@@ -251,6 +251,14 @@ public class WebSocketTunnelServer {
             registeredTunnelBusMap.remove(agentKey);
             System.out.println("Remove agent: " + agentKey);
 
+            final List<Channel> channels = forwardServerChannelMap.get(agentKey);
+            if (null != channels) {
+                for (Channel channel1 : channels) {
+                    if (channel1.isOpen()) {
+                        channel1.close();
+                    }
+                }
+            }
         }
     }
 
