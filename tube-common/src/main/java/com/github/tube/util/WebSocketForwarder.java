@@ -4,17 +4,7 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
@@ -22,20 +12,16 @@ import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
-import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
-import io.netty.handler.codec.http.websocketx.WebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketVersion;
+import io.netty.handler.codec.http.websocketx.*;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.ReferenceCountUtil;
-import io.netty.util.concurrent.DefaultThreadFactory;
+import io.netty.util.concurrent.*;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
+import java.net.ConnectException;
 import java.net.URI;
 
 /**
@@ -131,80 +117,95 @@ public class WebSocketForwarder {
 
     public static ChannelFuture forwardToNativeSocket(final URI masterEndpoint, final String masterProtocol, final HttpHeaders headers,
                                                       final URI slaveEndpoint, final String traceId) throws Exception {
-        final EventLoopGroup masterWebSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-MASTER", true));
-        final WebSocketClientProtocolHandler webSocketClientProtocolHandler = webSocketClientProtocolHandler(masterEndpoint, masterProtocol);
-        return bootstrap(
-                masterEndpoint,
-                masterWebSocketGroup,
-                new HttpClientCodec(),
-                new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                webSocketClientProtocolHandler,
-                new SimpleChannelInboundHandler<WebSocketFrame>() {
-                    @Override
-                    public void userEventTriggered(final ChannelHandlerContext webSocketContext, final Object evt) throws Exception {
-                        if (!WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
-                            return;
-                        }
-                        webSocketContext.channel().config().setAutoRead(false);
+        final URI slaveEndpointToUse = slaveEndpoint; //URI.create(masterEndpoint.getScheme() + "://" + slaveEndpoint.getHost() + ":" + slaveEndpoint.getPort());
+        final Promise<ChannelHandlerContext> nativeSocketPromise = GlobalEventExecutor.INSTANCE.newPromise();
+        nativeSocketPromise.addListener(new FutureListener<ChannelHandlerContext>() {
+            @Override
+            public void operationComplete(final Future<ChannelHandlerContext> future) throws Exception {
+                if (!future.isSuccess()) {
+                    return;
+                }
 
-                        final EventLoopGroup slaveWebSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
+                final ChannelHandlerContext nativeSocketContext = future.getNow();
 
-                        ChannelFuture closeFuture = null;
-                        try {
-                            closeFuture = bootstrap(slaveEndpoint, slaveWebSocketGroup, new ChannelInboundHandlerAdapter() {
-                                @Override
-                                public void channelActive(final ChannelHandlerContext nativeSocketContext) throws Exception {
-                                    nativeSocketContext.channel().config().setAutoRead(false);
+                final EventLoopGroup masterWebSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-MASTER", true));
+                final WebSocketClientProtocolHandler webSocketClientProtocolHandler = webSocketClientProtocolHandler(masterEndpoint, masterProtocol);
+                bootstrap(masterEndpoint,
+                        masterWebSocketGroup,
+                        new HttpClientCodec(),
+                        new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
+                        webSocketClientProtocolHandler,
+                        new SimpleChannelInboundHandler<WebSocketFrame>() {
 
-                                    log.info("{} Connected ({})", nativeSocketContext.channel(), traceId);
-
-
-                                    webSocketContext.pipeline().removeLast();
-                                    nativeSocketContext.pipeline().removeLast();
-
-                                    webSocketContext.pipeline().addLast(adaptWebSocketToNativeSocket(nativeSocketContext.channel()));
-                                    nativeSocketContext.pipeline().addLast(adaptNativeSocketToWebSocket(webSocketContext.channel()));
-
-                                    webSocketContext.channel().config().setAutoRead(true);
-                                    nativeSocketContext.channel().config().setAutoRead(true);
-
-                                    log.info("{} Connected ({})", webSocketContext.channel(), traceId);
-                                    log.info("{} Connect to {} ({})", nativeSocketContext.channel(), webSocketContext.channel(), traceId);
+                            @Override
+                            public void userEventTriggered(final ChannelHandlerContext webSocketContext, final Object evt) throws Exception {
+                                if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+                                    System.out.println("CCCCCCCCCC");
                                 }
-                            });
-                        } finally {
-                            if (null != closeFuture) {
-                                final Channel channel = closeFuture.channel();
-                                closeFuture.addListener(new ChannelFutureListener() {
-                                    @Override
-                                    public void operationComplete(final ChannelFuture future) throws Exception {
-                                        log.info("{} Connection closed: {}", channel, traceId);
-                                        // FIXME
-                                        webSocketContext.close();
-                                    }
-                                });
-                            } else {
-                                // XXX
-                                webSocketContext.writeAndFlush(new CloseWebSocketFrame()).addListener(ChannelFutureListener.CLOSE);
-                                slaveWebSocketGroup.shutdownGracefully();
+
+                                if (!WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+                                    return;
+                                }
+                                webSocketContext.channel().config().setAutoRead(false);
+
+                                webSocketContext.pipeline().remove(webSocketContext.handler());
+                                nativeSocketContext.pipeline().remove(nativeSocketContext.handler());
+
+                                webSocketContext.pipeline().addLast(adaptWebSocketToNativeSocket(nativeSocketContext.channel()));
+                                nativeSocketContext.pipeline().addLast(adaptNativeSocketToWebSocket(webSocketContext.channel()));
+
+                                webSocketContext.channel().config().setAutoRead(true);
+                                nativeSocketContext.channel().config().setAutoRead(true);
+
+                                log.info("{} Connected ({})", webSocketContext.channel(), traceId);
+                                log.info("{} Connect to {} ({})", nativeSocketContext.channel(), webSocketContext.channel(), traceId);
+                            }
+
+                            @Override
+                            protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame msg) throws Exception {
+                                System.out.println(msg);
+                            }
+
+                            @Override
+                            public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) throws Exception {
+                                log.warn("{} Software caused connection abort: {}", webSocketContext.channel(), cause.getMessage());
+                                webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                             }
                         }
-                    }
+                );
+            }
 
-                    @Override
-                    protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame msg) throws Exception {
-                    }
+        });
 
-                    @Override
-                    public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) throws Exception {
-                        log.warn("{} Software caused connection abort: {}", webSocketContext.channel(), cause.getMessage());
 
-                        // XXX 1003 CLOSE_UNSUPPORTED / 1007 Unsupported Data
-                        final CloseWebSocketFrame reason = new CloseWebSocketFrame();
-                        webSocketContext.writeAndFlush(reason).addListener(ChannelFutureListener.CLOSE);
-                    }
+        final EventLoopGroup slaveWebSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
+
+        ChannelFuture closeFuture = null;
+        try {
+            closeFuture = bootstrap(slaveEndpointToUse, slaveWebSocketGroup, new ChannelInboundHandlerAdapter() {
+                @Override
+                public void channelActive(final ChannelHandlerContext nativeSocketContext) throws Exception {
+                    nativeSocketContext.channel().config().setAutoRead(false);
+                    log.info("{} Connect ({})", nativeSocketContext.channel(), traceId);
+                    nativeSocketPromise.setSuccess(nativeSocketContext);
                 }
-        );
+            });
+        } finally {
+            if (null != closeFuture) {
+                final Channel channel = closeFuture.channel();
+                closeFuture.addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(final ChannelFuture future) throws Exception {
+                        log.info("{} Connection closed: {}", channel, traceId);
+                        slaveWebSocketGroup.shutdownGracefully();
+                    }
+                });
+            } else {
+                nativeSocketPromise.setFailure(new ConnectException("Connection refused"));
+                slaveWebSocketGroup.shutdownGracefully();
+            }
+        }
+        return closeFuture;
     }
 
     private static ChannelFuture bootstrap(final URI endpoint, final EventLoopGroup group, final ChannelHandler... handlers) throws Exception {
@@ -246,11 +247,7 @@ public class WebSocketForwarder {
         return closeFuture;
     }
 
-    private static SslContext createSslContext() throws SSLException {
-        /*
-        final SelfSignedCertificate ssc = new SelfSignedCertificate();
-        return SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey()).build();
-        */
+    public static SslContext createSslContext() throws SSLException {
         return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
     }
 
@@ -313,7 +310,7 @@ public class WebSocketForwarder {
                 if (webSocketChannel.isActive()) {
                     if (msg instanceof ByteBuf) {
                         if (log.isTraceEnabled()) {
-                            log.trace("[SO]{} -> [WS]{}: {}", nativeSocketContext.channel(), webSocketChannel, ByteBufUtil.hexDump(((ByteBuf) msg).copy()));
+                            log.trace("[SO]{} -> [WS]{}: {}", nativeSocketContext.channel(), webSocketChannel, ByteBufUtil.hexDump(((ByteBuf) msg)));
                         }
                         webSocketChannel.writeAndFlush(new BinaryWebSocketFrame((ByteBuf) msg));
                     } else {
@@ -361,7 +358,7 @@ public class WebSocketForwarder {
                     if (msg instanceof BinaryWebSocketFrame) {
                         final ByteBuf buf = ((BinaryWebSocketFrame) msg).content();
                         if (log.isTraceEnabled()) {
-                            log.trace("[WS]{} -> [SO]{}: {}", webSocketContext.channel(), nativeSocketChannel, ByteBufUtil.hexDump(buf.copy()));
+                            log.trace("[WS]{} -> [SO]{}: {}", webSocketContext.channel(), nativeSocketChannel, ByteBufUtil.hexDump(buf));
                         }
                         nativeSocketChannel.writeAndFlush(buf);
                     } else if (msg instanceof CloseWebSocketFrame) {

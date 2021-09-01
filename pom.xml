@@ -27,10 +27,10 @@
         <lombok.version>1.18.20</lombok.version>
         <slf4j.version>1.7.6</slf4j.version>
         <log4j.version>1.2.17</log4j.version>
-        <!--
         <netty.version>4.1.59.Final</netty.version>
-        -->
+        <!--
         <netty.version>4.1.25.Final</netty.version>
+        -->
         <spring-boot.version>1.5.9.RELEASE</spring-boot.version>
     </properties>
 

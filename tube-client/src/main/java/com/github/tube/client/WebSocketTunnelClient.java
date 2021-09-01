@@ -50,14 +50,14 @@ public class WebSocketTunnelClient {
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
-        final String uri = "ws://127.0.0.1:2345/tunnel";
+        final String uri = "wss://127.0.0.1:2345/tunnel";
         final URI endpoint = URI.create(uri + "?id=default");
         final String localAddress = determineLocalAddress(endpoint);
 
         // System.out.println(determineLocalAddress(URI.create("ssh://139.196.88.115:22")));
 
         final boolean isSecure = "wss".equalsIgnoreCase(endpoint.getScheme());
-        final SslContext context = null;
+        final SslContext context = isSecure ? WebSocketForwarder.createSslContext() : null;
 
         final DefaultHttpHeaders headers = new DefaultHttpHeaders();
         headers.set("X-TUNNEL-ID", "TEST");

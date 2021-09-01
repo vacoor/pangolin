@@ -3,16 +3,7 @@ package com.github.tube.server;
 import com.github.tube.util.WebSocketForwarder;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ConnectTimeoutException;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
@@ -28,19 +19,15 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
-import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import io.netty.util.concurrent.DefaultThreadFactory;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.FutureListener;
-import io.netty.util.concurrent.GenericFutureListener;
-import io.netty.util.concurrent.GlobalEventExecutor;
-import io.netty.util.concurrent.Promise;
+import io.netty.handler.ssl.util.SelfSignedCertificate;
+import io.netty.util.concurrent.*;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
+import java.security.cert.CertificateException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -76,41 +63,63 @@ public class WebSocketTunnelServer {
      */
     private static final String PROTOCOL_TUNNEL_RESPONSE = "PASSIVE";
 
-    private final String host = null;
-    private final int port = 2345;
-    private final boolean useSsl = false;
+    /**
+     * 注册的通道.
+     */
+    private final ConcurrentMap<String, ChannelHandlerContext> registeredTunnelBusMap = new ConcurrentHashMap<>();
 
-    private final NioEventLoopGroup bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocketTunnelServer-boss", false));
-    private final NioEventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("WebSocketTunnelServer-workers", false));
+    /**
+     * 等待 TCP 通道的连接.
+     */
+    private final ConcurrentMap<String, Promise<ChannelHandlerContext>> pendingSocketChannelMap = new ConcurrentHashMap<>();
+
+    /**
+     * 等待 WebSocket 通道的连接.
+     */
+    private final ConcurrentMap<String, Promise<ChannelHandlerContext>> pendingWebSocketChannelMap = new ConcurrentHashMap<>();
+
+    /**
+     * 端口转发的服务连接.
+     */
+    private final ConcurrentMap<String, List<Channel>> forwardServerChannelMap = new ConcurrentHashMap<>();
 
 
+    private final String host;
+    private final int port;
+    private final boolean useSsl;
+    private final String path;
+
+    private final NioEventLoopGroup bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocketTunnelServer-boss", true));
+    private final NioEventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("WebSocketTunnelServer-workers", true));
     private final AtomicBoolean startup = new AtomicBoolean(false);
 
     private Channel channel;
 
-    private ConcurrentMap<String, ChannelHandlerContext> registeredTunnelBusMap = new ConcurrentHashMap<>();
+    public WebSocketTunnelServer(final int inetPort, final String path, final boolean useSsl) {
+        this(null, inetPort, path, useSsl);
+    }
 
-    private ConcurrentMap<String, Promise<ChannelHandlerContext>> pendingSocketChannelMap = new ConcurrentHashMap<>();
-    private ConcurrentMap<String, Promise<ChannelHandlerContext>> pendingWebSocketChannelMap = new ConcurrentHashMap<>();
+    public WebSocketTunnelServer(final String inetHost, final int inetPort, final String path, final boolean useSsl) {
+        this.host = inetHost;
+        this.port = inetPort;
+        this.path = path;
+        this.useSsl = useSsl;
+    }
 
-    private ConcurrentMap<String, List<Channel>> forwardServerChannelMap = new ConcurrentHashMap<>();
 
-
-    public void start() throws Exception {
+    public Channel start() throws Exception {
         if (!startup.compareAndSet(false, true)) {
-            return;
+            return channel;
         }
 
         final SslContext context = useSsl ? createSslContext() : null;
-        final String path = "/tunnel";
-
         final ServerBootstrap bootstrap = new ServerBootstrap();
         bootstrap.group(bossGroup, workerGroup)
                 .channel(NioServerSocketChannel.class)
                 .handler(new LoggingHandler(LogLevel.INFO))
                 .childHandler(new ChannelInitializer<SocketChannel>() {
                     @Override
-                    protected void initChannel(final SocketChannel ch) throws Exception {
+                    protected void initChannel(final SocketChannel ch) {
                         final ChannelPipeline pipeline = ch.pipeline();
                         if (null != context) {
                             pipeline.addLast(context.newHandler(ch.alloc()));
@@ -124,11 +133,12 @@ public class WebSocketTunnelServer {
                 });
 
 
-        if (null != host) {
-            channel = bootstrap.bind(host, port).sync().channel();
-        } else {
+        if (null == host) {
             channel = bootstrap.bind(port).sync().channel();
+        } else {
+            channel = bootstrap.bind(host, port).sync().channel();
         }
+        return channel;
     }
 
     /**
@@ -136,14 +146,9 @@ public class WebSocketTunnelServer {
      *
      * @return ssl context
      */
-    private SslContext createSslContext() throws SSLException {
-        /*-
-        <pre>
+    private SslContext createSslContext() throws SSLException, CertificateException {
         final SelfSignedCertificate ssc = new SelfSignedCertificate();
         return SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey()).build();
-        </pre>
-        */
-        return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
     }
 
     private SimpleChannelInboundHandler<WebSocketFrame> createWebSocketTunnelFrameHandler() {
@@ -207,7 +212,6 @@ public class WebSocketTunnelServer {
 
     private void tunnelRegistered(final ChannelHandlerContext webSocketContext,
                                   final WebSocketServerProtocolHandler.HandshakeComplete handshake) throws Exception {
-        SocketAddress socketAddress = webSocketContext.channel().remoteAddress();
         final String requestUri = handshake.requestUri();
         final Map<String, String> parameters = this.determineQueryParameters(requestUri);
         final String id = parameters.get("id");
@@ -235,8 +239,8 @@ public class WebSocketTunnelServer {
         System.out.println("Agent: " + id + " registered");
 
         if ("default".equalsIgnoreCase(id)) {
-            forward(8889, "default", "127.0.0.1", 80);
-            // forward(2222, "SOCKET", "139.196.88.115", 22);
+            // forward(8889, "default", "127.0.0.1", 80);
+            forward(2222, "default", "139.196.88.115", 22);
         }
     }
 
@@ -471,7 +475,7 @@ public class WebSocketTunnelServer {
                 }
                 */
 
-                // nativeSocketChannel.config().setAutoRead(false);
+                nativeSocketChannel.config().setAutoRead(false);
                 nativeSocketChannel.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelActive(final ChannelHandlerContext nativeSocketContext) throws Exception {
@@ -580,8 +584,7 @@ public class WebSocketTunnelServer {
     }
 
     public static void main(String[] args) throws Exception {
-        WebSocketTunnelServer webSocketTunnelServer = new WebSocketTunnelServer();
-        webSocketTunnelServer.start();
-
+        WebSocketTunnelServer webSocketTunnelServer = new WebSocketTunnelServer(2345, "/tunnel", true);
+        webSocketTunnelServer.start().closeFuture().await();
     }
 }
