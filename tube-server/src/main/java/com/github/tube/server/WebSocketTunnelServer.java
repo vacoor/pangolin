@@ -50,6 +50,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * WebSocket 通道服务.
@@ -80,6 +82,8 @@ public class WebSocketTunnelServer {
      * 通道打开.
      */
     private static final String PROTOCOL_TUNNEL_RESPONSE = "PASSIVE";
+
+    private static final String PROTOCOL_TUNNEL_MANAGEMENT = "TUNNEL-MGR";
 
     /**
      * 注册的通道.
@@ -136,7 +140,7 @@ public class WebSocketTunnelServer {
             return serverChannel;
         }
 
-        final String subprotocols = PROTOCOL_TUNNEL_REGISTER + "," + PROTOCOL_TUNNEL_REQUEST + "," + PROTOCOL_TUNNEL_RESPONSE;
+        final String subprotocols = PROTOCOL_TUNNEL_REGISTER + "," + PROTOCOL_TUNNEL_REQUEST + "," + PROTOCOL_TUNNEL_RESPONSE + "," + PROTOCOL_TUNNEL_MANAGEMENT;
         final SslContext sslContext = useSsl ? createSslContext() : null;
         final ServerBootstrap bootstrap = new ServerBootstrap();
         bootstrap.option(ChannelOption.SO_REUSEADDR, true);
@@ -226,6 +230,8 @@ public class WebSocketTunnelServer {
                          * 通道打开响应.
                          */
                         tunnelResponded(webSocketContext, handshake);
+                    } else if (PROTOCOL_TUNNEL_MANAGEMENT.equalsIgnoreCase(subprotocol)) {
+                        tunnelManagement(webSocketContext, handshake);
                     } else {
                         WebSocketUtils.protocolErrorClose(webSocketContext, "PROTOCOL_NOT_SUPPORTED");
                     }
@@ -300,11 +306,13 @@ public class WebSocketTunnelServer {
 
             log.info("{} Tunnel '{}' registered: {}/{}", webSocketContext.channel(), tunnel, outerAddress, interAddress);
 
+            /*
             // FIXME
             if ("default".equalsIgnoreCase(tunnel)) {
                 // forward(8889, "default", "127.0.0.1", 80);
                 forward(3308, "default", "w-3308-ecs-iosp-mm-prod.service.consul", 3308);
             }
+            */
         } else {
             log.warn("{} Tunnel register conflict, '{}' already registered, rejected", webSocketContext.channel(), tunnel);
             WebSocketUtils.policyViolationClose(webSocketContext, "TUNNEL_CONFLICT");
@@ -495,6 +503,43 @@ public class WebSocketTunnelServer {
         }
     }
 
+    private static final Pattern FORWARD_CMD = Pattern.compile("^\\s*([-_a-zA-Z0-9]+)\\s+forward\\s+([1-9][0-9]{0,4})\\s+([^\\s:]+):([1-9][0-9]{0,4})\\s*$");
+
+    private void tunnelManagement(final ChannelHandlerContext webSocketTunnelContext, final WebSocketServerProtocolHandler.HandshakeComplete handshake) {
+        webSocketTunnelContext.channel().config().setAutoRead(false);
+
+        webSocketTunnelContext.pipeline().remove(webSocketTunnelContext.handler());
+        webSocketTunnelContext.pipeline().addLast(new SimpleChannelInboundHandler<WebSocketFrame>() {
+            @Override
+            protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame msg) throws Exception {
+                if (msg instanceof TextWebSocketFrame) {
+                    final String message = ((TextWebSocketFrame) msg).text();
+                    final Matcher matcher = FORWARD_CMD.matcher(message);
+                    if (matcher.find()) {
+                        final String tunnel = matcher.group(1);
+                        final int localPort = Integer.parseInt(matcher.group(2));
+                        final int remotePort = Integer.parseInt(matcher.group(4));
+                        final String remoteHost = matcher.group(3);
+
+                        try {
+                            forward(localPort, tunnel, remoteHost, remotePort);
+                            ctx.writeAndFlush(new TextWebSocketFrame("OK"));
+                        } catch (final Exception ex) {
+                            ctx.writeAndFlush(new TextWebSocketFrame("ERROR:" + ex.getMessage()));
+                        }
+                        return;
+                    } else if ("list".equals(message)) {
+                        ctx.writeAndFlush(new TextWebSocketFrame(registeredTunnelBusMap.keySet().toString()));
+                        return;
+                    }
+                }
+                ctx.writeAndFlush(new TextWebSocketFrame("NOT_SUPPORTED"));
+            }
+        });
+
+        webSocketTunnelContext.channel().config().setAutoRead(true);
+    }
+
     private String id(final Channel channel) {
         return "0x" + channel.id().asShortText();
     }
@@ -534,10 +579,10 @@ public class WebSocketTunnelServer {
         return channel;
     }
 
-    private Channel doForward(final int port, final String agent, final String remoteHost, final int remotePort) throws InterruptedException {
-        final ChannelHandlerContext agentContext = registeredTunnelBusMap.get(agent);
+    private Channel doForward(final int port, final String tunnel, final String remoteHost, final int remotePort) throws InterruptedException {
+        final ChannelHandlerContext agentContext = registeredTunnelBusMap.get(tunnel);
         if (null == agentContext) {
-            throw new IllegalStateException("Agent not found: " + agent);
+            throw new IllegalStateException("TUNNEL_NOT_FOUND:" + tunnel);
         }
 
         final NioEventLoopGroup socketBossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("socket-boss", false));
