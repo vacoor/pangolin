@@ -1,6 +1,6 @@
 package com.github.tube.client;
 
-import com.github.tube.util.WebSocketForwarder;
+import com.github.tube.util.WebSocketForwarderV2;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -57,7 +57,7 @@ public class WebSocketTunnelClient {
         // System.out.println(determineLocalAddress(URI.create("ssh://139.196.88.115:22")));
 
         final boolean isSecure = "wss".equalsIgnoreCase(endpoint.getScheme());
-        final SslContext context = isSecure ? WebSocketForwarder.createSslContext() : null;
+        final SslContext context = isSecure ? WebSocketForwarderV2.createSslContext() : null;
 
         final DefaultHttpHeaders headers = new DefaultHttpHeaders();
         headers.set("X-TUNNEL-ID", "TEST");
@@ -103,9 +103,9 @@ public class WebSocketTunnelClient {
                                     if ("tcp".equalsIgnoreCase(target.getScheme())) {
                                         final HttpHeaders headers = new DefaultHttpHeaders();
                                         headers.set("X-REQUEST-ID", requestId);
-                                        WebSocketForwarder.forwardToNativeSocket(URI.create(uri + "?id=" + requestId), "PASSIVE", headers, target, requestId);
+                                        WebSocketForwarderV2.forwardToNativeSocket(URI.create(uri + "?id=" + requestId), "PASSIVE", headers, target, requestId);
                                     } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
-                                        WebSocketForwarder.forwardToWebSocket(URI.create(uri + "?id=" + requestId), "PASSIVE", target, null);
+                                        WebSocketForwarderV2.forwardToWebSocket(URI.create(uri + "?id=" + requestId), "PASSIVE", target, null);
                                     }
                                 } catch (final Exception ex) {
                                     log.error("", ex);

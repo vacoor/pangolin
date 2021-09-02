@@ -1,6 +1,6 @@
 package com.github.tube.server;
 
-import com.github.tube.util.WebSocketForwarder;
+import com.github.tube.util.WebSocketForwarderV2;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
@@ -295,8 +295,8 @@ public class WebSocketTunnelServer {
                     webSocketContext.pipeline().remove(webSocketContext.handler());
                     webSocketTunnelContext.pipeline().remove(webSocketTunnelContext.handler());
 
-                    webSocketContext.pipeline().addLast(WebSocketForwarder.createPipeAdapter(webSocketTunnelContext.channel()));
-                    webSocketTunnelContext.pipeline().addLast(WebSocketForwarder.createPipeAdapter(webSocketContext.channel()));
+                    webSocketContext.pipeline().addLast(WebSocketForwarderV2.createPipeAdapter(webSocketTunnelContext.channel()));
+                    webSocketTunnelContext.pipeline().addLast(WebSocketForwarderV2.createPipeAdapter(webSocketContext.channel()));
 
                     webSocketContext.channel().config().setAutoRead(true);
                     webSocketTunnelContext.channel().config().setAutoRead(true);
@@ -350,12 +350,13 @@ public class WebSocketTunnelServer {
                 if (future.isSuccess()) {
                     final ChannelHandlerContext webSocketTunnelContext = future.getNow();
                     webSocketTunnelContext.channel().config().setAutoRead(false);
+                    webSocketTunnelContext.channel().writeAndFlush(new TextWebSocketFrame("hehe"));
 
                     nativeSocketContext.pipeline().remove(nativeSocketContext.handler());
                     webSocketTunnelContext.pipeline().remove(webSocketTunnelContext.handler());
 
-                    nativeSocketContext.pipeline().addLast(WebSocketForwarder.adaptNativeSocketToWebSocket(webSocketTunnelContext.channel()));
-                    webSocketTunnelContext.pipeline().addLast(WebSocketForwarder.adaptWebSocketToNativeSocket(nativeSocketContext.channel()));
+                    nativeSocketContext.pipeline().addLast(WebSocketForwarderV2.adaptNativeSocketToWebSocket(webSocketTunnelContext.channel()));
+                    webSocketTunnelContext.pipeline().addLast(WebSocketForwarderV2.adaptWebSocketToNativeSocket(nativeSocketContext.channel()));
 
                     if (log.isDebugEnabled()) {
                         log.debug("{} Native tunnel open: {}", nativeSocketContext.channel(), webSocketTunnelContext.channel());
@@ -508,8 +509,8 @@ public class WebSocketTunnelServer {
                             webSocketContext.pipeline().removeLast();
                             nativeSocketContext.pipeline().remove(this);
 
-                            webSocketContext.pipeline().addLast(WebSocketForwarder.adaptWebSocketToNativeSocket(nativeSocketContext.channel()));
-                            nativeSocketContext.pipeline().addLast(WebSocketForwarder.adaptNativeSocketToWebSocket(webSocketContext.channel()));
+                            webSocketContext.pipeline().addLast(WebSocketForwarderV2.adaptWebSocketToNativeSocket(nativeSocketContext.channel()));
+                            nativeSocketContext.pipeline().addLast(WebSocketForwarderV2.adaptNativeSocketToWebSocket(webSocketContext.channel()));
 
                             if (log.isDebugEnabled()) {
                                 log.debug("{} pipe channel to {}", nativeSocketChannel, webSocketContext.channel());
