@@ -303,7 +303,7 @@ public class WebSocketTunnelServer {
             // FIXME
             if ("default".equalsIgnoreCase(tunnel)) {
                 // forward(8889, "default", "127.0.0.1", 80);
-                forward(2222, "default", "139.196.88.115", 22);
+                forward(3308, "default", "w-3308-ecs-iosp-mm-prod.service.consul", 3308);
             }
         } else {
             log.warn("{} Tunnel register conflict, '{}' already registered, rejected", webSocketContext.channel(), tunnel);

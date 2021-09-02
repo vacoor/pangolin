@@ -55,10 +55,21 @@
                 <version>${tube.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.github.nomou</groupId>
-                <artifactId>nougat-lang</artifactId>
-                <version>${nougat.version}</version>
+                <groupId>com.github.tube</groupId>
+                <artifactId>tube-client-core</artifactId>
+                <version>${tube.version}</version>
             </dependency>
+            <dependency>
+                <groupId>com.github.tube</groupId>
+                <artifactId>tube-client-servlet</artifactId>
+                <version>${tube.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.tube</groupId>
+                <artifactId>tube-client-spring-boot-starter</artifactId>
+                <version>${tube.version}</version>
+            </dependency>
+
             <dependency>
                 <groupId>org.projectlombok</groupId>
                 <artifactId>lombok</artifactId>
@@ -108,6 +119,11 @@
                 <groupId>jline</groupId>
                 <artifactId>jline</artifactId>
                 <version>2.14.6</version>
+            </dependency>
+            <dependency>
+                <groupId>javax.servlet</groupId>
+                <artifactId>javax.servlet-api</artifactId>
+                <version>3.1.0</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

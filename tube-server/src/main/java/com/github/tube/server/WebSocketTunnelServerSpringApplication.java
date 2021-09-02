@@ -5,7 +5,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class TunnelSpringApplication {
+public class WebSocketTunnelServerSpringApplication {
 
     /**
      * Run spring application.
@@ -13,7 +13,7 @@ public class TunnelSpringApplication {
      * @param args command line args
      */
     public static void main(String[] args) throws Exception {
-        final SpringApplication application = new SpringApplication(TunnelSpringApplication.class);
+        final SpringApplication application = new SpringApplication(WebSocketTunnelServerSpringApplication.class);
 //        application.addListeners(new ApplicationPidFileWriter());
         application.run(args);
 

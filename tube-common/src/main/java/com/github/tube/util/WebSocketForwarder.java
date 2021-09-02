@@ -20,7 +20,6 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
-import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
@@ -69,58 +68,42 @@ public class WebSocketForwarder {
                         master.channel().config().setAutoRead(false);
 
                         final EventLoopGroup webSocketGroup2 = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-FORWARD-2", true));
-                        ChannelFuture future = null;
-                        try {
-                            future = launch(
-                                    webSocketEndpoint2,
-                                    webSocketGroup2,
-                                    new HttpClientCodec(),
-                                    new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                                    newWebSocketClientProtocolHandler(webSocketEndpoint2, webSocketProtocol2),
-                                    new SimpleChannelInboundHandler<WebSocketFrame>() {
-                                        @Override
-                                        public void channelActive(final ChannelHandlerContext webSocketContext) {
-                                            webSocketContext.channel().config().setAutoRead(false);
-                                            webSocketContext.channel().read();
-                                        }
-
-                                        @Override
-                                        public void userEventTriggered(final ChannelHandlerContext slave, final Object evt) {
-                                            if (!WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
-                                                return;
-                                            }
-                                            slave.channel().config().setAutoRead(false);
-
-                                            slave.pipeline().remove(slave.handler());
-                                            master.pipeline().remove(master.handler());
-
-                                            slave.pipeline().addLast(pipe(master.channel()));
-                                            master.pipeline().addLast(pipe(slave.channel()));
-
-                                            slave.channel().config().setAutoRead(true);
-                                            master.channel().config().setAutoRead(true);
-                                        }
-
-                                        @Override
-                                        protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame msg) throws Exception {
-                                            System.out.println(msg);
-                                        }
-                                    }
-                            );
-                        } finally {
-                            if (null != future) {
-                                future.addListener(new ChannelFutureListener() {
+                        launch(
+                                webSocketEndpoint2,
+                                webSocketGroup2,
+                                new HttpClientCodec(),
+                                new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
+                                newWebSocketClientProtocolHandler(webSocketEndpoint2, webSocketProtocol2),
+                                new SimpleChannelInboundHandler<WebSocketFrame>() {
                                     @Override
-                                    public void operationComplete(final ChannelFuture future) throws Exception {
-                                        // FIXME
-                                        master.close();
+                                    public void channelActive(final ChannelHandlerContext webSocketContext) {
+                                        webSocketContext.channel().config().setAutoRead(false);
+                                        webSocketContext.channel().read();
                                     }
-                                });
-                            } else {
-                                // FIXME
-                                master.close();
-                            }
-                        }
+
+                                    @Override
+                                    public void userEventTriggered(final ChannelHandlerContext slave, final Object evt) {
+                                        if (!WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
+                                            return;
+                                        }
+                                        slave.channel().config().setAutoRead(false);
+
+                                        slave.pipeline().remove(slave.handler());
+                                        master.pipeline().remove(master.handler());
+
+                                        slave.pipeline().addLast(pipe(master.channel()));
+                                        master.pipeline().addLast(pipe(slave.channel()));
+
+                                        slave.channel().config().setAutoRead(true);
+                                        master.channel().config().setAutoRead(true);
+                                    }
+
+                                    @Override
+                                    protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame msg) throws Exception {
+                                        System.out.println(msg);
+                                    }
+                                }
+                        );
                     }
 
                     @Override
@@ -132,8 +115,7 @@ public class WebSocketForwarder {
     }
 
 
-    public static ChannelFuture forwardToNativeSocket(final URI masterEndpoint, final String masterProtocol, final HttpHeaders headers,
-                                                      final URI slaveEndpoint, final String traceId) throws Exception {
+    public static ChannelFuture forwardToNativeSocket(final URI masterEndpoint, final String masterProtocol, final URI slaveEndpoint, final String traceId) throws Exception {
         final EventLoopGroup masterWebSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-MASTER", true));
         final WebSocketClientProtocolHandler webSocketClientProtocolHandler = newWebSocketClientProtocolHandler(masterEndpoint, masterProtocol);
         return launch(
@@ -159,43 +141,27 @@ public class WebSocketForwarder {
                         webSocketContext.channel().config().setAutoRead(false);
 
                         final EventLoopGroup slaveWebSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
-                        ChannelFuture closeFuture = null;
-                        try {
-                            closeFuture = launch(slaveEndpoint, slaveWebSocketGroup, new ChannelInboundHandlerAdapter() {
-                                @Override
-                                public void channelActive(final ChannelHandlerContext nativeSocketContext) {
-                                    nativeSocketContext.channel().config().setAutoRead(false);
+                        launch(slaveEndpoint, slaveWebSocketGroup, new ChannelInboundHandlerAdapter() {
+                            @Override
+                            public void channelActive(final ChannelHandlerContext nativeSocketContext) {
+                                nativeSocketContext.channel().config().setAutoRead(false);
 
-                                    log.info("{} Connect ({})", nativeSocketContext.channel(), traceId);
+                                log.info("{} Connect ({})", nativeSocketContext.channel(), traceId);
 
 
-                                    webSocketContext.pipeline().remove(webSocketContext.handler());
-                                    nativeSocketContext.pipeline().remove(nativeSocketContext.handler());
+                                webSocketContext.pipeline().remove(webSocketContext.handler());
+                                nativeSocketContext.pipeline().remove(nativeSocketContext.handler());
 
-                                    webSocketContext.pipeline().addLast(adaptWebSocketToNativeSocket(nativeSocketContext.channel()));
-                                    nativeSocketContext.pipeline().addLast(adaptNativeSocketToWebSocket(webSocketContext.channel()));
+                                webSocketContext.pipeline().addLast(adaptWebSocketToNativeSocket(nativeSocketContext.channel()));
+                                nativeSocketContext.pipeline().addLast(adaptNativeSocketToWebSocket(webSocketContext.channel()));
 
-                                    webSocketContext.channel().config().setAutoRead(true);
-                                    nativeSocketContext.channel().config().setAutoRead(true);
+                                webSocketContext.channel().config().setAutoRead(true);
+                                nativeSocketContext.channel().config().setAutoRead(true);
 
-                                    log.info("{} Connected ({})", webSocketContext.channel(), traceId);
-                                    log.info("{} Connect to {} ({})", nativeSocketContext.channel(), webSocketContext.channel(), traceId);
-                                }
-                            });
-                        } finally {
-                            if (null != closeFuture) {
-                                final Channel channel = closeFuture.channel();
-                                closeFuture.addListener(new ChannelFutureListener() {
-                                    @Override
-                                    public void operationComplete(final ChannelFuture future) throws Exception {
-                                        log.info("{} Connection closed: {}", channel, traceId);
-                                        slaveWebSocketGroup.shutdownGracefully();
-                                    }
-                                });
-                            } else {
-                                slaveWebSocketGroup.shutdownGracefully();
+                                log.info("{} Connected ({})", webSocketContext.channel(), traceId);
+                                log.info("{} Connect to {} ({})", nativeSocketContext.channel(), webSocketContext.channel(), traceId);
                             }
-                        }
+                        });
                     }
 
                     @Override
@@ -220,7 +186,7 @@ public class WebSocketForwarder {
         );
     }
 
-    private static ChannelFuture launch(final URI endpoint, final EventLoopGroup group, final ChannelHandler... handlers) throws Exception {
+    private static ChannelFuture launch(final URI endpoint, final EventLoopGroup group, final ChannelHandler... handlers) throws SSLException, InterruptedException {
         final boolean isSecure = "wss".equalsIgnoreCase(endpoint.getScheme());
         final SslContext context = isSecure ? createSslContext() : null;
 
