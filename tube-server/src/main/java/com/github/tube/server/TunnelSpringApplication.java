@@ -17,7 +17,7 @@ public class TunnelSpringApplication {
 //        application.addListeners(new ApplicationPidFileWriter());
         application.run(args);
 
-        WebSocketTunnelServer webSocketTunnelServer = new WebSocketTunnelServer(2345, "/tunnel", true);
+        WebSocketTunnelServer webSocketTunnelServer = new WebSocketTunnelServer(2345, "/tunnel", false);
         final Channel channel = webSocketTunnelServer.start();
         channel.closeFuture().await();
     }

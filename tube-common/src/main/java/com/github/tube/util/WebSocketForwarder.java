@@ -39,65 +39,53 @@ import javax.net.ssl.SSLException;
 import java.net.URI;
 
 /**
- * TODO DOC ME!.
  *
- * @author changhe.yang
- * @since 20210827
  */
 @Slf4j
 public class WebSocketForwarder {
     private static final int MAX_HTTP_CONTENT_LENGTH = Integer.MAX_VALUE;
 
-    private static WebSocketClientProtocolHandler webSocketClientProtocolHandler(final URI endpoint, final String subprotocol) {
-        return new WebSocketClientProtocolHandler(
-                WebSocketClientHandshakerFactory.newHandshaker(endpoint, WebSocketVersion.V13, subprotocol, true, new DefaultHttpHeaders()),
-                false
-        );
-    }
-
-    public static ChannelFuture forwardToWebSocket(final URI masterEndpoint, final String masterProtocol, final URI slaveEndpoint, final String slaveProtocol) throws Exception {
-        final EventLoopGroup masterWebSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-MASTER", true));
-        final WebSocketClientProtocolHandler masterWebSocketClientProtocolHandler = webSocketClientProtocolHandler(masterEndpoint, masterProtocol);
-        return bootstrap(
-                masterEndpoint, masterWebSocketGroup,
+    public static ChannelFuture forwardToWebSocket(final URI webSocketEndpoint1, final String webSocketProtocol1,
+                                                   final URI webSocketEndpoint2, final String webSocketProtocol2) throws Exception {
+        final EventLoopGroup workSocketGroup1 = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-FORWARD-1", true));
+        return launch(
+                webSocketEndpoint1,
+                workSocketGroup1,
                 new HttpClientCodec(),
                 new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                masterWebSocketClientProtocolHandler,
+                newWebSocketClientProtocolHandler(webSocketEndpoint1, webSocketProtocol1),
                 new SimpleChannelInboundHandler<WebSocketFrame>() {
                     @Override
-                    public void channelActive(final ChannelHandlerContext ctx) {
-                        ctx.channel().config().setAutoRead(false);
-                        ctx.channel().read();
+                    public void channelActive(final ChannelHandlerContext webSocketContext) {
+                        webSocketContext.channel().config().setAutoRead(false);
+                        webSocketContext.channel().read();
                     }
 
                     @Override
                     public void userEventTriggered(final ChannelHandlerContext master, final Object evt) throws Exception {
-                        if (!WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
+                        if (!WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
                             return;
                         }
                         master.channel().config().setAutoRead(false);
 
-                        /*-
-                         * master 握手请求发送成功后, 连接 slave.
-                         */
-                        final EventLoopGroup slaveWebSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
-                        final WebSocketClientProtocolHandler slaveWebSocketClientProtocolHandler = webSocketClientProtocolHandler(slaveEndpoint, slaveProtocol);
+                        final EventLoopGroup webSocketGroup2 = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-FORWARD-2", true));
                         ChannelFuture future = null;
                         try {
-                            future = bootstrap(
-                                    slaveEndpoint, slaveWebSocketGroup,
+                            future = launch(
+                                    webSocketEndpoint2,
+                                    webSocketGroup2,
                                     new HttpClientCodec(),
                                     new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                                    slaveWebSocketClientProtocolHandler,
+                                    newWebSocketClientProtocolHandler(webSocketEndpoint2, webSocketProtocol2),
                                     new SimpleChannelInboundHandler<WebSocketFrame>() {
                                         @Override
-                                        public void channelActive(final ChannelHandlerContext ctx) throws Exception {
-                                            ctx.channel().config().setAutoRead(false);
-                                            ctx.channel().read();
+                                        public void channelActive(final ChannelHandlerContext webSocketContext) {
+                                            webSocketContext.channel().config().setAutoRead(false);
+                                            webSocketContext.channel().read();
                                         }
 
                                         @Override
-                                        public void userEventTriggered(final ChannelHandlerContext slave, final Object evt) throws Exception {
+                                        public void userEventTriggered(final ChannelHandlerContext slave, final Object evt) {
                                             if (!WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
                                                 return;
                                             }
@@ -106,8 +94,8 @@ public class WebSocketForwarder {
                                             slave.pipeline().remove(slave.handler());
                                             master.pipeline().remove(master.handler());
 
-                                            slave.pipeline().addLast(createPipeAdapter(master.channel()));
-                                            master.pipeline().addLast(createPipeAdapter(slave.channel()));
+                                            slave.pipeline().addLast(pipe(master.channel()));
+                                            master.pipeline().addLast(pipe(slave.channel()));
 
                                             slave.channel().config().setAutoRead(true);
                                             master.channel().config().setAutoRead(true);
@@ -124,10 +112,12 @@ public class WebSocketForwarder {
                                 future.addListener(new ChannelFutureListener() {
                                     @Override
                                     public void operationComplete(final ChannelFuture future) throws Exception {
+                                        // FIXME
                                         master.close();
                                     }
                                 });
                             } else {
+                                // FIXME
                                 master.close();
                             }
                         }
@@ -145,8 +135,8 @@ public class WebSocketForwarder {
     public static ChannelFuture forwardToNativeSocket(final URI masterEndpoint, final String masterProtocol, final HttpHeaders headers,
                                                       final URI slaveEndpoint, final String traceId) throws Exception {
         final EventLoopGroup masterWebSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-MASTER", true));
-        final WebSocketClientProtocolHandler webSocketClientProtocolHandler = webSocketClientProtocolHandler(masterEndpoint, masterProtocol);
-        return bootstrap(
+        final WebSocketClientProtocolHandler webSocketClientProtocolHandler = newWebSocketClientProtocolHandler(masterEndpoint, masterProtocol);
+        return launch(
                 masterEndpoint,
                 masterWebSocketGroup,
                 new HttpClientCodec(),
@@ -171,7 +161,7 @@ public class WebSocketForwarder {
                         final EventLoopGroup slaveWebSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
                         ChannelFuture closeFuture = null;
                         try {
-                            closeFuture = bootstrap(slaveEndpoint, slaveWebSocketGroup, new ChannelInboundHandlerAdapter() {
+                            closeFuture = launch(slaveEndpoint, slaveWebSocketGroup, new ChannelInboundHandlerAdapter() {
                                 @Override
                                 public void channelActive(final ChannelHandlerContext nativeSocketContext) {
                                     nativeSocketContext.channel().config().setAutoRead(false);
@@ -223,7 +213,14 @@ public class WebSocketForwarder {
         );
     }
 
-    private static ChannelFuture bootstrap(final URI endpoint, final EventLoopGroup group, final ChannelHandler... handlers) throws Exception {
+    private static WebSocketClientProtocolHandler newWebSocketClientProtocolHandler(final URI endpoint, final String subprotocol) {
+        return new WebSocketClientProtocolHandler(
+                WebSocketClientHandshakerFactory.newHandshaker(endpoint, WebSocketVersion.V13, subprotocol, true, new DefaultHttpHeaders()),
+                false
+        );
+    }
+
+    private static ChannelFuture launch(final URI endpoint, final EventLoopGroup group, final ChannelHandler... handlers) throws Exception {
         final boolean isSecure = "wss".equalsIgnoreCase(endpoint.getScheme());
         final SslContext context = isSecure ? createSslContext() : null;
 
@@ -234,15 +231,11 @@ public class WebSocketForwarder {
             b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
             b.group(group).channel(NioSocketChannel.class).handler(new ChannelInitializer<SocketChannel>() {
                 @Override
-                protected void initChannel(final SocketChannel ch) throws Exception {
+                protected void initChannel(final SocketChannel ch) {
                     final ChannelPipeline cp = ch.pipeline();
                     if (null != context) {
                         cp.addLast(context.newHandler(ch.alloc()));
                     }
-                    /*
-                    cp.addLast(new HttpClientCodec());
-                    cp.addLast(new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
-                    */
                     cp.addLast(handlers);
                 }
             });
@@ -266,7 +259,7 @@ public class WebSocketForwarder {
         return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
     }
 
-    public static ChannelInboundHandlerAdapter createPipeAdapter(final Channel targetChannel) {
+    public static ChannelInboundHandlerAdapter pipe(final Channel targetChannel) {
         return new ChannelInboundHandlerAdapter() {
             @Override
             public void channelActive(final ChannelHandlerContext sourceChannelContext) throws Exception {

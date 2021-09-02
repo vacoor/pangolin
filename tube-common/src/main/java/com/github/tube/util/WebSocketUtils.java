@@ -8,9 +8,6 @@ import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 
 /**
  * TODO DOC ME!.
- *
- * @author changhe.yang
- * @since 20210902
  */
 public class WebSocketUtils {
 

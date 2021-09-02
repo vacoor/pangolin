@@ -238,6 +238,12 @@ public class WebSocketTunnelServer {
             protected void channelRead0(final ChannelHandlerContext webSocketContext, final WebSocketFrame msg) throws Exception {
                 log.warn("no handler found for message: {}", msg);
             }
+
+            @Override
+            public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) throws Exception {
+                // FIXME
+                super.exceptionCaught(webSocketContext, cause);
+            }
         };
     }
 
@@ -268,6 +274,10 @@ public class WebSocketTunnelServer {
         final String requestUri = handshake.requestUri();
         final Map<String, String> parameters = this.determineQueryParameters(requestUri);
         final String tunnel = parameters.get("id");
+        if (null == tunnel) {
+            WebSocketUtils.policyViolationClose(webSocketContext, "ILLEGAL_TUNNEL_REGISTER");
+            return;
+        }
         if (null == registeredTunnelBusMap.putIfAbsent(tunnel, webSocketContext)) {
             webSocketContext.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
                 @Override
@@ -368,8 +378,8 @@ public class WebSocketTunnelServer {
                     webSocketContext.pipeline().remove(webSocketContext.handler());
                     webSocketTunnelContext.pipeline().remove(webSocketTunnelContext.handler());
 
-                    webSocketContext.pipeline().addLast(WebSocketForwarder.createPipeAdapter(webSocketTunnelContext.channel()));
-                    webSocketTunnelContext.pipeline().addLast(WebSocketForwarder.createPipeAdapter(webSocketContext.channel()));
+                    webSocketContext.pipeline().addLast(WebSocketForwarder.pipe(webSocketTunnelContext.channel()));
+                    webSocketTunnelContext.pipeline().addLast(WebSocketForwarder.pipe(webSocketContext.channel()));
 
                     webSocketContext.channel().config().setAutoRead(true);
                     webSocketTunnelContext.channel().config().setAutoRead(true);
@@ -581,14 +591,12 @@ public class WebSocketTunnelServer {
         };
     }
 
-
     public void shutdownGracefully() {
         if (null != serverChannel) {
             serverChannel.close();
         }
         bossGroup.shutdownGracefully();
         workerGroup.shutdownGracefully();
-
     }
 
     /**
