@@ -19,6 +19,7 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
@@ -242,6 +243,9 @@ public class WebSocketTunnelServer {
 
             @Override
             protected void channelRead0(final ChannelHandlerContext webSocketContext, final WebSocketFrame msg) throws Exception {
+                /*-
+                 * Only tunnel bus arrived.
+                 */
                 log.warn("no handler found for message: {}", msg);
             }
 
@@ -276,7 +280,7 @@ public class WebSocketTunnelServer {
      * @throws Exception
      */
     private void tunnelRegistered(final ChannelHandlerContext webSocketContext,
-                                  final WebSocketServerProtocolHandler.HandshakeComplete handshake) throws Exception {
+                                  final WebSocketServerProtocolHandler.HandshakeComplete handshake) {
         final String requestUri = handshake.requestUri();
         final Map<String, String> parameters = this.determineQueryParameters(requestUri);
         final String tunnel = parameters.get("id");
@@ -305,14 +309,6 @@ public class WebSocketTunnelServer {
             }
 
             log.info("{} Tunnel '{}' registered: {}/{}", webSocketContext.channel(), tunnel, outerAddress, interAddress);
-
-            /*
-            // FIXME
-            if ("default".equalsIgnoreCase(tunnel)) {
-                // forward(8889, "default", "127.0.0.1", 80);
-                forward(3308, "default", "w-3308-ecs-iosp-mm-prod.service.consul", 3308);
-            }
-            */
         } else {
             log.warn("{} Tunnel register conflict, '{}' already registered, rejected", webSocketContext.channel(), tunnel);
             WebSocketUtils.policyViolationClose(webSocketContext, "TUNNEL_CONFLICT");
@@ -523,21 +519,26 @@ public class WebSocketTunnelServer {
 
                         try {
                             forward(localPort, tunnel, remoteHost, remotePort);
-                            ctx.writeAndFlush(new TextWebSocketFrame("OK"));
+                            sendText(ctx, "OK");
                         } catch (final Exception ex) {
-                            ctx.writeAndFlush(new TextWebSocketFrame("ERROR:" + ex.getMessage()));
+                            sendText(ctx, ex.getMessage());
                         }
                         return;
                     } else if ("list".equals(message)) {
-                        ctx.writeAndFlush(new TextWebSocketFrame(registeredTunnelBusMap.keySet().toString()));
+                        sendText(ctx, registeredTunnelBusMap.keySet().toString());
                         return;
                     }
                 }
-                ctx.writeAndFlush(new TextWebSocketFrame("NOT_SUPPORTED"));
+                sendText(ctx, "NOT_SUPPORTED");
             }
         });
 
         webSocketTunnelContext.channel().config().setAutoRead(true);
+    }
+
+    private void sendText(final ChannelHandlerContext context, final String message) {
+        // context.writeAndFlush(new BinaryWebSocketFrame(new TextWebSocketFrame(message).content()));
+        context.writeAndFlush(new TextWebSocketFrame(message));
     }
 
     private String id(final Channel channel) {
@@ -549,20 +550,6 @@ public class WebSocketTunnelServer {
      * ************************ */
 
     public Channel forward(final int port, final String agent, final String remoteHost, final int remotePort) throws Exception {
-        /*
-        Promise<ChannelHandlerContext> promise = tunnelForwardPromises.get(agent);
-        if (null == promise) {
-            tunnelForwardPromises.putIfAbsent(agent, GlobalEventExecutor.INSTANCE.<ChannelHandlerContext>newProgressivePromise());
-            promise = tunnelForwardPromises.get(agent);
-        }
-        promise.addListener(new FutureListener<ChannelHandlerContext>() {
-            @Override
-            public void operationComplete(final Future<ChannelHandlerContext> future) throws Exception {
-
-            }
-        });
-        */
-
         final Channel channel = doForward(port, agent, remoteHost, remotePort);
         channel.closeFuture().addListener(new ChannelFutureListener() {
             @Override
