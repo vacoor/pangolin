@@ -143,6 +143,9 @@ public class WebSocketTunnelClient {
         Socket socket = null;
         try {
             socket = new Socket(endpoint.getHost(), endpoint.getPort());
+            socket.setTcpNoDelay(true);
+            socket.setKeepAlive(false);
+            socket.setSoTimeout(3000);
             return socket.getLocalAddress().getHostAddress();
         } finally {
             if (null != socket) {
