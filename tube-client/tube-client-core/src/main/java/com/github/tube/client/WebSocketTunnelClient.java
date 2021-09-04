@@ -153,7 +153,8 @@ public class WebSocketTunnelClient {
 
 
     public static void main(String[] args) throws Exception {
-        final WebSocketTunnelClient client = new WebSocketTunnelClient("default", URI.create("ws://10.45.90.148:2345/tunnel"));
+        // final WebSocketTunnelClient client = new WebSocketTunnelClient("default", URI.create("ws://10.45.90.148:2345/tunnel"));
+        final WebSocketTunnelClient client = new WebSocketTunnelClient("default", URI.create("ws://127.0.0.1:2345/tunnel"));
         client.start().sync().channel().closeFuture().await();
     }
 }
