@@ -1,4 +1,4 @@
-package com.github.tube.server;
+package com.github.tube.server.shell;
 
 import com.github.tube.server.shell.ConsoleShell;
 import jline.Terminal;

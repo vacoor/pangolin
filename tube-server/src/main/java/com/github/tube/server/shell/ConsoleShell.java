@@ -1,12 +1,8 @@
 package com.github.tube.server.shell;
 
-import com.github.tube.server.shell.AbstractShell;
 import jline.Terminal;
 import jline.console.ConsoleReader;
-import jline.console.completer.AggregateCompleter;
-import jline.console.completer.CandidateListCompletionHandler;
-import jline.console.completer.CompletionHandler;
-import jline.console.completer.StringsCompleter;
+import jline.console.completer.*;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -14,8 +10,8 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 
 public class ConsoleShell extends AbstractShell {
-    private final InputStream in;
-    private final PrintStream out;
+    protected final InputStream in;
+    protected final PrintStream out;
     private final ConsoleReader console;
 
     public ConsoleShell(final InputStream in, final PrintStream out, final Terminal terminal) throws IOException {
@@ -38,6 +34,12 @@ public class ConsoleShell extends AbstractShell {
         completer.getCompleters().add(new StringsCompleter("tunnel "));
         completer.getCompleters().add(new StringsCompleter("tunnel2 "));
         completer.getCompleters().add(new StringsCompleter("tunnel3 "));
+        completer.getCompleters().add(new ArgumentCompleter(
+                new StringsCompleter("forward"),
+                new TunnelCompleter(),
+                NullCompleter.INSTANCE
+        ));
+
 
         console.addCompleter(completer);
         return console;
