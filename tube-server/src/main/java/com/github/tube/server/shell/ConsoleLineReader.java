@@ -1,5 +1,7 @@
 package com.github.tube.server.shell;
 
+import com.github.tube.server.shell.LineReader;
+import com.github.tube.server.shell.TunnelCompleter;
 import jline.Terminal;
 import jline.console.ConsoleReader;
 import jline.console.completer.*;
@@ -9,12 +11,12 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 
-public class ConsoleShell extends AbstractShell {
+public class ConsoleLineReader implements LineReader {
     protected final InputStream in;
     protected final PrintStream out;
     private final ConsoleReader console;
 
-    public ConsoleShell(final InputStream in, final PrintStream out, final Terminal terminal) throws IOException {
+    public ConsoleLineReader(final InputStream in, final PrintStream out, final Terminal terminal) throws IOException {
         this.in = in;
         this.out = out;
         this.console = create(in, out, terminal);
@@ -50,12 +52,7 @@ public class ConsoleShell extends AbstractShell {
     }
 
     @Override
-    protected String readLine() throws IOException {
+    public String readLine() throws IOException {
         return console.readLine(getPrompt());
-    }
-
-    @Override
-    protected PrintStream getOut() throws IOException {
-        return out;
     }
 }

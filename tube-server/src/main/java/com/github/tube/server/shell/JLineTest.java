@@ -1,6 +1,5 @@
 package com.github.tube.server.shell;
 
-import com.github.tube.server.shell.ConsoleShell;
 import jline.Terminal;
 import jline.TerminalFactory;
 
@@ -16,14 +15,12 @@ public class JLineTest {
         // final Terminal terminal = new WindowsTerminal();
         // TerminalFactory.registerFlavor(TerminalFactory.Flavor.WINDOWS, jline.UnsupportedTerminal.class);
         final Terminal terminal = TerminalFactory.create();
-
-
-
-        final ConsoleShell shell = new ConsoleShell(System.in, System.out, terminal);
-        shell.out.println();
-        shell.out.println("Welcome to WebSocket Tunnel Service!");
-        shell.out.println();
-        shell.out.flush();
+        final LineReader reader = new ConsoleLineReader(System.in, System.out, terminal);
+        final WebSocketTunnelShell shell = new WebSocketTunnelShell(reader, System.out);
+        shell.output.println();
+        shell.output.println("Welcome to WebSocket Tunnel Service!");
+        shell.output.println();
+        shell.output.flush();
 
         while (shell.next()) {
 

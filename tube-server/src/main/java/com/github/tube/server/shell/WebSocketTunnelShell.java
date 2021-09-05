@@ -3,14 +3,24 @@ package com.github.tube.server.shell;
 import com.github.tube.server.WebSocketTunnelServer;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintStream;
 
-public abstract class AbstractShell {
+public class WebSocketTunnelShell {
     private boolean breakOnNull;
     private WebSocketTunnelServer server;
 
+    protected final LineReader reader;
+    protected final PrintStream output;
+
+    protected WebSocketTunnelShell(final LineReader reader,
+                                   final PrintStream output) {
+        this.reader = reader;
+        this.output = output;
+    }
+
     public boolean next() throws IOException {
-        final String line = this.readLine();
+        final String line = reader.readLine();
         if (null == line && breakOnNull) {
             return false;
         }
@@ -22,13 +32,9 @@ public abstract class AbstractShell {
         return true;
     }
 
-    protected abstract String readLine() throws IOException;
-
-    protected abstract PrintStream getOut() throws IOException;
-
     protected void execute(final String line) {
         try {
-            doExecute(line, getOut());
+            doExecute(line, output);
         } catch (final Throwable ex) {
         }
     }
