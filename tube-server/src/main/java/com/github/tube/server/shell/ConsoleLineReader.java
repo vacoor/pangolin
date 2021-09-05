@@ -58,6 +58,7 @@ public class ConsoleLineReader implements LineReader {
 
 
         console.addCompleter(completer);
+        console.clearScreen();
         return console;
     }
 
