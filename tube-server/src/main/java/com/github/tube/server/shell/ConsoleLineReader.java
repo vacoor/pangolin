@@ -33,12 +33,26 @@ public class ConsoleLineReader implements LineReader {
         console.setExpandEvents(false);
 
         final AggregateCompleter completer = new AggregateCompleter();
-        completer.getCompleters().add(new StringsCompleter("tunnel "));
-        completer.getCompleters().add(new StringsCompleter("tunnel2 "));
-        completer.getCompleters().add(new StringsCompleter("tunnel3 "));
+        final TunnelCompleter tunnelCompleter = new TunnelCompleter();
+        /*-
+         * forward
+         */
         completer.getCompleters().add(new ArgumentCompleter(
                 new StringsCompleter("forward"),
-                new TunnelCompleter(),
+                new AggregateCompleter(
+                        new StringsCompleter("list"),
+                        new ArgumentCompleter(
+                                new StringsCompleter("add"),
+                                NullCompleter.INSTANCE,
+                                tunnelCompleter,
+                                NullCompleter.INSTANCE
+                        ),
+                        new ArgumentCompleter(
+                                new StringsCompleter("remove"),
+                                new StringsCompleter("8080", "9999", "2222"),
+                                NullCompleter.INSTANCE
+                        )
+                ),
                 NullCompleter.INSTANCE
         ));
 
