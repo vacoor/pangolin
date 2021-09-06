@@ -13,8 +13,8 @@ public class GenericLineReader implements LineReader {
 
     @Override
     public String readLine() throws IOException {
-        // writer.write("tunnel# ");
-        // writer.flush();
+        writer.write("tunnel# ");
+        writer.flush();
         return reader.readLine();
     }
 }

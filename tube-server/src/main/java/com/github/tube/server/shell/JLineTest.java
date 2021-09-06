@@ -21,13 +21,6 @@ public class JLineTest {
 //        final LineReader reader = new ConsoleLineReader(System.in, System.out, terminal);
         final LineReader reader = new GenericLineReader(System.in, System.out);
         final WebSocketTunnelShell shell = new WebSocketTunnelShell(reader, System.out);
-        shell.output.println();
-        shell.output.println("Welcome to WebSocket Tunnel Service!");
-        shell.output.println();
-        shell.output.flush();
-
-        while (shell.next()) {
-
-        }
+        shell.run();
     }
 }
