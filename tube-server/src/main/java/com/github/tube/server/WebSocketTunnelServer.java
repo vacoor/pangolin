@@ -1,8 +1,14 @@
 package com.github.tube.server;
 
+import com.github.tube.server.shell.ConsoleLineReader;
+import com.github.tube.server.shell.LineReader;
+import com.github.tube.server.shell.WebSocketTerminal;
+import com.github.tube.server.shell.WebSocketTunnelShell;
 import com.github.tube.util.WebSocketForwarder;
 import com.github.tube.util.WebSocketUtils;
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -35,17 +41,26 @@ import io.netty.util.concurrent.FutureListener;
 import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.concurrent.Promise;
+import jline.Terminal;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
+import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -70,6 +85,11 @@ public class WebSocketTunnelServer {
     private static final int MAX_HTTP_CONTENT_LENGTH = 1024 * 1024 * 8;
 
     /**
+     * 默认通道响应超时时间.
+     */
+    private static final long DEFAULT_TUNNEL_RESPONSE_TIMEOUT_MS = 20 * 1000L;
+
+    /**
      * 通道注册.
      */
     private static final String PROTOCOL_TUNNEL_REGISTER = "PASSIVE-REG";
@@ -84,48 +104,93 @@ public class WebSocketTunnelServer {
      */
     private static final String PROTOCOL_TUNNEL_RESPONSE = "PASSIVE";
 
+    /**
+     * 服务管理.
+     */
     private static final String PROTOCOL_TUNNEL_MANAGEMENT = "TUNNEL-MGR";
 
     /**
-     * 注册的通道.
+     * 支持的协议.
+     */
+    private static final String ALL_PROTOCOLS = PROTOCOL_TUNNEL_REQUEST + "," + PROTOCOL_TUNNEL_REGISTER + "," + PROTOCOL_TUNNEL_RESPONSE + "," + PROTOCOL_TUNNEL_MANAGEMENT;
+
+    /**
+     * 注册的通道(tunnel:tunnel-websocket).
      */
     private final ConcurrentMap<String, ChannelHandlerContext> registeredTunnelBusMap = new ConcurrentHashMap<>();
 
     /**
-     * 等待 TCP 通道的连接.
+     * 等待 TCP 通道的连接(tunnel:request-socket-promise).
      */
     private final ConcurrentMap<String, Promise<ChannelHandlerContext>> pendingSocketChannelMap = new ConcurrentHashMap<>();
 
     /**
-     * 等待 WebSocket 通道的连接.
+     * 等待 WebSocket 通道的连接(tunnel:request-websocket-promise).
      */
     private final ConcurrentMap<String, Promise<ChannelHandlerContext>> pendingWebSocketChannelMap = new ConcurrentHashMap<>();
 
     /**
-     * 端口转发的服务连接.
+     * 端口转发的服务连接(tunnel:server-channel).
      */
-    private final ConcurrentMap<String, List<Channel>> forwardServerChannelMap = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, List<Channel>> socketForwardServerChannelMap = new ConcurrentHashMap<>();
 
-    private final ConcurrentMap<String, Promise<ChannelHandlerContext>> tunnelForwardPromises = new ConcurrentHashMap<>();
 
-    private final String host;
-    private final int port;
-    private final boolean useSsl;
-    private final String endpointPath;
+    /**
+     * 已开启的端口转发监听.
+     */
+    private final ConcurrentMap<Integer, Link> forwardTunnels = new ConcurrentHashMap<>();
 
+    /**
+     * 已开启的端口转发通道.
+     */
+    private final ConcurrentMap<String, List<TunnelInstance>> tunnelInstanceMap = new ConcurrentHashMap<>();
+
+    /**
+     * 服务 event loop group.
+     */
     private final NioEventLoopGroup bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocketTunnelServer-boss", true));
+
+    /**
+     * 处理 event loop group.
+     */
     private final NioEventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("WebSocketTunnelServer-workers", true));
     private final AtomicBoolean startup = new AtomicBoolean(false);
 
+    /**
+     * 通道响应超时时间.
+     */
+    private long tunnelResponseTimeoutMs = DEFAULT_TUNNEL_RESPONSE_TIMEOUT_MS;
+
+    /**
+     * 监听端口.
+     */
+    private final int listenPort;
+
+    /**
+     * 监听主机名.
+     */
+    private final String listenHost;
+
+    /**
+     * 是否使用 SSL.
+     */
+    private final boolean useSsl;
+
+    /**
+     * 接入点路径.
+     */
+    private final String endpointPath;
+
+
     private Channel serverChannel;
 
-    public WebSocketTunnelServer(final int inetPort, final String endpointPath, final boolean useSsl) {
-        this(null, inetPort, endpointPath, useSsl);
+    public WebSocketTunnelServer(final int listenPort, final String endpointPath, final boolean useSsl) {
+        this(null, listenPort, endpointPath, useSsl);
     }
 
-    public WebSocketTunnelServer(final String inetHost, final int inetPort, final String endpointPath, final boolean useSsl) {
-        this.host = inetHost;
-        this.port = inetPort;
+    public WebSocketTunnelServer(final String listenHost, final int listenPort, final String endpointPath, final boolean useSsl) {
+        this.listenHost = listenHost;
+        this.listenPort = listenPort;
         this.endpointPath = endpointPath;
         this.useSsl = useSsl;
     }
@@ -136,12 +201,11 @@ public class WebSocketTunnelServer {
      * @return 服务通道
      * @throws Exception 如果启动发生错误
      */
-    public Channel start() throws Exception {
+    public Channel start() throws CertificateException, SSLException, InterruptedException {
         if (!startup.compareAndSet(false, true)) {
             return serverChannel;
         }
 
-        final String subprotocols = PROTOCOL_TUNNEL_REGISTER + "," + PROTOCOL_TUNNEL_REQUEST + "," + PROTOCOL_TUNNEL_RESPONSE + "," + PROTOCOL_TUNNEL_MANAGEMENT;
         final SslContext sslContext = useSsl ? createSslContext() : null;
         final ServerBootstrap bootstrap = new ServerBootstrap();
         bootstrap.option(ChannelOption.SO_REUSEADDR, true);
@@ -159,17 +223,15 @@ public class WebSocketTunnelServer {
                         pipeline.addLast(new HttpServerCodec());
                         pipeline.addLast(new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
                         pipeline.addLast(new WebSocketServerCompressionHandler());
-                        pipeline.addLast(new WebSocketServerProtocolHandler(
-                                endpointPath, subprotocols, true, MAX_HTTP_CONTENT_LENGTH, false, true
-                        ));
+                        pipeline.addLast(new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, MAX_HTTP_CONTENT_LENGTH, false, true));
                         pipeline.addLast(createWebSocketTunnelServerHandler());
                     }
                 });
 
-        if (null == host) {
-            serverChannel = bootstrap.bind(port).sync().channel();
+        if (null == listenHost) {
+            serverChannel = bootstrap.bind(listenPort).sync().channel();
         } else {
-            serverChannel = bootstrap.bind(host, port).sync().channel();
+            serverChannel = bootstrap.bind(listenHost, listenPort).sync().channel();
         }
         return serverChannel;
     }
@@ -193,51 +255,50 @@ public class WebSocketTunnelServer {
         return new SimpleChannelInboundHandler<WebSocketFrame>() {
             @Override
             public void userEventTriggered(final ChannelHandlerContext webSocketContext, final Object evt) throws Exception {
-                if (evt instanceof WebSocketServerProtocolHandler.HandshakeComplete) {
-                    final WebSocketServerProtocolHandler.HandshakeComplete handshake = (WebSocketServerProtocolHandler.HandshakeComplete) evt;
-                    final String subprotocol = null != handshake.selectedSubprotocol() ? handshake.selectedSubprotocol() : EMPTY;
-
-                    if (PROTOCOL_TUNNEL_REGISTER.equalsIgnoreCase(subprotocol)) {
-                        /*-
-                         * 通道注册.
-                         */
-                        tunnelRegistered(webSocketContext, handshake);
-                    } else if (PROTOCOL_TUNNEL_REQUEST.equalsIgnoreCase(subprotocol)) {
-                        /*-
-                         * 通道打开请求.
-                         */
-                        final Map<String, String> parameters = determineQueryParameters(handshake.requestUri());
-                        final String tunnel = parameters.get("tunnel");
-                        final String target = parameters.get("target");
-                        final ChannelHandlerContext tunnelBus = lookupTunnelBus(tunnel);
-                        if (null != tunnelBus) {
-                            final String forwardRequestId = "ws:" + id(webSocketContext.channel());
-                            final Promise<ChannelHandlerContext> webSocketTunnelPromise = webSocketTunnelRequested(forwardRequestId, webSocketContext);
-                            final String forwardRequest = forwardRequestId + "->" + target;
-
-                            if (log.isDebugEnabled()) {
-                                log.debug("{} Try open websocket tunnel: {}", webSocketContext.channel(), forwardRequest);
-                            }
-                            tunnelBus.writeAndFlush(new TextWebSocketFrame(forwardRequest));
-                            if (!webSocketTunnelPromise.await(20, TimeUnit.SECONDS)) {
-                                webSocketTunnelPromise.tryFailure(new ConnectTimeoutException("TUNNEL_WAIT_TIMOUT"));
-                            }
-                        } else {
-                            log.warn("{} Not found tunnel: {}, will close", webSocketContext.channel(), tunnel);
-                            WebSocketUtils.policyViolationClose(webSocketContext, "TUNNEL_NOT_FOUND");
-                        }
-                    } else if (PROTOCOL_TUNNEL_RESPONSE.equalsIgnoreCase(subprotocol)) {
-                        /*-
-                         * 通道打开响应.
-                         */
-                        tunnelResponded(webSocketContext, handshake);
-                    } else if (PROTOCOL_TUNNEL_MANAGEMENT.equalsIgnoreCase(subprotocol)) {
-                        tunnelManagement(webSocketContext, handshake);
-                    } else {
-                        WebSocketUtils.protocolErrorClose(webSocketContext, "PROTOCOL_NOT_SUPPORTED");
-                    }
-                } else {
+                if (!(evt instanceof WebSocketServerProtocolHandler.HandshakeComplete)) {
                     super.userEventTriggered(webSocketContext, evt);
+                    return;
+                }
+                final WebSocketServerProtocolHandler.HandshakeComplete handshake = (WebSocketServerProtocolHandler.HandshakeComplete) evt;
+                final String subprotocol = null != handshake.selectedSubprotocol() ? handshake.selectedSubprotocol() : EMPTY;
+                if (PROTOCOL_TUNNEL_REGISTER.equalsIgnoreCase(subprotocol)) {
+                    /*-
+                     * 通道注册.
+                     */
+                    tunnelRegistered(webSocketContext, handshake);
+                } else if (PROTOCOL_TUNNEL_REQUEST.equalsIgnoreCase(subprotocol)) {
+                    /*-
+                     * 通道打开请求.
+                     */
+                    final Map<String, String> parameters = determineQueryParameters(handshake.requestUri());
+                    final String tunnel = parameters.get("tunnel");
+                    final String target = parameters.get("target");
+                    final ChannelHandlerContext tunnelBus = lookupTunnelBus(tunnel);
+                    if (null != tunnelBus) {
+                        final String forwardRequestId = "ws:" + id(webSocketContext.channel());
+                        final Promise<ChannelHandlerContext> webSocketTunnelPromise = webSocketTunnelRequested(forwardRequestId, webSocketContext);
+                        final String forwardRequest = forwardRequestId + "->" + target;
+
+                        if (log.isDebugEnabled()) {
+                            log.debug("{} Try open websocket tunnel: {}", webSocketContext.channel(), forwardRequest);
+                        }
+                        tunnelBus.writeAndFlush(new TextWebSocketFrame(forwardRequest));
+                        if (!webSocketTunnelPromise.await(tunnelResponseTimeoutMs, TimeUnit.MILLISECONDS)) {
+                            webSocketTunnelPromise.tryFailure(new ConnectTimeoutException("TUNNEL_WAIT_TIMOUT"));
+                        }
+                    } else {
+                        log.warn("{} Not found tunnel: {}, will close", webSocketContext.channel(), tunnel);
+                        WebSocketUtils.policyViolationClose(webSocketContext, "TUNNEL_NOT_FOUND");
+                    }
+                } else if (PROTOCOL_TUNNEL_RESPONSE.equalsIgnoreCase(subprotocol)) {
+                    /*-
+                     * 通道打开响应.
+                     */
+                    tunnelResponded(webSocketContext, handshake);
+                } else if (PROTOCOL_TUNNEL_MANAGEMENT.equalsIgnoreCase(subprotocol)) {
+                    tunnelManagement(webSocketContext, handshake);
+                } else {
+                    WebSocketUtils.protocolErrorClose(webSocketContext, "PROTOCOL_NOT_SUPPORTED");
                 }
             }
 
@@ -340,7 +401,7 @@ public class WebSocketTunnelServer {
         if (null != tunnelBus && !tunnelBus.channel().isActive()) {
             System.out.println("Remove agent: " + tunnel);
 
-            final List<Channel> channels = forwardServerChannelMap.get(tunnel);
+            final List<Channel> channels = socketForwardServerChannelMap.get(tunnel);
             if (null != channels) {
                 for (Channel channel1 : channels) {
                     if (channel1.isOpen()) {
@@ -396,7 +457,6 @@ public class WebSocketTunnelServer {
                     if (log.isDebugEnabled()) {
                         log.debug("{} WebSocket tunnel open failure: {}", webSocketContext.channel(), cause.getMessage());
                     }
-                    // XXX 1006 CLOSE_ABNORMAL
                     WebSocketUtils.goingAwayClose(webSocketContext, cause.getMessage());
                 }
             }
@@ -427,10 +487,15 @@ public class WebSocketTunnelServer {
             log.debug("{} Native tunnel request: {}", nativeSocketContext.channel(), forwardRequestId);
         }
 
+        final String tunnel = nativeSocketContext.name();
         final Promise<ChannelHandlerContext> webSocketTunnelPromise = GlobalEventExecutor.INSTANCE.newPromise();
         if (null != pendingSocketChannelMap.putIfAbsent(forwardRequestId, webSocketTunnelPromise)) {
             throw new IllegalStateException(String.format("%s request id '%s' is already used", nativeSocketContext.channel(), forwardRequestId));
         }
+
+        final TunnelInstance link = new TunnelInstance(forwardRequestId, nativeSocketContext);
+        tunnelInstanceMap.putIfAbsent(tunnel, new CopyOnWriteArrayList<TunnelInstance>());
+        tunnelInstanceMap.get(tunnel).add(link);
 
         nativeSocketContext.channel().config().setAutoRead(false);
         webSocketTunnelPromise.addListener(new FutureListener<ChannelHandlerContext>() {
@@ -454,6 +519,7 @@ public class WebSocketTunnelServer {
                     if (log.isDebugEnabled()) {
                         log.debug("{} Native tunnel open success: {}", nativeSocketContext.channel(), webSocketTunnelContext.channel());
                     }
+                    link.setResponse(webSocketTunnelContext);
                 } else {
                     final Throwable cause = tunnelFuture.cause();
                     if (log.isDebugEnabled()) {
@@ -471,6 +537,10 @@ public class WebSocketTunnelServer {
                     log.debug("{} Connection closed", nativeSocketContext.channel());
                 }
                 pendingSocketChannelMap.remove(forwardRequestId);
+                tunnelInstanceMap.get(tunnel).remove(link);
+                if (null != link.response) {
+                    link.response.close();
+                }
             }
         });
 
@@ -501,15 +571,42 @@ public class WebSocketTunnelServer {
 
     private static final Pattern FORWARD_CMD = Pattern.compile("^\\s*([-_a-zA-Z0-9]+)\\s+forward\\s+([1-9][0-9]{0,4})\\s+([^\\s:]+):([1-9][0-9]{0,4})\\s*$");
 
-    private void tunnelManagement(final ChannelHandlerContext webSocketTunnelContext, final WebSocketServerProtocolHandler.HandshakeComplete handshake) {
+    private void tunnelManagement(final ChannelHandlerContext webSocketTunnelContext, final WebSocketServerProtocolHandler.HandshakeComplete handshake) throws IOException {
         webSocketTunnelContext.channel().config().setAutoRead(false);
-
         webSocketTunnelContext.pipeline().remove(webSocketTunnelContext.handler());
+
+        final PipedOutputStream out = new PipedOutputStream();
+        final PipedInputStream innerIn = new PipedInputStream(out);
+        final OutputStream innerOut = new WebSocketBinaryOutputStream(webSocketTunnelContext);
+        final Terminal terminal = new WebSocketTerminal();
+        final LineReader reader = new ConsoleLineReader(this, innerIn, innerOut, terminal);
+        new WebSocketTunnelShell(this, reader, new PrintStream(innerOut)).start();
+
         webSocketTunnelContext.pipeline().addLast(new SimpleChannelInboundHandler<WebSocketFrame>() {
             @Override
             protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame msg) throws Exception {
-                if (msg instanceof TextWebSocketFrame) {
+                if (msg instanceof BinaryWebSocketFrame) {
+                    out.write(ByteBufUtil.getBytes(msg.content()));
+                    out.flush();
+                } else if (msg instanceof TextWebSocketFrame) {
+
                     final String message = ((TextWebSocketFrame) msg).text();
+                    final int index = message.indexOf(' ');
+                    final String command = -1 < index ? message.substring(0, index) : message;
+                    final String commandArgs = -1 < index ? message.substring(index + 1) : "";
+                    if ("\u0009\u0011".equals(command)) {
+                        final String[] dimension = commandArgs.split("x", 2);
+                        try {
+                            final int cols = Integer.valueOf(dimension[0]);
+                            final int rows = Integer.valueOf(dimension[1]);
+                            ((WebSocketTerminal) terminal).setCols(cols);
+                            ((WebSocketTerminal) terminal).setRows(rows);
+                        } catch (final NumberFormatException ignore) {
+                            log.error("Execute command '{}' error", message, ignore);
+                        }
+                        return;
+                    }
+
                     final Matcher matcher = FORWARD_CMD.matcher(message);
                     if (matcher.find()) {
                         final String tunnel = matcher.group(1);
@@ -527,13 +624,49 @@ public class WebSocketTunnelServer {
                     } else if ("list".equals(message)) {
                         sendText(ctx, registeredTunnelBusMap.keySet().toString());
                         return;
+                    } else {
+                        sendText(ctx, "NOT_SUPPORTED");
                     }
                 }
-                sendText(ctx, "NOT_SUPPORTED");
             }
         });
 
         webSocketTunnelContext.channel().config().setAutoRead(true);
+    }
+
+    class WebSocketBinaryOutputStream extends OutputStream {
+        private final ChannelHandlerContext webSocketContext;
+
+        WebSocketBinaryOutputStream(final ChannelHandlerContext webSocketContext) {
+            this.webSocketContext = webSocketContext;
+        }
+
+        @Override
+        public void write(final byte[] b, final int off, final int len) throws IOException {
+            try {
+                /*-
+                 * await 不等待多线程写入时会丢失数据或多次发送相同数据.
+                 */
+                webSocketContext.writeAndFlush(new BinaryWebSocketFrame(Unpooled.wrappedBuffer(b, off, len))).await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        @Override
+        public void write(final int b) throws IOException {
+            this.write(new byte[]{(byte) b});
+        }
+
+        @Override
+        public void flush() throws IOException {
+            webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
+        }
+
+        @Override
+        public void close() throws IOException {
+            webSocketContext.close();
+        }
     }
 
     private void sendText(final ChannelHandlerContext context, final String message) {
@@ -549,21 +682,52 @@ public class WebSocketTunnelServer {
      *
      * ************************ */
 
-    public Channel forward(final int port, final String agent, final String remoteHost, final int remotePort) throws Exception {
-        final Channel channel = doForward(port, agent, remoteHost, remotePort);
-        channel.closeFuture().addListener(new ChannelFutureListener() {
+    public Channel forward(final int port, final String tunnel, final String remoteHost, final int remotePort) throws Exception {
+        final Channel serverChannel = doForward(port, tunnel, remoteHost, remotePort);
+        final ChannelHandlerContext tunnelBus = this.lookupTunnelBus(tunnel);
+
+        final Link mapping = new Link(serverChannel, tunnel, tunnelBus, remoteHost + ":" + remotePort);
+        forwardTunnels.put(port, mapping);
+
+        serverChannel.closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
-                List<Channel> channels = forwardServerChannelMap.get(agent);
+                List<Channel> channels = socketForwardServerChannelMap.get(tunnel);
                 if (null != channels) {
-                    channels.remove(channel);
+                    channels.remove(serverChannel);
                 }
+                forwardTunnels.remove(port);
             }
         });
-        forwardServerChannelMap.putIfAbsent(agent, new CopyOnWriteArrayList<Channel>());
-        List<Channel> channels = forwardServerChannelMap.get(agent);
-        channels.add(channel);
-        return channel;
+        socketForwardServerChannelMap.putIfAbsent(tunnel, new CopyOnWriteArrayList<Channel>());
+        List<Channel> channels = socketForwardServerChannelMap.get(tunnel);
+        channels.add(serverChannel);
+        return serverChannel;
+    }
+
+    public Set<String> getTunnelNames() {
+        return Collections.unmodifiableSet(registeredTunnelBusMap.keySet());
+    }
+
+    public Set<Integer> getForwardPorts() {
+        return Collections.unmodifiableSet(forwardTunnels.keySet());
+    }
+
+    public Collection<Link> getForwards() {
+        return forwardTunnels.values();
+    }
+
+    public Map<String, List<TunnelInstance>> getForwardTunnels() {
+        return Collections.unmodifiableMap(tunnelInstanceMap);
+    }
+
+    public boolean unforward(final int port) {
+        final Link link = forwardTunnels.remove(port);
+        if (null != link) {
+            link.serverChannel.close();
+            return true;
+        }
+        return false;
     }
 
     private Channel doForward(final int port, final String tunnel, final String remoteHost, final int remotePort) throws InterruptedException {
@@ -578,11 +742,11 @@ public class WebSocketTunnelServer {
         socketBootstrap.option(ChannelOption.SO_REUSEADDR, true);
         socketBootstrap.childOption(ChannelOption.TCP_NODELAY, true);
         socketBootstrap.group(socketBossGroup, socketWorkerGroup).channel(NioServerSocketChannel.class);
-        socketBootstrap.handler(new LoggingHandler(LogLevel.INFO)).childHandler(createNativeSocketForwardInitializer(agentContext, remoteHost, remotePort));
-        if (null == host) {
+        socketBootstrap.handler(new LoggingHandler(LogLevel.INFO)).childHandler(createNativeSocketForwardInitializer(tunnel, agentContext, remoteHost, remotePort));
+        if (null == listenHost) {
             return socketBootstrap.bind(port).sync().channel();
         } else {
-            return socketBootstrap.bind(host, port).sync().channel();
+            return socketBootstrap.bind(listenHost, port).sync().channel();
         }
     }
 
@@ -592,12 +756,12 @@ public class WebSocketTunnelServer {
      *
      * @return
      */
-    private ChannelInitializer<SocketChannel> createNativeSocketForwardInitializer(final ChannelHandlerContext agentContext, final String hostname, final int port) {
+    private ChannelInitializer<SocketChannel> createNativeSocketForwardInitializer(final String tunnel, final ChannelHandlerContext tunnelBus, final String hostname, final int port) {
         return new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel nativeSocketChannel) {
                 nativeSocketChannel.config().setAutoRead(false);
-                nativeSocketChannel.pipeline().addLast(new ChannelInboundHandlerAdapter() {
+                nativeSocketChannel.pipeline().addLast(tunnel, new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelActive(final ChannelHandlerContext nativeSocketContext) throws Exception {
                         final String forwardRequestId = "tcp:0x" + nativeSocketChannel.id().asShortText();
@@ -611,9 +775,9 @@ public class WebSocketTunnelServer {
                         if (log.isDebugEnabled()) {
                             log.debug("{} Try open native tunnel: {}", nativeSocketChannel, forwardRequest);
                         }
-                        agentContext.channel().writeAndFlush(new TextWebSocketFrame(forwardRequest));
+                        tunnelBus.writeAndFlush(new TextWebSocketFrame(forwardRequest));
 
-                        final boolean responded = webSocketTunnelPromise.await(20, TimeUnit.SECONDS);
+                        final boolean responded = webSocketTunnelPromise.await(tunnelResponseTimeoutMs, TimeUnit.MILLISECONDS);
                         if (!responded) {
                             webSocketTunnelPromise.tryFailure(new ConnectTimeoutException("Timeout"));
                         }
@@ -649,5 +813,87 @@ public class WebSocketTunnelServer {
             }
         }
         return result;
+    }
+
+    public class Link {
+        private final Channel serverChannel;
+        private final String tunnel;
+        private final ChannelHandlerContext tunnelBus;
+        private final String target;
+
+        private Link(final Channel serverChannel, final String tunnel, final ChannelHandlerContext tunnelBus, final String target) {
+            this.serverChannel = serverChannel;
+            this.tunnel = tunnel;
+            this.tunnelBus = tunnelBus;
+            this.target = target;
+        }
+
+        public String getTunnel() {
+            return tunnel;
+        }
+
+        @Override
+        public String toString() {
+            final SocketAddress localAddr = serverChannel.localAddress();
+            final SocketAddress tunnelAddr = tunnelBus.channel().remoteAddress();
+            return localAddr + " -> " + tunnel + "[" + tunnelAddr + "] -> " + target;
+        }
+    }
+
+    public class TunnelInstance {
+        private final String id;
+        private final ChannelHandlerContext request;
+        private ChannelHandlerContext response;
+
+        public TunnelInstance(final String id, final ChannelHandlerContext request) {
+            this.id = id;
+            this.request = request;
+        }
+
+        public boolean isPending() {
+            return null == response;
+        }
+
+        public void setResponse(final ChannelHandlerContext response) {
+            this.response = response;
+        }
+
+        @Override
+        public String toString() {
+            final Channel theRequest = request.channel();
+            String description = "[" + id + ", " + theRequest.remoteAddress() + " -> " + theRequest.localAddress();
+            if (null != response) {
+                final Channel theResponse = response.channel();
+                description += " >< " + theResponse.localAddress() + " <- " + theResponse.remoteAddress() + "]";
+            } else {
+                description += " ><  ?]";
+            }
+            return description;
+        }
+    }
+
+    public Map<String, ChannelHandlerContext> getRegisteredTunnels() {
+        return registeredTunnelBusMap;
+    }
+
+    public boolean kill(final String tunnelId) {
+        Collection<List<TunnelInstance>> values = tunnelInstanceMap.values();
+        for (List<TunnelInstance> value : values) {
+            final Iterator<TunnelInstance> it = value.iterator();
+            TunnelInstance found = null;
+            while (it.hasNext()) {
+                TunnelInstance next = it.next();
+                if (next.id.equals(tunnelId)) {
+                    found = next;
+                    break;
+                }
+            }
+            if (null != found) {
+                found.request.close();
+                value.remove(found);
+                return true;
+            }
+        }
+        return false;
     }
 }

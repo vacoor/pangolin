@@ -3,10 +3,12 @@ package com.github.tube.server.shell;
 import com.github.tube.server.WebSocketTunnelServer;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.PrintStream;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -16,21 +18,37 @@ public class WebSocketTunnelShell {
 
     protected final LineReader reader;
     protected final PrintStream output;
+    protected volatile boolean running = false;
 
-    protected WebSocketTunnelShell(final LineReader reader,
-                                   final PrintStream output) {
+    public WebSocketTunnelShell(final WebSocketTunnelServer server,
+                                final LineReader reader, final PrintStream output) {
+        this.server = server;
         this.reader = reader;
         this.output = output;
     }
 
-    public void run() throws IOException{
+    public void run() throws IOException {
+        running = true;
         output.println();
         output.println("Welcome to WebSocket Tunnel!");
         output.println();
         output.flush();
-        while (next()) {
+        while (running && next()) {
 
         }
+    }
+
+    public void start() {
+        new Thread() {
+            @Override
+            public void run() {
+                try {
+                    WebSocketTunnelShell.this.run();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }.start();
     }
 
     public boolean next() throws IOException {
@@ -53,11 +71,63 @@ public class WebSocketTunnelShell {
         try {
             doExecute(line, output);
         } catch (final Throwable ex) {
+            output.println(ex.getMessage());
         }
     }
 
-    protected void doExecute(final String line, final PrintStream out) {
+    protected void doExecute(final String line, final PrintStream out) throws Exception {
         // find command and execute
+        final String[] args = tokenize(line);
+        if (0 == args.length) {
+            return;
+        }
+
+        if ("exit".equals(args[0])) {
+            running = false;
+            out.println("Exit");
+            reader.close();
+            server.shutdownGracefully();
+        } else if ("ls".equals(args[0])) {
+            final boolean isL = args.length > 1  && "-l".equals(args[1]);
+            Collection<WebSocketTunnelServer.Link> forwards = server.getForwards();
+            Map<String, List<WebSocketTunnelServer.TunnelInstance>> forwardTunnels = isL ? server.getForwardTunnels() : Collections.<String, List<WebSocketTunnelServer.TunnelInstance>>emptyMap();
+            for (WebSocketTunnelServer.Link forward : forwards) {
+                out.println(forward);
+                List<WebSocketTunnelServer.TunnelInstance> instances = forwardTunnels.get(forward.getTunnel());
+                if (null == instances) {
+                    continue;
+                }
+                for (WebSocketTunnelServer.TunnelInstance instance : instances) {
+                    out.println("  |- " + instance);
+                }
+            }
+        } else if ("forward".equals(args[0])) {
+            final int port = Integer.parseInt(args[1]);
+            final String tunnel = args[2];
+            final String target = args[3];
+            final String[] segments = target.split(":", 2);
+            final String hostname = segments[0];
+            final int targetPort = Integer.parseInt(segments[1]);
+            server.forward(port, tunnel, hostname, targetPort);
+            out.println("OK");
+        } else if ("unforward".equals(args[0])) {
+            final int port = Integer.parseInt(args[1]);
+            server.unforward(port);
+            out.println("OK");
+        } else if ("kill".equals(args[0])) {
+            final String id = args[1];
+            boolean kill = server.kill(id);
+            if (kill) {
+                out.println("Killed");
+            } else {
+                out.println(String.format("'%s' not found", id));
+            }
+        } else {
+            out.println(String.format("%s: command not found", args[0]));
+        }
+    }
+
+    private String[] tokenize(final String line) {
         final Matcher matcher = ARGS_PATTERN.matcher(line);
         List<String> args = new LinkedList<String>();
         while (matcher.find()) {
@@ -68,25 +138,12 @@ public class WebSocketTunnelShell {
             }
             args.add(value);
         }
-        if (args.isEmpty()) {
-            return;
-        }
-        if ("exit".equals(args.get(0))) {
-            out.println("Exit");
-            System.exit(0);
-        } else if ("ls".equals(args.get(0))) {
-            out.println("127.0.0.1:2222 -> default/114.78.21.2 --> 10.7.8.1:2222");
-            out.println("127.0.0.1:2223 -> tunnel/132.11.129.198 --> 192.168.1.1:80");
-            /*
-            out.println("-rw-r--r-- 1 YSH8879 1049089  115212 8月  19 17:07  未完成单据.final.xlsx\n" +
-                    "-rw-r--r-- 1 YSH8879 1049089   24576 9月   3 11:12  现货订单导入模板.clean.xls\n" +
-                    "-rw-r--r-- 1 YSH8879 1049089   22528 9月   3 12:45  现货订单导入模板.p1.xls\n" +
-                    "-rw-r--r-- 1 YSH8879 1049089   50176 9月   3 11:09  现货订单导入模板.xls\n" +
-                    "-rw-r--r-- 1 YSH8879 1049089   86698 12月 23  2019  线路编码Line-codes.jpg\n" +
-                    "-rw-r--r-- 1 YSH8879 1049089   31232 8月  19 16:48  需维护中间表数据.xls\n" +
-                    "-rw-r--r-- 1 YSH8879 1049089    9186 8月  19 16:49  需维护中间表数据.xlsx\n" +
-                    "drwxr-xr-x 1 YSH8879 1049089       0 5月  24 12:35  作业/");
-            */
-        }
+        return args.toArray(new String[args.size()]);
+    }
+
+    public static void main(String[] args) throws Exception {
+        final WebSocketTunnelServer server = new WebSocketTunnelServer(2345, "/tunnel", false);
+        server.start();
+        new WebSocketTunnelShell(server, new GenericLineReader(System.in, System.out), System.out).run();
     }
 }

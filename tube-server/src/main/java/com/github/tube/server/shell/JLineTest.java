@@ -20,7 +20,7 @@ public class JLineTest {
         final Terminal terminal = TerminalFactory.create();
 //        final LineReader reader = new ConsoleLineReader(System.in, System.out, terminal);
         final LineReader reader = new GenericLineReader(System.in, System.out);
-        final WebSocketTunnelShell shell = new WebSocketTunnelShell(reader, System.out);
+        final WebSocketTunnelShell shell = new WebSocketTunnelShell(null, reader, System.out);
         shell.run();
     }
 }
