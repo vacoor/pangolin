@@ -9,16 +9,7 @@ import com.github.tube.util.WebSocketUtils;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ConnectTimeoutException;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
@@ -35,39 +26,22 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
-import io.netty.util.concurrent.DefaultThreadFactory;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.FutureListener;
-import io.netty.util.concurrent.GenericFutureListener;
-import io.netty.util.concurrent.GlobalEventExecutor;
-import io.netty.util.concurrent.Promise;
+import io.netty.util.concurrent.*;
 import jline.Terminal;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
-import java.io.PrintStream;
+import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * WebSocket 通道服务.
@@ -120,14 +94,9 @@ public class WebSocketTunnelServer {
     private final ConcurrentMap<String, ChannelHandlerContext> registeredTunnelBusMap = new ConcurrentHashMap<>();
 
     /**
-     * 等待 TCP 通道的连接(tunnel:request-socket-promise).
+     * 等待通道打开的连接(forward-id:request-socket-promise).
      */
-    private final ConcurrentMap<String, Promise<ChannelHandlerContext>> pendingSocketChannelMap = new ConcurrentHashMap<>();
-
-    /**
-     * 等待 WebSocket 通道的连接(tunnel:request-websocket-promise).
-     */
-    private final ConcurrentMap<String, Promise<ChannelHandlerContext>> pendingWebSocketChannelMap = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Promise<ChannelHandlerContext>> pendingTunnelMap = new ConcurrentHashMap<>();
 
     /**
      * 端口转发的服务连接(tunnel:server-channel).
@@ -426,7 +395,7 @@ public class WebSocketTunnelServer {
         }
 
         final Promise<ChannelHandlerContext> webSocketTunnelPromise = GlobalEventExecutor.INSTANCE.newPromise();
-        if (null != pendingWebSocketChannelMap.putIfAbsent(forwardRequestId, webSocketTunnelPromise)) {
+        if (null != pendingTunnelMap.putIfAbsent(forwardRequestId, webSocketTunnelPromise)) {
             throw new IllegalStateException(String.format("%s request id '%s' is already used", webSocketContext.channel(), forwardRequestId));
         }
 
@@ -438,7 +407,7 @@ public class WebSocketTunnelServer {
                     final ChannelHandlerContext webSocketTunnelContext = tunnelFuture.getNow();
                     webSocketTunnelContext.channel().config().setAutoRead(true);
 
-                    pendingWebSocketChannelMap.remove(forwardRequestId);
+                    pendingTunnelMap.remove(forwardRequestId);
 
                     webSocketContext.pipeline().remove(webSocketContext.handler());
                     webSocketTunnelContext.pipeline().remove(webSocketTunnelContext.handler());
@@ -468,7 +437,7 @@ public class WebSocketTunnelServer {
                 if (log.isDebugEnabled()) {
                     log.debug("{} Connection closed", webSocketContext.channel());
                 }
-                pendingWebSocketChannelMap.remove(forwardRequestId);
+                pendingTunnelMap.remove(forwardRequestId);
             }
         });
 
@@ -489,7 +458,7 @@ public class WebSocketTunnelServer {
 
         final String tunnel = nativeSocketContext.name();
         final Promise<ChannelHandlerContext> webSocketTunnelPromise = GlobalEventExecutor.INSTANCE.newPromise();
-        if (null != pendingSocketChannelMap.putIfAbsent(forwardRequestId, webSocketTunnelPromise)) {
+        if (null != pendingTunnelMap.putIfAbsent(forwardRequestId, webSocketTunnelPromise)) {
             throw new IllegalStateException(String.format("%s request id '%s' is already used", nativeSocketContext.channel(), forwardRequestId));
         }
 
@@ -505,7 +474,7 @@ public class WebSocketTunnelServer {
                     final ChannelHandlerContext webSocketTunnelContext = tunnelFuture.getNow();
                     webSocketTunnelContext.channel().config().setAutoRead(false);
 
-                    pendingSocketChannelMap.remove(forwardRequestId);
+                    pendingTunnelMap.remove(forwardRequestId);
 
                     nativeSocketContext.pipeline().remove(nativeSocketContext.handler());
                     webSocketTunnelContext.pipeline().remove(webSocketTunnelContext.handler());
@@ -536,7 +505,7 @@ public class WebSocketTunnelServer {
                 if (log.isDebugEnabled()) {
                     log.debug("{} Connection closed", nativeSocketContext.channel());
                 }
-                pendingSocketChannelMap.remove(forwardRequestId);
+                pendingTunnelMap.remove(forwardRequestId);
                 tunnelInstanceMap.get(tunnel).remove(link);
                 if (null != link.response) {
                     link.response.close();
@@ -559,8 +528,8 @@ public class WebSocketTunnelServer {
         final String requestUri = handshake.requestUri();
         final Map<String, String> parameters = determineQueryParameters(requestUri);
         final String forwardRequestId = parameters.get("id");
-        final boolean isNative = forwardRequestId.startsWith("tcp:");
-        final Promise<ChannelHandlerContext> webSocketTunnelPromise = isNative ? pendingSocketChannelMap.remove(forwardRequestId) : pendingWebSocketChannelMap.remove(forwardRequestId);
+
+        final Promise<ChannelHandlerContext> webSocketTunnelPromise = pendingTunnelMap.remove(forwardRequestId);
         if (null != webSocketTunnelPromise) {
             webSocketTunnelPromise.setSuccess(webSocketTunnelContext);
         } else {
@@ -568,8 +537,6 @@ public class WebSocketTunnelServer {
             WebSocketUtils.goingAwayClose(webSocketTunnelContext, "TUNNEL_REQUEST_NOT_FOUND");
         }
     }
-
-    private static final Pattern FORWARD_CMD = Pattern.compile("^\\s*([-_a-zA-Z0-9]+)\\s+forward\\s+([1-9][0-9]{0,4})\\s+([^\\s:]+):([1-9][0-9]{0,4})\\s*$");
 
     private void tunnelManagement(final ChannelHandlerContext webSocketTunnelContext, final WebSocketServerProtocolHandler.HandshakeComplete handshake) throws IOException {
         webSocketTunnelContext.channel().config().setAutoRead(false);
@@ -605,27 +572,6 @@ public class WebSocketTunnelServer {
                             log.error("Execute command '{}' error", message, ignore);
                         }
                         return;
-                    }
-
-                    final Matcher matcher = FORWARD_CMD.matcher(message);
-                    if (matcher.find()) {
-                        final String tunnel = matcher.group(1);
-                        final int localPort = Integer.parseInt(matcher.group(2));
-                        final int remotePort = Integer.parseInt(matcher.group(4));
-                        final String remoteHost = matcher.group(3);
-
-                        try {
-                            forward(localPort, tunnel, remoteHost, remotePort);
-                            sendText(ctx, "OK");
-                        } catch (final Exception ex) {
-                            sendText(ctx, ex.getMessage());
-                        }
-                        return;
-                    } else if ("list".equals(message)) {
-                        sendText(ctx, registeredTunnelBusMap.keySet().toString());
-                        return;
-                    } else {
-                        sendText(ctx, "NOT_SUPPORTED");
                     }
                 }
             }
