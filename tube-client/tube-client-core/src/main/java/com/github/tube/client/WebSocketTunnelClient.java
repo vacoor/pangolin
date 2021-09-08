@@ -6,7 +6,9 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -16,6 +18,7 @@ import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
@@ -27,9 +30,9 @@ import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.net.Socket;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.URI;
-import java.util.concurrent.CountDownLatch;
 import java.util.regex.Pattern;
 
 
@@ -89,6 +92,21 @@ public class WebSocketTunnelClient {
                 cp.addLast(new HttpClientCodec());
                 cp.addLast(new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
                 cp.addLast(new WebSocketClientProtocolHandler(webSocketHandshaker));
+                cp.addLast(new ChannelOutboundHandlerAdapter() {
+                    @Override
+                    public void write(final ChannelHandlerContext ctx, final Object msg, final ChannelPromise promise) throws Exception {
+                        if (msg instanceof HttpRequest) {
+                            final HttpRequest httpRequest = (HttpRequest) msg;
+                            final SocketAddress socketAddress = ctx.channel().localAddress();
+                            String addressToUse = socketAddress.toString();
+                            if (socketAddress instanceof InetSocketAddress) {
+                                addressToUse = ((InetSocketAddress) socketAddress).getAddress().getHostAddress();
+                            }
+                            httpRequest.headers().set("x-node-address", addressToUse);
+                        }
+                        super.write(ctx, msg, promise);
+                    }
+                });
                 cp.addLast(new SimpleChannelInboundHandler<WebSocketFrame>() {
 
                     @Override
@@ -109,9 +127,8 @@ public class WebSocketTunnelClient {
 
     private HttpHeaders createCustomHttpHeaders() throws IOException {
         final DefaultHttpHeaders headers = new DefaultHttpHeaders();
-        headers.set("x-tunnel-name", tunnelName);
-        headers.set("x-tunnel-version", "1.0");
-        headers.set("x-tunnel-address", localAddress(tunnelServerEndpoint));
+        headers.set("x-node-name", tunnelName);
+        headers.set("x-node-version", "1.0");
         return headers;
     }
 
@@ -138,22 +155,6 @@ public class WebSocketTunnelClient {
             }
         }
     }
-
-    private static String localAddress(final URI endpoint) throws IOException {
-        Socket socket = null;
-        try {
-            socket = new Socket(endpoint.getHost(), endpoint.getPort());
-            socket.setTcpNoDelay(true);
-            socket.setKeepAlive(false);
-            socket.setSoTimeout(3000);
-            return socket.getLocalAddress().getHostAddress();
-        } finally {
-            if (null != socket) {
-                socket.close();
-            }
-        }
-    }
-
 
     public static void main(String[] args) throws Exception {
         // final WebSocketTunnelClient client = new WebSocketTunnelClient("default", URI.create("ws://10.45.90.148:2345/tunnel"));

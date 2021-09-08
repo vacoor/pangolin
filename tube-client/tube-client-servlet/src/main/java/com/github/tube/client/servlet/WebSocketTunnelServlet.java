@@ -14,7 +14,7 @@ import java.net.URI;
 /**
  *
  */
-@WebServlet(urlPatterns = "/api/wst")
+@WebServlet(urlPatterns = "/api/debug")
 public class WebSocketTunnelServlet extends HttpServlet {
     private static final String KEY = WebSocketTunnelClient.class.getName();
 

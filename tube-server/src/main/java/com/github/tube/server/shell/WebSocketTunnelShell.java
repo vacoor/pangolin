@@ -89,16 +89,13 @@ public class WebSocketTunnelShell {
             server.shutdownGracefully();
         } else if ("ls".equals(args[0])) {
             final boolean isL = args.length > 1  && "-l".equals(args[1]);
-            Collection<WebSocketTunnelServer.Link> forwards = server.getForwards();
-            Map<String, List<WebSocketTunnelServer.TunnelInstance>> forwardTunnels = isL ? server.getForwardTunnels() : Collections.<String, List<WebSocketTunnelServer.TunnelInstance>>emptyMap();
-            for (WebSocketTunnelServer.Link forward : forwards) {
+            Collection<WebSocketTunnelServer.AccessRule> forwards = server.getAccessRules();
+            for (WebSocketTunnelServer.AccessRule forward : forwards) {
                 out.println(forward);
-                List<WebSocketTunnelServer.TunnelInstance> instances = forwardTunnels.get(forward.getTunnel());
-                if (null == instances) {
-                    continue;
-                }
-                for (WebSocketTunnelServer.TunnelInstance instance : instances) {
-                    out.println("  |- " + instance);
+                if (isL) {
+                    for (WebSocketTunnelServer.TunnelLink link : server.getTunnelLink(forward)) {
+                        out.println("  |- " + link);
+                    }
                 }
             }
         } else if ("forward".equals(args[0])) {
