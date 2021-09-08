@@ -5,10 +5,8 @@ import com.github.tube.server.WebSocketTunnelServer;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -82,15 +80,15 @@ public class WebSocketTunnelShell {
             return;
         }
 
-        if ("exit".equals(args[0])) {
+        if ("exit".equals(args[0]) || "quit".equals(args[0])) {
             running = false;
             out.println("Exit");
             reader.close();
             server.shutdownGracefully();
         } else if ("ls".equals(args[0])) {
             final boolean isL = args.length > 1  && "-l".equals(args[1]);
-            Collection<WebSocketTunnelServer.AccessRule> forwards = server.getAccessRules();
-            for (WebSocketTunnelServer.AccessRule forward : forwards) {
+            Collection<WebSocketTunnelServer.TunnelMapping> forwards = server.getAccessRules();
+            for (WebSocketTunnelServer.TunnelMapping forward : forwards) {
                 out.println(forward);
                 if (isL) {
                     for (WebSocketTunnelServer.TunnelLink link : server.getTunnelLink(forward)) {
@@ -139,7 +137,7 @@ public class WebSocketTunnelShell {
     }
 
     public static void main(String[] args) throws Exception {
-        final WebSocketTunnelServer server = new WebSocketTunnelServer(2345, "/tunnel", false);
+        final WebSocketTunnelServer server = new WebSocketTunnelServer("0.0.0.0", 2345, "/tunnel", false);
         server.start();
         new WebSocketTunnelShell(server, new GenericLineReader(System.in, System.out), System.out).run();
     }

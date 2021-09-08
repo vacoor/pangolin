@@ -43,7 +43,10 @@ public class WebSocketTunnelClient {
      */
     private static final int MAX_HTTP_CONTENT_LENGTH = 1024 * 1024 * 8;
 
-    private static final String TUNNEL_REGISTER_PROTOCOL = "PASSIVE-REG";
+    /**
+     * 节点注册协议.
+     */
+    private static final String NODE_REGISTER_PROTOCOL = "PASSIVE-REG";
 
     private final EventLoopGroup workerGroup = new NioEventLoopGroup(2, new DefaultThreadFactory("WebSocket-Tunnel-Client", true));
 
@@ -77,7 +80,7 @@ public class WebSocketTunnelClient {
         final String hostnameToUse = null != tunnelServerEndpoint.getHost() ? tunnelServerEndpoint.getHost() : "127.0.0.1";
         final SslContext sslContext = isSecure ? WebSocketForwarder.createSslContext() : null;
         final WebSocketClientHandshaker webSocketHandshaker = WebSocketClientHandshakerFactory.newHandshaker(
-                tunnelServerEndpoint, WebSocketVersion.V13, TUNNEL_REGISTER_PROTOCOL, true, createCustomHttpHeaders()
+                tunnelServerEndpoint, WebSocketVersion.V13, NODE_REGISTER_PROTOCOL, true, createCustomHttpHeaders()
         );
 
         final Bootstrap b = new Bootstrap();
