@@ -8,11 +8,65 @@
     <artifactId>pangolin</artifactId>
     <packaging>pom</packaging>
     <version>0.0.1-BETA</version>
+
+    <name>Pangolin</name>
+    <url>https://github.com/nomou/pangolin/</url>
+    <description>Pangolin - a light java tunnel</description>
+
     <modules>
+        <module>pangolin-common</module>
         <module>pangolin-client</module>
         <module>pangolin-server</module>
-        <module>pangolin-common</module>
     </modules>
+
+    <licenses>
+        <license>
+            <name>The Apache Software License, Version 2.0</name>
+            <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>actable</distribution>
+        </license>
+    </licenses>
+
+    <organization>
+        <name>nomou</name>
+        <url>https://github.com/nomou/</url>
+    </organization>
+
+    <developers>
+        <developer>
+            <name>vacoor</name>
+            <email>vacoor@qq.com</email>
+        </developer>
+    </developers>
+
+    <scm>
+        <url>https://github.com/nomou/pangolin</url>
+        <connection>scm:git:git@github.com:nomou/pangolin.git</connection>
+        <developerConnection>scm:git:git@github.com:nomou/pangolin.git</developerConnection>
+        <tag>HEAD</tag>
+    </scm>
+
+    <issueManagement>
+        <system>git@gitee Issue Management</system>
+        <url>https://github.com/nomou/pangolin/issues</url>
+    </issueManagement>
+
+    <ciManagement>
+        <system>Travis CI</system>
+        <url>https://travis-ci.org/nougat/</url>
+    </ciManagement>
+
+    <distributionManagement>
+        <snapshotRepository>
+            <id>${dist.mgt.snap-repo.id}</id>
+            <url>${dist.mgt.snap-repo.url}</url>
+        </snapshotRepository>
+        <repository>
+            <id>${dist.mgt.repo.id}</id>
+            <url>${dist.mgt.repo.url}</url>
+        </repository>
+    </distributionManagement>
+
 
     <properties>
         <project.encoding>UTF-8</project.encoding>
@@ -140,17 +194,6 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
-
-    <distributionManagement>
-        <snapshotRepository>
-            <id>${dist.mgt.snap-repo.id}</id>
-            <url>${dist.mgt.snap-repo.url}</url>
-        </snapshotRepository>
-        <repository>
-            <id>${dist.mgt.repo.id}</id>
-            <url>${dist.mgt.repo.url}</url>
-        </repository>
-    </distributionManagement>
 
     <build>
         <!-- java source & javadoc plugin [[ -->

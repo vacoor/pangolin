@@ -38,7 +38,9 @@ public class WebSocketTunnelServlet extends HttpServlet {
                 }
                 client.shutdownGracefully();
             }
-            final WebSocketTunnelClient newClient = new WebSocketTunnelClient("default", uri);
+            final String localAddr = httpRequest.getLocalAddr();
+            final int localPort = httpRequest.getLocalPort();
+            final WebSocketTunnelClient newClient = new WebSocketTunnelClient(localAddr + "." + localPort, uri);
             try {
                 newClient.start();
                 context.setAttribute(TUNNEL_KEY, newClient);
