@@ -4,14 +4,14 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.github.tube</groupId>
-    <artifactId>tube</artifactId>
+    <groupId>com.github.nomou.pangolin</groupId>
+    <artifactId>pangolin</artifactId>
     <packaging>pom</packaging>
-    <version>1.0-SNAPSHOT</version>
+    <version>0.0.1-BETA</version>
     <modules>
-        <module>tube-client</module>
-        <module>tube-server</module>
-        <module>tube-common</module>
+        <module>pangolin-client</module>
+        <module>pangolin-server</module>
+        <module>pangolin-common</module>
     </modules>
 
     <properties>
@@ -22,7 +22,7 @@
         <project.build.resourceEncoding>UTF-8</project.build.resourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
-        <tube.version>1.0-SNAPSHOT</tube.version>
+        <tube.version>0.0.1-BETA</tube.version>
         <nougat.version>1.0.12</nougat.version>
         <lombok.version>1.18.20</lombok.version>
         <slf4j.version>1.7.6</slf4j.version>
@@ -32,6 +32,19 @@
         -->
         <netty.version>4.1.25.Final</netty.version>
         <spring-boot.version>1.5.9.RELEASE</spring-boot.version>
+
+        <!-- distributionManagement [[ -->
+        <!--
+         | download:
+         |    snapshot: https://oss.sonatype.org/content/groups/public
+         |    release:  https://oss.sonatype.org/content/groups/staging
+         -->
+        <dist.mgt.snap-repo.id>ossrh</dist.mgt.snap-repo.id>
+        <dist.mgt.snap-repo.url>https://oss.sonatype.org/content/repositories/snapshots/</dist.mgt.snap-repo.url>
+        <dist.mgt.repo.id>ossrh</dist.mgt.repo.id>
+        <dist.mgt.repo.url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</dist.mgt.repo.url>
+        <!-- ]] distributionManagement -->
+        <gpg.executable>C:/Program Files (x86)/GnuPG/bin/gpg.exe</gpg.executable>
     </properties>
 
     <dependencyManagement>
@@ -50,23 +63,23 @@
             </dependency>
 
             <dependency>
-                <groupId>com.github.tube</groupId>
-                <artifactId>tube-common</artifactId>
+                <groupId>com.github.nomou.pangolin</groupId>
+                <artifactId>pangolin-common</artifactId>
                 <version>${tube.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.github.tube</groupId>
-                <artifactId>tube-client-core</artifactId>
+                <groupId>com.github.nomou.pangolin</groupId>
+                <artifactId>pangolin-client-core</artifactId>
                 <version>${tube.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.github.tube</groupId>
-                <artifactId>tube-client-servlet</artifactId>
+                <groupId>com.github.nomou.pangolin</groupId>
+                <artifactId>pangolin-client-servlet</artifactId>
                 <version>${tube.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.github.tube</groupId>
-                <artifactId>tube-client-spring-boot-starter</artifactId>
+                <groupId>com.github.nomou.pangolin</groupId>
+                <artifactId>pangolin-client-spring-boot-starter</artifactId>
                 <version>${tube.version}</version>
             </dependency>
 
@@ -127,4 +140,98 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <distributionManagement>
+        <snapshotRepository>
+            <id>${dist.mgt.snap-repo.id}</id>
+            <url>${dist.mgt.snap-repo.url}</url>
+        </snapshotRepository>
+        <repository>
+            <id>${dist.mgt.repo.id}</id>
+            <url>${dist.mgt.repo.url}</url>
+        </repository>
+    </distributionManagement>
+
+    <build>
+        <!-- java source & javadoc plugin [[ -->
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>3.0.1</version>
+                <configuration>
+                    <attach>true</attach>
+                </configuration>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>3.0.1</version>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <quiet>true</quiet>
+                    <charset>UTF-8</charset>
+                    <encoding>UTF-8</encoding>
+                    <docencoding>UTF-8</docencoding>
+                    <doclint>none</doclint>
+                    <failOnWarnings>false</failOnWarnings>
+                    <failOnError>false</failOnError>
+                    <!--<additionalparam>-Xdoclint:none</additionalparam>-->
+                </configuration>
+            </plugin>
+            <!-- ]] java source & javadoc plugin -->
+            <!-- GPG plugin [[ -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-gpg-plugin</artifactId>
+                <version>1.5</version>
+                <executions>
+                    <execution>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>sign</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- ]] GPG -->
+
+            <plugin>
+                <groupId>org.sonatype.plugins</groupId>
+                <artifactId>nexus-staging-maven-plugin</artifactId>
+                <version>1.6.8</version>
+                <!--
+                <executions>
+                    <execution>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>log4web-sample</artifactId>
+                    </execution>
+                </executions>
+                -->
+                <extensions>true</extensions>
+                <configuration>
+                    <serverId>ossrh</serverId>
+                    <nexusUrl>https://oss.sonatype.org/</nexusUrl>
+                    <autoReleaseAfterClose>true</autoReleaseAfterClose>
+                    <!--<skipNexusStagingDeployMojo>true</skipNexusStagingDeployMojo>-->
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
