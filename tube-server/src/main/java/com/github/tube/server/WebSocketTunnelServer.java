@@ -9,7 +9,17 @@ import com.github.tube.util.WebSocketUtils;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ConnectTimeoutException;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
@@ -27,17 +37,31 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
-import io.netty.util.concurrent.*;
+import io.netty.util.concurrent.DefaultThreadFactory;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.FutureListener;
+import io.netty.util.concurrent.GenericFutureListener;
+import io.netty.util.concurrent.GlobalEventExecutor;
+import io.netty.util.concurrent.Promise;
 import jline.Terminal;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
+import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -95,7 +119,7 @@ public class WebSocketTunnelServer {
     /**
      * 注册的中继节点(tunnel-id:node-channel).
      */
-    private final ConcurrentMap<String, ChannelHandlerContext> nodeRegistry = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, TunnelNode> nodeRegistry = new ConcurrentHashMap<>();
 
     /**
      * 隧道连接信息(id:tunnel-link).
@@ -258,7 +282,7 @@ public class WebSocketTunnelServer {
                     final Map<String, String> parameters = determineQueryParameters(handshake.requestUri());
                     final String tunnel = parameters.get("tunnel");
                     final String target = parameters.get("target");
-                    final ChannelHandlerContext tunnelBus = lookupNodeChannel(tunnel);
+                    final ChannelHandlerContext tunnelBus = lookupNodeChannel(tunnel).bus;
                     if (null != tunnelBus) {
                         final String forwardRequestId = "ws:" + id(webSocketContext.channel());
                         final Promise<ChannelHandlerContext> webSocketTunnelPromise = webSocketTunnelRequested(tunnel, forwardRequestId, webSocketContext);
@@ -339,7 +363,7 @@ public class WebSocketTunnelServer {
      * @param node 节点标识
      * @return 通信总线
      */
-    private ChannelHandlerContext lookupNodeChannel(final String node) {
+    private TunnelNode lookupNodeChannel(final String node) {
         return nodeRegistry.get(node);
     }
 
@@ -369,14 +393,14 @@ public class WebSocketTunnelServer {
         // XXX
         final String nodeId = String.format("%s@%s/%s", nodeName, nodeInnerAddress, nodeOuterAddress);
         final TunnelNode node = new TunnelNode(nodeId, nodeName, nodeVersion, nodeOuterAddress, nodeInnerAddress, webSocketContext);
-        if (null == nodeRegistry.putIfAbsent(nodeName, webSocketContext)) {
+        if (null == nodeRegistry.putIfAbsent(nodeName, node)) {
             webSocketContext.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
                 @Override
                 public void operationComplete(final Future<? super Void> future) {
                     if (log.isDebugEnabled()) {
                         log.debug("{} Node connection loosed", webSocketContext.channel());
                     }
-                    nodeUnregistered(nodeName, webSocketContext);
+                    nodeUnregistered(nodeName, node);
                 }
             });
 
@@ -390,20 +414,20 @@ public class WebSocketTunnelServer {
     /**
      * 节点取消注册.
      *
-     * @param node             节点名称
-     * @param webSocketContext 节点注册链接
+     * @param nodeKey 节点名称
+     * @param node    节点信息
      */
-    private void nodeUnregistered(final String node, final ChannelHandlerContext webSocketContext) {
-        if (nodeRegistry.remove(node, webSocketContext)) {
-            log.info("{} Node unregistered: {}", webSocketContext.channel(), node);
+    private void nodeUnregistered(final String nodeKey, final TunnelNode node) {
+        if (nodeRegistry.remove(nodeKey, node)) {
+            log.info("{} Node unregistered: {}", node.bus.channel(), node);
 
-            this.onNodeUnregisteredClose(node, webSocketContext);
+            this.onNodeUnregisteredClose(node.name, node.bus);
 
-            if (webSocketContext.channel().isOpen()) {
-                WebSocketUtils.normalClose(webSocketContext, "UNREGISTER");
+            if (node.bus.channel().isOpen()) {
+                WebSocketUtils.normalClose(node.bus, "UNREGISTER");
             }
         } else {
-            log.error("{} Node unregister failure: '{}' not found in registry", webSocketContext.channel(), node);
+            log.error("{} Node unregister failure: '{}' not found in registry", node.bus.channel(), node);
         }
     }
 
@@ -650,7 +674,7 @@ public class WebSocketTunnelServer {
      * ************************ */
 
     public Channel forward(final int listenPort, final String node, final String toHost, final int toPort) throws InterruptedException {
-        final ChannelHandlerContext nodeChannel = this.lookupNodeChannel(node);
+        final TunnelNode nodeChannel = this.lookupNodeChannel(node);
         if (null == nodeChannel) {
             throw new IllegalStateException("TUNNEL_NOT_FOUND:" + node);
         }
@@ -676,7 +700,7 @@ public class WebSocketTunnelServer {
                         if (log.isDebugEnabled()) {
                             log.debug("{} Try open native tunnel: {}", nativeSocketChannel, forwardRequest);
                         }
-                        nodeChannel.writeAndFlush(new TextWebSocketFrame(forwardRequest));
+                        nodeChannel.bus.writeAndFlush(new TextWebSocketFrame(forwardRequest));
 
                         final boolean responded = backhaulPromise.await(tunnelResponseTimeoutMs, TimeUnit.MILLISECONDS);
                         if (!responded) {
@@ -687,7 +711,7 @@ public class WebSocketTunnelServer {
             }
         });
 
-        final TunnelMapping rule = new TunnelMapping(listenChannel, node, nodeChannel, toHost + ":" + toPort);
+        final TunnelMapping rule = new TunnelMapping(listenChannel, nodeChannel, toHost + ":" + toPort);
         tcpListenChannelMap.putIfAbsent(node, new CopyOnWriteArrayList<Channel>());
         tcpForwardRuleMap.put(listenPort, rule);
 
@@ -752,8 +776,8 @@ public class WebSocketTunnelServer {
      *
      * @return 节点名称
      */
-    public Set<String> getNodeNames() {
-        return Collections.unmodifiableSet(nodeRegistry.keySet());
+    public Collection<TunnelNode> getNodes() {
+        return nodeRegistry.values();
     }
 
     /**
@@ -763,10 +787,8 @@ public class WebSocketTunnelServer {
      */
     public Collection<TunnelMapping> getAccessRules() {
         final List<TunnelMapping> rules = new LinkedList<>();
-        for (final Map.Entry<String, ChannelHandlerContext> entry : nodeRegistry.entrySet()) {
-            final String node = entry.getKey();
-            final ChannelHandlerContext nodeLink = entry.getValue();
-            rules.add(new TunnelMapping(serverChannel, node, nodeLink, "*ws*"));
+        for (final Map.Entry<String, TunnelNode> entry : nodeRegistry.entrySet()) {
+            rules.add(new TunnelMapping(serverChannel, entry.getValue(), "*ws*"));
         }
         rules.addAll(tcpForwardRuleMap.values());
         return rules;
@@ -783,7 +805,7 @@ public class WebSocketTunnelServer {
         for (final TunnelLink link : tunnelLinkMap.values()) {
             int port = ((InetSocketAddress) link.accessLink.channel().localAddress()).getPort();
             int port2 = ((InetSocketAddress) rule.serverChannel.localAddress()).getPort();
-            final String node = rule.tunnel;
+            final String node = rule.node.name;
             String node2 = link.node;
             if (port == port2 && node.equals(node2)) {
                 candidates.add(link);
@@ -797,7 +819,10 @@ public class WebSocketTunnelServer {
 
     /* ********************************** */
 
-    private class TunnelNode {
+    /**
+     * 节点信息.
+     */
+    public class TunnelNode {
         private final String id;
         private final String name;
         private final String version;
@@ -812,6 +837,11 @@ public class WebSocketTunnelServer {
             this.address = address;
             this.innerAddress = innerAddress;
             this.bus = bus;
+        }
+
+        @Override
+        public String toString() {
+            return id + ",\t" + name + "\t" + version + "\t" + address + "\t" + innerAddress;
         }
     }
 
@@ -865,26 +895,25 @@ public class WebSocketTunnelServer {
      */
     public class TunnelMapping {
         private final Channel serverChannel;
-        private final String tunnel;
-        private final ChannelHandlerContext tunnelBus;
+        private final TunnelNode node;
         private final String target;
 
-        private TunnelMapping(final Channel serverChannel, final String tunnel, final ChannelHandlerContext tunnelBus, final String target) {
+        private TunnelMapping(final Channel serverChannel, final TunnelNode node, final String target) {
             this.serverChannel = serverChannel;
-            this.tunnel = tunnel;
-            this.tunnelBus = tunnelBus;
+            this.node = node;
             this.target = target;
         }
 
-        public String getTunnel() {
-            return tunnel;
+        public TunnelNode getNode() {
+            return node;
         }
 
         @Override
         public String toString() {
             final SocketAddress localAddr = serverChannel.localAddress();
-            final SocketAddress tunnelAddr = tunnelBus.channel().remoteAddress();
-            return localAddr + " -> " + tunnel + "[" + tunnelAddr + "] -> " + target;
+            final String nodeName = node.name;
+            final String nodeAddress = node.innerAddress + "%" + node.address;
+            return localAddr + " -> " + nodeName + "[" + nodeAddress + "] -> " + target;
         }
     }
 

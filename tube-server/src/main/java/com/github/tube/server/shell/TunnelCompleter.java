@@ -17,7 +17,7 @@ public class TunnelCompleter implements Completer {
     @Override
     public int complete(final String buffer, final int cursor, final List<CharSequence> candidates) {
         System.out.println("------:" + buffer);
-        Set<String> strings = new TreeSet<>(server.getNodeNames());
+        Set<String> strings = new TreeSet<>();
         if (null == buffer) {
             candidates.addAll(strings);
             return 0;

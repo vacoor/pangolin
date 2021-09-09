@@ -85,6 +85,11 @@ public class WebSocketTunnelShell {
             out.println("Exit");
             reader.close();
             server.shutdownGracefully();
+        } else if ("stat".equals(args[0])) {
+            Collection<WebSocketTunnelServer.TunnelNode> nodes = server.getNodes();
+            for (WebSocketTunnelServer.TunnelNode node : nodes) {
+                out.println(node);
+            }
         } else if ("ls".equals(args[0])) {
             final boolean isL = args.length > 1  && "-l".equals(args[1]);
             Collection<WebSocketTunnelServer.TunnelMapping> forwards = server.getAccessRules();
