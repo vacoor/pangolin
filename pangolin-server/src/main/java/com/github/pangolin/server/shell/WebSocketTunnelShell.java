@@ -126,6 +126,14 @@ public class WebSocketTunnelShell {
             out.println(String.format("%s: command not found", args[0]));
         }
     }
+    /*-
+        tunnels     List tunnels
+        ps          List tunnel streams
+        kill        Kill one or more running tunnel streams
+
+        listen      Listen host port and forward to target by tunnel
+        rm          Remove one or more port mappings
+     */
 
     private String[] tokenize(final String line) {
         final Matcher matcher = ARGS_PATTERN.matcher(line);
