@@ -682,19 +682,14 @@ public class WebSocketTunnelServer {
         final Channel listenChannel = this.listenTcp(this.listenHost, listenPort, node, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel nativeSocketChannel) {
-                /*-
-                 *
-                 */
                 nativeSocketChannel.config().setAutoRead(false);
                 nativeSocketChannel.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
-                    public void channelInactive(final ChannelHandlerContext accessLink) throws Exception {
+                    public void channelActive(final ChannelHandlerContext accessLink) throws Exception {
                         final String forwardRequestId = "tcp:" + id(nativeSocketChannel);
                         final Promise<ChannelHandlerContext> backhaulPromise = nativeTunnelRequested(node, forwardRequestId, accessLink);
 
-                        /*-
-                         * XXX find agent and send connection request.
-                         */
+                        // XXX find agent and send connection request.
                         final String forwardTarget = "tcp://" + toHost + ":" + toPort;
                         final String forwardRequest = forwardRequestId + "->" + forwardTarget;
                         if (log.isDebugEnabled()) {
