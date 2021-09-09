@@ -59,12 +59,20 @@ public class WebSocketTunnelClient {
         this.tunnelServerEndpoint = getRegisterUri(tunnelServerEndpoint, tunnelName);
     }
 
+    public URI getTunnelServerEndpoint() {
+        return tunnelServerEndpoint;
+    }
+
     private URI getRegisterUri(final URI uri, final String tunnelName) {
         return URI.create(uri.getScheme() + "://" + uri.getHost() + ":" + uri.getPort() + uri.getPath() + "?id=" + tunnelName);
     }
 
     public ChannelFuture start() throws IOException, InterruptedException {
         return channelFuture = connect();
+    }
+
+    public boolean isRunning() {
+        return channelFuture.channel().isActive();
     }
 
     public void shutdownGracefully() {

@@ -92,8 +92,8 @@ public class WebSocketTunnelShell {
             }
         } else if ("ls".equals(args[0])) {
             final boolean isL = args.length > 1  && "-l".equals(args[1]);
-            Collection<WebSocketTunnelServer.TunnelMapping> forwards = server.getAccessRules();
-            for (WebSocketTunnelServer.TunnelMapping forward : forwards) {
+            Collection<WebSocketTunnelServer.TunnelForwarding> forwards = server.getAccessRules();
+            for (WebSocketTunnelServer.TunnelForwarding forward : forwards) {
                 out.println(forward);
                 if (isL) {
                     for (WebSocketTunnelServer.TunnelLink link : server.getTunnelLink(forward)) {

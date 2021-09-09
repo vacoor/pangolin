@@ -134,7 +134,7 @@ public class WebSocketTunnelServer {
     /**
      * 已开启的端口转发监听.
      */
-    private final ConcurrentMap<Integer, TunnelMapping> tcpForwardRuleMap = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Integer, TunnelForwarding> tcpForwardRuleMap = new ConcurrentHashMap<>();
 
     /**
      * 服务 event loop group.
@@ -177,7 +177,7 @@ public class WebSocketTunnelServer {
     private final AtomicBoolean startup = new AtomicBoolean(false);
 
 
-    private Channel serverChannel;
+    private Channel primaryServerChannel;
 
     /**
      * 创建隧道服务实例.
@@ -212,7 +212,7 @@ public class WebSocketTunnelServer {
      */
     public Channel start() throws CertificateException, SSLException, InterruptedException {
         if (!startup.compareAndSet(false, true)) {
-            return serverChannel;
+            return primaryServerChannel;
         }
 
         final SslContext sslContext = useSsl ? createSslContext() : null;
@@ -238,11 +238,11 @@ public class WebSocketTunnelServer {
                 });
 
         if (null == listenHost) {
-            serverChannel = bootstrap.bind(listenPort).sync().channel();
+            primaryServerChannel = bootstrap.bind(listenPort).sync().channel();
         } else {
-            serverChannel = bootstrap.bind(listenHost, listenPort).sync().channel();
+            primaryServerChannel = bootstrap.bind(listenHost, listenPort).sync().channel();
         }
-        return serverChannel;
+        return primaryServerChannel;
     }
 
     /**
@@ -661,8 +661,8 @@ public class WebSocketTunnelServer {
      * 关闭服务器.
      */
     public void shutdownGracefully() {
-        if (null != serverChannel) {
-            serverChannel.close();
+        if (null != primaryServerChannel) {
+            primaryServerChannel.close();
         }
         bossGroup.shutdownGracefully();
         workerGroup.shutdownGracefully();
@@ -706,7 +706,7 @@ public class WebSocketTunnelServer {
             }
         });
 
-        final TunnelMapping rule = new TunnelMapping(listenChannel, nodeChannel, toHost + ":" + toPort);
+        final TunnelForwarding rule = new TunnelForwarding(listenChannel, nodeChannel, toHost + ":" + toPort);
         tcpListenChannelMap.putIfAbsent(node, new CopyOnWriteArrayList<Channel>());
         tcpForwardRuleMap.put(listenPort, rule);
 
@@ -726,9 +726,9 @@ public class WebSocketTunnelServer {
     }
 
     public boolean unforward(final int port) {
-        final TunnelMapping tunnelMapping = tcpForwardRuleMap.remove(port);
-        if (null != tunnelMapping) {
-            tunnelMapping.serverChannel.close();
+        final TunnelForwarding tunnelForwarding = tcpForwardRuleMap.remove(port);
+        if (null != tunnelForwarding) {
+            tunnelForwarding.serverChannel.close();
             return true;
         }
         return false;
@@ -742,7 +742,6 @@ public class WebSocketTunnelServer {
      * @param namePrefix  线程名称前缀
      * @param initializer 请求处理初始化器
      * @return 服务监听channel
-     * @throws InterruptedException
      */
     private Channel listenTcp(final String listenHost, final int listenPort,
                               final String namePrefix, final ChannelHandler initializer) throws InterruptedException {
@@ -767,7 +766,7 @@ public class WebSocketTunnelServer {
      * *************************** */
 
     /**
-     * 获取所有注册的节点名称.
+     * 获取所有注册的节点.
      *
      * @return 节点名称
      */
@@ -780,10 +779,10 @@ public class WebSocketTunnelServer {
      *
      * @return 转发规则清单
      */
-    public Collection<TunnelMapping> getAccessRules() {
-        final List<TunnelMapping> rules = new LinkedList<>();
+    public Collection<TunnelForwarding> getAccessRules() {
+        final List<TunnelForwarding> rules = new LinkedList<>();
         for (final Map.Entry<String, TunnelNode> entry : nodeRegistry.entrySet()) {
-            rules.add(new TunnelMapping(serverChannel, entry.getValue(), "*ws*"));
+            rules.add(new TunnelForwarding(primaryServerChannel, entry.getValue(), "*ws*"));
         }
         rules.addAll(tcpForwardRuleMap.values());
         return rules;
@@ -793,9 +792,8 @@ public class WebSocketTunnelServer {
      * 获取转发的明细.
      *
      * @param rule 转发规则
-     * @return
      */
-    public List<TunnelLink> getTunnelLink(final TunnelMapping rule) {
+    public List<TunnelLink> getTunnelLink(final TunnelForwarding rule) {
         final List<TunnelLink> candidates = new LinkedList<>();
         for (final TunnelLink link : tunnelLinkMap.values()) {
             int port = ((InetSocketAddress) link.accessLink.channel().localAddress()).getPort();
@@ -808,9 +806,6 @@ public class WebSocketTunnelServer {
         }
         return candidates;
     }
-
-
-
 
     /* ********************************** */
 
@@ -888,12 +883,12 @@ public class WebSocketTunnelServer {
     /**
      * 隧道映射.
      */
-    public class TunnelMapping {
+    public class TunnelForwarding {
         private final Channel serverChannel;
         private final TunnelNode node;
         private final String target;
 
-        private TunnelMapping(final Channel serverChannel, final TunnelNode node, final String target) {
+        private TunnelForwarding(final Channel serverChannel, final TunnelNode node, final String target) {
             this.serverChannel = serverChannel;
             this.node = node;
             this.target = target;

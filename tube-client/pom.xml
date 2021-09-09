@@ -15,6 +15,5 @@
         <module>tube-client-core</module>
         <module>tube-client-servlet</module>
         <module>tube-client-spring-boot-starter</module>
-        <module>tube-client-spring-boot-app</module>
     </modules>
 </project>

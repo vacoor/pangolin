@@ -95,7 +95,7 @@ public class WebSocketForwarder {
                             public void channelActive(final ChannelHandlerContext nativeSocketContext) {
                                 nativeSocketContext.channel().config().setAutoRead(false);
 
-                                log.info("{} Connect ({})", nativeSocketContext.channel(), traceId);
+                                log.debug("{} Connect ({})", nativeSocketContext.channel(), traceId);
 
 
                                 webSocketContext.pipeline().remove(webSocketContext.handler());
@@ -107,8 +107,8 @@ public class WebSocketForwarder {
                                 webSocketContext.channel().config().setAutoRead(true);
                                 nativeSocketContext.channel().config().setAutoRead(true);
 
-                                log.info("{} Connected ({})", webSocketContext.channel(), traceId);
-                                log.info("{} Connect to {} ({})", nativeSocketContext.channel(), webSocketContext.channel(), traceId);
+                                log.debug("{} Connected ({})", webSocketContext.channel(), traceId);
+                                log.debug("{} Connect to {} ({})", nativeSocketContext.channel(), webSocketContext.channel(), traceId);
                             }
 
                             @Override

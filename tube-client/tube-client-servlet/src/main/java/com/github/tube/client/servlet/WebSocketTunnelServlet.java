@@ -14,9 +14,9 @@ import java.net.URI;
 /**
  *
  */
-@WebServlet(urlPatterns = "/api/debug")
+@WebServlet(urlPatterns = "/api/tunnel")
 public class WebSocketTunnelServlet extends HttpServlet {
-    private static final String KEY = WebSocketTunnelClient.class.getName();
+    private static final String TUNNEL_KEY = WebSocketTunnelClient.class.getName();
 
     @Override
     public void init() throws ServletException {
@@ -30,14 +30,18 @@ public class WebSocketTunnelServlet extends HttpServlet {
             final URI uri = URI.create(server);
 
             final ServletContext context = httpRequest.getServletContext();
-            final WebSocketTunnelClient client = (WebSocketTunnelClient) context.getAttribute(KEY);
+            final WebSocketTunnelClient client = (WebSocketTunnelClient) context.getAttribute(TUNNEL_KEY);
             if (null != client) {
+                if (client.isRunning() && uri.equals(client.getTunnelServerEndpoint())) {
+                    httpResponse.getWriter().write("READY");
+                    return;
+                }
                 client.shutdownGracefully();
             }
             final WebSocketTunnelClient newClient = new WebSocketTunnelClient("default", uri);
             try {
                 newClient.start();
-                context.setAttribute(KEY, newClient);
+                context.setAttribute(TUNNEL_KEY, newClient);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
