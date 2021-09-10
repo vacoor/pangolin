@@ -820,7 +820,8 @@ public class WebSocketTunnelServer {
         private final String innerAddress;
         private final ChannelHandlerContext bus;
 
-        Broker(final String id, final String name, final String version, final String address, final String innerAddress, final ChannelHandlerContext bus) {
+        Broker(final String id, final String name, final String version,
+               final String address, final String innerAddress, final ChannelHandlerContext bus) {
             this.id = id;
             this.name = name;
             this.version = version;
