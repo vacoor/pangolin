@@ -134,7 +134,7 @@ public class WebSocketTunnelServer {
     /**
      * 已开启的端口转发监听.
      */
-    private final ConcurrentMap<Integer, TunnelForwarding> tcpForwardRuleMap = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Integer, BrokerForwarding> tcpForwardRuleMap = new ConcurrentHashMap<>();
 
     /**
      * 服务 event loop group.
@@ -706,7 +706,7 @@ public class WebSocketTunnelServer {
             }
         });
 
-        final TunnelForwarding rule = new TunnelForwarding(listenChannel, nodeChannel, toHost + ":" + toPort);
+        final BrokerForwarding rule = new BrokerForwarding(listenChannel, nodeChannel, toHost + ":" + toPort);
         tcpListenChannelMap.putIfAbsent(node, new CopyOnWriteArrayList<Channel>());
         tcpForwardRuleMap.put(listenPort, rule);
 
@@ -726,9 +726,9 @@ public class WebSocketTunnelServer {
     }
 
     public boolean unforward(final int port) {
-        final TunnelForwarding tunnelForwarding = tcpForwardRuleMap.remove(port);
-        if (null != tunnelForwarding) {
-            tunnelForwarding.serverChannel.close();
+        final BrokerForwarding brokerForwarding = tcpForwardRuleMap.remove(port);
+        if (null != brokerForwarding) {
+            brokerForwarding.serverChannel.close();
             return true;
         }
         return false;
@@ -779,10 +779,10 @@ public class WebSocketTunnelServer {
      *
      * @return 转发规则清单
      */
-    public Collection<TunnelForwarding> getAccessRules() {
-        final List<TunnelForwarding> rules = new LinkedList<>();
+    public Collection<BrokerForwarding> getAccessRules() {
+        final List<BrokerForwarding> rules = new LinkedList<>();
         for (final Map.Entry<String, Broker> entry : brokerRegistry.entrySet()) {
-            rules.add(new TunnelForwarding(primaryServerChannel, entry.getValue(), "*ws*"));
+            rules.add(new BrokerForwarding(primaryServerChannel, entry.getValue(), "*ws*"));
         }
         rules.addAll(tcpForwardRuleMap.values());
         return rules;
@@ -793,7 +793,7 @@ public class WebSocketTunnelServer {
      *
      * @param rule 转发规则
      */
-    public List<TunnelLink> getTunnelLink(final TunnelForwarding rule) {
+    public List<TunnelLink> getTunnelLink(final BrokerForwarding rule) {
         final List<TunnelLink> candidates = new LinkedList<>();
         for (final TunnelLink link : tunnelLinkMap.values()) {
             int port = ((InetSocketAddress) link.accessLink.channel().localAddress()).getPort();
@@ -884,12 +884,12 @@ public class WebSocketTunnelServer {
     /**
      * 隧道映射.
      */
-    public class TunnelForwarding {
+    public class BrokerForwarding {
         private final Channel serverChannel;
         private final Broker node;
         private final String target;
 
-        private TunnelForwarding(final Channel serverChannel, final Broker node, final String target) {
+        private BrokerForwarding(final Channel serverChannel, final Broker node, final String target) {
             this.serverChannel = serverChannel;
             this.node = node;
             this.target = target;
