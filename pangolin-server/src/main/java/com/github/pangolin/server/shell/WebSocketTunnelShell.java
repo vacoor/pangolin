@@ -86,8 +86,8 @@ public class WebSocketTunnelShell {
             reader.close();
             server.shutdownGracefully();
         } else if ("stat".equals(args[0])) {
-            Collection<WebSocketTunnelServer.TunnelNode> nodes = server.getNodes();
-            for (WebSocketTunnelServer.TunnelNode node : nodes) {
+            Collection<WebSocketTunnelServer.Broker> nodes = server.getNodes();
+            for (WebSocketTunnelServer.Broker node : nodes) {
                 out.println(node);
             }
         } else if ("ls".equals(args[0])) {

@@ -117,9 +117,9 @@ public class WebSocketTunnelServer {
     private static final String ALL_PROTOCOLS = PROTOCOL_TUNNEL_REQUEST + "," + PROTOCOL_TUNNEL_REGISTER + "," + PROTOCOL_TUNNEL_RESPONSE + "," + PROTOCOL_TUNNEL_MANAGEMENT;
 
     /**
-     * 注册的中继节点(tunnel-id:node-channel).
+     * 注册的broker节点(tunnel-id:node-channel).
      */
-    private final ConcurrentMap<String, TunnelNode> nodeRegistry = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Broker> brokerRegistry = new ConcurrentHashMap<>();
 
     /**
      * 隧道连接信息(id:tunnel-link).
@@ -363,8 +363,8 @@ public class WebSocketTunnelServer {
      * @param node 节点标识
      * @return 通信总线
      */
-    private TunnelNode lookupNodeChannel(final String node) {
-        return nodeRegistry.get(node);
+    private Broker lookupNodeChannel(final String node) {
+        return brokerRegistry.get(node);
     }
 
     /**
@@ -392,8 +392,8 @@ public class WebSocketTunnelServer {
 
         // XXX
         final String nodeId = String.format("%s@%s/%s", nodeName, nodeInnerAddress, nodeOuterAddress);
-        final TunnelNode node = new TunnelNode(nodeId, nodeName, nodeVersion, nodeOuterAddress, nodeInnerAddress, webSocketContext);
-        if (null == nodeRegistry.putIfAbsent(nodeName, node)) {
+        final Broker node = new Broker(nodeId, nodeName, nodeVersion, nodeOuterAddress, nodeInnerAddress, webSocketContext);
+        if (null == brokerRegistry.putIfAbsent(nodeName, node)) {
             webSocketContext.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
                 @Override
                 public void operationComplete(final Future<? super Void> future) {
@@ -417,8 +417,8 @@ public class WebSocketTunnelServer {
      * @param nodeKey 节点名称
      * @param node    节点信息
      */
-    private void nodeUnregistered(final String nodeKey, final TunnelNode node) {
-        if (nodeRegistry.remove(nodeKey, node)) {
+    private void nodeUnregistered(final String nodeKey, final Broker node) {
+        if (brokerRegistry.remove(nodeKey, node)) {
             log.info("{} Node unregistered: {}", node.bus.channel(), node);
 
             this.onNodeUnregisteredClose(node.name, node.bus);
@@ -674,7 +674,7 @@ public class WebSocketTunnelServer {
      * ************************ */
 
     public Channel forward(final int listenPort, final String node, final String toHost, final int toPort) throws InterruptedException {
-        final TunnelNode nodeChannel = this.lookupNodeChannel(node);
+        final Broker nodeChannel = this.lookupNodeChannel(node);
         if (null == nodeChannel) {
             throw new IllegalStateException("TUNNEL_NOT_FOUND:" + node);
         }
@@ -770,8 +770,8 @@ public class WebSocketTunnelServer {
      *
      * @return 节点名称
      */
-    public Collection<TunnelNode> getNodes() {
-        return nodeRegistry.values();
+    public Collection<Broker> getNodes() {
+        return brokerRegistry.values();
     }
 
     /**
@@ -781,7 +781,7 @@ public class WebSocketTunnelServer {
      */
     public Collection<TunnelForwarding> getAccessRules() {
         final List<TunnelForwarding> rules = new LinkedList<>();
-        for (final Map.Entry<String, TunnelNode> entry : nodeRegistry.entrySet()) {
+        for (final Map.Entry<String, Broker> entry : brokerRegistry.entrySet()) {
             rules.add(new TunnelForwarding(primaryServerChannel, entry.getValue(), "*ws*"));
         }
         rules.addAll(tcpForwardRuleMap.values());
@@ -812,7 +812,7 @@ public class WebSocketTunnelServer {
     /**
      * 节点信息.
      */
-    public class TunnelNode {
+    public class Broker {
         private final String id;
         private final String name;
         private final String version;
@@ -820,7 +820,7 @@ public class WebSocketTunnelServer {
         private final String innerAddress;
         private final ChannelHandlerContext bus;
 
-        TunnelNode(final String id, final String name, final String version, final String address, final String innerAddress, final ChannelHandlerContext bus) {
+        Broker(final String id, final String name, final String version, final String address, final String innerAddress, final ChannelHandlerContext bus) {
             this.id = id;
             this.name = name;
             this.version = version;
@@ -885,16 +885,16 @@ public class WebSocketTunnelServer {
      */
     public class TunnelForwarding {
         private final Channel serverChannel;
-        private final TunnelNode node;
+        private final Broker node;
         private final String target;
 
-        private TunnelForwarding(final Channel serverChannel, final TunnelNode node, final String target) {
+        private TunnelForwarding(final Channel serverChannel, final Broker node, final String target) {
             this.serverChannel = serverChannel;
             this.node = node;
             this.target = target;
         }
 
-        public TunnelNode getNode() {
+        public Broker getNode() {
             return node;
         }
 
