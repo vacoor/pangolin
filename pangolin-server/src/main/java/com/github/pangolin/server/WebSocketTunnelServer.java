@@ -377,12 +377,12 @@ public class WebSocketTunnelServer {
         final HttpHeaders headers = handshake.requestHeaders();
         final String nodeName = headers.getAsString("x-node-name");
         final String nodeVersion = headers.getAsString("x-node-version");
-        final String nodeInnerAddress = headers.getAsString("x-node-address");
+        final String nodeIntranetAddress = headers.getAsString("x-node-extranet");
 
         final SocketAddress address = webSocketContext.channel().remoteAddress();
-        String nodeOuterAddress = address.toString();
+        String nodeExtranetAddress = address.toString();
         if (address instanceof InetSocketAddress) {
-            nodeOuterAddress = ((InetSocketAddress) address).getAddress().getHostAddress();
+            nodeExtranetAddress = ((InetSocketAddress) address).getAddress().getHostAddress();
         }
 
         if (null == nodeName || nodeName.isEmpty()) {
@@ -391,8 +391,8 @@ public class WebSocketTunnelServer {
         }
 
         // XXX
-        final String nodeId = String.format("%s@%s/%s", nodeName, nodeInnerAddress, nodeOuterAddress);
-        final Broker node = new Broker(nodeId, nodeName, nodeVersion, nodeOuterAddress, nodeInnerAddress, webSocketContext);
+        final String nodeId = String.format("%s@%s/%s", nodeName, nodeIntranetAddress, nodeExtranetAddress);
+        final Broker node = new Broker(nodeId, nodeName, nodeVersion, nodeExtranetAddress, nodeIntranetAddress, webSocketContext);
         if (null == brokerRegistry.putIfAbsent(nodeName, node)) {
             webSocketContext.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
                 @Override
@@ -404,7 +404,7 @@ public class WebSocketTunnelServer {
                 }
             });
 
-            log.info("{} Node '{}' registered, version: {}, address: {}/{}", webSocketContext.channel(), nodeName, nodeVersion, nodeOuterAddress, nodeInnerAddress);
+            log.info("{} Node '{}' registered, version: {}, address: {}/{}", webSocketContext.channel(), nodeName, nodeVersion, nodeExtranetAddress, nodeIntranetAddress);
         } else {
             log.warn("{} Node register conflict, '{}' already registered, rejected", webSocketContext.channel(), nodeName);
             WebSocketUtils.policyViolationClose(webSocketContext, "NODE_CONFLICT");
@@ -816,23 +816,23 @@ public class WebSocketTunnelServer {
         private final String id;
         private final String name;
         private final String version;
-        private final String address;
-        private final String innerAddress;
+        private final String extranet;
+        private final String intranet;
         private final ChannelHandlerContext bus;
 
         Broker(final String id, final String name, final String version,
-               final String address, final String innerAddress, final ChannelHandlerContext bus) {
+               final String extranet, final String intranet, final ChannelHandlerContext bus) {
             this.id = id;
             this.name = name;
             this.version = version;
-            this.address = address;
-            this.innerAddress = innerAddress;
+            this.extranet = extranet;
+            this.intranet = intranet;
             this.bus = bus;
         }
 
         @Override
         public String toString() {
-            return id + ",\t" + name + "\t" + version + "\t" + address + "\t" + innerAddress;
+            return id + ",\t" + name + "\t" + version + "\t" + extranet + "\t" + intranet;
         }
     }
 
@@ -903,7 +903,7 @@ public class WebSocketTunnelServer {
         public String toString() {
             final SocketAddress localAddr = serverChannel.localAddress();
             final String nodeName = node.name;
-            final String nodeAddress = node.innerAddress + "%" + node.address;
+            final String nodeAddress = node.intranet + "%" + node.extranet;
             return localAddr + " -> " + nodeName + "[" + nodeAddress + "] -> " + target;
         }
     }
