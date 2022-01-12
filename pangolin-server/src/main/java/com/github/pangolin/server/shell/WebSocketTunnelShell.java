@@ -85,42 +85,77 @@ public class WebSocketTunnelShell {
             out.println("Exit");
             reader.close();
             server.shutdownGracefully();
-        } else if ("stat".equals(args[0])) {
-            Collection<WebSocketTunnelServer.Broker> nodes = server.getNodes();
-            for (WebSocketTunnelServer.Broker node : nodes) {
-                out.println(node);
+        } else if ("tunnel".equals(args[0])) {
+            if (args.length < 2 || ("remove".equals(args[1]) && args.length < 3)) {
+                out.println("Usage: tunnel [ACTION] [TUNNEL]");
+                out.println();
+                out.println("  list    List information about registered tunnels");
+                out.println("  remove  Remove the registered tunnel");
+                return;
             }
-        } else if ("ls".equals(args[0])) {
-            final boolean isL = args.length > 1  && "-l".equals(args[1]);
-            Collection<WebSocketTunnelServer.BrokerForwarding> forwards = server.getAccessRules();
-            for (WebSocketTunnelServer.BrokerForwarding forward : forwards) {
-                out.println(forward);
-                if (isL) {
-                    for (WebSocketTunnelServer.TunnelLink link : server.getTunnelLink(forward)) {
-                        out.println("  |- " + link);
+            final String action = args[1];
+            if ("list".equals(action)) {
+                final String prefix = args.length > 2 ? args[2] : "";
+                final Collection<WebSocketTunnelServer.Broker> nodes = server.getNodes();
+                for (WebSocketTunnelServer.Broker node : nodes) {
+                    if (node.name().startsWith(prefix)) {
+                        out.println(node);
                     }
+                }
+            } else if ("remove".equals(action)) {
+                final String tunnel = args[2];
+                final WebSocketTunnelServer.Broker broker = server.lookupNodeChannel(tunnel);
+                if (null == broker) {
+                    out.println(String.format("Tunnel '%s' not exists", tunnel));
+                } else {
+                    broker.close();
+                    out.println(String.format("Tunnel '%s' removed", tunnel));
                 }
             }
         } else if ("forward".equals(args[0])) {
-            final int port = Integer.parseInt(args[1]);
-            final String tunnel = args[2];
-            final String target = args[3];
-            final String[] segments = target.split(":", 2);
-            final String hostname = segments[0];
-            final int targetPort = Integer.parseInt(segments[1]);
-            server.forward(port, tunnel, hostname, targetPort);
-            out.println("OK");
-        } else if ("unforward".equals(args[0])) {
-            final int port = Integer.parseInt(args[1]);
-            server.unforward(port);
-            out.println("OK");
-        } else if ("kill".equals(args[0])) {
-            final String id = args[1];
-            boolean kill = server.kill(id);
-            if (kill) {
-                out.println("Killed");
-            } else {
-                out.println(String.format("'%s' not found", id));
+            if (args.length < 2) {
+                out.println("Usage: forward [ACTION] [OPTION]");
+                out.println();
+                out.println("  list [-l]                             List information about forward rule");
+                out.println("  add [L_PORT] [TUNNEL] [R_HOST:R_PORT] Add the forward rule, mapping local L_PORT to remote host R_HOST and port R_PORT by TUNNEL");
+                out.println("  remove [L_PORT]                       Remove the forward rule");
+                out.println("  kill [LINK_ID]                        Kill the forward link");
+                return;
+            }
+            final String action = args[1];
+            if ("list".equals(action)) {
+                final String option = args.length > 2 ? args[2] : "";
+                final boolean isL = "-l".equals(option);
+                Collection<WebSocketTunnelServer.BrokerForwarding> forwards = server.getAccessRules();
+                for (WebSocketTunnelServer.BrokerForwarding forward : forwards) {
+                    out.println(forward);
+                    if (isL) {
+                        for (WebSocketTunnelServer.TunnelLink link : server.getTunnelLink(forward)) {
+                            out.println("  |- " + link);
+                        }
+                    }
+                }
+            } else if ("add".equals(action)) {
+                final int port = Integer.parseInt(args[2]);
+                final String tunnel = args[3];
+                final String target = args[4];
+                final String[] segments = target.split(":", 2);
+                final String hostname = segments[0];
+                final int targetPort = Integer.parseInt(segments[1]);
+                server.forward(port, tunnel, hostname, targetPort);
+                out.println("OK");
+            } else if ("remove".equals(action)) {
+                final int port = Integer.parseInt(args[2]);
+                server.unforward(port);
+                out.println("OK");
+            } else if ("kill".equals(action)) {
+                final String id = args[2];
+                boolean kill = server.kill(id);
+                if (kill) {
+                    out.println("Killed");
+                } else {
+                    out.println(String.format("'%s' not found", id));
+                }
             }
         } else {
             out.println(String.format("%s: command not found", args[0]));

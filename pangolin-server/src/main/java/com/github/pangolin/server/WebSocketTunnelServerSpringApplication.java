@@ -1,11 +1,15 @@
 package com.github.pangolin.server;
 
 import com.github.pangolin.server.shell.ConsoleLineReader;
+import com.github.pangolin.server.shell.GenericLineReader;
 import com.github.pangolin.server.shell.WebSocketTunnelShell;
+import io.netty.channel.Channel;
 import jline.Terminal;
 import jline.TerminalFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+import java.util.concurrent.TimeUnit;
 
 @SpringBootApplication
 public class WebSocketTunnelServerSpringApplication {
@@ -26,9 +30,17 @@ public class WebSocketTunnelServerSpringApplication {
         channel.closeFuture().await();
         */
         final WebSocketTunnelServer server = new WebSocketTunnelServer(2345, "/tunnel", false);
-        server.start();
+        final Channel channel = server.start();
+        channel.eventLoop().scheduleWithFixedDelay(new Runnable() {
+            @Override
+            public void run() {
+                server.expiredCheck();
+            }
+        }, 60, 60, TimeUnit.SECONDS);
+
         final Terminal terminal = TerminalFactory.create();
         new WebSocketTunnelShell(server, new ConsoleLineReader(server, System.in, System.out, terminal), System.out).run();
+        // new WebSocketTunnelShell(server, new GenericLineReader(System.in, System.out), System.out).run();
     }
 
 }

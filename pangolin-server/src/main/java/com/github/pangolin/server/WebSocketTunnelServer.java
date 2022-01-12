@@ -245,6 +245,15 @@ public class WebSocketTunnelServer {
         return primaryServerChannel;
     }
 
+    public void expiredCheck() {
+        for (Map.Entry<String, Broker> entry : brokerRegistry.entrySet()) {
+            if (!entry.getValue().bus.channel().isActive()) {
+                log.warn("Expired: {}", entry.getValue());
+                brokerRegistry.remove(entry.getKey());
+            }
+        }
+    }
+
     /**
      * Create an ssl context.
      *
@@ -363,7 +372,7 @@ public class WebSocketTunnelServer {
      * @param node 节点标识
      * @return 通信总线
      */
-    private Broker lookupNodeChannel(final String node) {
+    public Broker lookupNodeChannel(final String node) {
         return brokerRegistry.get(node);
     }
 
@@ -643,11 +652,11 @@ public class WebSocketTunnelServer {
     /**
      * 强制关闭隧道.
      *
-     * @param tunnelId 隧道ID
+     * @param linkId 隧道ID
      * @return 如果隧道存在返回true, 否则false
      */
-    public boolean kill(final String tunnelId) {
-        final TunnelLink tunnelLink = tunnelLinkMap.get(tunnelId);
+    public boolean kill(final String linkId) {
+        final TunnelLink tunnelLink = tunnelLinkMap.get(linkId);
         if (null != tunnelLink) {
             final ChannelHandlerContext backhaul = tunnelLink.backhaulPromise.getNow();
             tunnelLink.accessLink.channel().close();
@@ -828,6 +837,14 @@ public class WebSocketTunnelServer {
             this.extranet = extranet;
             this.intranet = intranet;
             this.bus = bus;
+        }
+
+        public String name() {
+            return name;
+        }
+
+        public void close() {
+            bus.close();
         }
 
         @Override
