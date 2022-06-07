@@ -396,7 +396,7 @@ public class WebSocketTunnelServer {
                 @Override
                 public void operationComplete(final Future<? super Void> future) {
                     if (log.isDebugEnabled()) {
-                        log.debug("{} Node '{}' connection loosed", nodeName, webSocketContext.channel());
+                        log.debug("{} Node '{}' connection loosed", webSocketContext.channel(), nodeName);
                     }
                     nodeUnregistered(nodeName, node);
                 }
