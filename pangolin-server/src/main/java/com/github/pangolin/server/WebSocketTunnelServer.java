@@ -9,17 +9,7 @@ import com.github.pangolin.util.WebSocketUtils;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ConnectTimeoutException;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
@@ -39,31 +29,17 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
-import io.netty.util.concurrent.DefaultThreadFactory;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.FutureListener;
-import io.netty.util.concurrent.GenericFutureListener;
-import io.netty.util.concurrent.GlobalEventExecutor;
-import io.netty.util.concurrent.Promise;
+import io.netty.util.concurrent.*;
 import jline.Terminal;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
-import java.io.PrintStream;
+import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -91,7 +67,7 @@ public class WebSocketTunnelServer {
     /**
      * 默认通道响应超时时间.
      */
-    private static final long DEFAULT_TUNNEL_RESPONSE_TIMEOUT_MS = 20 * 1000L;
+    private static final long DEFAULT_BACKHAUL_LINK_TIMEOUT_MS = 20 * 1000L;
 
     /**
      * 通道注册.
@@ -149,9 +125,9 @@ public class WebSocketTunnelServer {
     private final NioEventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("WebSocketTunnelServer-workers", true));
 
     /**
-     * 通道响应超时时间.
+     * 回程链路超时时间.
      */
-    private final long tunnelResponseTimeoutMs = DEFAULT_TUNNEL_RESPONSE_TIMEOUT_MS;
+    private final long backhaulLinkTimeoutMs = DEFAULT_BACKHAUL_LINK_TIMEOUT_MS;
 
     /**
      * 监听端口.
@@ -300,7 +276,7 @@ public class WebSocketTunnelServer {
                     final Map<String, String> parameters = determineQueryParameters(handshake.requestUri());
                     final String tunnel = parameters.get("tunnel");
                     final String target = parameters.get("target");
-                    final ChannelHandlerContext tunnelBus = lookupNodeChannel(tunnel).bus;
+                    final ChannelHandlerContext tunnelBus = lookupBroker(tunnel).bus;
                     if (null != tunnelBus) {
                         final String forwardRequestId = "ws:" + id(webSocketContext.channel());
                         final Promise<ChannelHandlerContext> webSocketTunnelPromise = webSocketTunnelRequested(tunnel, forwardRequestId, webSocketContext);
@@ -310,7 +286,7 @@ public class WebSocketTunnelServer {
                             log.debug("{} Try open websocket tunnel: {}", webSocketContext.channel(), forwardRequest);
                         }
                         tunnelBus.writeAndFlush(new TextWebSocketFrame(forwardRequest));
-                        if (!webSocketTunnelPromise.await(tunnelResponseTimeoutMs, TimeUnit.MILLISECONDS)) {
+                        if (!webSocketTunnelPromise.await(backhaulLinkTimeoutMs, TimeUnit.MILLISECONDS)) {
                             webSocketTunnelPromise.tryFailure(new ConnectTimeoutException("TUNNEL_WAIT_TIMOUT"));
                         }
                     } else {
@@ -378,11 +354,11 @@ public class WebSocketTunnelServer {
     /**
      * 查找通信链接.
      *
-     * @param node 节点标识
+     * @param nodeKey 节点标识
      * @return 通信总线
      */
-    public Broker lookupNodeChannel(final String node) {
-        return brokerRegistry.get(node);
+    public Broker lookupBroker(final String nodeKey) {
+        return brokerRegistry.get(nodeKey);
     }
 
     /* ***************** 节点注册 [[ **************** */
@@ -480,11 +456,12 @@ public class WebSocketTunnelServer {
     /**
      * 请求接入 WebSocket 隧道.
      *
-     * @param accessRequestId     隧道请求 ID
-     * @param webSocketAccessLink 请求接入链接
+     * @param accessRequestId     接入请求ID
+     * @param webSocketAccessLink 接入链路
      * @return 用于设置回传链接的 promise
      */
-    private Promise<ChannelHandlerContext> webSocketTunnelRequested(final String nodeKey, final String accessRequestId, final ChannelHandlerContext webSocketAccessLink) {
+    private Promise<ChannelHandlerContext> webSocketTunnelRequested(final String nodeKey, final String accessRequestId,
+                                                                    final ChannelHandlerContext webSocketAccessLink) {
         if (log.isDebugEnabled()) {
             log.debug("{} WebSocket tunnel access link: {}", webSocketAccessLink.channel(), accessRequestId);
         }
@@ -529,9 +506,11 @@ public class WebSocketTunnelServer {
                 if (log.isDebugEnabled()) {
                     log.debug("{} Tunnel closed, access link: {}", webSocketAccessLink.channel(), accessRequestId);
                 }
-                final ChannelHandlerContext backhaul = tunnelLink.backhaulPromise.getNow();
-                if (null != backhaul && backhaul.channel().isOpen()) {
-                    backhaul.close();
+
+                final ChannelHandlerContext webSocketBackhaulLink = tunnelLink.backhaulLinkPromise.getNow();
+                if (null != webSocketBackhaulLink && webSocketBackhaulLink.channel().isOpen()) {
+                    // XXX WebSocketUtils.normalClose(webSocketBackhaulLink, "");
+                    webSocketBackhaulLink.close();
                 }
                 tunnelLinkMap.remove(accessRequestId, tunnelLink);
             }
@@ -593,8 +572,8 @@ public class WebSocketTunnelServer {
                 if (log.isDebugEnabled()) {
                     log.debug("{} Connection closed", nativeSocketAccessLink.channel());
                 }
-                if (null != tunnelLink.backhaulPromise.getNow()) {
-                    tunnelLink.backhaulPromise.getNow().close();
+                if (null != tunnelLink.backhaulLinkPromise.getNow()) {
+                    tunnelLink.backhaulLinkPromise.getNow().close();
                 }
                 tunnelLinkMap.remove(accessRequestId, tunnelLink);
             }
@@ -616,7 +595,7 @@ public class WebSocketTunnelServer {
         final String accessRequestId = determineQueryParameters(handshake.requestUri()).get("id");
         final TunnelLink tunnelLink = tunnelLinkMap.get(accessRequestId);
         if (null != tunnelLink) {
-            tunnelLink.backhaulPromise.setSuccess(backhaulLink);
+            tunnelLink.backhaulLinkPromise.setSuccess(backhaulLink);
         } else {
             log.warn("{} The corresponding tunnel access link cannot be found, it may have timed out: {}", backhaulLink.channel(), accessRequestId);
             WebSocketUtils.goingAwayClose(backhaulLink, "TUNNEL_REQUEST_NOT_FOUND");
@@ -677,7 +656,7 @@ public class WebSocketTunnelServer {
     public boolean kill(final String linkId) {
         final TunnelLink tunnelLink = tunnelLinkMap.get(linkId);
         if (null != tunnelLink) {
-            final ChannelHandlerContext backhaul = tunnelLink.backhaulPromise.getNow();
+            final ChannelHandlerContext backhaul = tunnelLink.backhaulLinkPromise.getNow();
             tunnelLink.accessLink.channel().close();
             backhaul.channel().close();
             return true;
@@ -702,7 +681,7 @@ public class WebSocketTunnelServer {
      * ************************ */
 
     public Channel forward(final int listenPort, final String node, final String toHost, final int toPort) throws InterruptedException {
-        final Broker nodeChannel = this.lookupNodeChannel(node);
+        final Broker nodeChannel = this.lookupBroker(node);
         if (null == nodeChannel) {
             throw new IllegalStateException("TUNNEL_NOT_FOUND:" + node);
         }
@@ -725,7 +704,7 @@ public class WebSocketTunnelServer {
                         }
                         nodeChannel.bus.writeAndFlush(new TextWebSocketFrame(forwardRequest));
 
-                        final boolean responded = backhaulPromise.await(tunnelResponseTimeoutMs, TimeUnit.MILLISECONDS);
+                        final boolean responded = backhaulPromise.await(backhaulLinkTimeoutMs, TimeUnit.MILLISECONDS);
                         if (!responded) {
                             backhaulPromise.tryFailure(new ConnectTimeoutException("Timeout"));
                         }
@@ -894,21 +873,21 @@ public class WebSocketTunnelServer {
         /**
          * 回传链路.
          */
-        private final Promise<ChannelHandlerContext> backhaulPromise;
+        private final Promise<ChannelHandlerContext> backhaulLinkPromise;
 
         TunnelLink(final String id, final String nodeKey,
                    final ChannelHandlerContext accessLink,
-                   final Promise<ChannelHandlerContext> backhaulPromise) {
+                   final Promise<ChannelHandlerContext> backhaulLinkPromise) {
             this.id = id;
             this.nodeKey = nodeKey;
             this.accessLink = accessLink;
-            this.backhaulPromise = backhaulPromise;
+            this.backhaulLinkPromise = backhaulLinkPromise;
         }
 
         @Override
         public String toString() {
             final Channel theRequest = accessLink.channel();
-            final ChannelHandlerContext backhaulLink = backhaulPromise.getNow();
+            final ChannelHandlerContext backhaulLink = backhaulLinkPromise.getNow();
             String description = "[" + id + ", " + theRequest.remoteAddress() + " -> " + theRequest.localAddress();
             if (null != backhaulLink) {
                 final Channel theResponse = backhaulLink.channel();

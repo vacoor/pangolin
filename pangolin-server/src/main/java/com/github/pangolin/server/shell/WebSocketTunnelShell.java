@@ -104,7 +104,7 @@ public class WebSocketTunnelShell {
                 }
             } else if ("remove".equals(action)) {
                 final String tunnel = args[2];
-                final WebSocketTunnelServer.Broker broker = server.lookupNodeChannel(tunnel);
+                final WebSocketTunnelServer.Broker broker = server.lookupBroker(tunnel);
                 if (null == broker) {
                     out.println(String.format("Tunnel '%s' not exists", tunnel));
                 } else {
