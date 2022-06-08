@@ -96,7 +96,7 @@ public class WebSocketTunnelShell {
             final String action = args[1];
             if ("list".equals(action)) {
                 final String prefix = args.length > 2 ? args[2] : "";
-                final Collection<WebSocketTunnelServer.Broker> nodes = server.getNodes();
+                final Collection<WebSocketTunnelServer.Broker> nodes = server.getBrokers();
                 for (WebSocketTunnelServer.Broker node : nodes) {
                     if (node.name().startsWith(prefix)) {
                         out.println(node);
@@ -126,11 +126,11 @@ public class WebSocketTunnelShell {
             if ("list".equals(action)) {
                 final String option = args.length > 2 ? args[2] : "";
                 final boolean isL = "-l".equals(option);
-                Collection<WebSocketTunnelServer.PortForwarding> forwards = server.getAccessRules();
-                for (WebSocketTunnelServer.PortForwarding forward : forwards) {
+                Collection<WebSocketTunnelServer.PortForwarding2> forwards = server.getAccessRules();
+                for (WebSocketTunnelServer.PortForwarding2 forward : forwards) {
                     out.println(forward);
                     if (isL) {
-                        for (WebSocketTunnelServer.TunnelLink link : server.getTunnelLink(forward)) {
+                        for (WebSocketTunnelServer.Connection link : server.getConnections(forward)) {
                             out.println("  |- " + link);
                         }
                     }

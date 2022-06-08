@@ -23,6 +23,7 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler.ClientHandshakeStateEvent;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.ssl.SslContext;
@@ -95,6 +96,7 @@ public class WebSocketTunnelClient {
         final boolean isSecure = "wss".equalsIgnoreCase(tunnelServerEndpoint.getScheme());
         final int portToUse = 0 < tunnelServerEndpoint.getPort() ? tunnelServerEndpoint.getPort() : (isSecure ? 443 : 80);
         final String hostnameToUse = null != tunnelServerEndpoint.getHost() ? tunnelServerEndpoint.getHost() : "127.0.0.1";
+
         final SslContext sslContext = isSecure ? WebSocketForwarder.createSslContext() : null;
         final WebSocketClientHandshaker webSocketHandshaker = WebSocketClientHandshakerFactory.newHandshaker(
                 tunnelServerEndpoint, WebSocketVersion.V13, NODE_REGISTER_PROTOCOL, true, new DefaultHttpHeaders()
@@ -161,11 +163,16 @@ public class WebSocketTunnelClient {
                     }
 
                     @Override
-                    public void userEventTriggered(final ChannelHandlerContext webSocketContext, final Object evt) throws Exception {
-                        if (evt instanceof IdleStateEvent) {
-                            webSocketContext.writeAndFlush(new PingWebSocketFrame());
+                    public void userEventTriggered(final ChannelHandlerContext webSocket, final Object evt) throws Exception {
+                        if (ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
+                            log.info("handshake issued");
+                        } else if (ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+                            log.info("handshake complete");
+                        } else if (evt instanceof IdleStateEvent) {
+                            log.debug("ping");
+                            webSocket.writeAndFlush(new PingWebSocketFrame());
                         } else {
-                            super.userEventTriggered(webSocketContext, evt);
+                            super.userEventTriggered(webSocket, evt);
                         }
                     }
 
