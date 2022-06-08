@@ -126,8 +126,8 @@ public class WebSocketTunnelShell {
             if ("list".equals(action)) {
                 final String option = args.length > 2 ? args[2] : "";
                 final boolean isL = "-l".equals(option);
-                Collection<WebSocketTunnelServer.BrokerForwarding> forwards = server.getAccessRules();
-                for (WebSocketTunnelServer.BrokerForwarding forward : forwards) {
+                Collection<WebSocketTunnelServer.PortForwarding> forwards = server.getAccessRules();
+                for (WebSocketTunnelServer.PortForwarding forward : forwards) {
                     out.println(forward);
                     if (isL) {
                         for (WebSocketTunnelServer.TunnelLink link : server.getTunnelLink(forward)) {

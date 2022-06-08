@@ -4,14 +4,29 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
@@ -52,7 +67,7 @@ public class WebSocketForwarder {
                 newWebSocketClientProtocolHandler(webSocketEndpoint1, webSocketProtocol1),
                 new WebSocketForwardingAdapter() {
                     @Override
-                    protected void initChannelForwarding(final ChannelHandlerContext master) throws Exception {
+                    protected void initChannelForwarding(final ChannelHandlerContext source) throws Exception {
 
                         final EventLoopGroup webSocketGroup2 = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-FORWARD-2", true));
                         launch(
@@ -61,15 +76,15 @@ public class WebSocketForwarder {
                                 newWebSocketClientProtocolHandler(webSocketEndpoint2, webSocketProtocol2),
                                 new WebSocketForwardingAdapter() {
                                     @Override
-                                    protected void initChannelForwarding(final ChannelHandlerContext slave) throws Exception {
-                                        slave.pipeline().remove(slave.handler());
-                                        master.pipeline().remove(master.handler());
+                                    protected void initChannelForwarding(final ChannelHandlerContext target) throws Exception {
+                                        target.pipeline().remove(target.handler());
+                                        source.pipeline().remove(source.handler());
 
-                                        slave.pipeline().addLast(pipe(master.channel()));
-                                        master.pipeline().addLast(pipe(slave.channel()));
+                                        target.pipeline().addLast(pipe(source.channel()));
+                                        source.pipeline().addLast(pipe(target.channel()));
 
-                                        slave.channel().config().setAutoRead(true);
-                                        master.channel().config().setAutoRead(true);
+                                        target.channel().config().setAutoRead(true);
+                                        source.channel().config().setAutoRead(true);
                                     }
                                 }
                         );
@@ -88,27 +103,26 @@ public class WebSocketForwarder {
                 newWebSocketClientProtocolHandler(webSocketEndpoint, webSocketProtocol),
                 new WebSocketForwardingAdapter() {
                     @Override
-                    protected void initChannelForwarding(final ChannelHandlerContext webSocketContext) throws Exception {
-                        final EventLoopGroup slaveWebSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
-                        launch(nativeSocketEndpoint, slaveWebSocketGroup, new ChannelInboundHandlerAdapter() {
+                    protected void initChannelForwarding(final ChannelHandlerContext webSocket) throws Exception {
+                        final EventLoopGroup nativeSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
+                        launch(nativeSocketEndpoint, nativeSocketGroup, new ChannelInboundHandlerAdapter() {
                             @Override
-                            public void channelActive(final ChannelHandlerContext nativeSocketContext) {
-                                nativeSocketContext.channel().config().setAutoRead(false);
+                            public void channelActive(final ChannelHandlerContext nativeSocket) {
+                                nativeSocket.channel().config().setAutoRead(false);
 
-                                log.debug("{} Connect ({})", nativeSocketContext.channel(), traceId);
+                                log.debug("{} Connect ({})", nativeSocket.channel(), traceId);
 
+                                webSocket.pipeline().remove(webSocket.handler());
+                                nativeSocket.pipeline().remove(nativeSocket.handler());
 
-                                webSocketContext.pipeline().remove(webSocketContext.handler());
-                                nativeSocketContext.pipeline().remove(nativeSocketContext.handler());
+                                webSocket.pipeline().addLast(adaptWebSocketToNativeSocket(nativeSocket.channel()));
+                                nativeSocket.pipeline().addLast(adaptNativeSocketToWebSocket(webSocket.channel()));
 
-                                webSocketContext.pipeline().addLast(adaptWebSocketToNativeSocket(nativeSocketContext.channel()));
-                                nativeSocketContext.pipeline().addLast(adaptNativeSocketToWebSocket(webSocketContext.channel()));
+                                webSocket.channel().config().setAutoRead(true);
+                                nativeSocket.channel().config().setAutoRead(true);
 
-                                webSocketContext.channel().config().setAutoRead(true);
-                                nativeSocketContext.channel().config().setAutoRead(true);
-
-                                log.debug("{} Connected ({})", webSocketContext.channel(), traceId);
-                                log.debug("{} Connect to {} ({})", nativeSocketContext.channel(), webSocketContext.channel(), traceId);
+                                log.debug("{} Connected ({})", webSocket.channel(), traceId);
+                                log.debug("{} Connect to {} ({})", nativeSocket.channel(), webSocket.channel(), traceId);
                             }
 
                             @Override
@@ -184,6 +198,7 @@ public class WebSocketForwarder {
         @Override
         public void channelActive(final ChannelHandlerContext webSocketContext) {
             webSocketContext.channel().config().setAutoRead(false);
+            // read websocket handshake
             webSocketContext.read();
         }
 
@@ -222,33 +237,33 @@ public class WebSocketForwarder {
         return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
     }
 
-    public static ChannelInboundHandlerAdapter pipe(final Channel targetChannel) {
+    public static ChannelInboundHandlerAdapter pipe(final Channel target) {
         return new ChannelInboundHandlerAdapter() {
             @Override
-            public void channelActive(final ChannelHandlerContext sourceChannelContext) throws Exception {
-                sourceChannelContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
+            public void channelActive(final ChannelHandlerContext source) throws Exception {
+                source.writeAndFlush(Unpooled.EMPTY_BUFFER);
             }
 
             @Override
             public void channelInactive(final ChannelHandlerContext sourceChannelContext) throws Exception {
-                if (targetChannel.isActive()) {
-                    targetChannel.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                if (target.isActive()) {
+                    target.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             }
 
             @Override
-            public void channelRead(final ChannelHandlerContext sourceChannelContext, final Object msg) throws Exception {
-                if (targetChannel.isActive()) {
-                    targetChannel.writeAndFlush(msg);
+            public void channelRead(final ChannelHandlerContext source, final Object msg) throws Exception {
+                if (target.isActive()) {
+                    target.writeAndFlush(msg);
                 } else {
                     ReferenceCountUtil.release(msg);
                 }
             }
 
             @Override
-            public void exceptionCaught(final ChannelHandlerContext sourceChannelContext, final Throwable cause) throws Exception {
+            public void exceptionCaught(final ChannelHandlerContext source, final Throwable cause) throws Exception {
                 log.error("channel pipe to channel error: {}", cause.getMessage(), cause);
-                sourceChannelContext.close();
+                source.close();
             }
         };
     }
@@ -256,10 +271,10 @@ public class WebSocketForwarder {
     /**
      * 将原生 Socket 适配到 WebSocket.
      *
-     * @param webSocketChannel webSocket
+     * @param webSocket webSocket
      * @return 适配器
      */
-    public static ChannelInboundHandlerAdapter adaptNativeSocketToWebSocket(final Channel webSocketChannel) {
+    public static ChannelInboundHandlerAdapter adaptNativeSocketToWebSocket(final Channel webSocket) {
         return new ChannelInboundHandlerAdapter() {
             @Override
             public void channelActive(final ChannelHandlerContext nativeSocketContext) {
@@ -267,23 +282,23 @@ public class WebSocketForwarder {
             }
 
             @Override
-            public void channelInactive(final ChannelHandlerContext nativeSocketContext) {
-                if (webSocketChannel.isActive()) {
+            public void channelInactive(final ChannelHandlerContext nativeSocket) {
+                if (webSocket.isActive()) {
                     if (log.isDebugEnabled()) {
-                        log.debug("{} WebSocket Connection closed by {}", webSocketChannel, nativeSocketContext.channel());
+                        log.debug("{} WebSocket Connection closed by {}", webSocket, nativeSocket.channel());
                     }
-                    webSocketChannel.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    webSocket.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             }
 
             @Override
-            public void channelRead(final ChannelHandlerContext nativeSocketContext, final Object msg) throws Exception {
-                if (webSocketChannel.isActive()) {
+            public void channelRead(final ChannelHandlerContext nativeSocket, final Object msg) throws Exception {
+                if (webSocket.isActive()) {
                     if (msg instanceof ByteBuf) {
                         if (log.isTraceEnabled()) {
-                            log.trace("[SO]{} -> [WS]{}: {}", nativeSocketContext.channel(), webSocketChannel, ByteBufUtil.hexDump(((ByteBuf) msg)));
+                            log.trace("[SO]{} -> [WS]{}: {}", nativeSocket.channel(), webSocket, ByteBufUtil.hexDump(((ByteBuf) msg)));
                         }
-                        webSocketChannel.writeAndFlush(new BinaryWebSocketFrame((ByteBuf) msg));
+                        webSocket.writeAndFlush(new BinaryWebSocketFrame((ByteBuf) msg));
                     } else {
                         throw new UnsupportedOperationException("Unexpect native-socket message: " + msg);
                     }
@@ -303,41 +318,41 @@ public class WebSocketForwarder {
     /**
      * 将 WebSocket 适配到原生 Socket.
      *
-     * @param nativeSocketChannel 原生 socket
+     * @param nativeSocket 原生 socket
      * @return 适配器
      */
-    public static ChannelInboundHandlerAdapter adaptWebSocketToNativeSocket(final Channel nativeSocketChannel) {
+    public static ChannelInboundHandlerAdapter adaptWebSocketToNativeSocket(final Channel nativeSocket) {
         return new ChannelInboundHandlerAdapter() {
             @Override
-            public void channelActive(final ChannelHandlerContext webSocketContext) {
-                webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
+            public void channelActive(final ChannelHandlerContext webSocket) {
+                webSocket.writeAndFlush(Unpooled.EMPTY_BUFFER);
             }
 
             @Override
-            public void channelInactive(final ChannelHandlerContext webSocketContext) {
-                if (nativeSocketChannel.isActive()) {
+            public void channelInactive(final ChannelHandlerContext webSocket) {
+                if (nativeSocket.isActive()) {
                     if (log.isDebugEnabled()) {
-                        log.debug("{} Native connection closed by {}", nativeSocketChannel, webSocketContext.channel());
+                        log.debug("{} Native connection closed by {}", nativeSocket, webSocket.channel());
                     }
-                    nativeSocketChannel.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    nativeSocket.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             }
 
             @Override
-            public void channelRead(final ChannelHandlerContext webSocketContext, final Object msg) {
-                if (nativeSocketChannel.isActive()) {
+            public void channelRead(final ChannelHandlerContext webSocket, final Object msg) {
+                if (nativeSocket.isActive()) {
                     if (msg instanceof BinaryWebSocketFrame) {
                         final ByteBuf buf = ((BinaryWebSocketFrame) msg).content();
                         if (log.isTraceEnabled()) {
-                            log.trace("[WS]{} -> [SO]{}: {}", webSocketContext.channel(), nativeSocketChannel, ByteBufUtil.hexDump(buf));
+                            log.trace("[WS]{} -> [SO]{}: {}", webSocket.channel(), nativeSocket, ByteBufUtil.hexDump(buf));
                         }
-                        nativeSocketChannel.writeAndFlush(buf);
+                        nativeSocket.writeAndFlush(buf);
                     } else if (msg instanceof CloseWebSocketFrame) {
                         if (log.isDebugEnabled()) {
                             final CloseWebSocketFrame close = (CloseWebSocketFrame) msg;
-                            log.debug("{} Connection closed: {}({})", webSocketContext.channel(), close.reasonText(), close.statusCode());
+                            log.debug("{} Connection closed: {}({})", webSocket.channel(), close.reasonText(), close.statusCode());
                         }
-                        webSocketContext.close();
+                        webSocket.close();
                     } else {
                         throw new UnsupportedOperationException("Unexpect websocket message: " + msg);
                     }

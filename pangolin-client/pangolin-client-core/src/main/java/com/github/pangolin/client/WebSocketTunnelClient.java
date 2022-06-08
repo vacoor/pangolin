@@ -180,27 +180,28 @@ public class WebSocketTunnelClient {
         return b.connect();
     }
 
-    private void onMessageReceived(final ChannelHandlerContext webSocketContext, final WebSocketFrame frame) {
+    private void onMessageReceived(final ChannelHandlerContext webSocket, final WebSocketFrame frame) {
         if (frame instanceof TextWebSocketFrame) {
             final TextWebSocketFrame textFrame = (TextWebSocketFrame) frame;
             /*-
              * tcp:8080->tcp://172.16.0.12:7788
-             * source_protocol:source_port->target_protocol://target_host:target_port
+             * id->target_protocol://target_host:target_port
              */
             final String text = textFrame.text();
             final String[] segments = text.split(Pattern.quote("->"));
-            final String requestId = segments[0];
+            final String id = segments[0];
             final URI target = URI.create(segments[1]);
             try {
                 final String endpoint = tunnelServerEndpoint.getScheme() + "://" + tunnelServerEndpoint.getHost() + ":" + tunnelServerEndpoint.getPort() + tunnelServerEndpoint.getPath();
                 if ("tcp".equalsIgnoreCase(target.getScheme())) {
-                    WebSocketForwarder.forwardToNativeSocket(URI.create(endpoint + "?id=" + requestId), "PASSIVE", target, requestId);
+                    WebSocketForwarder.forwardToNativeSocket(URI.create(endpoint + "?id=" + id), "PASSIVE", target, id);
                 } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
-                    WebSocketForwarder.forwardToWebSocket(URI.create(endpoint + "?id=" + requestId), "PASSIVE", target, null);
+                    WebSocketForwarder.forwardToWebSocket(URI.create(endpoint + "?id=" + id), "PASSIVE", target, null);
                 }
             } catch (final Exception ex) {
                 log.error("", ex);
-                // webSocketContext.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, ex.getMessage())).addListener(ChannelFutureListener.CLOSE);
+                // FIXME
+                // webSocket.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, ex.getMessage())).addListener(ChannelFutureListener.CLOSE);
             }
         }
     }

@@ -9,7 +9,17 @@ import com.github.pangolin.util.WebSocketUtils;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ConnectTimeoutException;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
@@ -29,17 +39,31 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
-import io.netty.util.concurrent.*;
+import io.netty.util.concurrent.DefaultThreadFactory;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.FutureListener;
+import io.netty.util.concurrent.GenericFutureListener;
+import io.netty.util.concurrent.GlobalEventExecutor;
+import io.netty.util.concurrent.Promise;
 import jline.Terminal;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
+import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -112,7 +136,7 @@ public class WebSocketTunnelServer {
     /**
      * 已开启的端口转发监听.
      */
-    private final ConcurrentMap<Integer, BrokerForwarding> tcpForwardRuleMap = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Integer, PortForwarding> tcpForwardRuleMap = new ConcurrentHashMap<>();
 
     /**
      * 服务 event loop group.
@@ -188,42 +212,45 @@ public class WebSocketTunnelServer {
      *
      * @return 服务通道
      */
-    public Channel start() throws CertificateException, SSLException, InterruptedException {
+    public Channel start() throws InterruptedException, CertificateException, SSLException {
         if (!startup.compareAndSet(false, true)) {
             return primaryServerChannel;
         }
 
         final SslContext sslContext = useSsl ? createSslContext() : null;
-        final ServerBootstrap bootstrap = new ServerBootstrap();
-        bootstrap.option(ChannelOption.SO_REUSEADDR, true);
-        bootstrap.childOption(ChannelOption.TCP_NODELAY, true);
-        bootstrap.group(bossGroup, workerGroup)
-                .channel(NioServerSocketChannel.class)
-                .handler(new LoggingHandler(LogLevel.INFO))
-                .childHandler(new ChannelInitializer<SocketChannel>() {
-                    @Override
-                    protected void initChannel(final SocketChannel ch) {
-                        final ChannelPipeline pipeline = ch.pipeline();
-                        if (null != sslContext) {
-                            pipeline.addLast(sslContext.newHandler(ch.alloc()));
-                        }
-                        pipeline.addLast(
-                                new HttpServerCodec(),
-                                new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                                new WebSocketServerCompressionHandler(),
-                                new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, MAX_HTTP_CONTENT_LENGTH, false, true),
-                                new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
-                                createWebSocketTunnelServerHandler()
-                        );
-                    }
-                });
+        return primaryServerChannel = listenTcp(listenHost, listenPort, bossGroup, workerGroup, new ChannelInitializer<SocketChannel>() {
+            @Override
+            protected void initChannel(final SocketChannel ch) throws Exception {
+                final ChannelPipeline pipeline = ch.pipeline();
+                if (null != sslContext) {
+                    pipeline.addLast(sslContext.newHandler(ch.alloc()));
+                }
+                pipeline.addLast(
+                        new HttpServerCodec(),
+                        new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
+                        new WebSocketServerCompressionHandler(),
+                        new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, MAX_HTTP_CONTENT_LENGTH, false, true),
+                        new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
+                        createWebSocketTunnelServerHandler()
+                );
+            }
+        });
+    }
 
+
+    private Channel listenTcp(final String listenHost, final int listenPort,
+                              final NioEventLoopGroup bossGroup, final NioEventLoopGroup workerGroup,
+                              final ChannelHandler initializer) throws InterruptedException {
+        final ServerBootstrap serverBootstrap = new ServerBootstrap();
+        serverBootstrap.option(ChannelOption.SO_REUSEADDR, true);
+        serverBootstrap.childOption(ChannelOption.TCP_NODELAY, true);
+        serverBootstrap.group(bossGroup, workerGroup).channel(NioServerSocketChannel.class);
+        serverBootstrap.handler(new LoggingHandler(LogLevel.INFO)).childHandler(initializer);
         if (null == listenHost) {
-            primaryServerChannel = bootstrap.bind(listenPort).sync().channel();
+            return serverBootstrap.bind(listenPort).sync().channel();
         } else {
-            primaryServerChannel = bootstrap.bind(listenHost, listenPort).sync().channel();
+            return serverBootstrap.bind(listenHost, listenPort).sync().channel();
         }
-        return primaryServerChannel;
     }
 
     public void expiredCheck() {
@@ -526,13 +553,13 @@ public class WebSocketTunnelServer {
      * @param nativeSocketAccessLink 请求接入的原生 socket链接
      * @return 用于设置回传链接的 promise
      */
-    private Promise<ChannelHandlerContext> nativeTunnelRequested(final String tunnel, final String accessRequestId, final ChannelHandlerContext nativeSocketAccessLink) {
+    private Promise<ChannelHandlerContext> nativeTunnelRequested(final String nodeKey, final String accessRequestId, final ChannelHandlerContext nativeSocketAccessLink) {
         if (log.isDebugEnabled()) {
             log.debug("{} Native tunnel request: {}", nativeSocketAccessLink.channel(), accessRequestId);
         }
 
         final Promise<ChannelHandlerContext> webSocketBackhaulLinkPromise = GlobalEventExecutor.INSTANCE.newPromise();
-        final TunnelLink tunnelLink = new TunnelLink(accessRequestId, tunnel, nativeSocketAccessLink, webSocketBackhaulLinkPromise);
+        final TunnelLink tunnelLink = new TunnelLink(accessRequestId, nodeKey, nativeSocketAccessLink, webSocketBackhaulLinkPromise);
         if (null != tunnelLinkMap.putIfAbsent(accessRequestId, tunnelLink)) {
             throw new IllegalStateException(String.format("%s request id '%s' is already used", nativeSocketAccessLink.channel(), accessRequestId));
         }
@@ -680,13 +707,13 @@ public class WebSocketTunnelServer {
      *
      * ************************ */
 
-    public Channel forward(final int listenPort, final String node, final String toHost, final int toPort) throws InterruptedException {
-        final Broker nodeChannel = this.lookupBroker(node);
-        if (null == nodeChannel) {
-            throw new IllegalStateException("TUNNEL_NOT_FOUND:" + node);
+    public Channel forward(final int listenPort, final String nodeKey, final String toHost, final int toPort) throws InterruptedException {
+        final Broker broker = this.lookupBroker(nodeKey);
+        if (null == broker) {
+            throw new IllegalStateException("TUNNEL_NOT_FOUND:" + nodeKey);
         }
 
-        final Channel listenChannel = this.listenTcp(this.listenHost, listenPort, node, new ChannelInitializer<SocketChannel>() {
+        final Channel listenChannel = this.listenTcp(this.listenHost, listenPort, nodeKey, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel nativeSocketChannel) {
                 nativeSocketChannel.config().setAutoRead(false);
@@ -694,7 +721,7 @@ public class WebSocketTunnelServer {
                     @Override
                     public void channelActive(final ChannelHandlerContext accessLink) throws Exception {
                         final String forwardRequestId = "tcp:" + id(nativeSocketChannel);
-                        final Promise<ChannelHandlerContext> backhaulPromise = nativeTunnelRequested(node, forwardRequestId, accessLink);
+                        final Promise<ChannelHandlerContext> backhaulLinkPromise = nativeTunnelRequested(nodeKey, forwardRequestId, accessLink);
 
                         // XXX find agent and send connection request.
                         final String forwardTarget = "tcp://" + toHost + ":" + toPort;
@@ -702,40 +729,40 @@ public class WebSocketTunnelServer {
                         if (log.isDebugEnabled()) {
                             log.debug("{} Try open native tunnel: {}", nativeSocketChannel, forwardRequest);
                         }
-                        nodeChannel.bus.writeAndFlush(new TextWebSocketFrame(forwardRequest));
+                        broker.bus.writeAndFlush(new TextWebSocketFrame(forwardRequest));
 
-                        final boolean responded = backhaulPromise.await(backhaulLinkTimeoutMs, TimeUnit.MILLISECONDS);
+                        final boolean responded = backhaulLinkPromise.await(backhaulLinkTimeoutMs, TimeUnit.MILLISECONDS);
                         if (!responded) {
-                            backhaulPromise.tryFailure(new ConnectTimeoutException("Timeout"));
+                            backhaulLinkPromise.tryFailure(new ConnectTimeoutException("Timeout"));
                         }
                     }
                 });
             }
         });
 
-        final BrokerForwarding rule = new BrokerForwarding(listenChannel, nodeChannel, toHost + ":" + toPort);
-        tcpListenChannelMap.putIfAbsent(node, new CopyOnWriteArrayList<Channel>());
-        tcpForwardRuleMap.put(listenPort, rule);
+        final PortForwarding forwarding = new PortForwarding(listenChannel, broker, toHost + ":" + toPort);
+        tcpListenChannelMap.putIfAbsent(nodeKey, new CopyOnWriteArrayList<Channel>());
+        tcpForwardRuleMap.put(listenPort, forwarding);
 
         listenChannel.closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
-                List<Channel> channels = tcpListenChannelMap.get(node);
+                List<Channel> channels = tcpListenChannelMap.get(nodeKey);
                 if (null != channels) {
                     channels.remove(listenChannel);
                 }
-                tcpForwardRuleMap.remove(listenPort, rule);
+                tcpForwardRuleMap.remove(listenPort, forwarding);
             }
         });
-        List<Channel> channels = tcpListenChannelMap.get(node);
+        List<Channel> channels = tcpListenChannelMap.get(nodeKey);
         channels.add(listenChannel);
         return listenChannel;
     }
 
     public boolean unforward(final int port) {
-        final BrokerForwarding brokerForwarding = tcpForwardRuleMap.remove(port);
-        if (null != brokerForwarding) {
-            brokerForwarding.serverChannel.close();
+        final PortForwarding portForwarding = tcpForwardRuleMap.remove(port);
+        if (null != portForwarding) {
+            portForwarding.serverChannel.close();
             return true;
         }
         return false;
@@ -754,16 +781,15 @@ public class WebSocketTunnelServer {
                               final String namePrefix, final ChannelHandler initializer) throws InterruptedException {
         final NioEventLoopGroup socketBossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory(namePrefix + "-forward-boss", false));
         final NioEventLoopGroup socketWorkerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory(namePrefix + "-forward-workers", false));
-        final ServerBootstrap socketBootstrap = new ServerBootstrap();
-        socketBootstrap.option(ChannelOption.SO_REUSEADDR, true);
-        socketBootstrap.childOption(ChannelOption.TCP_NODELAY, true);
-        socketBootstrap.group(socketBossGroup, socketWorkerGroup).channel(NioServerSocketChannel.class);
-        socketBootstrap.handler(new LoggingHandler(LogLevel.INFO)).childHandler(initializer);
-        if (null == listenHost) {
-            return socketBootstrap.bind(listenPort).sync().channel();
-        } else {
-            return socketBootstrap.bind(listenHost, listenPort).sync().channel();
-        }
+        final Channel channel = listenTcp(listenHost, listenPort, socketBossGroup, socketWorkerGroup, initializer);
+        channel.closeFuture().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) {
+                socketBossGroup.shutdownGracefully();
+                socketWorkerGroup.shutdownGracefully();
+            }
+        });
+        return channel;
     }
 
     /*- ****************************
@@ -786,10 +812,10 @@ public class WebSocketTunnelServer {
      *
      * @return 转发规则清单
      */
-    public Collection<BrokerForwarding> getAccessRules() {
-        final List<BrokerForwarding> rules = new LinkedList<>();
+    public Collection<PortForwarding> getAccessRules() {
+        final List<PortForwarding> rules = new LinkedList<>();
         for (final Map.Entry<String, Broker> entry : brokerRegistry.entrySet()) {
-            rules.add(new BrokerForwarding(primaryServerChannel, entry.getValue(), "*ws*"));
+            rules.add(new PortForwarding(primaryServerChannel, entry.getValue(), "*ws*"));
         }
         rules.addAll(tcpForwardRuleMap.values());
         return rules;
@@ -800,7 +826,7 @@ public class WebSocketTunnelServer {
      *
      * @param rule 转发规则
      */
-    public List<TunnelLink> getTunnelLink(final BrokerForwarding rule) {
+    public List<TunnelLink> getTunnelLink(final PortForwarding rule) {
         final List<TunnelLink> candidates = new LinkedList<>();
         for (final TunnelLink link : tunnelLinkMap.values()) {
             int port = ((InetSocketAddress) link.accessLink.channel().localAddress()).getPort();
@@ -902,12 +928,12 @@ public class WebSocketTunnelServer {
     /**
      * 隧道映射.
      */
-    public class BrokerForwarding {
+    public class PortForwarding {
         private final Channel serverChannel;
         private final Broker node;
         private final String target;
 
-        private BrokerForwarding(final Channel serverChannel, final Broker node, final String target) {
+        private PortForwarding(final Channel serverChannel, final Broker node, final String target) {
             this.serverChannel = serverChannel;
             this.node = node;
             this.target = target;
