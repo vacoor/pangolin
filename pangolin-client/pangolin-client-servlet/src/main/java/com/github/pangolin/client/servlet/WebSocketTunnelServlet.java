@@ -19,34 +19,25 @@ public class WebSocketTunnelServlet extends HttpServlet {
     private static final String TUNNEL_KEY = WebSocketTunnelClient.class.getName();
 
     @Override
-    public void init() throws ServletException {
-        super.init();
-    }
-
-    @Override
     protected void doGet(final HttpServletRequest httpRequest, final HttpServletResponse httpResponse) throws ServletException, IOException {
         final String server = httpRequest.getParameter("server");
         if (null != server) {
-            final URI uri = URI.create(server);
-
+            final URI serverUrl = URI.create(server);
             final ServletContext context = httpRequest.getServletContext();
             final WebSocketTunnelClient client = (WebSocketTunnelClient) context.getAttribute(TUNNEL_KEY);
             if (null != client) {
-                if (client.isRunning() && uri.equals(client.getTunnelServerEndpoint())) {
+                if (client.isRunning() && serverUrl.equals(client.getTunnelServerEndpoint())) {
                     httpResponse.getWriter().write("READY");
                     return;
                 }
                 client.shutdownGracefully();
             }
+
             final String localAddr = httpRequest.getLocalAddr();
             final int localPort = httpRequest.getLocalPort();
-            final WebSocketTunnelClient newClient = new WebSocketTunnelClient(localAddr + "." + localPort, uri);
-            try {
-                newClient.start();
-                context.setAttribute(TUNNEL_KEY, newClient);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            final WebSocketTunnelClient newClient = new WebSocketTunnelClient(localAddr + "." + localPort, serverUrl);
+            newClient.start();
+            context.setAttribute(TUNNEL_KEY, newClient);
             httpResponse.getWriter().write("CLIENT_START");
         } else {
             httpResponse.getWriter().write("NOT_FOUND_SERVER");

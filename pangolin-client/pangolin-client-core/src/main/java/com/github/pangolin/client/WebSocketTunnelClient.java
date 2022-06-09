@@ -1,9 +1,11 @@
 package com.github.pangolin.client;
 
 import com.github.pangolin.util.WebSocketForwarder;
+import com.github.pangolin.util.WebSocketUtils;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandler;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
@@ -37,6 +39,7 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
 import java.util.regex.Pattern;
 
@@ -53,11 +56,21 @@ public class WebSocketTunnelClient {
      */
     private static final String NODE_REGISTER_PROTOCOL = "PASSIVE-REG";
 
+    private enum ConnectionState {
+        CONNECTED,
+        SUSPENDED,
+        RECONNECTED
+    }
+
     private final EventLoopGroup workerGroup = new NioEventLoopGroup(2, new DefaultThreadFactory("WebSocket-Tunnel-Client", true));
 
     private final String name;
     private final URI tunnelServerEndpoint;
+
     private ChannelFuture channelFuture;
+    private ConnectionState connectionState;
+
+    private final AtomicBoolean started = new AtomicBoolean(false);
 
     /**
      * 重连延迟秒数.
@@ -77,7 +90,7 @@ public class WebSocketTunnelClient {
         return URI.create(uri.getScheme() + "://" + uri.getHost() + ":" + uri.getPort() + uri.getPath() + "?id=" + tunnelName);
     }
 
-    public ChannelFuture start() throws IOException, InterruptedException {
+    public ChannelFuture start() throws IOException {
         return channelFuture = connect();
     }
 
@@ -93,6 +106,10 @@ public class WebSocketTunnelClient {
     }
 
     private ChannelFuture connect() throws IOException {
+        return connect(createWebSocketTunnelClientHandler());
+    }
+
+    private ChannelFuture connect(final ChannelInboundHandler... handlers) throws IOException {
         final boolean isSecure = "wss".equalsIgnoreCase(tunnelServerEndpoint.getScheme());
         final int portToUse = 0 < tunnelServerEndpoint.getPort() ? tunnelServerEndpoint.getPort() : (isSecure ? 443 : 80);
         final String hostnameToUse = null != tunnelServerEndpoint.getHost() ? tunnelServerEndpoint.getHost() : "127.0.0.1";
@@ -139,52 +156,57 @@ public class WebSocketTunnelClient {
                         super.write(ctx, msg, promise);
                     }
                 });
-                cp.addLast(new SimpleChannelInboundHandler<WebSocketFrame>() {
-
-                    @Override
-                    protected void channelRead0(final ChannelHandlerContext webSocketContext, final WebSocketFrame msg) throws Exception {
-                        onMessageReceived(webSocketContext, msg);
-                    }
-
-                    @Override
-                    public void channelUnregistered(final ChannelHandlerContext ctx) throws Exception {
-                        // super.channelUnregistered(ctx);
-                        ctx.channel().eventLoop().schedule(new Runnable() {
-                            @Override
-                            public void run() {
-                                log.error("try to reconnect to tunnel server, uri: {}", "xx");
-                                try {
-                                    connect();
-                                } catch (final Exception ex) {
-                                    log.error("reconnect fail: {}", ex.getMessage(), ex);
-                                }
-                            }
-                        }, reconnectDelaySeconds, TimeUnit.SECONDS);
-                    }
-
-                    @Override
-                    public void userEventTriggered(final ChannelHandlerContext webSocket, final Object evt) throws Exception {
-                        if (ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
-                            log.info("handshake issued");
-                        } else if (ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
-                            log.info("handshake complete");
-                        } else if (evt instanceof IdleStateEvent) {
-                            log.debug("ping");
-                            webSocket.writeAndFlush(new PingWebSocketFrame());
-                        } else {
-                            super.userEventTriggered(webSocket, evt);
-                        }
-                    }
-
-                    @Override
-                    public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) throws Exception {
-                        log.warn("{} Software caused connection abort: {}", webSocketContext.channel(), cause.getMessage());
-                        webSocketContext.close();
-                    }
-                });
+                cp.addLast(handlers);
             }
         });
         return b.connect();
+    }
+
+    private SimpleChannelInboundHandler<WebSocketFrame> createWebSocketTunnelClientHandler() {
+        return new SimpleChannelInboundHandler<WebSocketFrame>() {
+
+            @Override
+            public void channelUnregistered(final ChannelHandlerContext ctx) throws Exception {
+                connectionState = ConnectionState.SUSPENDED;
+                ctx.channel().eventLoop().schedule(new Runnable() {
+                    @Override
+                    public void run() {
+                        log.error("try to reconnect to tunnel server, uri: {}", "xx");
+                        try {
+                            connect();
+                        } catch (final Exception ex) {
+                            log.error("reconnect fail: {}", ex.getMessage(), ex);
+                        }
+                    }
+                }, reconnectDelaySeconds, TimeUnit.SECONDS);
+            }
+
+            @Override
+            public void userEventTriggered(final ChannelHandlerContext webSocket, final Object evt) throws Exception {
+                if (ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
+                    log.info("handshake issued");
+                } else if (ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+                    log.info("handshake complete");
+                    connectionState = ConnectionState.SUSPENDED.equals(connectionState) ? ConnectionState.RECONNECTED : ConnectionState.CONNECTED;
+                } else if (evt instanceof IdleStateEvent) {
+                    log.debug("ping");
+                    webSocket.writeAndFlush(new PingWebSocketFrame());
+                } else {
+                    super.userEventTriggered(webSocket, evt);
+                }
+            }
+
+            @Override
+            protected void channelRead0(final ChannelHandlerContext webSocketContext, final WebSocketFrame msg) throws Exception {
+                onMessageReceived(webSocketContext, msg);
+            }
+
+            @Override
+            public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) throws Exception {
+                log.warn("{} Software caused connection abort: {}", webSocketContext.channel(), cause.getMessage());
+                webSocketContext.close();
+            }
+        };
     }
 
     private void onMessageReceived(final ChannelHandlerContext webSocket, final WebSocketFrame frame) {
@@ -201,14 +223,13 @@ public class WebSocketTunnelClient {
             try {
                 final String endpoint = tunnelServerEndpoint.getScheme() + "://" + tunnelServerEndpoint.getHost() + ":" + tunnelServerEndpoint.getPort() + tunnelServerEndpoint.getPath();
                 if ("tcp".equalsIgnoreCase(target.getScheme())) {
-                    WebSocketForwarder.forwardToNativeSocket(URI.create(endpoint + "?id=" + id), "PASSIVE", target, id);
+                    WebSocketForwarder.forwardToNativeSocket2(id, URI.create(endpoint + "?id=" + id), "PASSIVE", target);
                 } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
-                    WebSocketForwarder.forwardToWebSocket(URI.create(endpoint + "?id=" + id), "PASSIVE", target, null);
+                    WebSocketForwarder.forwardToWebSocket2(id, URI.create(endpoint + "?id=" + id), "PASSIVE", target, null);
                 }
             } catch (final Exception ex) {
                 log.error("", ex);
-                // FIXME
-                // webSocket.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, ex.getMessage())).addListener(ChannelFutureListener.CLOSE);
+                WebSocketUtils.internalErrorClose(webSocket, ex.getMessage());
             }
         }
     }

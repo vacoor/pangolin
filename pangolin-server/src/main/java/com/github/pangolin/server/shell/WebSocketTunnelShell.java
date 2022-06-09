@@ -7,6 +7,7 @@ import java.io.PrintStream;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -16,23 +17,25 @@ public class WebSocketTunnelShell {
 
     protected final LineReader reader;
     protected final PrintStream output;
-    protected volatile boolean running = false;
+    protected final AtomicBoolean started = new AtomicBoolean(false);
 
-    public WebSocketTunnelShell(final WebSocketTunnelServer server,
-                                final LineReader reader, final PrintStream output) {
+    public WebSocketTunnelShell(final WebSocketTunnelServer server, final LineReader reader, final PrintStream output) {
         this.server = server;
         this.reader = reader;
         this.output = output;
     }
 
     public void run() throws IOException {
-        running = true;
-        output.println();
-        output.println("Welcome to WebSocket Tunnel!");
-        output.println();
-        output.flush();
-        while (running && next()) {
+        if (started.compareAndSet(false, true)) {
+            output.println();
+            output.println("Welcome to WebSocket Tunnel!");
+            output.println();
+            output.flush();
+            while (started.get() && next()) {
 
+            }
+        } else {
+            throw new IllegalStateException("already started");
         }
     }
 
@@ -49,7 +52,7 @@ public class WebSocketTunnelShell {
         }.start();
     }
 
-    public boolean next() throws IOException {
+    private boolean next() throws IOException {
         final String line = reader.readLine();
         if (null == line && breakOnNull) {
             return false;
@@ -81,7 +84,7 @@ public class WebSocketTunnelShell {
         }
 
         if ("exit".equals(args[0]) || "quit".equals(args[0])) {
-            running = false;
+            started.set(false);
             out.println("Exit");
             reader.close();
             server.shutdownGracefully();

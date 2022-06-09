@@ -2,10 +2,13 @@ package com.github.pangolin.server;
 
 import com.github.pangolin.server.shell.ConsoleLineReader;
 import com.github.pangolin.server.shell.GenericLineReader;
+import com.github.pangolin.server.shell.LineReader;
 import com.github.pangolin.server.shell.WebSocketTunnelShell;
 import io.netty.channel.Channel;
 import jline.Terminal;
 import jline.TerminalFactory;
+import jline.console.ConsoleReader;
+import org.fusesource.jansi.AnsiConsole;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -39,7 +42,8 @@ public class WebSocketTunnelServerSpringApplication {
         }, 60, 60, TimeUnit.SECONDS);
 
         final Terminal terminal = TerminalFactory.create();
-        new WebSocketTunnelShell(server, new ConsoleLineReader(server, System.in, System.out, terminal), System.out).run();
+        final LineReader lineReader = !terminal.isEchoEnabled() && !terminal.isAnsiSupported() ? new GenericLineReader(System.in, System.out) : new ConsoleLineReader(server, System.in, System.out, terminal);
+        new WebSocketTunnelShell(server, lineReader, System.out).run();
         // new WebSocketTunnelShell(server, new GenericLineReader(System.in, System.out), System.out).run();
     }
 

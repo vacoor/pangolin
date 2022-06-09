@@ -278,7 +278,7 @@ public class WebSocketTunnelServer {
                     /*-
                      * 中继节点注册.
                      */
-                    nodeRegistered(webSocketContext, handshake);
+                    brokerRegistered(webSocketContext, handshake);
                 } else if (PROTOCOL_TUNNEL_REQUEST.equalsIgnoreCase(subprotocol)) {
                     /*-
                      * 隧道打开请求.
@@ -360,7 +360,7 @@ public class WebSocketTunnelServer {
      * @param webSocketContext 节点注册上下文
      * @param handshake        节点注册握手信息
      */
-    private void nodeRegistered(final ChannelHandlerContext webSocketContext, final HandshakeComplete handshake) {
+    private void brokerRegistered(final ChannelHandlerContext webSocketContext, final HandshakeComplete handshake) {
         final HttpHeaders headers = handshake.requestHeaders();
         final String nodeName = headers.getAsString("X-Node-Name");
         final String nodeVersion = headers.getAsString("X-Node-Version");
@@ -453,7 +453,7 @@ public class WebSocketTunnelServer {
         final ChannelHandlerContext bus = lookupBroker(tunnel).bus;
         if (null != bus) {
             final String id = "ws:" + id(webSocketAccessLink.channel());
-            final Promise<ChannelHandlerContext> webSocketBackhaulPromise = webSocketTunnelRequested(tunnel, id, webSocketAccessLink);
+            final Promise<ChannelHandlerContext> webSocketBackhaulPromise = webSocketTunnelRequested(id, tunnel, webSocketAccessLink);
             final String webSocketBackhaulRequest = id + "->" + target;
 
             if (log.isDebugEnabled()) {
@@ -464,7 +464,7 @@ public class WebSocketTunnelServer {
             waitBackhaulLinkUntilTimeout(webSocketBackhaulPromise);
         } else {
             log.warn("{} Not found tunnel: {}, will close", webSocketAccessLink.channel(), tunnel);
-            WebSocketUtils.policyViolationClose(webSocketAccessLink, "BROKER_NOT_FOUND");
+            WebSocketUtils.policyViolationClose(webSocketAccessLink, "BROKER_UNAVAILABLE");
         }
     }
 
@@ -475,7 +475,7 @@ public class WebSocketTunnelServer {
      * @param webSocketAccessLink 接入链路
      * @return 用于设置回传链接的 promise
      */
-    private Promise<ChannelHandlerContext> webSocketTunnelRequested(final String nodeKey, final String accessRequestId,
+    private Promise<ChannelHandlerContext> webSocketTunnelRequested(final String accessRequestId, final String nodeKey,
                                                                     final ChannelHandlerContext webSocketAccessLink) {
         if (log.isDebugEnabled()) {
             log.debug("{} WebSocket tunnel access link: {}", webSocketAccessLink.channel(), accessRequestId);
@@ -535,7 +535,7 @@ public class WebSocketTunnelServer {
     }
 
     private void waitBackhaulLinkUntilTimeout(final Promise<ChannelHandlerContext> backhaulPromise) throws InterruptedException {
-        if (!backhaulPromise.await(backhaulLinkTimeoutMs, TimeUnit.MICROSECONDS)) {
+        if (!backhaulPromise.await(backhaulLinkTimeoutMs, TimeUnit.MILLISECONDS)) {
             backhaulPromise.tryFailure(new ConnectTimeoutException("backhual link wait timeout"));
         }
     }
@@ -700,7 +700,6 @@ public class WebSocketTunnelServer {
      *
      *
      * ************************ */
-
 
     public Channel forward(final int listenPort, final String nodeKey, final String toHost, final int toPort) throws InterruptedException {
         final Broker broker = this.lookupBroker(nodeKey);
