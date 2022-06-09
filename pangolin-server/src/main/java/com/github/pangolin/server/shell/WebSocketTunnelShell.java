@@ -28,7 +28,7 @@ public class WebSocketTunnelShell {
     public void run() throws IOException {
         if (started.compareAndSet(false, true)) {
             output.println();
-            output.println("Welcome to WebSocket Tunnel!");
+            output.println("Welcome to WebSocket Broker!");
             output.println();
             output.flush();
             while (started.get() && next()) {
@@ -88,12 +88,12 @@ public class WebSocketTunnelShell {
             out.println("Exit");
             reader.close();
             server.shutdownGracefully();
-        } else if ("tunnel".equals(args[0])) {
+        } else if ("broker".equals(args[0])) {
             if (args.length < 2 || ("remove".equals(args[1]) && args.length < 3)) {
-                out.println("Usage: tunnel [ACTION] [TUNNEL]");
+                out.println("Usage: broker [ACTION] [TUNNEL]");
                 out.println();
-                out.println("  list    List information about registered tunnels");
-                out.println("  remove  Remove the registered tunnel");
+                out.println("  list    List information about registered brokers");
+                out.println("  remove  Remove the registered broker");
                 return;
             }
             final String action = args[1];
@@ -106,13 +106,13 @@ public class WebSocketTunnelShell {
                     }
                 }
             } else if ("remove".equals(action)) {
-                final String tunnel = args[2];
-                final WebSocketTunnelServer.Broker broker = server.lookupBroker(tunnel);
+                final String brokerKey = args[2];
+                final WebSocketTunnelServer.Broker broker = server.lookupBroker(brokerKey);
                 if (null == broker) {
-                    out.println(String.format("Tunnel '%s' not exists", tunnel));
+                    out.println(String.format("Broker '%s' not exists", brokerKey));
                 } else {
                     broker.close();
-                    out.println(String.format("Tunnel '%s' removed", tunnel));
+                    out.println(String.format("Broker '%s' removed", brokerKey));
                 }
             }
         } else if ("forward".equals(args[0])) {
@@ -140,12 +140,12 @@ public class WebSocketTunnelShell {
                 }
             } else if ("add".equals(action)) {
                 final int port = Integer.parseInt(args[2]);
-                final String tunnel = args[3];
+                final String broker = args[3];
                 final String target = args[4];
                 final String[] segments = target.split(":", 2);
                 final String hostname = segments[0];
                 final int targetPort = Integer.parseInt(segments[1]);
-                server.forward(port, tunnel, hostname, targetPort);
+                server.forward(port, broker, hostname, targetPort);
                 out.println("OK");
             } else if ("remove".equals(action)) {
                 final int port = Integer.parseInt(args[2]);
@@ -165,11 +165,11 @@ public class WebSocketTunnelShell {
         }
     }
     /*-
-        tunnels     List tunnels
-        ps          List tunnel streams
-        kill        Kill one or more running tunnel streams
+        brokers     List brokers
+        ps          List broker streams
+        kill        Kill one or more running broker streams
 
-        listen      Listen host port and forward to target by tunnel
+        listen      Listen host port and forward to target by broker
         rm          Remove one or more port mappings
      */
 

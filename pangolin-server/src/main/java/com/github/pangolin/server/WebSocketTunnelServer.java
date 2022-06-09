@@ -9,7 +9,17 @@ import com.github.pangolin.util.WebSocketUtils;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ConnectTimeoutException;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
@@ -27,19 +37,35 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
-import io.netty.util.concurrent.*;
+import io.netty.util.concurrent.DefaultThreadFactory;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.FutureListener;
+import io.netty.util.concurrent.GenericFutureListener;
+import io.netty.util.concurrent.GlobalEventExecutor;
+import io.netty.util.concurrent.Promise;
 import jline.Terminal;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
+import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -769,6 +795,14 @@ public class WebSocketTunnelServer {
 
         private final Broker broker;
         private final String target;
+
+        @Override
+        public String toString() {
+            final SocketAddress localAddr = listenChannel.localAddress();
+            final String nodeName = broker.name;
+            final String nodeAddress = broker.intranet + "%" + broker.extranet;
+            return localAddr + " -> " + nodeName + "[" + nodeAddress + "] -> " + target;
+        }
     }
 
 
@@ -967,14 +1001,6 @@ public class WebSocketTunnelServer {
 
         public Broker getNode() {
             return node;
-        }
-
-        @Override
-        public String toString() {
-            final SocketAddress localAddr = serverChannel.localAddress();
-            final String nodeName = node.name;
-            final String nodeAddress = node.intranet + "%" + node.extranet;
-            return localAddr + " -> " + nodeName + "[" + nodeAddress + "] -> " + target;
         }
     }
 

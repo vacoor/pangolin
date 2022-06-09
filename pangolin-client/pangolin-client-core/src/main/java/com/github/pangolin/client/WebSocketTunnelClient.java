@@ -67,7 +67,7 @@ public class WebSocketTunnelClient {
     private final String name;
     private final URI tunnelServerEndpoint;
 
-    private ChannelFuture channelFuture;
+    private volatile ChannelFuture channelFuture;
     private ConnectionState connectionState;
 
     private final AtomicBoolean started = new AtomicBoolean(false);
@@ -173,7 +173,7 @@ public class WebSocketTunnelClient {
                     public void run() {
                         log.error("try to reconnect to tunnel server, uri: {}", "xx");
                         try {
-                            connect();
+                            channelFuture = connect();
                         } catch (final Exception ex) {
                             log.error("reconnect fail: {}", ex.getMessage(), ex);
                         }

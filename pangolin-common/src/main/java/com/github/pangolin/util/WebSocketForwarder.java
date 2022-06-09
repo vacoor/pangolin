@@ -14,7 +14,6 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.EventLoopGroup;
-import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
@@ -25,7 +24,6 @@ import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
-import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
@@ -58,52 +56,15 @@ public class WebSocketForwarder {
      * @return
      * @throws SSLException
      */
-    public static ChannelFuture forwardToWebSocket(final String id,
-                                                   final URI webSocketEndpoint1, final String webSocketProtocol1,
-                                                   final URI webSocketEndpoint2, final String webSocketProtocol2) throws SSLException, InterruptedException {
-        final EventLoopGroup workSocketGroup1 = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-FORWARD-1", true));
-        return launch(
-                webSocketEndpoint1, workSocketGroup1,
-                new HttpClientCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                newWebSocketClientProtocolHandler(webSocketEndpoint1, webSocketProtocol1),
-                new WebSocketForwardingAdapter() {
-                    @Override
-                    protected void initChannelForwarding(final ChannelHandlerContext source) throws Exception {
-
-                        final EventLoopGroup webSocketGroup2 = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-FORWARD-2", true));
-                        launch(
-                                webSocketEndpoint2, webSocketGroup2,
-                                new HttpClientCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                                newWebSocketClientProtocolHandler(webSocketEndpoint2, webSocketProtocol2),
-                                new WebSocketForwardingAdapter() {
-                                    @Override
-                                    protected void initChannelForwarding(final ChannelHandlerContext target) throws Exception {
-                                        target.pipeline().remove(target.handler());
-                                        source.pipeline().remove(source.handler());
-
-                                        target.pipeline().addLast(pipe(source.channel()));
-                                        source.pipeline().addLast(pipe(target.channel()));
-
-                                        target.channel().config().setAutoRead(true);
-                                        source.channel().config().setAutoRead(true);
-                                    }
-                                }
-                        );
-                    }
-                }
-        );
-    }
-
     public static ChannelFuture forwardToWebSocket2(final String id,
                                                     final URI webSocketEndpoint1, final String webSocketProtocol1,
                                                     final URI webSocketEndpoint2, final String webSocketProtocol2) throws SSLException, InterruptedException {
-        return openWebSocket(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingAdapter() {
+        return openWebSocket(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingHandler() {
             @Override
-            protected void initChannelForwarding(final ChannelHandlerContext webSocketContext1) throws Exception {
-
-                openWebSocket(webSocketEndpoint2, webSocketProtocol2, new WebSocketForwardingAdapter() {
+            protected void forwarding(final ChannelHandlerContext webSocketContext1) throws Exception {
+                openWebSocket(webSocketEndpoint2, webSocketProtocol2, new WebSocketForwardingHandler() {
                     @Override
-                    protected void initChannelForwarding(final ChannelHandlerContext webSocketContext2) {
+                    protected void forwarding(final ChannelHandlerContext webSocketContext2) {
                         webSocketContext2.pipeline().remove(webSocketContext2.handler());
                         webSocketContext1.pipeline().remove(webSocketContext1.handler());
 
@@ -118,21 +79,13 @@ public class WebSocketForwarder {
         });
     }
 
-    private static ChannelFuture openWebSocket(final URI webSocketEndpoint, final String webSocketProtocol, final ChannelHandler webSocketHandler) throws SSLException, InterruptedException {
-        final EventLoopGroup webSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-MASTER", true));
-        return launch(
-                webSocketEndpoint, webSocketGroup,
-                new HttpClientCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                newWebSocketClientProtocolHandler(webSocketEndpoint, webSocketProtocol), webSocketHandler
-        );
-    }
 
     public static ChannelFuture forwardToNativeSocket2(final String id,
                                                        final URI webSocketEndpoint1, final String webSocketProtocol1,
                                                        final URI nativeSocketEndpoint) throws SSLException, InterruptedException {
-        return openWebSocket(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingAdapter() {
+        return openWebSocket(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingHandler() {
             @Override
-            protected void initChannelForwarding(final ChannelHandlerContext webSocketContext1) throws Exception {
+            protected void forwarding(final ChannelHandlerContext webSocketContext1) throws Exception {
                 final EventLoopGroup nativeSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
                 launch(nativeSocketEndpoint, nativeSocketGroup, new ChannelInboundHandlerAdapter() {
                     @Override
@@ -150,16 +103,13 @@ public class WebSocketForwarder {
                     }
 
                     @Override
-                    public void channelRead(final ChannelHandlerContext nativeSocketContext, final Object msg) throws Exception {
-                        /*-
-                         * 转发不应该走到这里, 走到这里说明转发逻辑存在问题.
-                         */
+                    public void channelRead(final ChannelHandlerContext nativeSocketContext, final Object msg) {
                         log.warn("{} Software caused forwarding abort: {}", nativeSocketContext.channel(), msg);
                         nativeSocketContext.close();
                     }
 
                     @Override
-                    public void exceptionCaught(final ChannelHandlerContext nativeSocketContext, final Throwable cause) throws Exception {
+                    public void exceptionCaught(final ChannelHandlerContext nativeSocketContext, final Throwable cause) {
                         log.warn("{} Software caused forwarding abort: {}", nativeSocketContext.channel(), cause.getMessage());
                         nativeSocketContext.close();
                     }
@@ -168,86 +118,44 @@ public class WebSocketForwarder {
         });
     }
 
-    public static ChannelFuture forwardToNativeSocket(final String id, final URI webSocketEndpoint, final String webSocketProtocol, final URI nativeSocketEndpoint) throws SSLException, InterruptedException {
-        return openWebSocket(webSocketEndpoint, webSocketProtocol, new WebSocketForwardingAdapter() {
-                    @Override
-                    protected void initChannelForwarding(final ChannelHandlerContext webSocket) throws Exception {
-                        final EventLoopGroup nativeSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
-                        launch(nativeSocketEndpoint, nativeSocketGroup, new ChannelInboundHandlerAdapter() {
-                            @Override
-                            public void channelRegistered(final ChannelHandlerContext nativeSocket) {
-                                // public void channelActive(final ChannelHandlerContext nativeSocket) {
-                                nativeSocket.channel().config().setAutoRead(false);
-
-                                log.debug("{} Connect ({})", nativeSocket.channel(), id);
-
-                                webSocket.pipeline().remove(webSocket.handler());
-                                nativeSocket.pipeline().remove(nativeSocket.handler());
-
-                                webSocket.pipeline().addLast(adaptWebSocketToNativeSocket(nativeSocket.channel()));
-                                nativeSocket.pipeline().addLast(adaptNativeSocketToWebSocket(webSocket.channel()));
-
-                                webSocket.channel().config().setAutoRead(true);
-                                nativeSocket.channel().config().setAutoRead(true);
-
-                                log.debug("{} Connected ({})", webSocket.channel(), id);
-                                log.debug("{} Connect to {} ({})", nativeSocket.channel(), webSocket.channel(), id);
-                            }
-
-                            @Override
-                            public void channelRead(final ChannelHandlerContext nativeSocketContext, final Object msg) throws Exception {
-                                /*-
-                                 * 转发不应该走到这里, 走到这里说明转发逻辑存在问题.
-                                 */
-                                log.warn("{} Software caused forwarding abort: {}", nativeSocketContext.channel(), msg);
-                                nativeSocketContext.close();
-                            }
-
-                            @Override
-                            public void exceptionCaught(final ChannelHandlerContext nativeSocketContext, final Throwable cause) throws Exception {
-                                log.warn("{} Software caused forwarding abort: {}", nativeSocketContext.channel(), cause.getMessage());
-                                nativeSocketContext.close();
-                            }
-                        });
-
-
-                    }
-                }
-        );
-    }
-
-    private static WebSocketClientProtocolHandler newWebSocketClientProtocolHandler(final URI endpoint, final String subprotocol) {
-        return new WebSocketClientProtocolHandler(
-                WebSocketClientHandshakerFactory.newHandshaker(endpoint, WebSocketVersion.V13, subprotocol, true, new DefaultHttpHeaders()),
-                false
-        );
-    }
-
-    private static ChannelFuture launch(final URI endpoint, final EventLoopGroup group, final ChannelHandler... handlers) throws SSLException, InterruptedException {
-        final boolean isSecure = "wss".equalsIgnoreCase(endpoint.getScheme());
+    private static ChannelFuture openWebSocket(final URI webSocketEndpoint, final String webSocketProtocol, final ChannelHandler... webSocketHandlers) throws SSLException, InterruptedException {
+        final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
         final SslContext context = isSecure ? createSslContext() : null;
+        final EventLoopGroup webSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-MASTER", true));
+        return launch(webSocketEndpoint, webSocketGroup, new ChannelInitializer<SocketChannel>() {
+            @Override
+            protected void initChannel(final SocketChannel ch) {
+                final ChannelPipeline cp = ch.pipeline();
+                if (null != context) {
+                    cp.addLast(context.newHandler(ch.alloc()));
+                }
+                cp.addLast(new HttpClientCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
+                cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
+                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, new DefaultHttpHeaders()
+                ), false));
+                cp.addLast(webSocketHandlers);
+            }
+        });
+    }
 
+    public static SslContext createSslContext() throws SSLException {
+        return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
+    }
+
+
+    private static ChannelFuture launch(final URI endpoint, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
         ChannelFuture closeFuture = null;
         try {
             final Bootstrap b = new Bootstrap();
             b.option(ChannelOption.TCP_NODELAY, true);
             b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
-            b.group(group).channel(NioSocketChannel.class).handler(new ChannelInitializer<SocketChannel>() {
-                @Override
-                protected void initChannel(final SocketChannel ch) {
-                    final ChannelPipeline cp = ch.pipeline();
-                    if (null != context) {
-                        cp.addLast(context.newHandler(ch.alloc()));
-                    }
-                    cp.addLast(handlers);
-                }
-            });
+            b.group(group).channel(NioSocketChannel.class).handler(initializer);
             closeFuture = b.connect(endpoint.getHost(), endpoint.getPort()).sync().channel().closeFuture();
         } finally {
             if (null != closeFuture) {
                 closeFuture.addListener(new ChannelFutureListener() {
                     @Override
-                    public void operationComplete(final ChannelFuture future) throws Exception {
+                    public void operationComplete(final ChannelFuture future) {
                         group.shutdownGracefully();
                     }
                 });
@@ -261,7 +169,7 @@ public class WebSocketForwarder {
     /**
      * WebSocket 转发处理器.
      */
-    private abstract static class WebSocketForwardingAdapter extends SimpleChannelInboundHandler<WebSocketFrame> {
+    private abstract static class WebSocketForwardingHandler extends ChannelInboundHandlerAdapter {
 
         @Override
         public void channelActive(final ChannelHandlerContext webSocketContext) {
@@ -273,7 +181,7 @@ public class WebSocketForwarder {
         @Override
         public void userEventTriggered(final ChannelHandlerContext webSocketContext, final Object evt) throws Exception {
             if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
-                this.initChannelForwarding(webSocketContext);
+                this.forwarding(webSocketContext);
             }
         }
 
@@ -283,10 +191,10 @@ public class WebSocketForwarder {
          * @param webSocketContext channel 上下文
          * @throws Exception 如果发生错误
          */
-        protected abstract void initChannelForwarding(final ChannelHandlerContext webSocketContext) throws Exception;
+        protected abstract void forwarding(final ChannelHandlerContext webSocketContext) throws Exception;
 
         @Override
-        protected void channelRead0(final ChannelHandlerContext webSocketContext, final WebSocketFrame msg) throws Exception {
+        public void channelRead(final ChannelHandlerContext webSocketContext, final Object msg) throws Exception {
             /*-
              * 转发不应该走到这里, 走到这里说明转发逻辑存在问题.
              */
@@ -301,26 +209,22 @@ public class WebSocketForwarder {
         }
     }
 
-    public static SslContext createSslContext() throws SSLException {
-        return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-    }
-
     public static ChannelInboundHandlerAdapter pipe(final Channel target) {
         return new ChannelInboundHandlerAdapter() {
             @Override
-            public void channelActive(final ChannelHandlerContext source) throws Exception {
-                source.writeAndFlush(Unpooled.EMPTY_BUFFER);
+            public void channelActive(final ChannelHandlerContext sourceContext) {
+                sourceContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
             }
 
             @Override
-            public void channelInactive(final ChannelHandlerContext sourceChannelContext) throws Exception {
+            public void channelInactive(final ChannelHandlerContext sourceContext) {
                 if (target.isActive()) {
                     target.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             }
 
             @Override
-            public void channelRead(final ChannelHandlerContext source, final Object msg) throws Exception {
+            public void channelRead(final ChannelHandlerContext sourceContext, final Object msg) {
                 if (target.isActive()) {
                     target.writeAndFlush(msg);
                 } else {
@@ -329,9 +233,9 @@ public class WebSocketForwarder {
             }
 
             @Override
-            public void exceptionCaught(final ChannelHandlerContext source, final Throwable cause) throws Exception {
-                log.error("channel pipe to channel error: {}", cause.getMessage(), cause);
-                source.close();
+            public void exceptionCaught(final ChannelHandlerContext sourceContext, final Throwable cause) {
+                log.error("Channel PIPE error: {}", cause.getMessage(), cause);
+                sourceContext.close();
             }
         };
     }
@@ -438,7 +342,7 @@ public class WebSocketForwarder {
     }
 
     public static void main(String[] args) throws Exception {
-        final ChannelFuture future = WebSocketForwarder.forwardToWebSocket("1",
+        final ChannelFuture future = WebSocketForwarder.forwardToWebSocket2("1",
                 URI.create("ws://127.0.0.1:8080/ws/echo"), null,
                 // URI.create("ws://127.0.0.1:2345/tunnel?id=WEBSOCKET-TEST"), "PASSIVE",
                 URI.create("ws://127.0.0.1:8080/ws/print"), null

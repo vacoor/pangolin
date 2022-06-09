@@ -7,10 +7,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
-public class TunnelCompleter implements Completer {
+public class WebSocketBrokerCompleter implements Completer {
     private final WebSocketTunnelServer server;
 
-    public TunnelCompleter(final WebSocketTunnelServer server) {
+    public WebSocketBrokerCompleter(final WebSocketTunnelServer server) {
         this.server = server;
     }
 
