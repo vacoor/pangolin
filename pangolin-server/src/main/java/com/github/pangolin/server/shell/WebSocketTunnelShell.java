@@ -28,7 +28,7 @@ public class WebSocketTunnelShell {
     public void run() throws IOException {
         if (started.compareAndSet(false, true)) {
             output.println();
-            output.println("Welcome to WebSocket Broker!");
+            output.println("Welcome to WebSocket Tunnel!");
             output.println();
             output.flush();
             while (started.get() && next()) {
