@@ -214,7 +214,17 @@ public class WebSocketForwarder {
             @Override
             public void channelRead(final ChannelHandlerContext sourceContext, final Object msg) {
                 if (target.isActive()) {
-                    target.writeAndFlush(msg);
+                    if (msg instanceof ContinuationWebSocketFrame) {
+                        ContinuationWebSocketFrame f = (ContinuationWebSocketFrame) msg;
+                        if (!((ContinuationWebSocketFrame) msg).isFinalFragment()) {
+                            target.write(msg);
+                        } else {
+//                            target.writeAndFlush(new TextWebSocketFrame(f.content()));
+                            target.write(msg);
+                        }
+                    } else {
+                        target.writeAndFlush(msg);
+                    }
                 } else {
                     ReferenceCountUtil.release(msg);
                 }
