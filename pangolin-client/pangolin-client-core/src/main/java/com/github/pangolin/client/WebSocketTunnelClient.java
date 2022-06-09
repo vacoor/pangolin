@@ -171,11 +171,11 @@ public class WebSocketTunnelClient {
                 ctx.channel().eventLoop().schedule(new Runnable() {
                     @Override
                     public void run() {
-                        log.error("try to reconnect to tunnel server, uri: {}", "xx");
+                        // log.debug("try to reconnect to tunnel server, uri: {}", "xx");
                         try {
                             channelFuture = connect();
                         } catch (final Exception ex) {
-                            log.error("reconnect fail: {}", ex.getMessage(), ex);
+                            // log.debug("reconnect fail: {}", ex.getMessage(), ex);
                         }
                     }
                 }, reconnectDelaySeconds, TimeUnit.SECONDS);
