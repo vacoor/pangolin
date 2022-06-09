@@ -12,6 +12,7 @@ import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketClientCompressionHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
@@ -124,8 +125,10 @@ public class WebSocketForwarder {
                     cp.addLast(context.newHandler(ch.alloc()));
                 }
                 cp.addLast(new HttpClientCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
+
+//                cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
                 cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
-                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, new DefaultHttpHeaders()
+                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, false, new DefaultHttpHeaders(), 65536, false, true
                 ), false));
                 cp.addLast(webSocketHandlers);
             }
@@ -213,18 +216,28 @@ public class WebSocketForwarder {
 
             @Override
             public void channelRead(final ChannelHandlerContext sourceContext, final Object msg) {
+                // protected void channelRead0(final ChannelHandlerContext sourceContext, final WebSocketFrame msg) {
                 if (target.isActive()) {
+                    if (!((WebSocketFrame) msg).isFinalFragment()) {
+                        System.out.println("!F: " + msg.getClass());
+//                        target.write(msg);
+                    } else {
+                        System.out.println("F: " + msg.getClass());
+                    }
+                    target.writeAndFlush(msg);
+                    /*
                     if (msg instanceof ContinuationWebSocketFrame) {
                         ContinuationWebSocketFrame f = (ContinuationWebSocketFrame) msg;
                         if (!((ContinuationWebSocketFrame) msg).isFinalFragment()) {
-                            target.write(msg);
+                            target.writeAndFlush(msg);
                         } else {
 //                            target.writeAndFlush(new TextWebSocketFrame(f.content()));
-                            target.write(msg);
+                            target.writeAndFlush(msg);
                         }
                     } else {
                         target.writeAndFlush(msg);
                     }
+                    */
                 } else {
                     ReferenceCountUtil.release(msg);
                 }
@@ -232,7 +245,7 @@ public class WebSocketForwarder {
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext sourceContext, final Throwable cause) {
-                log.error("Channel PIPE error: {}", cause.getMessage(), cause);
+                log.error("Channel PIPE error: {}, {} -> {}", cause.getMessage(), sourceContext.channel(), target, cause);
                 sourceContext.close();
             }
         };

@@ -236,8 +236,8 @@ public class WebSocketTunnelServer {
                 pipeline.addLast(
                         new HttpServerCodec(),
                         new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                        new WebSocketServerCompressionHandler(),
-                        new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, MAX_HTTP_CONTENT_LENGTH, false, true),
+//                        new WebSocketServerCompressionHandler(),
+                        new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, false, 65536, true, true),
                         new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
                         createWebSocketTunnelServerHandler()
                 );
