@@ -656,7 +656,7 @@ public class WebSocketTunnelServer {
         final PipedOutputStream out = new PipedOutputStream();
         final PipedInputStream innerIn = new PipedInputStream(out);
         final OutputStream innerOut = new WebSocketBinaryOutputStream(webSocketTunnelContext);
-        final Terminal terminal = new WebSocketTerminal();
+        final WebSocketTerminal terminal = new WebSocketTerminal();
         final LineReader reader = new ConsoleLineReader(this, innerIn, innerOut, terminal);
         new WebSocketTunnelShell(this, reader, new PrintStream(innerOut)).start();
 
@@ -674,10 +674,10 @@ public class WebSocketTunnelServer {
                     if ("\u0009\u0011".equals(command)) {
                         final String[] dimension = commandArgs.split("x", 2);
                         try {
-                            final int cols = Integer.valueOf(dimension[0]);
-                            final int rows = Integer.valueOf(dimension[1]);
-                            ((WebSocketTerminal) terminal).setCols(cols);
-                            ((WebSocketTerminal) terminal).setRows(rows);
+                            final int cols = Integer.parseInt(dimension[0]);
+                            final int rows = Integer.parseInt(dimension[1]);
+                            terminal.setCols(cols);
+                            terminal.setRows(rows);
                         } catch (final NumberFormatException ignore) {
                             log.error("Execute command '{}' error", message, ignore);
                         }
