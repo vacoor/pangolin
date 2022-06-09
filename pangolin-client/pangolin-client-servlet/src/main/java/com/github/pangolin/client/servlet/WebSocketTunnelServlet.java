@@ -26,7 +26,7 @@ public class WebSocketTunnelServlet extends HttpServlet {
             final ServletContext context = httpRequest.getServletContext();
             final WebSocketTunnelClient client = (WebSocketTunnelClient) context.getAttribute(TUNNEL_KEY);
             if (null != client) {
-                if (client.isRunning() && serverUrl.equals(client.getTunnelServerEndpoint())) {
+                if (client.isRunning() && serverUrl.equals(client.getServerEndpoint())) {
                     httpResponse.getWriter().write("READY");
                     return;
                 }
@@ -36,7 +36,11 @@ public class WebSocketTunnelServlet extends HttpServlet {
             final String localAddr = httpRequest.getLocalAddr();
             final int localPort = httpRequest.getLocalPort();
             final WebSocketTunnelClient newClient = new WebSocketTunnelClient(localAddr + "." + localPort, serverUrl);
-            newClient.start();
+            try {
+                newClient.start();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
             context.setAttribute(TUNNEL_KEY, newClient);
             httpResponse.getWriter().write("CLIENT_START");
         } else {

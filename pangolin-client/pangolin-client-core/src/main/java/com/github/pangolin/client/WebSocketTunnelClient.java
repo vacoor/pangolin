@@ -2,33 +2,14 @@ package com.github.pangolin.client;
 
 import com.github.pangolin.util.WebSocketForwarder;
 import com.github.pangolin.util.WebSocketUtils;
-import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandler;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelOutboundHandlerAdapter;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ChannelPromise;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.codec.http.DefaultHttpHeaders;
-import io.netty.handler.codec.http.HttpClientCodec;
-import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
-import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler.ClientHandshakeStateEvent;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketVersion;
-import io.netty.handler.ssl.SslContext;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.concurrent.DefaultThreadFactory;
@@ -47,11 +28,6 @@ import java.util.regex.Pattern;
 @Slf4j
 public class WebSocketTunnelClient {
     /**
-     * 最大 HTTP 内容长度.
-     */
-    private static final int MAX_HTTP_CONTENT_LENGTH = 1024 * 1024 * 8;
-
-    /**
      * 节点注册协议.
      */
     private static final String NODE_REGISTER_PROTOCOL = "PASSIVE-REG";
@@ -65,7 +41,7 @@ public class WebSocketTunnelClient {
     private final EventLoopGroup workerGroup = new NioEventLoopGroup(2, new DefaultThreadFactory("WebSocket-Tunnel-Client", true));
 
     private final String name;
-    private final URI tunnelServerEndpoint;
+    private final URI serverEndpoint;
 
     private volatile ChannelFuture channelFuture;
     private ConnectionState connectionState;
@@ -77,20 +53,16 @@ public class WebSocketTunnelClient {
      */
     private int reconnectDelaySeconds = 5;
 
-    public WebSocketTunnelClient(final String name, final URI tunnelServerEndpoint) {
+    public WebSocketTunnelClient(final String name, final URI serverEndpoint) {
         this.name = name;
-        this.tunnelServerEndpoint = getRegisterUri(tunnelServerEndpoint, name);
+        this.serverEndpoint = serverEndpoint;
     }
 
-    public URI getTunnelServerEndpoint() {
-        return tunnelServerEndpoint;
+    public URI getServerEndpoint() {
+        return serverEndpoint;
     }
 
-    private URI getRegisterUri(final URI uri, final String tunnelName) {
-        return URI.create(uri.getScheme() + "://" + uri.getHost() + ":" + uri.getPort() + uri.getPath() + "?id=" + tunnelName);
-    }
-
-    public ChannelFuture start() throws IOException {
+    public ChannelFuture start() throws IOException, InterruptedException {
         return channelFuture = connect();
     }
 
@@ -105,61 +77,20 @@ public class WebSocketTunnelClient {
         workerGroup.shutdownGracefully();
     }
 
-    private ChannelFuture connect() throws IOException {
+    private ChannelFuture connect() throws IOException, InterruptedException {
         return connect(createWebSocketTunnelClientHandler());
     }
 
-    private ChannelFuture connect(final ChannelInboundHandler... handlers) throws IOException {
-        final boolean isSecure = "wss".equalsIgnoreCase(tunnelServerEndpoint.getScheme());
-        final int portToUse = 0 < tunnelServerEndpoint.getPort() ? tunnelServerEndpoint.getPort() : (isSecure ? 443 : 80);
-        final String hostnameToUse = null != tunnelServerEndpoint.getHost() ? tunnelServerEndpoint.getHost() : "127.0.0.1";
-
-        final SslContext sslContext = isSecure ? WebSocketForwarder.createSslContext() : null;
-        final WebSocketClientHandshaker webSocketHandshaker = WebSocketClientHandshakerFactory.newHandshaker(
-                tunnelServerEndpoint, WebSocketVersion.V13, NODE_REGISTER_PROTOCOL, true, new DefaultHttpHeaders()
-        );
-
-        final Bootstrap b = new Bootstrap();
-        b.option(ChannelOption.TCP_NODELAY, true).option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
-        b.group(workerGroup).channel(NioSocketChannel.class).remoteAddress(hostnameToUse, portToUse).handler(new ChannelInitializer<SocketChannel>() {
+    private ChannelFuture connect(final ChannelHandler... handlers) throws IOException, InterruptedException {
+        return WebSocketForwarder.openWebSocket(serverEndpoint, NODE_REGISTER_PROTOCOL, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();
-                if (null != sslContext) {
-                    cp.addLast(sslContext.newHandler(ch.alloc()));
-                }
-                cp.addLast(
-                        new HttpClientCodec(),
-                        new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                        new WebSocketClientProtocolHandler(webSocketHandshaker),
-                        new IdleStateHandler(0, 0, 50)
-                );
-
-                /*-
-                 * 添加请求头.
-                 */
-                cp.addLast(new ChannelOutboundHandlerAdapter() {
-                    @Override
-                    public void write(final ChannelHandlerContext ctx, final Object msg, final ChannelPromise promise) throws Exception {
-                        if (msg instanceof HttpRequest) {
-                            final HttpRequest httpRequest = (HttpRequest) msg;
-                            final SocketAddress socketAddress = ctx.channel().localAddress();
-                            String addressToUse = socketAddress.toString();
-                            if (socketAddress instanceof InetSocketAddress) {
-                                final InetSocketAddress address = (InetSocketAddress) socketAddress;
-                                addressToUse = address.getAddress().getHostAddress();
-                            }
-                            httpRequest.headers().set("X-Node-Name", name);
-                            httpRequest.headers().set("X-Node-Version", "1.0");
-                            httpRequest.headers().set("X-Node-Intranet", addressToUse);
-                        }
-                        super.write(ctx, msg, promise);
-                    }
-                });
+                cp.addLast(new IdleStateHandler(0, 0, 50));
+                cp.addLast(new WebSocketTunnelHeaderHandler(name));
                 cp.addLast(handlers);
             }
         });
-        return b.connect();
     }
 
     private SimpleChannelInboundHandler<WebSocketFrame> createWebSocketTunnelClientHandler() {
@@ -189,7 +120,6 @@ public class WebSocketTunnelClient {
                     log.info("handshake complete");
                     connectionState = ConnectionState.SUSPENDED.equals(connectionState) ? ConnectionState.RECONNECTED : ConnectionState.CONNECTED;
                 } else if (evt instanceof IdleStateEvent) {
-                    log.debug("ping");
                     webSocket.writeAndFlush(new PingWebSocketFrame());
                 } else {
                     super.userEventTriggered(webSocket, evt);
@@ -221,7 +151,7 @@ public class WebSocketTunnelClient {
             final String id = segments[0];
             final URI target = URI.create(segments[1]);
             try {
-                final String endpoint = tunnelServerEndpoint.getScheme() + "://" + tunnelServerEndpoint.getHost() + ":" + tunnelServerEndpoint.getPort() + tunnelServerEndpoint.getPath();
+                final String endpoint = serverEndpoint.getScheme() + "://" + serverEndpoint.getHost() + ":" + serverEndpoint.getPort() + serverEndpoint.getPath();
                 if ("tcp".equalsIgnoreCase(target.getScheme())) {
                     WebSocketForwarder.forwardToNativeSocket2(id, URI.create(endpoint + "?id=" + id), "PASSIVE", target);
                 } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
@@ -232,6 +162,32 @@ public class WebSocketTunnelClient {
                 WebSocketUtils.internalErrorClose(webSocket, ex.getMessage());
             }
         }
+    }
+
+    class WebSocketTunnelHeaderHandler extends ChannelOutboundHandlerAdapter {
+        private final String name;
+
+        private WebSocketTunnelHeaderHandler(final String name) {
+            this.name = name;
+        }
+
+        @Override
+        public void write(final ChannelHandlerContext webSocketContext, final Object msg, final ChannelPromise promise) throws Exception {
+            if (msg instanceof HttpRequest) {
+                final HttpRequest httpRequest = (HttpRequest) msg;
+                final SocketAddress socketAddress = webSocketContext.channel().localAddress();
+                String addressToUse = socketAddress.toString();
+                if (socketAddress instanceof InetSocketAddress) {
+                    final InetSocketAddress address = (InetSocketAddress) socketAddress;
+                    addressToUse = address.getAddress().getHostAddress();
+                }
+                httpRequest.headers().set("X-Node-Name", name);
+                httpRequest.headers().set("X-Node-Version", "1.0");
+                httpRequest.headers().set("X-Node-Intranet", addressToUse);
+            }
+            super.write(webSocketContext, msg, promise);
+        }
+
     }
 
     public static void main(String[] args) throws Exception {

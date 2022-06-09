@@ -4,27 +4,14 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
-import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
-import io.netty.handler.codec.http.websocketx.WebSocketVersion;
+import io.netty.handler.codec.http.websocketx.*;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
@@ -62,9 +49,12 @@ public class WebSocketForwarder {
         return openWebSocket(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingHandler() {
             @Override
             protected void forwarding(final ChannelHandlerContext webSocketContext1) throws Exception {
+                webSocketContext1.channel().config().setAutoRead(false);
                 openWebSocket(webSocketEndpoint2, webSocketProtocol2, new WebSocketForwardingHandler() {
                     @Override
                     protected void forwarding(final ChannelHandlerContext webSocketContext2) {
+                        webSocketContext2.channel().config().setAutoRead(false);
+
                         webSocketContext2.pipeline().remove(webSocketContext2.handler());
                         webSocketContext1.pipeline().remove(webSocketContext1.handler());
 
@@ -86,8 +76,10 @@ public class WebSocketForwarder {
         return openWebSocket(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingHandler() {
             @Override
             protected void forwarding(final ChannelHandlerContext webSocketContext1) throws Exception {
+                webSocketContext1.channel().config().setAutoRead(false);
+
                 final EventLoopGroup nativeSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
-                launch(nativeSocketEndpoint, nativeSocketGroup, new ChannelInboundHandlerAdapter() {
+                launch(nativeSocketEndpoint.getHost(), nativeSocketEndpoint.getPort(), nativeSocketGroup, new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRegistered(final ChannelHandlerContext nativeSocketContext) {
                         nativeSocketContext.channel().config().setAutoRead(false);
@@ -98,8 +90,8 @@ public class WebSocketForwarder {
                         nativeSocketContext.pipeline().addLast(adaptNativeSocketToWebSocket(webSocketContext1.channel()));
                         webSocketContext1.pipeline().addLast(adaptWebSocketToNativeSocket(nativeSocketContext.channel()));
 
-                        nativeSocketContext.channel().config().setAutoRead(true);
-                        webSocketContext1.channel().config().setAutoRead(true);
+//                        nativeSocketContext.channel().config().setAutoRead(true);
+//                        webSocketContext1.channel().config().setAutoRead(true);
                     }
 
                     @Override
@@ -118,11 +110,13 @@ public class WebSocketForwarder {
         });
     }
 
-    private static ChannelFuture openWebSocket(final URI webSocketEndpoint, final String webSocketProtocol, final ChannelHandler... webSocketHandlers) throws SSLException, InterruptedException {
+    public static ChannelFuture openWebSocket(final URI webSocketEndpoint, final String webSocketProtocol, final ChannelHandler... webSocketHandlers) throws SSLException, InterruptedException {
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
         final SslContext context = isSecure ? createSslContext() : null;
+        final int portToUse = 0 < webSocketEndpoint.getPort() ? webSocketEndpoint.getPort() : (isSecure ? 443 : 80);
+
         final EventLoopGroup webSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-MASTER", true));
-        return launch(webSocketEndpoint, webSocketGroup, new ChannelInitializer<SocketChannel>() {
+        return launch(webSocketEndpoint.getHost(), portToUse, webSocketGroup, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) {
                 final ChannelPipeline cp = ch.pipeline();
@@ -143,17 +137,17 @@ public class WebSocketForwarder {
     }
 
 
-    private static ChannelFuture launch(final URI endpoint, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
-        ChannelFuture closeFuture = null;
+    private static ChannelFuture launch(final String host, final int port, final EventLoopGroup group, final ChannelHandler initializer) {
+        ChannelFuture channelFuture = null;
         try {
             final Bootstrap b = new Bootstrap();
             b.option(ChannelOption.TCP_NODELAY, true);
             b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
             b.group(group).channel(NioSocketChannel.class).handler(initializer);
-            closeFuture = b.connect(endpoint.getHost(), endpoint.getPort()).sync().channel().closeFuture();
+            channelFuture = b.connect(host, port);
         } finally {
-            if (null != closeFuture) {
-                closeFuture.addListener(new ChannelFutureListener() {
+            if (null != channelFuture) {
+                channelFuture.channel().closeFuture().addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(final ChannelFuture future) {
                         group.shutdownGracefully();
@@ -163,7 +157,7 @@ public class WebSocketForwarder {
                 group.shutdownGracefully();
             }
         }
-        return closeFuture;
+        return channelFuture;
     }
 
     /**
@@ -172,15 +166,9 @@ public class WebSocketForwarder {
     private abstract static class WebSocketForwardingHandler extends ChannelInboundHandlerAdapter {
 
         @Override
-        public void channelActive(final ChannelHandlerContext webSocketContext) {
-            webSocketContext.channel().config().setAutoRead(false);
-            // read websocket handshake
-            webSocketContext.read();
-        }
-
-        @Override
         public void userEventTriggered(final ChannelHandlerContext webSocketContext, final Object evt) throws Exception {
-            if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+            // if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+            if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
                 this.forwarding(webSocketContext);
             }
         }
@@ -355,7 +343,7 @@ public class WebSocketForwarder {
                 URI.create("ws://139.196.88.115:22")
         );
         */
-        future.await();
+        future.channel().closeFuture().await();
         System.out.println("Wait over");
     }
 }
