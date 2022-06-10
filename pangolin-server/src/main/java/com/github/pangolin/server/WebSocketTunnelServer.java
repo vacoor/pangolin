@@ -43,7 +43,6 @@ import io.netty.util.concurrent.FutureListener;
 import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.concurrent.Promise;
-import jline.Terminal;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -236,8 +235,10 @@ public class WebSocketTunnelServer {
                 pipeline.addLast(
                         new HttpServerCodec(),
                         new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                        // new WebSocketServerCompressionHandler(),
-                        // new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
+                        /*- 浏览器似乎处理压缩有问题, permessage-deflate
+                        new WebSocketServerCompressionHandler(),
+                        new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
+                        */
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, false, 65536, true, true),
                         new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
                         createWebSocketTunnelServerHandler()

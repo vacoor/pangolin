@@ -5,6 +5,9 @@ import com.github.pangolin.util.WebSocketUtils;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaderValues;
+import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -87,7 +90,7 @@ public class WebSocketTunnelClient {
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();
                 cp.addLast(new IdleStateHandler(0, 0, 50));
-                cp.addLast(new WebSocketTunnelHeaderHandler(name));
+                cp.addLast(new WebSocketTunnelHandshakeHandler(name));
                 cp.addLast(handlers);
             }
         });
@@ -164,28 +167,37 @@ public class WebSocketTunnelClient {
         }
     }
 
-    class WebSocketTunnelHeaderHandler extends ChannelOutboundHandlerAdapter {
+    class WebSocketTunnelHandshakeHandler extends ChannelOutboundHandlerAdapter {
         private final String name;
 
-        private WebSocketTunnelHeaderHandler(final String name) {
+        private WebSocketTunnelHandshakeHandler(final String name) {
             this.name = name;
         }
 
         @Override
-        public void write(final ChannelHandlerContext webSocketContext, final Object msg, final ChannelPromise promise) throws Exception {
+        public void write(final ChannelHandlerContext ctx, final Object msg, final ChannelPromise promise) throws Exception {
             if (msg instanceof HttpRequest) {
-                final HttpRequest httpRequest = (HttpRequest) msg;
-                final SocketAddress socketAddress = webSocketContext.channel().localAddress();
-                String addressToUse = socketAddress.toString();
-                if (socketAddress instanceof InetSocketAddress) {
-                    final InetSocketAddress address = (InetSocketAddress) socketAddress;
-                    addressToUse = address.getAddress().getHostAddress();
+                final HttpHeaders httpHeaders = ((HttpRequest) msg).headers();
+                if (httpHeaders.contains(HttpHeaderNames.UPGRADE, HttpHeaderValues.WEBSOCKET, true)) {
+                    final SocketAddress socketAddress = ctx.channel().localAddress();
+                    String addressToUse = socketAddress.toString();
+                    if (socketAddress instanceof InetSocketAddress) {
+                        final InetSocketAddress address = (InetSocketAddress) socketAddress;
+                        addressToUse = address.getAddress().getHostAddress();
+                    }
+                    httpHeaders.set("X-Node-Name", name);
+                    httpHeaders.set("X-Node-Version", "1.0");
+                    httpHeaders.set("X-Node-Intranet", addressToUse);
+
+                    promise.addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(ChannelFuture future) {
+                            ctx.pipeline().remove(ctx.name());
+                        }
+                    });
                 }
-                httpRequest.headers().set("X-Node-Name", name);
-                httpRequest.headers().set("X-Node-Version", "1.0");
-                httpRequest.headers().set("X-Node-Intranet", addressToUse);
             }
-            super.write(webSocketContext, msg, promise);
+            super.write(ctx, msg, promise);
         }
 
     }

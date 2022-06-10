@@ -22,9 +22,9 @@ class WebSocketTunnelHandler extends SimpleChannelInboundHandler<WebSocketFrame>
     public void handlerAdded(final ChannelHandlerContext webSocketContext) {
         /*
         final ChannelPipeline cp = webSocketContext.pipeline();
-        if (null == cp.get(WebSocketTunnelHeaderHandler.class)) {
-            final WebSocketTunnelHeaderHandler handler = new WebSocketTunnelHeaderHandler(name);
-            cp.addBefore(webSocketContext.name(), WebSocketTunnelHeaderHandler.class.getName(), handler);
+        if (null == cp.get(WebSocketTunnelHandshakeHandler.class)) {
+            final WebSocketTunnelHandshakeHandler handler = new WebSocketTunnelHandshakeHandler(name);
+            cp.addBefore(webSocketContext.name(), WebSocketTunnelHandshakeHandler.class.getName(), handler);
         }
         */
     }

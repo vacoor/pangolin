@@ -24,7 +24,6 @@ import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
-import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketClientCompressionHandler;
 import io.netty.handler.ssl.SslContext;
@@ -229,28 +228,8 @@ public class WebSocketForwarder {
 
             @Override
             public void channelRead(final ChannelHandlerContext sourceContext, final Object msg) {
-                // protected void channelRead0(final ChannelHandlerContext sourceContext, final WebSocketFrame msg) {
                 if (target.channel().isActive()) {
-                    if (!((WebSocketFrame) msg).isFinalFragment()) {
-                        System.out.println("!F: " + msg.getClass());
-//                        target.write(msg);
-                    } else {
-                        System.out.println("F: " + msg.getClass());
-                    }
                     target.writeAndFlush(msg);
-                    /*
-                    if (msg instanceof ContinuationWebSocketFrame) {
-                        ContinuationWebSocketFrame f = (ContinuationWebSocketFrame) msg;
-                        if (!((ContinuationWebSocketFrame) msg).isFinalFragment()) {
-                            target.writeAndFlush(msg);
-                        } else {
-//                            target.writeAndFlush(new TextWebSocketFrame(f.content()));
-                            target.writeAndFlush(msg);
-                        }
-                    } else {
-                        target.writeAndFlush(msg);
-                    }
-                    */
                 } else {
                     ReferenceCountUtil.release(msg);
                 }
