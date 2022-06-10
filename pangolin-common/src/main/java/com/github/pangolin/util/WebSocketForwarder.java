@@ -4,14 +4,28 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketClientCompressionHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
@@ -59,8 +73,8 @@ public class WebSocketForwarder {
                         webSocketContext2.pipeline().remove(webSocketContext2.handler());
                         webSocketContext1.pipeline().remove(webSocketContext1.handler());
 
-                        webSocketContext2.pipeline().addLast(pipe(webSocketContext1.channel()));
-                        webSocketContext1.pipeline().addLast(pipe(webSocketContext2.channel()));
+                        webSocketContext2.pipeline().addLast(pipe(webSocketContext1));
+                        webSocketContext1.pipeline().addLast(pipe(webSocketContext2));
 
                         webSocketContext2.channel().config().setAutoRead(true);
                         webSocketContext1.channel().config().setAutoRead(true);
@@ -125,10 +139,9 @@ public class WebSocketForwarder {
                     cp.addLast(context.newHandler(ch.alloc()));
                 }
                 cp.addLast(new HttpClientCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
-
-//                cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
+                cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
                 cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
-                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, false, new DefaultHttpHeaders(), 65536, false, true
+                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, new DefaultHttpHeaders(), 65536, false, true
                 ), false));
                 cp.addLast(webSocketHandlers);
             }
@@ -200,7 +213,7 @@ public class WebSocketForwarder {
         }
     }
 
-    public static ChannelInboundHandlerAdapter pipe(final Channel target) {
+    public static ChannelInboundHandlerAdapter pipe(final ChannelHandlerContext target) {
         return new ChannelInboundHandlerAdapter() {
             @Override
             public void channelActive(final ChannelHandlerContext sourceContext) {
@@ -209,7 +222,7 @@ public class WebSocketForwarder {
 
             @Override
             public void channelInactive(final ChannelHandlerContext sourceContext) {
-                if (target.isActive()) {
+                if (target.channel().isActive()) {
                     target.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             }
@@ -217,7 +230,7 @@ public class WebSocketForwarder {
             @Override
             public void channelRead(final ChannelHandlerContext sourceContext, final Object msg) {
                 // protected void channelRead0(final ChannelHandlerContext sourceContext, final WebSocketFrame msg) {
-                if (target.isActive()) {
+                if (target.channel().isActive()) {
                     if (!((WebSocketFrame) msg).isFinalFragment()) {
                         System.out.println("!F: " + msg.getClass());
 //                        target.write(msg);

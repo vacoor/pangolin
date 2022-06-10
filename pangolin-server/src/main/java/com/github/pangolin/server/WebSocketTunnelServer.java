@@ -236,7 +236,8 @@ public class WebSocketTunnelServer {
                 pipeline.addLast(
                         new HttpServerCodec(),
                         new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-//                        new WebSocketServerCompressionHandler(),
+                        // new WebSocketServerCompressionHandler(),
+                        // new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, false, 65536, true, true),
                         new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
                         createWebSocketTunnelServerHandler()
@@ -524,8 +525,8 @@ public class WebSocketTunnelServer {
                     webSocketAccessLink.pipeline().remove(webSocketAccessLink.handler());
                     webSocketBackhaulLink.pipeline().remove(webSocketBackhaulLink.handler());
 
-                    webSocketAccessLink.pipeline().addLast(WebSocketForwarder.pipe(webSocketBackhaulLink.channel()));
-                    webSocketBackhaulLink.pipeline().addLast(WebSocketForwarder.pipe(webSocketAccessLink.channel()));
+                    webSocketAccessLink.pipeline().addLast(WebSocketForwarder.pipe(webSocketBackhaulLink));
+                    webSocketBackhaulLink.pipeline().addLast(WebSocketForwarder.pipe(webSocketAccessLink));
 
                     webSocketAccessLink.channel().config().setAutoRead(true);
                     webSocketBackhaulLink.channel().config().setAutoRead(true);
