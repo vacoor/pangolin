@@ -478,8 +478,9 @@ public class WebSocketTunnelServer {
         final String tunnel = parameters.get("tunnel");
         final String target = parameters.get("target");
 
-        final ChannelHandlerContext bus = lookupBroker(tunnel).bus;
-        if (null != bus) {
+        final Broker broker = lookupBroker(tunnel);
+        if (null != broker) {
+            final ChannelHandlerContext bus = broker.bus;
             final String id = "ws:" + id(webSocketAccessLink.channel());
             final Promise<ChannelHandlerContext> webSocketBackhaulPromise = webSocketTunnelRequested(id, tunnel, webSocketAccessLink);
             final String webSocketBackhaulRequest = id + "->" + target;
@@ -492,7 +493,7 @@ public class WebSocketTunnelServer {
             waitBackhaulLinkUntilTimeout(webSocketBackhaulPromise);
         } else {
             log.warn("{} Not found tunnel: {}, will close", webSocketAccessLink.channel(), tunnel);
-            WebSocketUtils.policyViolationClose(webSocketAccessLink, "BROKER_UNAVAILABLE");
+            WebSocketUtils.policyViolationClose(webSocketAccessLink, "Broker unavailable");
         }
     }
 

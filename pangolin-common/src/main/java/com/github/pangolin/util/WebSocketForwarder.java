@@ -31,6 +31,8 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
@@ -64,6 +66,7 @@ public class WebSocketForwarder {
             @Override
             protected void forwarding(final ChannelHandlerContext webSocketContext1) throws Exception {
                 webSocketContext1.channel().config().setAutoRead(false);
+
                 openWebSocket(webSocketEndpoint2, webSocketProtocol2, new WebSocketForwardingHandler() {
                     @Override
                     protected void forwarding(final ChannelHandlerContext webSocketContext2) {
@@ -77,6 +80,13 @@ public class WebSocketForwarder {
 
                         webSocketContext2.channel().config().setAutoRead(true);
                         webSocketContext1.channel().config().setAutoRead(true);
+                    }
+                }).channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
+                    @Override
+                    public void operationComplete(final Future<? super Void> future) throws Exception {
+                        if (webSocketContext1.channel().isActive()) {
+                            WebSocketUtils.policyViolationClose(webSocketContext1, "Destination unavailable");
+                        }
                     }
                 });
             }
@@ -104,8 +114,8 @@ public class WebSocketForwarder {
                         nativeSocketContext.pipeline().addLast(adaptNativeSocketToWebSocket(webSocketContext1.channel()));
                         webSocketContext1.pipeline().addLast(adaptWebSocketToNativeSocket(nativeSocketContext.channel()));
 
-//                        nativeSocketContext.channel().config().setAutoRead(true);
-//                        webSocketContext1.channel().config().setAutoRead(true);
+                        nativeSocketContext.channel().config().setAutoRead(true);
+                        webSocketContext1.channel().config().setAutoRead(true);
                     }
 
                     @Override
@@ -118,6 +128,13 @@ public class WebSocketForwarder {
                     public void exceptionCaught(final ChannelHandlerContext nativeSocketContext, final Throwable cause) {
                         log.warn("{} Software caused forwarding abort: {}", nativeSocketContext.channel(), cause.getMessage());
                         nativeSocketContext.close();
+                    }
+                }).channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
+                    @Override
+                    public void operationComplete(final Future<? super Void> future) throws Exception {
+                        if (webSocketContext1.channel().isActive()) {
+                            WebSocketUtils.policyViolationClose(webSocketContext1, "Destination unavailable");
+                        }
                     }
                 });
             }
