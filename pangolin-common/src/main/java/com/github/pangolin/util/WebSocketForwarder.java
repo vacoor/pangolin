@@ -232,23 +232,31 @@ public class WebSocketForwarder {
             @Override
             public void channelInactive(final ChannelHandlerContext sourceWebSocketContext) {
                 if (targetWebSocketContext.channel().isActive()) {
-                    log.warn("{} WebSocket PIPE the input has been closed, the output will be closed: {}", sourceWebSocketContext.channel(), targetWebSocketContext.channel());
+                    log.info("{} WebSocket PIPE the input has been closed, the output will be closed: {}", sourceWebSocketContext.channel(), targetWebSocketContext.channel());
+                    /*-
+                     * 如果正常关闭, channelRead 中会写入 close frame, 这里直接等待写入完成关闭即可.
+                     */
                     targetWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             }
 
             @Override
             public void channelRead(final ChannelHandlerContext sourceWebSocketContext, final Object msg) {
-                if (targetWebSocketContext.channel().isActive()) {
-                    targetWebSocketContext.writeAndFlush(msg);
-                } else {
-                    ReferenceCountUtil.release(msg);
-                }
+                ReferenceCountUtil.retain(msg);
+                try {
+                    if (targetWebSocketContext.channel().isActive()) {
+                        targetWebSocketContext.writeAndFlush(msg);
+                    } else {
+                        ReferenceCountUtil.release(msg);
+                    }
 
-                if (msg instanceof CloseWebSocketFrame) {
-                    final CloseWebSocketFrame c = (CloseWebSocketFrame) msg;
-                    log.info("{} WebSocket connection closed by {}/{}", sourceWebSocketContext.channel(), c.statusCode(), c.reasonText());
-                    sourceWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    if (msg instanceof CloseWebSocketFrame) {
+                        final CloseWebSocketFrame c = (CloseWebSocketFrame) msg;
+                        log.info("{} WebSocket connection closed by {}/{}", sourceWebSocketContext.channel(), c.statusCode(), c.reasonText());
+                        sourceWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    }
+                } finally {
+                    ReferenceCountUtil.release(msg);
                 }
             }
 
@@ -314,8 +322,8 @@ public class WebSocketForwarder {
     public static ChannelInboundHandlerAdapter adaptWebSocketToNativeSocket(final ChannelHandlerContext nativeSocketContext) {
         return new ChannelInboundHandlerAdapter() {
             @Override
-            public void channelActive(final ChannelHandlerContext webSocket) {
-                webSocket.writeAndFlush(Unpooled.EMPTY_BUFFER);
+            public void channelActive(final ChannelHandlerContext webSocketContext) {
+                webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
             }
 
             @Override
@@ -335,8 +343,12 @@ public class WebSocketForwarder {
                     } else if (msg instanceof CloseWebSocketFrame) {
                         final CloseWebSocketFrame c = (CloseWebSocketFrame) msg;
                         log.info("{} WebSocket connection closed by {}/{}", webSocketContext.channel(), c.statusCode(), c.reasonText());
-                        webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                        nativeSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                        try {
+                            webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                            nativeSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                        } finally {
+                            c.release();
+                        }
                     } else {
                         throw new UnsupportedOperationException("Unexpect websocket message: " + msg);
                     }
