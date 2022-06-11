@@ -16,7 +16,10 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
@@ -209,16 +212,7 @@ public class WebSocketTunnelServer {
                         new WebSocketServerCompressionHandler(),
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
                         */
-                        new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, false, 65536, true, true) {
-                            @Override
-                            protected void decode(final ChannelHandlerContext ctx, final WebSocketFrame frame, final List<Object> out) throws Exception {
-                                if (frame instanceof CloseWebSocketFrame) {
-                                    out.add(frame.retain());
-                                    return;
-                                }
-                                super.decode(ctx, frame, out);
-                            }
-                        },
+                        new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, false, 65536, true, true),
                         new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
                         createWebSocketTunnelServerHandler()
                 );

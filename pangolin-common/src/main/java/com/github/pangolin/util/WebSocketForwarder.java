@@ -7,6 +7,7 @@ import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
@@ -23,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
 import java.net.URI;
+import java.util.List;
 
 /**
  * WebSocket 数据转发.
@@ -232,34 +234,58 @@ public class WebSocketForwarder {
             @Override
             public void channelInactive(final ChannelHandlerContext sourceWebSocketContext) {
                 if (targetWebSocketContext.channel().isActive()) {
-                    log.info("{} WebSocket PIPE the input has been closed, the output will be closed: {}", sourceWebSocketContext.channel(), targetWebSocketContext.channel());
-                    /*-
-                     * 如果正常关闭, channelRead 中会写入 close frame, 这里直接等待写入完成关闭即可.
-                     */
+                    // 非正常关闭, 另一侧可能没有关闭.
+                    log.warn("{} WebSocket PIPE the input has been closed, the output will be closed: {}", sourceWebSocketContext.channel(), targetWebSocketContext.channel());
                     targetWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             }
 
             @Override
             public void channelRead(final ChannelHandlerContext sourceWebSocketContext, final Object msg) {
-                ReferenceCountUtil.retain(msg);
-                try {
-                    if (targetWebSocketContext.channel().isActive()) {
-                        targetWebSocketContext.writeAndFlush(msg);
-                    } else {
-                        ReferenceCountUtil.release(msg);
-                    }
-
-                    if (msg instanceof CloseWebSocketFrame) {
-                        final CloseWebSocketFrame c = (CloseWebSocketFrame) msg;
-                        log.info("{} WebSocket connection closed by {}/{}", sourceWebSocketContext.channel(), c.statusCode(), c.reasonText());
-                        sourceWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                    }
-                } finally {
+                if (targetWebSocketContext.channel().isActive()) {
+                    targetWebSocketContext.writeAndFlush(msg);
+                } else {
                     ReferenceCountUtil.release(msg);
+                }
+
+                /*-
+                 * 对于 CloseWebSocketFrame:
+                 * 服务端无法收到 @see io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.decode
+                 * 客户端需要设置 @see io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler#handleCloseFrames
+                 * 这里通过 #handlerAdded 来处理
+                 */
+                if (msg instanceof CloseWebSocketFrame) {
+                    handleCloseFrame((CloseWebSocketFrame) msg, sourceWebSocketContext, targetWebSocketContext);
                 }
             }
 
+            private void handleCloseFrame(final CloseWebSocketFrame c,
+                                          final ChannelHandlerContext sourceWebSocketContext,
+                                          final ChannelHandlerContext targetWebSocketContext) {
+                c.retain();
+                log.info("{} WebSocket connection closed by {}/{}", sourceWebSocketContext.channel(), c.statusCode(), c.reasonText());
+                if (targetWebSocketContext.channel().isActive()) {
+                    targetWebSocketContext.writeAndFlush(c).addListener(ChannelFutureListener.CLOSE);
+                } else {
+                    c.release();
+                }
+                sourceWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            }
+
+            @Override
+            public void handlerAdded(final ChannelHandlerContext webSocketContext) throws Exception {
+                final ChannelPipeline cp = webSocketContext.pipeline();
+                final ChannelHandlerContext context = cp.context(WebSocketServerProtocolHandler.class);
+                final ChannelHandlerContext contextToUse = null != context ? context : cp.context(WebSocketClientProtocolHandler.class);
+                if (null != contextToUse && null == cp.get("WsCloser")) {
+                    cp.addBefore(contextToUse.name(), "WsCloser", new MessageToMessageDecoder<CloseWebSocketFrame>() {
+                        @Override
+                        protected void decode(final ChannelHandlerContext ctx, final CloseWebSocketFrame c, final List<Object> out) throws Exception {
+                            handleCloseFrame(c, ctx, targetWebSocketContext);
+                        }
+                    });
+                }
+            }
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext sourceWebSocketContext, final Throwable cause) {
@@ -286,7 +312,7 @@ public class WebSocketForwarder {
             @Override
             public void channelInactive(final ChannelHandlerContext nativeSocketContext) {
                 if (webSocketContext.channel().isActive()) {
-                    log.info("{} Socket-WebSocket PIPE the input has been closed, the output will be closed: {}", nativeSocketContext.channel(), webSocketContext.channel());
+                    log.debug("{} Socket-WebSocket PIPE the input has been closed, the output will be closed: {}", nativeSocketContext.channel(), webSocketContext.channel());
                     WebSocketUtils.goingAwayClose(webSocketContext, "Connection closed");
                 }
             }
@@ -329,7 +355,7 @@ public class WebSocketForwarder {
             @Override
             public void channelInactive(final ChannelHandlerContext webSocketContext) {
                 if (nativeSocketContext.channel().isActive()) {
-                    log.warn("{} WebSocket-Socket PIPE the input has been closed, the output will be closed: {}", webSocketContext.channel(), nativeSocketContext.channel());
+                    log.info("{} WebSocket-Socket PIPE the input has been closed, the output will be closed: {}", webSocketContext.channel(), nativeSocketContext.channel());
                     nativeSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             }
