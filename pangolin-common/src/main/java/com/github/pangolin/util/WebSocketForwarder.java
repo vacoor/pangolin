@@ -170,7 +170,6 @@ public class WebSocketForwarder {
                 channelFuture.channel().closeFuture().addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(final ChannelFuture future) {
-                        System.out.println("On closed: " + host + ":" + port);
                         group.shutdownGracefully();
                     }
                 });
