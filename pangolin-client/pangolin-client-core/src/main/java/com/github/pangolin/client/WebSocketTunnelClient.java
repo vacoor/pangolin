@@ -137,12 +137,12 @@ public class WebSocketTunnelClient {
             @Override
             public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) throws Exception {
                 log.warn("{} Software caused connection abort: {}", webSocketContext.channel(), cause.getMessage());
-                webSocketContext.close();
+                WebSocketUtils.internalErrorClose(webSocketContext, cause.getMessage());
             }
         };
     }
 
-    private void onMessageReceived(final ChannelHandlerContext webSocket, final WebSocketFrame frame) {
+    private void onMessageReceived(final ChannelHandlerContext webSocket, final WebSocketFrame frame) throws Exception {
         if (frame instanceof TextWebSocketFrame) {
             final TextWebSocketFrame textFrame = (TextWebSocketFrame) frame;
             /*-
@@ -153,16 +153,11 @@ public class WebSocketTunnelClient {
             final String[] segments = text.split(Pattern.quote("->"));
             final String id = segments[0];
             final URI target = URI.create(segments[1]);
-            try {
-                final String endpoint = serverEndpoint.getScheme() + "://" + serverEndpoint.getHost() + ":" + serverEndpoint.getPort() + serverEndpoint.getPath();
-                if ("tcp".equalsIgnoreCase(target.getScheme())) {
-                    WebSocketForwarder.forwardToNativeSocket2(id, URI.create(endpoint + "?id=" + id), "PASSIVE", target);
-                } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
-                    WebSocketForwarder.forwardToWebSocket2(id, URI.create(endpoint + "?id=" + id), "PASSIVE", target, null);
-                }
-            } catch (final Exception ex) {
-                log.error("", ex);
-                WebSocketUtils.internalErrorClose(webSocket, ex.getMessage());
+            final String endpoint = serverEndpoint.getScheme() + "://" + serverEndpoint.getHost() + ":" + serverEndpoint.getPort() + serverEndpoint.getPath();
+            if ("tcp".equalsIgnoreCase(target.getScheme())) {
+                WebSocketForwarder.forwardToNativeSocket2(id, URI.create(endpoint + "?id=" + id), "PASSIVE", target);
+            } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
+                WebSocketForwarder.forwardToWebSocket2(id, URI.create(endpoint + "?id=" + id), "PASSIVE", target, null);
             }
         }
     }

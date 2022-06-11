@@ -9,17 +9,7 @@ import com.github.pangolin.util.WebSocketUtils;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ConnectTimeoutException;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
@@ -31,40 +21,23 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
-import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketServerCompressionHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
-import io.netty.util.concurrent.DefaultThreadFactory;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.FutureListener;
-import io.netty.util.concurrent.GenericFutureListener;
-import io.netty.util.concurrent.GlobalEventExecutor;
-import io.netty.util.concurrent.Promise;
+import io.netty.util.concurrent.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
-import java.io.PrintStream;
+import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -235,7 +208,7 @@ public class WebSocketTunnelServer {
                 pipeline.addLast(
                         new HttpServerCodec(),
                         new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                        /*- 浏览器似乎处理压缩有问题, permessage-deflate
+                        /*- 浏览器似乎处理压缩有问题(permessage-deflate).
                         new WebSocketServerCompressionHandler(),
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
                         */
@@ -527,8 +500,8 @@ public class WebSocketTunnelServer {
                     webSocketAccessLink.pipeline().remove(webSocketAccessLink.handler());
                     webSocketBackhaulLink.pipeline().remove(webSocketBackhaulLink.handler());
 
-                    webSocketAccessLink.pipeline().addLast(WebSocketForwarder.pipe(webSocketBackhaulLink));
-                    webSocketBackhaulLink.pipeline().addLast(WebSocketForwarder.pipe(webSocketAccessLink));
+                    webSocketAccessLink.pipeline().addLast(WebSocketForwarder.pipeWebSocket(webSocketBackhaulLink));
+                    webSocketBackhaulLink.pipeline().addLast(WebSocketForwarder.pipeWebSocket(webSocketAccessLink));
 
                     webSocketAccessLink.channel().config().setAutoRead(true);
                     webSocketBackhaulLink.channel().config().setAutoRead(true);
@@ -598,7 +571,7 @@ public class WebSocketTunnelServer {
                     nativeSocketAccessLink.pipeline().remove(nativeSocketAccessLink.handler());
                     webSocketBackhaulLink.pipeline().remove(webSocketBackhaulLink.handler());
 
-                    nativeSocketAccessLink.pipeline().addLast(WebSocketForwarder.adaptNativeSocketToWebSocket(webSocketBackhaulLink.channel()));
+                    nativeSocketAccessLink.pipeline().addLast(WebSocketForwarder.adaptNativeSocketToWebSocket(webSocketBackhaulLink));
                     webSocketBackhaulLink.pipeline().addLast(WebSocketForwarder.adaptWebSocketToNativeSocket(nativeSocketAccessLink.channel()));
 
                     nativeSocketAccessLink.channel().config().setAutoRead(true);
