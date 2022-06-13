@@ -571,8 +571,8 @@ public class WebSocketTunnelServer {
                     nativeSocketAccessLink.pipeline().remove(nativeSocketAccessLink.handler());
                     webSocketBackhaulLink.pipeline().remove(webSocketBackhaulLink.handler());
 
-                    nativeSocketAccessLink.pipeline().addLast(WebSocketForwarder.adaptNativeSocketToWebSocket(webSocketBackhaulLink));
-                    webSocketBackhaulLink.pipeline().addLast(WebSocketForwarder.adaptWebSocketToNativeSocket(nativeSocketAccessLink));
+                    nativeSocketAccessLink.pipeline().addLast(WebSocketForwarder.adaptSocketToWebSocket(webSocketBackhaulLink));
+                    webSocketBackhaulLink.pipeline().addLast(WebSocketForwarder.adaptWebSocketToSocket(nativeSocketAccessLink));
 
                     nativeSocketAccessLink.channel().config().setAutoRead(true);
                     webSocketBackhaulLink.channel().config().setAutoRead(true);

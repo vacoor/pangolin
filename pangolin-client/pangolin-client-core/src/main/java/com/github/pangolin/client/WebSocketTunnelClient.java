@@ -46,7 +46,7 @@ public class WebSocketTunnelClient {
     private final String name;
     private final URI serverEndpoint;
 
-    private volatile ChannelFuture channelFuture;
+    private volatile Channel channel;
     private ConnectionState connectionState;
 
     private final AtomicBoolean started = new AtomicBoolean(false);
@@ -65,27 +65,27 @@ public class WebSocketTunnelClient {
         return serverEndpoint;
     }
 
-    public ChannelFuture start() throws IOException, InterruptedException {
-        return channelFuture = connect();
+    public Channel start() throws IOException, InterruptedException {
+        return channel = connect();
     }
 
     public boolean isRunning() {
-        return channelFuture.channel().isActive();
+        return channel.isActive();
     }
 
     public void shutdownGracefully() {
-        if (null != channelFuture) {
-            channelFuture.channel().close();
+        if (null != channel) {
+            channel.close();
         }
         workerGroup.shutdownGracefully();
     }
 
-    private ChannelFuture connect() throws IOException, InterruptedException {
+    private Channel connect() throws IOException, InterruptedException {
         return connect(createWebSocketTunnelClientHandler());
     }
 
-    private ChannelFuture connect(final ChannelHandler... handlers) throws IOException, InterruptedException {
-        return WebSocketForwarder.openWebSocket(serverEndpoint, NODE_REGISTER_PROTOCOL, new ChannelInitializer<SocketChannel>() {
+    private Channel connect(final ChannelHandler... handlers) throws IOException, InterruptedException {
+        return WebSocketForwarder.openWebSocketChannel(serverEndpoint, NODE_REGISTER_PROTOCOL, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();
@@ -107,7 +107,7 @@ public class WebSocketTunnelClient {
                     public void run() {
                         // log.debug("try to reconnect to tunnel server, uri: {}", "xx");
                         try {
-                            channelFuture = connect();
+                            channel = connect();
                         } catch (final Exception ex) {
                             // log.debug("reconnect fail: {}", ex.getMessage(), ex);
                         }
@@ -200,7 +200,7 @@ public class WebSocketTunnelClient {
     public static void main(String[] args) throws Exception {
         // final WebSocketTunnelClient client = new WebSocketTunnelClient("default", URI.create("ws://10.45.90.148:2345/tunnel"));
         final WebSocketTunnelClient client = new WebSocketTunnelClient("default", URI.create("ws://127.0.0.1:2345/tunnel"));
-        client.start().channel().closeFuture().await();
+        client.start().closeFuture().await();
         System.out.println("Over");
         while (true) {
             LockSupport.park(TimeUnit.SECONDS.toNanos(10));

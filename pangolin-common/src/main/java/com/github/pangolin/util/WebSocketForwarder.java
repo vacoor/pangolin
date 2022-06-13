@@ -47,15 +47,15 @@ public class WebSocketForwarder {
      * @return
      * @throws SSLException
      */
-    public static ChannelFuture forwardToWebSocket2(final String id,
-                                                    final URI webSocketEndpoint1, final String webSocketProtocol1,
-                                                    final URI webSocketEndpoint2, final String webSocketProtocol2) throws SSLException, InterruptedException {
-        return openWebSocket(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingHandler() {
+    public static Channel forwardToWebSocket2(final String id,
+                                              final URI webSocketEndpoint1, final String webSocketProtocol1,
+                                              final URI webSocketEndpoint2, final String webSocketProtocol2) throws SSLException, InterruptedException {
+        return openWebSocketChannel(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingHandler() {
             @Override
             protected void forwarding(final ChannelHandlerContext webSocketContext1) throws Exception {
                 webSocketContext1.channel().config().setAutoRead(false);
 
-                openWebSocket(webSocketEndpoint2, webSocketProtocol2, new WebSocketForwardingHandler() {
+                openWebSocketChannel(webSocketEndpoint2, webSocketProtocol2, new WebSocketForwardingHandler() {
                     @Override
                     protected void forwarding(final ChannelHandlerContext webSocketContext2) {
                         webSocketContext2.channel().config().setAutoRead(false);
@@ -69,7 +69,7 @@ public class WebSocketForwarder {
                         webSocketContext2.channel().config().setAutoRead(true);
                         webSocketContext1.channel().config().setAutoRead(true);
                     }
-                }).channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
+                }).closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
                     @Override
                     public void operationComplete(final Future<? super Void> future) throws Exception {
                         if (webSocketContext1.channel().isActive()) {
@@ -82,16 +82,16 @@ public class WebSocketForwarder {
     }
 
 
-    public static ChannelFuture forwardToNativeSocket2(final String id,
-                                                       final URI webSocketEndpoint1, final String webSocketProtocol1,
-                                                       final URI nativeSocketEndpoint) throws SSLException, InterruptedException {
-        return openWebSocket(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingHandler() {
+    public static Channel forwardToNativeSocket2(final String id,
+                                                 final URI webSocketEndpoint1, final String webSocketProtocol1,
+                                                 final URI nativeSocketEndpoint) throws SSLException, InterruptedException {
+        return openWebSocketChannel(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingHandler() {
             @Override
             protected void forwarding(final ChannelHandlerContext webSocketContext1) throws Exception {
                 webSocketContext1.channel().config().setAutoRead(false);
 
                 final EventLoopGroup nativeSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
-                launch(nativeSocketEndpoint.getHost(), nativeSocketEndpoint.getPort(), nativeSocketGroup, new ChannelInboundHandlerAdapter() {
+                openSocketChannel(nativeSocketEndpoint.getHost(), nativeSocketEndpoint.getPort(), nativeSocketGroup, new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRegistered(final ChannelHandlerContext nativeSocketContext) {
                         nativeSocketContext.channel().config().setAutoRead(false);
@@ -99,8 +99,8 @@ public class WebSocketForwarder {
                         nativeSocketContext.pipeline().remove(nativeSocketContext.handler());
                         webSocketContext1.pipeline().remove(webSocketContext1.handler());
 
-                        nativeSocketContext.pipeline().addLast(adaptNativeSocketToWebSocket(webSocketContext1));
-                        webSocketContext1.pipeline().addLast(adaptWebSocketToNativeSocket(nativeSocketContext));
+                        nativeSocketContext.pipeline().addLast(adaptSocketToWebSocket(webSocketContext1));
+                        webSocketContext1.pipeline().addLast(adaptWebSocketToSocket(nativeSocketContext));
 
                         nativeSocketContext.channel().config().setAutoRead(true);
                         webSocketContext1.channel().config().setAutoRead(true);
@@ -117,7 +117,7 @@ public class WebSocketForwarder {
                         log.warn("{} Software caused forwarding abort: {}", nativeSocketContext.channel(), cause.getMessage());
                         nativeSocketContext.close();
                     }
-                }).channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
+                }).closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
                     @Override
                     public void operationComplete(final Future<? super Void> future) throws Exception {
                         if (webSocketContext1.channel().isActive()) {
@@ -129,13 +129,13 @@ public class WebSocketForwarder {
         });
     }
 
-    public static ChannelFuture openWebSocket(final URI webSocketEndpoint, final String webSocketProtocol, final ChannelHandler... webSocketHandlers) throws SSLException, InterruptedException {
+    public static Channel openWebSocketChannel(final URI webSocketEndpoint, final String webSocketProtocol, final ChannelHandler... webSocketHandlers) throws SSLException, InterruptedException {
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
         final SslContext context = isSecure ? createSslContext() : null;
         final int portToUse = 0 < webSocketEndpoint.getPort() ? webSocketEndpoint.getPort() : (isSecure ? 443 : 80);
 
         final EventLoopGroup webSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-MASTER", true));
-        return launch(webSocketEndpoint.getHost(), portToUse, webSocketGroup, new ChannelInitializer<SocketChannel>() {
+        return openSocketChannel(webSocketEndpoint.getHost(), portToUse, webSocketGroup, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) {
                 final ChannelPipeline cp = ch.pipeline();
@@ -152,22 +152,22 @@ public class WebSocketForwarder {
         });
     }
 
-    public static SslContext createSslContext() throws SSLException {
+    private static SslContext createSslContext() throws SSLException {
         return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
     }
 
 
-    private static ChannelFuture launch(final String host, final int port, final EventLoopGroup group, final ChannelHandler initializer) {
-        ChannelFuture channelFuture = null;
+    private static Channel openSocketChannel(final String host, final int port, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
+        Channel channel = null;
         try {
             final Bootstrap b = new Bootstrap();
             b.option(ChannelOption.TCP_NODELAY, true);
             b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
             b.group(group).channel(NioSocketChannel.class).handler(initializer);
-            channelFuture = b.connect(host, port);
+            channel = b.connect(host, port).sync().channel();
         } finally {
-            if (null != channelFuture) {
-                channelFuture.channel().closeFuture().addListener(new ChannelFutureListener() {
+            if (null != channel) {
+                channel.closeFuture().addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(final ChannelFuture future) {
                         group.shutdownGracefully();
@@ -177,7 +177,7 @@ public class WebSocketForwarder {
                 group.shutdownGracefully();
             }
         }
-        return channelFuture;
+        return channel;
     }
 
     /**
@@ -301,7 +301,7 @@ public class WebSocketForwarder {
      * @param webSocketContext 输出源
      * @return 输入处理适配器
      */
-    public static ChannelInboundHandlerAdapter adaptNativeSocketToWebSocket(final ChannelHandlerContext webSocketContext) {
+    public static ChannelInboundHandlerAdapter adaptSocketToWebSocket(final ChannelHandlerContext webSocketContext) {
         return new ChannelInboundHandlerAdapter() {
             @Override
             public void channelActive(final ChannelHandlerContext nativeSocketContext) {
@@ -344,8 +344,9 @@ public class WebSocketForwarder {
      * @param nativeSocketContext 原生 socket
      * @return 适配器
      */
-    public static ChannelInboundHandlerAdapter adaptWebSocketToNativeSocket(final ChannelHandlerContext nativeSocketContext) {
+    public static ChannelInboundHandlerAdapter adaptWebSocketToSocket(final ChannelHandlerContext nativeSocketContext) {
         return new ChannelInboundHandlerAdapter() {
+
             @Override
             public void channelActive(final ChannelHandlerContext webSocketContext) {
                 webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
@@ -393,7 +394,7 @@ public class WebSocketForwarder {
     }
 
     public static void main(String[] args) throws Exception {
-        final ChannelFuture future = WebSocketForwarder.forwardToWebSocket2("1",
+        final Channel future = WebSocketForwarder.forwardToWebSocket2("1",
                 URI.create("ws://127.0.0.1:8080/ws/echo"), null,
                 // URI.create("ws://127.0.0.1:2345/tunnel?id=WEBSOCKET-TEST"), "PASSIVE",
                 URI.create("ws://127.0.0.1:8080/ws/print"), null
@@ -406,7 +407,7 @@ public class WebSocketForwarder {
                 URI.create("ws://139.196.88.115:22")
         );
         */
-        future.channel().closeFuture().await();
+        future.closeFuture().await();
         System.out.println("Wait over");
     }
 }
