@@ -213,7 +213,7 @@ public class WebSocketTunnelServer {
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
                         */
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, false, 65536, true, true),
-                        new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
+                        // new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
                         createWebSocketTunnelServerHandler()
                 );
             }
