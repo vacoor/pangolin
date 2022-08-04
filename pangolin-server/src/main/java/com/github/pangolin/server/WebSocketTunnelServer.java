@@ -634,7 +634,7 @@ public class WebSocketTunnelServer {
         final OutputStream innerOut = new WebSocketBinaryOutputStream(webSocketTunnelContext);
         final WebSocketTerminal terminal = new WebSocketTerminal();
         final LineReader reader = new ConsoleLineReader(this, innerIn, innerOut, terminal);
-        new WebSocketTunnelShell(this, reader, new PrintStream(innerOut)).start();
+        new WebSocketTunnelShell(this, reader, new PrintStream(innerOut), null).start();
 
         webSocketTunnelContext.pipeline().addLast(new SimpleChannelInboundHandler<WebSocketFrame>() {
             @Override

@@ -5,8 +5,10 @@ import com.github.pangolin.server.WebSocketTunnelServer;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -19,10 +21,14 @@ public class WebSocketTunnelShell {
     protected final PrintStream output;
     protected final AtomicBoolean started = new AtomicBoolean(false);
 
-    public WebSocketTunnelShell(final WebSocketTunnelServer server, final LineReader reader, final PrintStream output) {
+    private Map<String, String> forwardHostnameAliasMap;
+
+    public WebSocketTunnelShell(final WebSocketTunnelServer server, final LineReader reader, final PrintStream output,
+                                final Map<String, String> forwardHostnameAliasMap) {
         this.server = server;
         this.reader = reader;
         this.output = output;
+        this.forwardHostnameAliasMap = null != forwardHostnameAliasMap ? forwardHostnameAliasMap : new HashMap<String, String>();
     }
 
     public void run() throws IOException {
@@ -145,7 +151,9 @@ public class WebSocketTunnelShell {
                 final String[] segments = target.split(":", 2);
                 final String hostname = segments[0];
                 final int targetPort = Integer.parseInt(segments[1]);
-                server.forward(port, broker, hostname, targetPort);
+                String hostnameToUse = forwardHostnameAliasMap.get(hostname);
+                hostnameToUse = null != hostnameToUse ? hostnameToUse : hostname;
+                server.forward(port, broker, hostnameToUse, targetPort);
                 out.println("OK");
             } else if ("remove".equals(action)) {
                 final int port = Integer.parseInt(args[2]);
@@ -190,6 +198,6 @@ public class WebSocketTunnelShell {
     public static void main(String[] args) throws Exception {
         final WebSocketTunnelServer server = new WebSocketTunnelServer("0.0.0.0", 2345, "/tunnel", false);
         server.start();
-        new WebSocketTunnelShell(server, new GenericLineReader(System.in, System.out), System.out).run();
+        new WebSocketTunnelShell(server, new GenericLineReader(System.in, System.out), System.out, null).run();
     }
 }
