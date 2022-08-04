@@ -129,6 +129,7 @@ public class WebSocketTunnelShell {
                 out.println("  add [L_PORT] [TUNNEL] [R_HOST:R_PORT] Add the forward rule, mapping local L_PORT to remote host R_HOST and port R_PORT by TUNNEL");
                 out.println("  remove [L_PORT]                       Remove the forward rule");
                 out.println("  kill [LINK_ID]                        Kill the forward link");
+                out.println("  alias                                 List alias for forward target hostname");
                 return;
             }
             final String action = args[1];
@@ -166,6 +167,10 @@ public class WebSocketTunnelShell {
                     out.println("Killed");
                 } else {
                     out.println(String.format("'%s' not found", id));
+                }
+            } else if ("alias".equals(action)) {
+                for (final Map.Entry<String, String> entry : forwardHostnameAliasMap.entrySet()) {
+                    out.println(String.format("%s     ->    %s", entry.getKey(), entry.getValue()));
                 }
             }
         } else {
