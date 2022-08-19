@@ -7,7 +7,7 @@
     <groupId>com.github.nomou.pangolin</groupId>
     <artifactId>pangolin</artifactId>
     <packaging>pom</packaging>
-    <version>0.0.2-SNAPSHOT</version>
+    <version>0.0.3-SNAPSHOT</version>
 
     <name>Pangolin</name>
     <url>https://github.com/nomou/pangolin/</url>
@@ -76,7 +76,7 @@
         <project.build.resourceEncoding>UTF-8</project.build.resourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
-        <tube.version>0.0.2-SNAPSHOT</tube.version>
+        <tube.version>0.0.3-SNAPSHOT</tube.version>
         <nougat.version>1.0.12</nougat.version>
         <lombok.version>1.18.20</lombok.version>
         <slf4j.version>1.7.6</slf4j.version>
