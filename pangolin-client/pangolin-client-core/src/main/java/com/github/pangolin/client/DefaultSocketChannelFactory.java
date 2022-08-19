@@ -24,6 +24,7 @@ public class DefaultSocketChannelFactory implements SocketChannelFactory {
         try {
             final Bootstrap b = new Bootstrap();
             b.option(ChannelOption.TCP_NODELAY, true);
+            b.option(ChannelOption.SO_KEEPALIVE, true);
             b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectTimeoutMs);
             b.group(group).channel(NioSocketChannel.class).handler(handler);
             socketChannel = (SocketChannel) b.connect(host, port).sync().channel();

@@ -162,6 +162,7 @@ public class WebSocketForwarder {
         try {
             final Bootstrap b = new Bootstrap();
             b.option(ChannelOption.TCP_NODELAY, true);
+            b.option(ChannelOption.SO_KEEPALIVE, true);
             b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
             b.group(group).channel(NioSocketChannel.class).handler(initializer);
             channel = b.connect(host, port).sync().channel();
