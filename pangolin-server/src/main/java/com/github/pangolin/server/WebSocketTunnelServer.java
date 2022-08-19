@@ -227,6 +227,7 @@ public class WebSocketTunnelServer {
         final ServerBootstrap serverBootstrap = new ServerBootstrap();
         serverBootstrap.option(ChannelOption.SO_REUSEADDR, true);
         serverBootstrap.childOption(ChannelOption.TCP_NODELAY, true);
+        serverBootstrap.childOption(ChannelOption.SO_KEEPALIVE, true);
         serverBootstrap.group(bossGroup, workerGroup).channel(NioServerSocketChannel.class);
         serverBootstrap.childHandler(initializer);
 
