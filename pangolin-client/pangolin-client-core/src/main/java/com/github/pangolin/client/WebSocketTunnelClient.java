@@ -89,7 +89,7 @@ public class WebSocketTunnelClient {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();
-                cp.addLast(new IdleStateHandler(0, 0, 50));
+                // cp.addLast(new IdleStateHandler(0, 0, 50));
                 cp.addLast(new WebSocketTunnelHandshakeHandler(name));
                 cp.addLast(handlers);
             }

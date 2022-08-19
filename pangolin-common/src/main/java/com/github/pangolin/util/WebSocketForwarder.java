@@ -16,6 +16,8 @@ import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketCl
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.handler.timeout.IdleStateEvent;
+import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
@@ -142,6 +144,7 @@ public class WebSocketForwarder {
                 if (null != context) {
                     cp.addLast(context.newHandler(ch.alloc()));
                 }
+                cp.addLast(new IdleStateHandler(0, 0, 50));
                 cp.addLast(new HttpClientCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
                 cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
                 cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
@@ -191,6 +194,8 @@ public class WebSocketForwarder {
             // if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
             if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
                 this.forwarding(webSocketContext);
+            } else if (evt instanceof IdleStateEvent) {
+                webSocketContext.writeAndFlush(new PingWebSocketFrame());
             }
         }
 
@@ -226,6 +231,15 @@ public class WebSocketForwarder {
      */
     public static ChannelInboundHandlerAdapter pipeWebSocket(final ChannelHandlerContext targetWebSocketContext) {
         return new ChannelInboundHandlerAdapter() {
+
+            @Override
+            public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
+                if (evt instanceof IdleStateEvent) {
+                    ctx.writeAndFlush(Unpooled.EMPTY_BUFFER);
+                }
+                super.userEventTriggered(ctx, evt);
+            }
+
             @Override
             public void channelActive(final ChannelHandlerContext sourceWebSocketContext) {
                 sourceWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
@@ -304,6 +318,15 @@ public class WebSocketForwarder {
      */
     public static ChannelInboundHandlerAdapter adaptSocketToWebSocket(final ChannelHandlerContext webSocketContext) {
         return new ChannelInboundHandlerAdapter() {
+
+            @Override
+            public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
+                if (evt instanceof IdleStateEvent) {
+                    ctx.writeAndFlush(Unpooled.EMPTY_BUFFER);
+                }
+                super.userEventTriggered(ctx, evt);
+            }
+
             @Override
             public void channelActive(final ChannelHandlerContext nativeSocketContext) {
                 nativeSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
@@ -347,6 +370,14 @@ public class WebSocketForwarder {
      */
     public static ChannelInboundHandlerAdapter adaptWebSocketToSocket(final ChannelHandlerContext nativeSocketContext) {
         return new ChannelInboundHandlerAdapter() {
+
+            @Override
+            public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
+                if (evt instanceof IdleStateEvent) {
+                    ctx.writeAndFlush(new PingWebSocketFrame());
+                }
+                super.userEventTriggered(ctx, evt);
+            }
 
             @Override
             public void channelActive(final ChannelHandlerContext webSocketContext) {
