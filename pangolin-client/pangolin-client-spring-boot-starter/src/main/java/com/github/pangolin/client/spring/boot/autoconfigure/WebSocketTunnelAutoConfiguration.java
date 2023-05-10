@@ -79,6 +79,11 @@ public class WebSocketTunnelAutoConfiguration implements EnvironmentAware {
                     webSocketTunnelClientNew.start();
                 }
             }
+        } else {
+            final WebSocketTunnelClient webSocketTunnelClient = clientRef.getAndSet(null);
+            if (null != webSocketTunnelClient) {
+                webSocketTunnelClient.shutdownGracefully();
+            }
         }
     }
 
