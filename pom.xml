@@ -85,7 +85,7 @@
         <netty.version>4.1.59.Final</netty.version>
         -->
         <netty.version>4.1.25.Final</netty.version>
-        <spring-boot.version>1.5.9.RELEASE</spring-boot.version>
+        <spring-boot.version>2.0.0.RELEASE</spring-boot.version>
 
         <!-- distributionManagement [[ -->
         <!--
