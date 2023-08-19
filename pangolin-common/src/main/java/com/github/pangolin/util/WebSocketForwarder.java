@@ -428,13 +428,13 @@ public class WebSocketForwarder {
     public static void main(String[] args) throws Exception {
         final Channel future = WebSocketForwarder.forwardToWebSocket2("1",
                 URI.create("ws://127.0.0.1:8080/ws/echo"), null,
-                // URI.create("ws://127.0.0.1:2345/tunnel?id=WEBSOCKET-TEST"), "PASSIVE",
+                // URI.create("ws://127.0.0.1:2345/tunnel?id=WEBSOCKET-TEST"), "TUNNEL_RESPONSE",
                 URI.create("ws://127.0.0.1:8080/ws/print"), null
         );
         /*
         final ChannelFuture future = WebSocketForwarder.pipeToNativeSocket(
                 // URI.create("ws://127.0.0.1:8080/ws/echo"), null,
-                URI.create("ws://127.0.0.1:2345/tunnel?id=SOCKET-TEST"), "SOCKET-PASSIVE",
+                URI.create("ws://127.0.0.1:2345/tunnel?id=SOCKET-TEST"), "SOCKET-TUNNEL_RESPONSE",
                 // URI.create("ws://127.0.0.1:8080/ws/echo"), null,
                 URI.create("ws://139.196.88.115:22")
         );

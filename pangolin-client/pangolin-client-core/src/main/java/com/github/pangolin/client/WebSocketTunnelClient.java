@@ -14,7 +14,6 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler.ClientHandshakeStateEvent;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.timeout.IdleStateEvent;
-import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
 
@@ -33,7 +32,7 @@ public class WebSocketTunnelClient {
     /**
      * 节点注册协议.
      */
-    private static final String NODE_REGISTER_PROTOCOL = "PASSIVE-REG";
+    private static final String AGENT_REGISTER_PROTOCOL = "AGENT-REGISTER";
 
     private enum ConnectionState {
         CONNECTED,
@@ -85,7 +84,7 @@ public class WebSocketTunnelClient {
     }
 
     private Channel connect(final ChannelHandler... handlers) throws IOException, InterruptedException {
-        return WebSocketForwarder.openWebSocketChannel(serverEndpoint, NODE_REGISTER_PROTOCOL, new ChannelInitializer<SocketChannel>() {
+        return WebSocketForwarder.openWebSocketChannel(serverEndpoint, AGENT_REGISTER_PROTOCOL, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();
@@ -155,9 +154,9 @@ public class WebSocketTunnelClient {
             final URI target = URI.create(segments[1]);
             final String endpoint = serverEndpoint.getScheme() + "://" + serverEndpoint.getHost() + ":" + serverEndpoint.getPort() + serverEndpoint.getPath();
             if ("tcp".equalsIgnoreCase(target.getScheme())) {
-                WebSocketForwarder.forwardToNativeSocket2(id, URI.create(endpoint + "?id=" + id), "PASSIVE", target);
+                WebSocketForwarder.forwardToNativeSocket2(id, URI.create(endpoint + "?id=" + id), "TUNNEL_RESPONSE", target);
             } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
-                WebSocketForwarder.forwardToWebSocket2(id, URI.create(endpoint + "?id=" + id), "PASSIVE", target, null);
+                WebSocketForwarder.forwardToWebSocket2(id, URI.create(endpoint + "?id=" + id), "TUNNEL_RESPONSE", target, null);
             }
         }
     }

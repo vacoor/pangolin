@@ -67,9 +67,9 @@ public class WebSocketTunnelServer {
     private static final long DEFAULT_BACKHAUL_LINK_TIMEOUT_MS = 20 * 1000L;
 
     /**
-     * 通道注册.
+     * 通道Agent注册.
      */
-    private static final String PROTOCOL_NODE_REGISTER = "PASSIVE-REG";
+    private static final String PROTOCOL_AGENT_REGISTER = "AGENT-REGISTER";
 
     /**
      * 通道请求.
@@ -79,7 +79,7 @@ public class WebSocketTunnelServer {
     /**
      * 通道打开.
      */
-    private static final String PROTOCOL_TUNNEL_RESPONSE = "PASSIVE";
+    private static final String PROTOCOL_TUNNEL_RESPONSE = "TUNNEL_RESPONSE";
 
     /**
      * 服务管理.
@@ -89,7 +89,7 @@ public class WebSocketTunnelServer {
     /**
      * 支持的协议.
      */
-    private static final String ALL_PROTOCOLS = PROTOCOL_TUNNEL_REQUEST + "," + PROTOCOL_NODE_REGISTER + "," + PROTOCOL_TUNNEL_RESPONSE + "," + PROTOCOL_TUNNEL_MANAGEMENT;
+    private static final String ALL_PROTOCOLS = PROTOCOL_TUNNEL_REQUEST + "," + PROTOCOL_AGENT_REGISTER + "," + PROTOCOL_TUNNEL_RESPONSE + "," + PROTOCOL_TUNNEL_MANAGEMENT;
 
     /**
      * 已注册的broker节点(id:broker).
@@ -276,7 +276,7 @@ public class WebSocketTunnelServer {
                 }
                 final HandshakeComplete handshake = (HandshakeComplete) evt;
                 final String subprotocol = null != handshake.selectedSubprotocol() ? handshake.selectedSubprotocol() : EMPTY;
-                if (PROTOCOL_NODE_REGISTER.equalsIgnoreCase(subprotocol)) {
+                if (PROTOCOL_AGENT_REGISTER.equalsIgnoreCase(subprotocol)) {
                     /*-
                      * 中继节点注册.
                      */
