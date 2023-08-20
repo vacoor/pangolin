@@ -1,13 +1,10 @@
 package com.github.pangolin.util;
 
 import io.netty.bootstrap.Bootstrap;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
@@ -18,7 +15,6 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
-import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
@@ -26,7 +22,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
 import java.net.URI;
-import java.util.List;
 
 /**
  * WebSocket 数据转发.
@@ -52,14 +47,14 @@ public class WebSocketForwarder {
     public static Channel forwardToWebSocket2(final String id,
                                               final URI webSocketEndpoint1, final String webSocketProtocol1,
                                               final URI webSocketEndpoint2, final String webSocketProtocol2) throws SSLException, InterruptedException {
-        return openWebSocketChannel(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingHandler() {
+        return openWebSocketChannel(webSocketEndpoint1, webSocketProtocol1, new WebSocketHandshakedHandler() {
             @Override
-            protected void forwarding(final ChannelHandlerContext webSocketContext1) throws Exception {
+            protected void channelHandshaked(final ChannelHandlerContext webSocketContext1) throws Exception {
                 webSocketContext1.channel().config().setAutoRead(false);
 
-                openWebSocketChannel(webSocketEndpoint2, webSocketProtocol2, new WebSocketForwardingHandler() {
+                openWebSocketChannel(webSocketEndpoint2, webSocketProtocol2, new WebSocketHandshakedHandler() {
                     @Override
-                    protected void forwarding(final ChannelHandlerContext webSocketContext2) {
+                    protected void channelHandshaked(final ChannelHandlerContext webSocketContext2) {
                         webSocketContext2.channel().config().setAutoRead(false);
 
                         webSocketContext2.pipeline().remove(webSocketContext2.handler());
@@ -87,9 +82,9 @@ public class WebSocketForwarder {
     public static Channel forwardToNativeSocket2(final String id,
                                                  final URI webSocketEndpoint1, final String webSocketProtocol1,
                                                  final URI nativeSocketEndpoint) throws SSLException, InterruptedException {
-        return openWebSocketChannel(webSocketEndpoint1, webSocketProtocol1, new WebSocketForwardingHandler() {
+        return openWebSocketChannel(webSocketEndpoint1, webSocketProtocol1, new WebSocketHandshakedHandler() {
             @Override
-            protected void forwarding(final ChannelHandlerContext webSocketContext1) throws Exception {
+            protected void channelHandshaked(final ChannelHandlerContext webSocketContext1) throws Exception {
                 webSocketContext1.channel().config().setAutoRead(false);
 
                 final EventLoopGroup nativeSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-SLAVE", true));
@@ -160,7 +155,7 @@ public class WebSocketForwarder {
     }
 
 
-    private static Channel openSocketChannel(final String host, final int port, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
+    public static Channel openSocketChannel(final String host, final int port, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
         Channel channel = null;
         try {
             final Bootstrap b = new Bootstrap();
@@ -184,16 +179,17 @@ public class WebSocketForwarder {
         return channel;
     }
 
+
     /**
      * WebSocket 转发处理器.
      */
-    private abstract static class WebSocketForwardingHandler extends ChannelInboundHandlerAdapter {
+    private abstract static class WebSocketHandshakedHandler extends ChannelInboundHandlerAdapter {
 
         @Override
         public void userEventTriggered(final ChannelHandlerContext webSocketContext, final Object evt) throws Exception {
             // if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
             if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
-                this.forwarding(webSocketContext);
+                this.channelHandshaked(webSocketContext);
             } else if (evt instanceof IdleStateEvent) {
                 webSocketContext.writeAndFlush(new PingWebSocketFrame());
             }
@@ -205,7 +201,7 @@ public class WebSocketForwarder {
          * @param webSocketContext channel 上下文
          * @throws Exception 如果发生错误
          */
-        protected abstract void forwarding(final ChannelHandlerContext webSocketContext) throws Exception;
+        protected abstract void channelHandshaked(final ChannelHandlerContext webSocketContext) throws Exception;
 
         @Override
         public void channelRead(final ChannelHandlerContext webSocketContext, final Object msg) throws Exception {
@@ -229,85 +225,8 @@ public class WebSocketForwarder {
      * @param targetWebSocketContext 输出源
      * @return 输入处理适配器
      */
-    public static ChannelInboundHandlerAdapter pipeWebSocket(final ChannelHandlerContext targetWebSocketContext) {
-        return new ChannelInboundHandlerAdapter() {
-
-            @Override
-            public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
-                if (evt instanceof IdleStateEvent) {
-                    ctx.writeAndFlush(Unpooled.EMPTY_BUFFER);
-                }
-                super.userEventTriggered(ctx, evt);
-            }
-
-            @Override
-            public void channelActive(final ChannelHandlerContext sourceWebSocketContext) {
-                sourceWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
-            }
-
-            @Override
-            public void channelInactive(final ChannelHandlerContext sourceWebSocketContext) {
-                if (targetWebSocketContext.channel().isActive()) {
-                    // 非正常关闭, 另一侧可能没有关闭.
-                    log.warn("{} WebSocket PIPE the input has been closed, the output will be closed: {}", sourceWebSocketContext.channel(), targetWebSocketContext.channel());
-                    targetWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                }
-            }
-
-            @Override
-            public void channelRead(final ChannelHandlerContext sourceWebSocketContext, final Object msg) {
-                if (targetWebSocketContext.channel().isActive()) {
-                    targetWebSocketContext.writeAndFlush(msg);
-                } else {
-                    ReferenceCountUtil.release(msg);
-                }
-
-                /*-
-                 * 对于 CloseWebSocketFrame:
-                 * 服务端无法收到 @see io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.decode
-                 * 客户端需要设置 @see io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler#handleCloseFrames
-                 * 这里通过 #handlerAdded 来处理
-                 */
-                if (msg instanceof CloseWebSocketFrame) {
-                    handleCloseFrame((CloseWebSocketFrame) msg, sourceWebSocketContext, targetWebSocketContext);
-                }
-            }
-
-            private void handleCloseFrame(final CloseWebSocketFrame c,
-                                          final ChannelHandlerContext sourceWebSocketContext,
-                                          final ChannelHandlerContext targetWebSocketContext) {
-                c.retain();
-                log.info("{} WebSocket connection closed by {}/{}", sourceWebSocketContext.channel(), c.statusCode(), c.reasonText());
-                if (targetWebSocketContext.channel().isActive()) {
-                    targetWebSocketContext.writeAndFlush(c).addListener(ChannelFutureListener.CLOSE);
-                } else {
-                    c.release();
-                }
-                sourceWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-            }
-
-            @Override
-            public void handlerAdded(final ChannelHandlerContext webSocketContext) throws Exception {
-                final ChannelPipeline cp = webSocketContext.pipeline();
-                final ChannelHandlerContext context = cp.context(WebSocketServerProtocolHandler.class);
-                final ChannelHandlerContext contextToUse = null != context ? context : cp.context(WebSocketClientProtocolHandler.class);
-                if (null != contextToUse && null == cp.get("WsCloser")) {
-                    cp.addBefore(contextToUse.name(), "WsCloser", new MessageToMessageDecoder<CloseWebSocketFrame>() {
-                        @Override
-                        protected void decode(final ChannelHandlerContext ctx, final CloseWebSocketFrame c, final List<Object> out) throws Exception {
-                            handleCloseFrame(c, ctx, targetWebSocketContext);
-                        }
-                    });
-                }
-            }
-
-            @Override
-            public void exceptionCaught(final ChannelHandlerContext sourceWebSocketContext, final Throwable cause) {
-                log.warn("{} Software caused connection abort: {}, -> {}", sourceWebSocketContext.channel(), cause.getMessage(), targetWebSocketContext.channel(), cause);
-                WebSocketUtils.internalErrorClose(sourceWebSocketContext, cause.getMessage());
-                WebSocketUtils.internalErrorClose(targetWebSocketContext, cause.getMessage());
-            }
-        };
+    public static ChannelInboundHandler pipeWebSocket(final ChannelHandlerContext targetWebSocketContext) {
+        return Redirects.webSocketRedirectToWebSocket(targetWebSocketContext);
     }
 
     /**
@@ -316,50 +235,8 @@ public class WebSocketForwarder {
      * @param webSocketContext 输出源
      * @return 输入处理适配器
      */
-    public static ChannelInboundHandlerAdapter adaptSocketToWebSocket(final ChannelHandlerContext webSocketContext) {
-        return new ChannelInboundHandlerAdapter() {
-
-            @Override
-            public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
-                if (evt instanceof IdleStateEvent) {
-                    ctx.writeAndFlush(Unpooled.EMPTY_BUFFER);
-                }
-                super.userEventTriggered(ctx, evt);
-            }
-
-            @Override
-            public void channelActive(final ChannelHandlerContext nativeSocketContext) {
-                nativeSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
-            }
-
-            @Override
-            public void channelInactive(final ChannelHandlerContext nativeSocketContext) {
-                if (webSocketContext.channel().isActive()) {
-                    log.debug("{} Socket-WebSocket PIPE the input has been closed, the output will be closed: {}", nativeSocketContext.channel(), webSocketContext.channel());
-                    WebSocketUtils.goingAwayClose(webSocketContext, "Connection closed");
-                }
-            }
-
-            @Override
-            public void channelRead(final ChannelHandlerContext nativeSocketContext, final Object msg) throws Exception {
-                if (webSocketContext.channel().isActive()) {
-                    if (msg instanceof ByteBuf) {
-                        webSocketContext.writeAndFlush(new BinaryWebSocketFrame((ByteBuf) msg));
-                    } else {
-                        throw new UnsupportedOperationException("Unexpect socket message: " + msg);
-                    }
-                } else {
-                    ReferenceCountUtil.release(msg);
-                }
-            }
-
-            @Override
-            public void exceptionCaught(final ChannelHandlerContext nativeSocketContext, final Throwable cause) throws Exception {
-                log.warn("{} Software caused connection abort: {}, -> {}", nativeSocketContext.channel(), cause.getMessage(), webSocketContext.channel());
-                nativeSocketContext.close();
-                WebSocketUtils.internalErrorClose(webSocketContext, cause.getMessage());
-            }
-        };
+    public static ChannelInboundHandler adaptSocketToWebSocket(final ChannelHandlerContext webSocketContext) {
+        return Redirects.socketRedirectToWebSocket(webSocketContext);
     }
 
     /**
@@ -368,61 +245,8 @@ public class WebSocketForwarder {
      * @param nativeSocketContext 原生 socket
      * @return 适配器
      */
-    public static ChannelInboundHandlerAdapter adaptWebSocketToSocket(final ChannelHandlerContext nativeSocketContext) {
-        return new ChannelInboundHandlerAdapter() {
-
-            @Override
-            public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
-                if (evt instanceof IdleStateEvent) {
-                    ctx.writeAndFlush(new PingWebSocketFrame());
-                }
-                super.userEventTriggered(ctx, evt);
-            }
-
-            @Override
-            public void channelActive(final ChannelHandlerContext webSocketContext) {
-                webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
-            }
-
-            @Override
-            public void channelInactive(final ChannelHandlerContext webSocketContext) {
-                if (nativeSocketContext.channel().isActive()) {
-                    log.info("{} WebSocket-Socket PIPE the input has been closed, the output will be closed: {}", webSocketContext.channel(), nativeSocketContext.channel());
-                    nativeSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                }
-            }
-
-            @Override
-            public void channelRead(final ChannelHandlerContext webSocketContext, final Object msg) {
-                if (nativeSocketContext.channel().isActive()) {
-                    if (msg instanceof BinaryWebSocketFrame) {
-                        final ByteBuf buf = ((BinaryWebSocketFrame) msg).content();
-                        nativeSocketContext.writeAndFlush(buf);
-                    } else if (msg instanceof CloseWebSocketFrame) {
-                        final CloseWebSocketFrame c = (CloseWebSocketFrame) msg;
-                        log.info("{} WebSocket connection closed by {}/{}", webSocketContext.channel(), c.statusCode(), c.reasonText());
-                        try {
-                            webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                            nativeSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                        } finally {
-                            c.release();
-                        }
-                    } else {
-                        throw new UnsupportedOperationException("Unexpect websocket message: " + msg);
-                    }
-                } else {
-                    ReferenceCountUtil.release(msg);
-                }
-            }
-
-            @Override
-            public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) {
-                log.warn("{} Software caused connection abort: {}, -> {}", webSocketContext.channel(), cause.getMessage(), nativeSocketContext.channel(), cause);
-
-                WebSocketUtils.internalErrorClose(webSocketContext, cause.getMessage());
-                nativeSocketContext.close();
-            }
-        };
+    public static ChannelInboundHandler adaptWebSocketToSocket(final ChannelHandlerContext nativeSocketContext) {
+        return Redirects.webSocketRedirectToSocket(nativeSocketContext);
     }
 
     public static void main(String[] args) throws Exception {
