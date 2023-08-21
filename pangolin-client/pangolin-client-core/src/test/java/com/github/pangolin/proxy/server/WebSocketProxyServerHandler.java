@@ -150,19 +150,7 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
                 ctx.channel().config().setAutoRead(false);
                 final String hostname = req.headers().getAsString("X-TARGET-ADDRESS");
                 final int port = req.headers().getInt("X-TARGET-PORT", 0);
-                Channels.open(hostname, port, false, new NioEventLoopGroup(), new ChannelInboundHandlerAdapter() {
-                    @Override
-                    public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
-//                        ctx.pipeline().addLast(new ChannelInboundHandlerAdapter() {
-//                            @Override
-//                            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-//                        ctx.pipeline().replace(ctx.name(), "WebSocketToSocket", Redirects.webSocketRedirectToSocket(targetCtx));
-                                // ctx.pipeline().replace(ctx.name(), "WebSocketToSocket", Redirects.webSocketRedirectToSocket(targetCtx));
-//                            }
-//                        });
-//                        targetCtx.fireChannelRegistered();
-                    }
-                }).addListener(f -> {
+                Channels.open(hostname, port, false, group, new ChannelInboundHandlerAdapter()).addListener(f -> {
                     if (f.isSuccess()) {
 //                    log.debug("连接到目标地址({}/{}:{})成功", addrType, addr, port);
 //                    requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addrType));
