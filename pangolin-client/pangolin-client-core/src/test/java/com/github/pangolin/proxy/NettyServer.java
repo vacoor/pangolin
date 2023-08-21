@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  */
 @Slf4j
-public class AbstractNettyServer {
+public class NettyServer {
     /**
      * 服务 event loop group.
      */
@@ -55,7 +55,7 @@ public class AbstractNettyServer {
      *
      * @param listenPort 监听端口
      */
-    public AbstractNettyServer(final int listenPort) {
+    public NettyServer(final int listenPort) {
         this(null, listenPort);
     }
 
@@ -65,7 +65,7 @@ public class AbstractNettyServer {
      * @param listenHost 监听地址
      * @param listenPort 监听端口
      */
-    public AbstractNettyServer(final String listenHost, final int listenPort) {
+    public NettyServer(final String listenHost, final int listenPort) {
         this(
                 listenHost, listenPort,
                 new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocketTunnelServer-boss", true)),
@@ -73,8 +73,8 @@ public class AbstractNettyServer {
         );
     }
 
-    public AbstractNettyServer(final String listenHost, final int listenPort,
-                               final NioEventLoopGroup bossGroup, final NioEventLoopGroup workerGroup) {
+    public NettyServer(final String listenHost, final int listenPort,
+                       final NioEventLoopGroup bossGroup, final NioEventLoopGroup workerGroup) {
         this.listenHost = listenHost;
         this.listenPort = listenPort;
         this.bossGroup = bossGroup;

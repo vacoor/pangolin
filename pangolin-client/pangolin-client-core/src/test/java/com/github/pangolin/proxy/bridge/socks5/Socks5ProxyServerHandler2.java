@@ -3,11 +3,7 @@ package com.github.pangolin.proxy.bridge.socks5;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
@@ -17,11 +13,7 @@ import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketClientCompressionHandler;
-import io.netty.handler.codec.socksx.v5.DefaultSocks5CommandResponse;
-import io.netty.handler.codec.socksx.v5.Socks5AddressType;
-import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
-import io.netty.handler.codec.socksx.v5.Socks5CommandStatus;
-import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
+import io.netty.handler.codec.socksx.v5.*;
 import io.netty.handler.timeout.IdleStateHandler;
 import lombok.extern.slf4j.Slf4j;
 
@@ -55,6 +47,9 @@ public class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler {
         final URI webSocketEndpoint = URI.create("ws://127.0.0.1:8899/ws/echo");
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
         final int portToUse = 0 < webSocketEndpoint.getPort() ? webSocketEndpoint.getPort() : (isSecure ? 443 : 80);
+        final DefaultHttpHeaders headers = new DefaultHttpHeaders();
+        headers.set("X-TARGET-ADDRESS", address);
+        headers.setInt("X-TARGET-PORT", port);
 
         Channels.open(webSocketEndpoint.getHost(), portToUse, true, group, new ChannelInitializer<SocketChannel>() {
             @Override
@@ -67,7 +62,7 @@ public class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler {
                 cp.addLast(new HttpClientCodec(), new HttpObjectAggregator(1024 * 1024 * 8));
                 cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
                 cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
-                        webSocketEndpoint, WebSocketVersion.V13, "", true, new DefaultHttpHeaders(), 65536, false, true
+                        webSocketEndpoint, WebSocketVersion.V13, "", true, headers, 65536, false, true
                 ), false));
                 cp.addLast(new ChannelInboundHandlerAdapter() {
                     @Override
@@ -78,7 +73,6 @@ public class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler {
                             requestCtx.pipeline().replace(requestCtx.handler(), null, Redirects.socketRedirectToWebSocket(delegateCtx));
                             delegateCtx.pipeline().replace(this, null, Redirects.webSocketRedirectToSocket(requestCtx));
 
-                            System.out.println();
                             requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(g -> requestCtx.pipeline().remove(Socks5ServerEncoder.DEFAULT));
 
                             requestCtx.channel().config().setAutoRead(true);

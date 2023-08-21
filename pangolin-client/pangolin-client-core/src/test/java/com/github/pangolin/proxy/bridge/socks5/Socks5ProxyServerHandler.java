@@ -8,21 +8,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.handler.codec.socksx.v5.DefaultSocks5CommandResponse;
-import io.netty.handler.codec.socksx.v5.DefaultSocks5InitialResponse;
-import io.netty.handler.codec.socksx.v5.DefaultSocks5PasswordAuthResponse;
-import io.netty.handler.codec.socksx.v5.Socks5AddressType;
-import io.netty.handler.codec.socksx.v5.Socks5AuthMethod;
-import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
-import io.netty.handler.codec.socksx.v5.Socks5CommandRequestDecoder;
-import io.netty.handler.codec.socksx.v5.Socks5CommandStatus;
-import io.netty.handler.codec.socksx.v5.Socks5CommandType;
-import io.netty.handler.codec.socksx.v5.Socks5InitialRequest;
-import io.netty.handler.codec.socksx.v5.Socks5InitialRequestDecoder;
-import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequest;
-import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequestDecoder;
-import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthStatus;
-import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
+import io.netty.handler.codec.socksx.v5.*;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -94,9 +80,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
             final Socks5CommandType type = request.type();
             final Socks5AddressType addressType = request.dstAddrType();
             if (Socks5CommandType.CONNECT.equals(type)) {
-
-                // connectToTarget(group, ctx, request);
-                connectToTarget(new NioEventLoopGroup(1), ctx, request);
+                connectToTarget(group, ctx, request);
             } else {
                 ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType));
             }

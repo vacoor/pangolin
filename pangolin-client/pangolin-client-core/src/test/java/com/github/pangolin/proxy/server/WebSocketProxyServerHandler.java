@@ -139,7 +139,9 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
             } else {
                 //
                 ctx.channel().config().setAutoRead(false);
-                Channels.open("www.baidu.com", 443, false, new NioEventLoopGroup(), new ChannelInboundHandlerAdapter() {
+                final String hostname = req.headers().getAsString("X-TARGET-ADDRESS");
+                final int port = req.headers().getInt("X-TARGET-PORT", 0);
+                Channels.open(hostname, port, false, new NioEventLoopGroup(), new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
                         ctx.pipeline().replace(ctx.handler(), null, Redirects.webSocketRedirectToSocket(targetCtx));
