@@ -48,7 +48,7 @@ public class Socks5ProxyServer extends NettyServer {
         return super.start(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new Socks5ProxyServerHandler(bossGroup));
+                ch.pipeline().addLast(new Socks5ProxyServerHandler2(bossGroup));
             }
         });
     }

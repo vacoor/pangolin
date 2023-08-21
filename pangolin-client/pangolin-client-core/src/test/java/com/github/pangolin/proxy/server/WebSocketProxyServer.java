@@ -1,9 +1,7 @@
 package com.github.pangolin.proxy.server;
 
 import com.github.pangolin.proxy.NettyServer;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
+import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
@@ -47,13 +45,9 @@ public class WebSocketProxyServer extends NettyServer {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();
-                ch.pipeline().addLast();
-                ch.pipeline().addLast(
-                        new HttpServerCodec(),
-                        new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                        new WebSocketProxyServerHandler("/ws", "*", false, 65536, true, true)
-
-                );
+//                cp.addLast(createServerSslContext().newHandler(ch.alloc()));
+                cp.addLast(new HttpServerCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
+                cp.addLast(new WebSocketProxyServerHandler(bossGroup, "/ws", "*", false, 65536, true, true));
             }
         });
     }

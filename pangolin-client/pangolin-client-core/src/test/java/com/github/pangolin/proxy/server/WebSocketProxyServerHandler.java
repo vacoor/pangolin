@@ -26,9 +26,15 @@ import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketHandshakeException;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.SslHandler;
+import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.util.AttributeKey;
+import lombok.extern.slf4j.Slf4j;
 
+import javax.net.ssl.SSLException;
+import java.security.cert.CertificateException;
 import java.util.List;
 
 import static io.netty.handler.codec.http.HttpMethod.GET;
@@ -39,9 +45,11 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 /**
  *
  */
+@Slf4j
 public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
     private static final AttributeKey<WebSocketServerHandshaker> HANDSHAKER_ATTR_KEY = AttributeKey.valueOf(WebSocketServerHandshaker.class, "HANDSHAKER");
 
+    private final NioEventLoopGroup group;
     private final String websocketPath;
     private final String subprotocols;
     private final boolean allowExtensions;
@@ -49,11 +57,12 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
     private final boolean allowMaskMismatch;
     private final boolean checkStartsWith;
 
-    WebSocketProxyServerHandler(String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch) {
-        this(websocketPath, subprotocols, allowExtensions, maxFrameSize, allowMaskMismatch, false);
+    WebSocketProxyServerHandler(NioEventLoopGroup group, String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch) {
+        this(group, websocketPath, subprotocols, allowExtensions, maxFrameSize, allowMaskMismatch, false);
     }
 
-    public WebSocketProxyServerHandler(String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch, boolean checkStartsWith) {
+    public WebSocketProxyServerHandler(NioEventLoopGroup group, String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch, boolean checkStartsWith) {
+        this.group = group;
         this.websocketPath = websocketPath;
         this.subprotocols = subprotocols;
         this.allowExtensions = allowExtensions;
@@ -70,7 +79,7 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
          * protocol
          */
         final ChannelPipeline cp = ctx.pipeline();
-        ctx.pipeline().addAfter(ctx.name(), null, new MessageToMessageDecoder<WebSocketFrame>() {
+        ctx.pipeline().addAfter(ctx.name(), "DECODER", new MessageToMessageDecoder<WebSocketFrame>() {
 
             @Override
             protected void decode(final ChannelHandlerContext ctx, final WebSocketFrame frame, final List<Object> out) throws Exception {
@@ -144,17 +153,21 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
                 Channels.open(hostname, port, false, new NioEventLoopGroup(), new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
-                        ctx.pipeline().replace(ctx.handler(), null, Redirects.webSocketRedirectToSocket(targetCtx));
-                        targetCtx.pipeline().replace(targetCtx.handler(), null, Redirects.socketRedirectToWebSocket(targetCtx));
-
-                        ctx.channel().config().setAutoRead(true);
-                        targetCtx.channel().config().setAutoRead(true);
+//                        ctx.pipeline().addLast(new ChannelInboundHandlerAdapter() {
+//                            @Override
+//                            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+//                        ctx.pipeline().replace(ctx.name(), "WebSocketToSocket", Redirects.webSocketRedirectToSocket(targetCtx));
+                                // ctx.pipeline().replace(ctx.name(), "WebSocketToSocket", Redirects.webSocketRedirectToSocket(targetCtx));
+//                            }
+//                        });
+//                        targetCtx.fireChannelRegistered();
                     }
                 }).addListener(f -> {
                     if (f.isSuccess()) {
 //                    log.debug("连接到目标地址({}/{}:{})成功", addrType, addr, port);
 //                    requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addrType));
 
+                        ChannelHandlerContext targetCtx = ((ChannelFuture) f).channel().pipeline().lastContext();
                         final ChannelFuture handshakeFuture = handshaker.handshake(ctx.channel(), req);
                         handshakeFuture.addListener(new ChannelFutureListener() {
                             @Override
@@ -162,12 +175,25 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
                                 if (!future.isSuccess()) {
                                     ctx.fireExceptionCaught(future.cause());
                                 } else {
+                                    ctx.pipeline().remove(ctx.handler());
+                                    log.info("OK");
+                                    ChannelHandlerContext ctx2 = future.channel().pipeline().lastContext();
+                                    ctx2.pipeline().addLast("WebSocketToSocket", Redirects.webSocketRedirectToSocket(targetCtx));
+                                    targetCtx.pipeline().replace(targetCtx.name(), "SocketToWebSocket", Redirects.socketRedirectToWebSocket(ctx2));
+
+//                        ctx.pipeline().addLast(Redirects.webSocketRedirectToSocket(targetCtx));
+                                    ctx2.channel().config().setAutoRead(true);
+                                    targetCtx.channel().config().setAutoRead(true);
+//                                    ctx.pipeline().remove(ctx.handler());
                                     // Kept for compatibility
 //                            ctx.fireUserEventTriggered(WebSocketServerProtocolHandler.ServerHandshakeStateEvent.HANDSHAKE_COMPLETE);
 //                            ctx.fireUserEventTriggered(new WebSocketServerProtocolHandler.HandshakeComplete(req.uri(), req.headers(), handshaker.selectedSubprotocol()));
+                                    ChannelHandlerContext targetCtx = ((ChannelFuture) f).channel().pipeline().firstContext();
                                 }
                             }
                         });
+                        /*
+                        */
                         setHandshaker(ctx.channel(), handshaker);
                         /*
                         ctx.pipeline().replace(this, "WS403Responder", new ChannelInboundHandlerAdapter() {
@@ -185,16 +211,14 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
                         });
                         */
                     } else {
-//                        log.warn("连接到目标地址({}/{}:{})失败: {}", addrType, addr, port, f.cause());
+                        log.warn("连接到目标地址({}/{}:{})失败: {}", 0, hostname, port, f.cause());
 //                        requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.FAILURE, addrType));
                     }
                 }).sync().channel().closeFuture().addListener(f -> {
-                    /*
-                    if (requestCtx.channel().isActive()) {
-                        log.info("目标地址({}/{}:{})断开连接", addrType, addr, port, f.cause());
-                        requestCtx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    if (ctx.channel().isActive()) {
+                        log.info("目标地址({}/{}:{})断开连接", 0, hostname, port, f.cause());
+                        ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                     }
-                    */
                 });
 
             }

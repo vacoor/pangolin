@@ -14,9 +14,13 @@ import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketClientCompressionHandler;
 import io.netty.handler.codec.socksx.v5.*;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.handler.timeout.IdleStateHandler;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.net.ssl.SSLException;
 import java.net.URI;
 
 /**
@@ -44,7 +48,7 @@ public class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler {
 
         requestCtx.channel().config().setAutoRead(false);
 
-        final URI webSocketEndpoint = URI.create("ws://127.0.0.1:8899/ws/echo");
+        final URI webSocketEndpoint = URI.create("ws://127.0.0.1:8888/ws");
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
         final int portToUse = 0 < webSocketEndpoint.getPort() ? webSocketEndpoint.getPort() : (isSecure ? 443 : 80);
         final DefaultHttpHeaders headers = new DefaultHttpHeaders();
@@ -53,14 +57,12 @@ public class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler {
 
         Channels.open(webSocketEndpoint.getHost(), portToUse, true, group, new ChannelInitializer<SocketChannel>() {
             @Override
-            protected void initChannel(final SocketChannel ch) {
+            protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();
-//                if (null != context) {
-//                    cp.addLast(context.newHandler(ch.alloc()));
-//                }
-                cp.addLast(new IdleStateHandler(0, 0, 50));
+//                cp.addLast(createClientSslContext().newHandler(ch.alloc()));
+//                cp.addLast(new IdleStateHandler(0, 0, 50));
                 cp.addLast(new HttpClientCodec(), new HttpObjectAggregator(1024 * 1024 * 8));
-                cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
+//                cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
                 cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
                         webSocketEndpoint, WebSocketVersion.V13, "", true, headers, 65536, false, true
                 ), false));
@@ -107,6 +109,10 @@ public class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler {
                 requestCtx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         });
+    }
+
+    private static SslContext createClientSslContext() throws SSLException {
+        return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
     }
 
     private static boolean nullSafeEquals(Object a, Object b) {

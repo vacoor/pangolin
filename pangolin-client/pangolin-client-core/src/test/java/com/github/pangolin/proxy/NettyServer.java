@@ -104,7 +104,7 @@ public class NettyServer {
         return SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey()).build();
     }
 
-    private static SslContext createSslContext() throws SSLException {
+    protected SslContext createClientSslContext() throws SSLException {
         return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
     }
 
