@@ -8,7 +8,6 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.*;
-import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
 
@@ -49,7 +48,7 @@ public class WebSocketServerTunnelHandlerMain extends ChannelInboundHandlerAdapt
                 ch.pipeline().addLast(
                         new HttpServerCodec(),
                         new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
-                        new WebSocketServerTunnelHandler("/ws", "*", false, 65536, true, true)
+                        new WebSocketProxyServerHandler("/ws", "*", false, 65536, true, true)
 //                        new WebSocketServerProtocolHandler("/ws", "", false, 65536, true, true)
 
                 );

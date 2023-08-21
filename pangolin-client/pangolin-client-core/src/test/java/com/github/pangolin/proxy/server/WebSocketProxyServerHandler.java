@@ -3,27 +3,44 @@ package com.github.pangolin.proxy.server;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelPipeline;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.codec.MessageToMessageDecoder;
-import io.netty.handler.codec.http.*;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.DefaultFullHttpResponse;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpRequest;
+import io.netty.handler.codec.http.HttpResponse;
+import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketHandshakeException;
+import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker;
+import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.AttributeKey;
 
 import java.util.List;
 
-import static io.netty.handler.codec.http.HttpUtil.*;
-import static io.netty.handler.codec.http.HttpMethod.*;
-import static io.netty.handler.codec.http.HttpResponseStatus.*;
-import static io.netty.handler.codec.http.HttpVersion.*;
+import static io.netty.handler.codec.http.HttpMethod.GET;
+import static io.netty.handler.codec.http.HttpResponseStatus.FORBIDDEN;
+import static io.netty.handler.codec.http.HttpUtil.isKeepAlive;
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 /**
  *
  */
-class WebSocketServerTunnelHandler extends ChannelInboundHandlerAdapter {
-    private static final AttributeKey<WebSocketServerHandshaker> HANDSHAKER_ATTR_KEY =
-            AttributeKey.valueOf(WebSocketServerHandshaker.class, "HANDSHAKER");
+public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
+    private static final AttributeKey<WebSocketServerHandshaker> HANDSHAKER_ATTR_KEY = AttributeKey.valueOf(WebSocketServerHandshaker.class, "HANDSHAKER");
 
     private final String websocketPath;
     private final String subprotocols;
@@ -32,11 +49,11 @@ class WebSocketServerTunnelHandler extends ChannelInboundHandlerAdapter {
     private final boolean allowMaskMismatch;
     private final boolean checkStartsWith;
 
-    WebSocketServerTunnelHandler(String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch) {
+    WebSocketProxyServerHandler(String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch) {
         this(websocketPath, subprotocols, allowExtensions, maxFrameSize, allowMaskMismatch, false);
     }
 
-    WebSocketServerTunnelHandler(String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch, boolean checkStartsWith) {
+    public WebSocketProxyServerHandler(String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch, boolean checkStartsWith) {
         this.websocketPath = websocketPath;
         this.subprotocols = subprotocols;
         this.allowExtensions = allowExtensions;
@@ -83,11 +100,8 @@ class WebSocketServerTunnelHandler extends ChannelInboundHandlerAdapter {
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-//                ctx.fireExceptionCaught(cause);
-//                ctx.close();
                 if (cause instanceof WebSocketHandshakeException) {
-                    FullHttpResponse response = new DefaultFullHttpResponse(
-                            HTTP_1_1, HttpResponseStatus.BAD_REQUEST, Unpooled.wrappedBuffer(cause.getMessage().getBytes()));
+                    FullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.BAD_REQUEST, Unpooled.wrappedBuffer(cause.getMessage().getBytes()));
                     ctx.channel().writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
                 } else {
                     ctx.fireExceptionCaught(cause);
