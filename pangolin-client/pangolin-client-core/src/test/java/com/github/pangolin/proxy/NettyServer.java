@@ -29,7 +29,7 @@ public class NettyServer {
     /**
      * 处理 event loop group.
      */
-    protected final NioEventLoopGroup workerGroup;
+    protected final NioEventLoopGroup workersGroup;
 
     /**
      *
@@ -69,17 +69,17 @@ public class NettyServer {
     public NettyServer(final String listenHost, final int listenPort) {
         this(
                 listenHost, listenPort,
-                new NioEventLoopGroup(2, new DefaultThreadFactory("WebSocketTunnelServer-boss", true)),
-                new NioEventLoopGroup(4, new DefaultThreadFactory("WebSocketTunnelServer-workers", true))
+                new NioEventLoopGroup(2, new DefaultThreadFactory("NettyServer-boss", true)),
+                new NioEventLoopGroup(0, new DefaultThreadFactory("NettyServer-workers", true))
         );
     }
 
     public NettyServer(final String listenHost, final int listenPort,
-                       final NioEventLoopGroup bossGroup, final NioEventLoopGroup workerGroup) {
+                       final NioEventLoopGroup bossGroup, final NioEventLoopGroup workersGroup) {
         this.listenHost = listenHost;
         this.listenPort = listenPort;
         this.bossGroup = bossGroup;
-        this.workerGroup = workerGroup;
+        this.workersGroup = workersGroup;
     }
 
     /**
@@ -92,9 +92,9 @@ public class NettyServer {
             return serverChannel;
         }
 
-        final ChannelFuture cf = Channels.listen(listenHost, listenPort, bossGroup, workerGroup, initializer);
+        final ChannelFuture cf = Channels.listen(listenHost, listenPort, bossGroup, workersGroup, initializer);
         Channels.shutdownGroupOnChannelClose(cf.channel(), bossGroup);
-        Channels.shutdownGroupOnChannelClose(cf.channel(), workerGroup);
+        Channels.shutdownGroupOnChannelClose(cf.channel(), workersGroup);
 
         return serverChannel = cf.sync().channel();
     }
@@ -122,7 +122,7 @@ public class NettyServer {
             serverChannel.close();
         }
         bossGroup.shutdownGracefully();
-        workerGroup.shutdownGracefully();
+        workersGroup.shutdownGracefully();
     }
 
 }

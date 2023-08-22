@@ -47,7 +47,7 @@ public class Socks4ProxyServer extends NettyServer {
         return super.start(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new Socks4ProxyServerHandler(bossGroup));
+                ch.pipeline().addLast(new Socks4ProxyServerHandler(workersGroup));
             }
         });
     }

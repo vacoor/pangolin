@@ -53,8 +53,7 @@ public class Socks5WebSocketProxyServer extends NettyServer {
         return super.start(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                final NioEventLoopGroup proxyGroup = new NioEventLoopGroup(4);
-                ch.pipeline().addLast(new Socks5WebSocketProxyServerHandler(webSocketProxyServerEndpoint, webSocketProxyServerProtocol, proxyGroup));
+                ch.pipeline().addLast(new Socks5WebSocketProxyServerHandler(webSocketProxyServerEndpoint, webSocketProxyServerProtocol, workersGroup));
             }
         });
     }

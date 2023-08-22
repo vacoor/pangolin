@@ -22,15 +22,15 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
     private static final String NONE = "";
 
     private final String uid;
-    private final NioEventLoopGroup eventGroup;
+    private final NioEventLoopGroup proxyWorkersGroup;
 
-    public Socks4ProxyServerHandler(final NioEventLoopGroup eventGroup) {
-        this(NONE, eventGroup);
+    public Socks4ProxyServerHandler(final NioEventLoopGroup proxyWorkersGroup) {
+        this(NONE, proxyWorkersGroup);
     }
 
-    public Socks4ProxyServerHandler(final String uid, final NioEventLoopGroup eventGroup) {
+    public Socks4ProxyServerHandler(final String uid, final NioEventLoopGroup proxyWorkersGroup) {
         this.uid = null != uid ? uid : NONE;
-        this.eventGroup = eventGroup;
+        this.proxyWorkersGroup = proxyWorkersGroup;
     }
 
     @Override
@@ -68,7 +68,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final Socks4CommandType type = request.type();
                 final String requestUid = request.userId();
                 if (nullSafeEquals(uid, requestUid) && Socks4CommandType.CONNECT.equals(type)) {
-                    connectToTarget(eventGroup, ctx, request);
+                    connectToTarget(proxyWorkersGroup, ctx, request);
                 } else {
                     ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.REJECTED_OR_FAILED)).addListener(ChannelFutureListener.CLOSE);
                 }

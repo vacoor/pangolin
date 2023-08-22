@@ -4,6 +4,7 @@ import com.github.pangolin.proxy.NettyServer;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
@@ -35,7 +36,7 @@ public class WebSocketProxyServer extends NettyServer {
      * @param listenPort 监听端口
      */
     public WebSocketProxyServer(final String listenHost, final int listenPort, final boolean isSecure) {
-        super(listenHost, listenPort);
+        super(listenHost, listenPort, new NioEventLoopGroup(2), new NioEventLoopGroup(100));
         this.isSecure = isSecure;
     }
 
@@ -54,7 +55,7 @@ public class WebSocketProxyServer extends NettyServer {
                     cp.addLast(createServerSslContext().newHandler(ch.alloc()));
                 }
                 cp.addLast(new HttpServerCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
-                cp.addLast(new WebSocketProxyServerHandler(bossGroup, "/ws", "*", false, 65536, true, true));
+                cp.addLast(new WebSocketProxyServerHandler(workersGroup, "/ws", "*", false, 65536, true, true));
             }
         });
     }

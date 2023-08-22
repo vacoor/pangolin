@@ -24,16 +24,16 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
 
     private final String username;
     private final String password;
-    private final NioEventLoopGroup eventGroup;
+    private final NioEventLoopGroup proxyWorksGroup;
 
-    public Socks5ProxyServerHandler(final NioEventLoopGroup eventGroup) {
-        this(null, null, eventGroup);
+    public Socks5ProxyServerHandler(final NioEventLoopGroup proxyWorksGroup) {
+        this(null, null, proxyWorksGroup);
     }
 
-    public Socks5ProxyServerHandler(final String username, final String password, final NioEventLoopGroup eventGroup) {
+    public Socks5ProxyServerHandler(final String username, final String password, final NioEventLoopGroup proxyWorksGroup) {
         this.username = username;
         this.password = password;
-        this.eventGroup = eventGroup;
+        this.proxyWorksGroup = proxyWorksGroup;
     }
 
     @Override
@@ -100,7 +100,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final Socks5CommandType type = request.type();
                 final Socks5AddressType addressType = request.dstAddrType();
                 if (Socks5CommandType.CONNECT.equals(type)) {
-                    connectToTarget(eventGroup, ctx, request);
+                    connectToTarget(proxyWorksGroup, ctx, request);
                 } else {
                     ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
                 }
@@ -114,13 +114,13 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
-    protected void connectToTarget(final NioEventLoopGroup group, final ChannelHandlerContext requestCtx, Socks5CommandRequest request) throws InterruptedException {
+    protected void connectToTarget(final NioEventLoopGroup proxyWorkersGroup, final ChannelHandlerContext requestCtx, Socks5CommandRequest request) throws InterruptedException {
         final int port = request.dstPort();
         final String address = request.dstAddr();
         final Socks5AddressType addressType = request.dstAddrType();
 
         requestCtx.channel().config().setAutoRead(false);
-        Channels.open(address, port, false, group, new ChannelInboundHandlerAdapter() {
+        Channels.open(address, port, false, proxyWorkersGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
                 delegateCtx.pipeline().replace(this, null, Redirects.socketRedirectToSocket(requestCtx));

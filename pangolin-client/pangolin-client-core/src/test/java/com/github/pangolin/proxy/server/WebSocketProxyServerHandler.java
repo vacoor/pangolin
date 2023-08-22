@@ -2,21 +2,15 @@ package com.github.pangolin.proxy.server;
 
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
-import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.ByteToMessageDecoder;
-import io.netty.handler.codec.MessageToByteEncoder;
 import io.netty.handler.codec.MessageToMessageDecoder;
-import io.netty.handler.codec.MessageToMessageEncoder;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
@@ -24,30 +18,18 @@ import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
-import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.ContinuationWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
-import io.netty.handler.codec.http.websocketx.WebSocket00FrameEncoder;
-import io.netty.handler.codec.http.websocketx.WebSocket13FrameDecoder;
-import io.netty.handler.codec.http.websocketx.WebSocket13FrameEncoder;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketFrameEncoder;
 import io.netty.handler.codec.http.websocketx.WebSocketHandshakeException;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory;
-import io.netty.handler.ssl.SslContext;
-import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.SslHandler;
-import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.util.AttributeKey;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.net.ssl.SSLException;
-import java.security.cert.CertificateException;
 import java.util.List;
 
 import static io.netty.handler.codec.http.HttpMethod.GET;
@@ -62,7 +44,7 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
     private static final AttributeKey<WebSocketServerHandshaker> HANDSHAKER_ATTR_KEY = AttributeKey.valueOf(WebSocketServerHandshaker.class, "HANDSHAKER");
 
-    private final NioEventLoopGroup group;
+    private final NioEventLoopGroup proxyWorkersGroup;
     private final String websocketPath;
     private final String subprotocols;
     private final boolean allowExtensions;
@@ -70,12 +52,12 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
     private final boolean allowMaskMismatch;
     private final boolean checkStartsWith;
 
-    WebSocketProxyServerHandler(NioEventLoopGroup group, String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch) {
-        this(group, websocketPath, subprotocols, allowExtensions, maxFrameSize, allowMaskMismatch, false);
+    WebSocketProxyServerHandler(NioEventLoopGroup proxyWorkersGroup, String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch) {
+        this(proxyWorkersGroup, websocketPath, subprotocols, allowExtensions, maxFrameSize, allowMaskMismatch, false);
     }
 
-    public WebSocketProxyServerHandler(NioEventLoopGroup group, String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch, boolean checkStartsWith) {
-        this.group = group;
+    public WebSocketProxyServerHandler(NioEventLoopGroup proxyWorkersGroup, String websocketPath, String subprotocols, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch, boolean checkStartsWith) {
+        this.proxyWorkersGroup = proxyWorkersGroup;
         this.websocketPath = websocketPath;
         this.subprotocols = subprotocols;
         this.allowExtensions = allowExtensions;
@@ -164,7 +146,7 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final String hostname = req.headers().getAsString("X-TARGET-ADDRESS");
                 final int port = req.headers().getInt("X-TARGET-PORT", 0);
 
-                Channels.open(hostname, port, false, group, new ChannelInboundHandlerAdapter() {
+                Channels.open(hostname, port, false, proxyWorkersGroup, new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
                         ctx.pipeline().addBefore(ctx.name(), "WebSocket->Socket", Redirects.webSocketRedirectToSocket(targetCtx));
