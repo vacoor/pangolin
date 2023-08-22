@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.bridge.socks5;
+package com.github.pangolin.proxy.client.socks5;
 
 import com.github.pangolin.proxy.NettyServer;
 import io.netty.channel.Channel;
@@ -7,9 +7,9 @@ import io.netty.channel.socket.SocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
+import java.net.URI;
 import java.security.cert.CertificateException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 
 /**
  * WebSocket 隧道服务.
@@ -18,15 +18,17 @@ import java.util.concurrent.TimeUnit;
  * @since 20210825
  */
 @Slf4j
-public class Socks5ProxyServer extends NettyServer {
+public class Socks5WebSocketProxyServer extends NettyServer {
+    private final URI webSocketProxyServerEndpoint;
+    private final String webSocketProxyServerProtocol;
 
     /**
      * 创建隧道服务实例.
      *
      * @param listenPort 监听端口
      */
-    public Socks5ProxyServer(final int listenPort) {
-        this(null, listenPort);
+    public Socks5WebSocketProxyServer(final int listenPort, final URI webSocketProxyServerEndpoint, final String webSocketProxyServerProtocol) {
+        this(null, listenPort, webSocketProxyServerEndpoint, webSocketProxyServerProtocol);
     }
 
     /**
@@ -35,8 +37,10 @@ public class Socks5ProxyServer extends NettyServer {
      * @param listenHost 监听地址
      * @param listenPort 监听端口
      */
-    public Socks5ProxyServer(final String listenHost, final int listenPort) {
+    public Socks5WebSocketProxyServer(final String listenHost, final int listenPort, final URI webSocketProxyServerEndpoint, final String webSocketProxyServerProtocol) {
         super(listenHost, listenPort);
+        this.webSocketProxyServerEndpoint = webSocketProxyServerEndpoint;
+        this.webSocketProxyServerProtocol = webSocketProxyServerProtocol;
     }
 
     /**
@@ -48,21 +52,17 @@ public class Socks5ProxyServer extends NettyServer {
         return super.start(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new Socks5ProxyServerHandler2(bossGroup));
+                ch.pipeline().addLast(new Socks5WebSocketProxyServerHandler(webSocketProxyServerEndpoint, webSocketProxyServerProtocol, bossGroup));
             }
         });
     }
 
     public static void main(String[] args) throws InterruptedException, SSLException, CertificateException, ExecutionException {
-        final Socks5ProxyServer server = new Socks5ProxyServer(1008);
+        final int listenPort = 1008;
+        final URI webSocketProxyServerEndpoint = URI.create("wss://127.0.0.1:8888/ws");
+        final String webSocketProxyServerProtocol = null;
+        final Socks5WebSocketProxyServer server = new Socks5WebSocketProxyServer(listenPort, webSocketProxyServerEndpoint, webSocketProxyServerProtocol);
         final Channel channel = server.start();
-        channel.eventLoop().scheduleWithFixedDelay(new Runnable() {
-            @Override
-            public void run() {
-//                server.expiredCheck();
-            }
-        }, 60, 60, TimeUnit.SECONDS);
-
         channel.closeFuture().sync().get();
     }
 }

@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.server;
+package com.github.pangolin.proxy.bridge;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;

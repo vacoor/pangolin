@@ -2,6 +2,7 @@ package com.github.pangolin.proxy;
 
 import com.github.pangolin.util.Channels;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContext;
@@ -91,7 +92,11 @@ public class NettyServer {
             return serverChannel;
         }
 
-        return serverChannel = Channels.listen(listenHost, listenPort, bossGroup, workerGroup, initializer).sync().channel();
+        final ChannelFuture cf = Channels.listen(listenHost, listenPort, bossGroup, workerGroup, initializer);
+        Channels.shutdownGroupOnChannelClose(cf.channel(), bossGroup);
+        Channels.shutdownGroupOnChannelClose(cf.channel(), workerGroup);
+
+        return serverChannel = cf.sync().channel();
     }
 
     /**

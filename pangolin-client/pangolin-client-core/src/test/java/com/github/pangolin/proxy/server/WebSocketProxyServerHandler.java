@@ -2,15 +2,21 @@ package com.github.pangolin.proxy.server;
 
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
+import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.codec.ByteToMessageDecoder;
+import io.netty.handler.codec.MessageToByteEncoder;
 import io.netty.handler.codec.MessageToMessageDecoder;
+import io.netty.handler.codec.MessageToMessageEncoder;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
@@ -18,11 +24,18 @@ import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.ContinuationWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
+import io.netty.handler.codec.http.websocketx.WebSocket00FrameEncoder;
+import io.netty.handler.codec.http.websocketx.WebSocket13FrameDecoder;
+import io.netty.handler.codec.http.websocketx.WebSocket13FrameEncoder;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketFrameEncoder;
 import io.netty.handler.codec.http.websocketx.WebSocketHandshakeException;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory;
@@ -150,12 +163,22 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
                 ctx.channel().config().setAutoRead(false);
                 final String hostname = req.headers().getAsString("X-TARGET-ADDRESS");
                 final int port = req.headers().getInt("X-TARGET-PORT", 0);
-                Channels.open(hostname, port, false, group, new ChannelInboundHandlerAdapter()).addListener(f -> {
+
+                Channels.open(hostname, port, false, group, new ChannelInboundHandlerAdapter() {
+                    @Override
+                    public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
+                        ctx.pipeline().addBefore(ctx.name(), "WebSocket->Socket", Redirects.webSocketRedirectToSocket(targetCtx));
+                        targetCtx.pipeline().replace(targetCtx.name(), "Socket->WebSocket", Redirects.socketRedirectToWebSocket(ctx));
+
+                        ctx.channel().config().setAutoRead(true);
+                        targetCtx.channel().config().setAutoRead(true);
+                    }
+
+                }).addListener(f -> {
                     if (f.isSuccess()) {
 //                    log.debug("连接到目标地址({}/{}:{})成功", addrType, addr, port);
 //                    requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addrType));
 
-                        ChannelHandlerContext targetCtx = ((ChannelFuture) f).channel().pipeline().lastContext();
                         final ChannelFuture handshakeFuture = handshaker.handshake(ctx.channel(), req);
                         handshakeFuture.addListener(new ChannelFutureListener() {
                             @Override
@@ -163,20 +186,9 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
                                 if (!future.isSuccess()) {
                                     ctx.fireExceptionCaught(future.cause());
                                 } else {
-                                    ctx.pipeline().remove(ctx.handler());
-                                    log.info("OK");
-                                    ChannelHandlerContext ctx2 = future.channel().pipeline().lastContext();
-                                    ctx2.pipeline().addLast("WebSocketToSocket", Redirects.webSocketRedirectToSocket(targetCtx));
-                                    targetCtx.pipeline().replace(targetCtx.name(), "SocketToWebSocket", Redirects.socketRedirectToWebSocket(ctx2));
-
-//                        ctx.pipeline().addLast(Redirects.webSocketRedirectToSocket(targetCtx));
-                                    ctx2.channel().config().setAutoRead(true);
-                                    targetCtx.channel().config().setAutoRead(true);
-//                                    ctx.pipeline().remove(ctx.handler());
                                     // Kept for compatibility
 //                            ctx.fireUserEventTriggered(WebSocketServerProtocolHandler.ServerHandshakeStateEvent.HANDSHAKE_COMPLETE);
 //                            ctx.fireUserEventTriggered(new WebSocketServerProtocolHandler.HandshakeComplete(req.uri(), req.headers(), handshaker.selectedSubprotocol()));
-                                    ChannelHandlerContext targetCtx = ((ChannelFuture) f).channel().pipeline().firstContext();
                                 }
                             }
                         });

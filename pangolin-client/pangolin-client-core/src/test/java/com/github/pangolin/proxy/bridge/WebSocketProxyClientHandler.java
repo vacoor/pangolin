@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.bridge.socks5;
+package com.github.pangolin.proxy.bridge;
 
 import com.github.pangolin.util.Channels;
 import io.netty.channel.ChannelDuplexHandler;

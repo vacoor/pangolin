@@ -1,31 +1,32 @@
-package com.github.pangolin.proxy.server;
+package com.github.pangolin.proxy.client.socks5;
 
 import com.github.pangolin.proxy.NettyServer;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpServerCodec;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
 import java.security.cert.CertificateException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
+/**
+ * WebSocket 隧道服务.
+ *
+ * @author changhe.yang
+ * @since 20210825
+ */
 @Slf4j
-public class WebSocketProxyServer extends NettyServer {
-    private static final int MAX_HTTP_CONTENT_LENGTH = 1024 * 1024 * 8;
-
-    private final boolean isSecure;
+public class Socks5ProxyServer extends NettyServer {
 
     /**
      * 创建隧道服务实例.
      *
      * @param listenPort 监听端口
      */
-    public WebSocketProxyServer(final int listenPort, final boolean isSecure) {
-        this(null, listenPort, isSecure);
+    public Socks5ProxyServer(final int listenPort) {
+        this(null, listenPort);
     }
 
     /**
@@ -34,9 +35,8 @@ public class WebSocketProxyServer extends NettyServer {
      * @param listenHost 监听地址
      * @param listenPort 监听端口
      */
-    public WebSocketProxyServer(final String listenHost, final int listenPort, final boolean isSecure) {
+    public Socks5ProxyServer(final String listenHost, final int listenPort) {
         super(listenHost, listenPort);
-        this.isSecure = isSecure;
     }
 
     /**
@@ -45,22 +45,17 @@ public class WebSocketProxyServer extends NettyServer {
      * @return 服务通道
      */
     public Channel start() throws InterruptedException, CertificateException, SSLException {
-
         return super.start(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                final ChannelPipeline cp = ch.pipeline();
-                if (isSecure) {
-                    cp.addLast(createServerSslContext().newHandler(ch.alloc()));
-                }
-                cp.addLast(new HttpServerCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
-                cp.addLast(new WebSocketProxyServerHandler(bossGroup, "/ws", "*", false, 65536, true, true));
+                ch.pipeline().addLast(new Socks5ProxyServerHandler(bossGroup));
             }
         });
     }
 
     public static void main(String[] args) throws InterruptedException, SSLException, CertificateException, ExecutionException {
-        final WebSocketProxyServer server = new WebSocketProxyServer(8888, true);
+        final int listenPort = 1008;
+        final Socks5ProxyServer server = new Socks5ProxyServer(listenPort);
         final Channel channel = server.start();
         channel.closeFuture().sync().get();
     }

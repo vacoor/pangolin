@@ -2,8 +2,11 @@ package com.github.pangolin.util;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -41,10 +44,30 @@ public class Channels {
         b.option(ChannelOption.AUTO_READ, autoRead);
         b.option(ChannelOption.TCP_NODELAY, true);
         b.option(ChannelOption.SO_KEEPALIVE, true);
-        b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000);
+        b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10000);
         b.group(group).channel(NioSocketChannel.class).handler(initializer);
         // return b.connect(hostname, port).sync().channel();
         return b.connect(hostname, port);
+    }
+
+    public static void closeWebSocketOnChannelClose(final Channel channel, final ChannelHandlerContext webSocketContext) {
+        channel.closeFuture().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (webSocketContext.channel().isActive()) {
+                    WebSocketUtils.normalClose(webSocketContext, "Disconnect");
+                }
+            }
+        });
+    }
+
+    public static void shutdownGroupOnChannelClose(final Channel channel, final EventLoopGroup eventLoopGroup) {
+        channel.closeFuture().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) {
+                eventLoopGroup.shutdownGracefully();
+            }
+        });
     }
 
 }

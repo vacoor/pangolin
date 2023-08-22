@@ -1,9 +1,13 @@
-package com.github.pangolin.proxy.bridge.socks5;
+package com.github.pangolin.proxy.client.socks5;
 
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPipeline;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
@@ -12,12 +16,14 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
-import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketClientCompressionHandler;
-import io.netty.handler.codec.socksx.v5.*;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5CommandResponse;
+import io.netty.handler.codec.socksx.v5.Socks5AddressType;
+import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
+import io.netty.handler.codec.socksx.v5.Socks5CommandStatus;
+import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import io.netty.handler.timeout.IdleStateHandler;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
@@ -30,14 +36,18 @@ import java.net.URI;
  * @since 20230821
  */
 @Slf4j
-public class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler {
+public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler {
+    private final URI webSocketEndpoint;
+    private final String webSocketProtocol;
 
-    public Socks5ProxyServerHandler2(final NioEventLoopGroup group) {
-        super(group, null, null);
+    public Socks5WebSocketProxyServerHandler(final URI webSocketEndpoint, final String webSocketProtocol, final NioEventLoopGroup group) {
+        this(null, null, webSocketEndpoint, webSocketProtocol, group);
     }
 
-    public Socks5ProxyServerHandler2(final NioEventLoopGroup group, final String username, final String password) {
-        super(group, username, password);
+    public Socks5WebSocketProxyServerHandler(final String username, final String password, final URI webSocketEndpoint, final String webSocketProtocol, final NioEventLoopGroup group) {
+        super(username, password, group);
+        this.webSocketEndpoint = webSocketEndpoint;
+        this.webSocketProtocol = webSocketProtocol;
     }
 
     @Override
@@ -48,23 +58,25 @@ public class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler {
 
         requestCtx.channel().config().setAutoRead(false);
 
-        final URI webSocketEndpoint = URI.create("ws://127.0.0.1:8888/ws");
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
         final int portToUse = 0 < webSocketEndpoint.getPort() ? webSocketEndpoint.getPort() : (isSecure ? 443 : 80);
-        final DefaultHttpHeaders headers = new DefaultHttpHeaders();
-        headers.set("X-TARGET-ADDRESS", address);
-        headers.setInt("X-TARGET-PORT", port);
+
+        final DefaultHttpHeaders httpHeaders = new DefaultHttpHeaders();
+        httpHeaders.set("X-TARGET-ADDRESS", address);
+        httpHeaders.setInt("X-TARGET-PORT", port);
 
         Channels.open(webSocketEndpoint.getHost(), portToUse, true, group, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();
-//                cp.addLast(createClientSslContext().newHandler(ch.alloc()));
+                if (isSecure) {
+                    cp.addLast(createClientSslContext().newHandler(ch.alloc()));
+                }
 //                cp.addLast(new IdleStateHandler(0, 0, 50));
                 cp.addLast(new HttpClientCodec(), new HttpObjectAggregator(1024 * 1024 * 8));
 //                cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
                 cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
-                        webSocketEndpoint, WebSocketVersion.V13, "", true, headers, 65536, false, true
+                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, httpHeaders, 65536, true, true
                 ), false));
                 cp.addLast(new ChannelInboundHandlerAdapter() {
                     @Override
@@ -82,19 +94,6 @@ public class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler {
                         }
                     }
                 });
-
-                /*
-                cp.addLast(new WebSocketProxyClientHandler(webSocketEndpoint, "") {
-                    @Override
-                    public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
-                        if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
-                            System.out.println();
-                            requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(g -> requestCtx.pipeline().remove(Socks5ServerEncoder.DEFAULT));
-                        }
-                        super.userEventTriggered(ctx, evt);
-                    }
-                });
-                */
             }
         }).addListener(f -> {
             if (f.isSuccess()) {
@@ -111,11 +110,8 @@ public class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler {
         });
     }
 
-    private static SslContext createClientSslContext() throws SSLException {
+    private SslContext createClientSslContext() throws SSLException {
         return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
     }
 
-    private static boolean nullSafeEquals(Object a, Object b) {
-        return (a == b) || (a != null && a.equals(b));
-    }
 }

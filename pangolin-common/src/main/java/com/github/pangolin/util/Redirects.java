@@ -93,8 +93,8 @@ public abstract class Redirects {
             @Override
             public void channelRead(final ChannelHandlerContext webSocketContext, final Object msg) {
                 if (nativeSocketContext.channel().isActive()) {
-                    if (msg instanceof BinaryWebSocketFrame) {
-                        final ByteBuf buf = ((BinaryWebSocketFrame) msg).content();
+                    if (msg instanceof BinaryWebSocketFrame || msg instanceof TextWebSocketFrame || msg instanceof ContinuationWebSocketFrame) {
+                        final ByteBuf buf = ((WebSocketFrame) msg).content();
                         nativeSocketContext.writeAndFlush(buf);
                     } else if (msg instanceof CloseWebSocketFrame) {
                         final CloseWebSocketFrame c = (CloseWebSocketFrame) msg;

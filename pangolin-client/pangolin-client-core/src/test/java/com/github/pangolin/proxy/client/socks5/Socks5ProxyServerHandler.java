@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.bridge.socks5;
+package com.github.pangolin.proxy.client.socks5;
 
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
@@ -19,18 +19,20 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
-    private final NioEventLoopGroup group;
+    private static final String SERVER_DECODER_NAME = "Socks5Decoder";
+
     private final String username;
     private final String password;
+    private final NioEventLoopGroup eventGroup;
 
-    public Socks5ProxyServerHandler(final NioEventLoopGroup group) {
-        this(group, null, null);
+    public Socks5ProxyServerHandler(final NioEventLoopGroup eventGroup) {
+        this(null, null, eventGroup);
     }
 
-    public Socks5ProxyServerHandler(final NioEventLoopGroup group, final String username, final String password) {
-        this.group = group;
+    public Socks5ProxyServerHandler(final String username, final String password, final NioEventLoopGroup eventGroup) {
         this.username = username;
         this.password = password;
+        this.eventGroup = eventGroup;
     }
 
     @Override
@@ -48,8 +50,9 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void handlerRemoved(final ChannelHandlerContext ctx) throws Exception {
         final ChannelPipeline cp = ctx.pipeline();
-
-        cp.remove(Socks5InitialRequestDecoder.class);
+        if (null != cp.get(Socks5InitialRequestDecoder.class)) {
+            cp.remove(Socks5InitialRequestDecoder.class);
+        }
         if (null != cp.get(Socks5PasswordAuthRequestDecoder.class)) {
             cp.remove(Socks5PasswordAuthRequestDecoder.class);
         }
@@ -80,12 +83,12 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
             final Socks5CommandType type = request.type();
             final Socks5AddressType addressType = request.dstAddrType();
             if (Socks5CommandType.CONNECT.equals(type)) {
-                connectToTarget(group, ctx, request);
+                connectToTarget(eventGroup, ctx, request);
             } else {
                 ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType));
             }
         } else {
-            // ..
+            log.error("illegal message: {}", msg);
             ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }
@@ -99,11 +102,11 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         Channels.open(address, port, false, group, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
-                requestCtx.pipeline().replace(requestCtx.handler(), null, Redirects.socketRedirectToSocket(delegateCtx));
                 delegateCtx.pipeline().replace(this, null, Redirects.socketRedirectToSocket(requestCtx));
+                requestCtx.pipeline().replace(requestCtx.handler(), null, Redirects.socketRedirectToSocket(delegateCtx));
 
-                requestCtx.channel().config().setAutoRead(true);
                 delegateCtx.channel().config().setAutoRead(true);
+                requestCtx.channel().config().setAutoRead(true);
             }
         }).addListener(f -> {
             if (f.isSuccess()) {

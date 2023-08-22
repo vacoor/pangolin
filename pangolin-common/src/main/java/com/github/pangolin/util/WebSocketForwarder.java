@@ -57,11 +57,8 @@ public class WebSocketForwarder {
                     protected void channelHandshaked(final ChannelHandlerContext webSocketContext2) {
                         webSocketContext2.channel().config().setAutoRead(false);
 
-                        webSocketContext2.pipeline().remove(webSocketContext2.handler());
-                        webSocketContext1.pipeline().remove(webSocketContext1.handler());
-
-                        webSocketContext2.pipeline().addLast(pipeWebSocket(webSocketContext1));
-                        webSocketContext1.pipeline().addLast(pipeWebSocket(webSocketContext2));
+                        webSocketContext2.pipeline().replace(webSocketContext2.name(), null, pipeWebSocket(webSocketContext1));
+                        webSocketContext1.pipeline().replace(webSocketContext1.name(), null, pipeWebSocket(webSocketContext2));
 
                         webSocketContext2.channel().config().setAutoRead(true);
                         webSocketContext1.channel().config().setAutoRead(true);
@@ -143,7 +140,7 @@ public class WebSocketForwarder {
                 cp.addLast(new HttpClientCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
                 cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
                 cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
-                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, new DefaultHttpHeaders(), 65536, false, true
+                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, new DefaultHttpHeaders(), 65536, true, true
                 ), false));
                 cp.addLast(webSocketHandlers);
             }
