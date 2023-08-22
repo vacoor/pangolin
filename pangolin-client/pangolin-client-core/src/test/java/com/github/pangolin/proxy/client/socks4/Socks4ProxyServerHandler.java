@@ -36,8 +36,12 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         final ChannelPipeline cp = ctx.pipeline();
-        cp.addBefore(ctx.name(), null, new Socks4ServerDecoder());
-        cp.addBefore(ctx.name(), null, Socks4ServerEncoder.INSTANCE);
+        if (null == cp.get(Socks4ServerDecoder.class)) {
+            cp.addBefore(ctx.name(), null, new Socks4ServerDecoder());
+        }
+        if (null == cp.get(Socks4ServerEncoder.class)) {
+            cp.addBefore(ctx.name(), null, Socks4ServerEncoder.INSTANCE);
+        }
     }
 
     @Override

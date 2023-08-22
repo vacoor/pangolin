@@ -20,11 +20,12 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
-    private static final String SERVER_DECODER_NAME = "Socks5ServerDecoder";
+    private static final String DEFAULT_SERVER_DECODER_NAME = "Socks5ServerDecoder";
 
     private final String username;
     private final String password;
     private final NioEventLoopGroup proxyWorksGroup;
+    private String serverDecoderName = DEFAULT_SERVER_DECODER_NAME;
 
     public Socks5ProxyServerHandler(final NioEventLoopGroup proxyWorksGroup) {
         this(null, null, proxyWorksGroup);
@@ -39,7 +40,12 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         final ChannelPipeline cp = ctx.pipeline();
-        cp.addBefore(ctx.name(), SERVER_DECODER_NAME, new Socks5InitialRequestDecoder());
+        final Socks5InitialRequestDecoder decoder = cp.get(Socks5InitialRequestDecoder.class);
+        if (null == decoder) {
+            cp.addBefore(ctx.name(), DEFAULT_SERVER_DECODER_NAME, new Socks5InitialRequestDecoder());
+        } else {
+            serverDecoderName = cp.context(decoder).name();
+        }
         /*
         if (isHasAuthorization()) {
             cp.addBefore(ctx.name(), null, new Socks5PasswordAuthRequestDecoder());
@@ -47,7 +53,9 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
             cp.addBefore(ctx.name(), null, new Socks5CommandRequestDecoder());
         }
         */
-        cp.addBefore(ctx.name(), null, Socks5ServerEncoder.DEFAULT);
+        if (null == cp.get(Socks5ServerEncoder.class)) {
+            cp.addBefore(ctx.name(), null, Socks5ServerEncoder.DEFAULT);
+        }
     }
 
     @Override
@@ -81,7 +89,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
             if (msg instanceof Socks5InitialRequest) {
                 final boolean needAuth = isHasAuthorization();
                 final ByteToMessageDecoder newDecoder = needAuth ? new Socks5PasswordAuthRequestDecoder() : new Socks5CommandRequestDecoder();
-                ctx.pipeline().replace(SERVER_DECODER_NAME, SERVER_DECODER_NAME, newDecoder);
+                ctx.pipeline().replace(serverDecoderName, serverDecoderName, newDecoder);
                 ctx.writeAndFlush(new DefaultSocks5InitialResponse(isHasAuthorization() ? Socks5AuthMethod.PASSWORD : Socks5AuthMethod.NO_AUTH));
             } else if (msg instanceof Socks5PasswordAuthRequest) {
                 final Socks5PasswordAuthRequest request = (Socks5PasswordAuthRequest) msg;
@@ -90,7 +98,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final ChannelHandlerContext context = ctx.pipeline().context(Socks5PasswordAuthRequestDecoder.class);
                 ctx.pipeline().addAfter(context.name(), null, new Socks5CommandRequestDecoder());
                 */
-                    ctx.pipeline().replace(SERVER_DECODER_NAME, SERVER_DECODER_NAME, new Socks5CommandRequestDecoder());
+                    ctx.pipeline().replace(serverDecoderName, serverDecoderName, new Socks5CommandRequestDecoder());
                     ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.SUCCESS));
                 } else {
                     ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.FAILURE));
