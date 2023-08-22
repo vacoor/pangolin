@@ -8,6 +8,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.socksx.v5.*;
 import lombok.extern.slf4j.Slf4j;
 
@@ -19,7 +20,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
-    private static final String SERVER_DECODER_NAME = "Socks5Decoder";
+    private static final String SERVER_DECODER_NAME = "Socks5ServerDecoder";
 
     private final String username;
     private final String password;
@@ -38,12 +39,14 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         final ChannelPipeline cp = ctx.pipeline();
-        cp.addBefore(ctx.name(), null, new Socks5InitialRequestDecoder());
+        cp.addBefore(ctx.name(), SERVER_DECODER_NAME, new Socks5InitialRequestDecoder());
+        /*
         if (isHasAuthorization()) {
             cp.addBefore(ctx.name(), null, new Socks5PasswordAuthRequestDecoder());
         } else {
             cp.addBefore(ctx.name(), null, new Socks5CommandRequestDecoder());
         }
+        */
         cp.addBefore(ctx.name(), null, Socks5ServerEncoder.DEFAULT);
     }
 
@@ -67,28 +70,46 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-        if (msg instanceof Socks5InitialRequest) {
-            ctx.writeAndFlush(new DefaultSocks5InitialResponse(isHasAuthorization() ? Socks5AuthMethod.PASSWORD : Socks5AuthMethod.NO_AUTH));
-        } else if (msg instanceof Socks5PasswordAuthRequest) {
-            final Socks5PasswordAuthRequest request = (Socks5PasswordAuthRequest) msg;
-            if (nullSafeEquals(username, request.username()) && nullSafeEquals(password, request.password())) {
+        if (msg instanceof Socks5Message) {
+            final Socks5Message socks5Msg = (Socks5Message) msg;
+            if (!socks5Msg.decoderResult().isSuccess()) {
+                log.error("not support message: {}", msg);
+                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                return;
+            }
+
+            if (msg instanceof Socks5InitialRequest) {
+                final boolean needAuth = isHasAuthorization();
+                final ByteToMessageDecoder newDecoder = needAuth ? new Socks5PasswordAuthRequestDecoder() : new Socks5CommandRequestDecoder();
+                ctx.pipeline().replace(SERVER_DECODER_NAME, SERVER_DECODER_NAME, newDecoder);
+                ctx.writeAndFlush(new DefaultSocks5InitialResponse(isHasAuthorization() ? Socks5AuthMethod.PASSWORD : Socks5AuthMethod.NO_AUTH));
+            } else if (msg instanceof Socks5PasswordAuthRequest) {
+                final Socks5PasswordAuthRequest request = (Socks5PasswordAuthRequest) msg;
+                if (nullSafeEquals(username, request.username()) && nullSafeEquals(password, request.password())) {
+                /*
                 final ChannelHandlerContext context = ctx.pipeline().context(Socks5PasswordAuthRequestDecoder.class);
                 ctx.pipeline().addAfter(context.name(), null, new Socks5CommandRequestDecoder());
-                ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.SUCCESS));
+                */
+                    ctx.pipeline().replace(SERVER_DECODER_NAME, SERVER_DECODER_NAME, new Socks5CommandRequestDecoder());
+                    ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.SUCCESS));
+                } else {
+                    ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.FAILURE));
+                }
+            } else if (msg instanceof Socks5CommandRequest) {
+                final Socks5CommandRequest request = (Socks5CommandRequest) msg;
+                final Socks5CommandType type = request.type();
+                final Socks5AddressType addressType = request.dstAddrType();
+                if (Socks5CommandType.CONNECT.equals(type)) {
+                    connectToTarget(eventGroup, ctx, request);
+                } else {
+                    ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
+                }
             } else {
-                ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.FAILURE));
-            }
-        } else if (msg instanceof Socks5CommandRequest) {
-            final Socks5CommandRequest request = (Socks5CommandRequest) msg;
-            final Socks5CommandType type = request.type();
-            final Socks5AddressType addressType = request.dstAddrType();
-            if (Socks5CommandType.CONNECT.equals(type)) {
-                connectToTarget(eventGroup, ctx, request);
-            } else {
-                ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType));
+                log.error("illegal message: {}", msg);
+                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         } else {
-            log.error("illegal message: {}", msg);
+            log.error("not support message: {}", msg);
             ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }
@@ -114,7 +135,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(g -> requestCtx.pipeline().remove(Socks5ServerEncoder.DEFAULT));
             } else {
                 log.warn("连接到目标地址({}/{}:{})失败: {}", addressType, address, port, f.cause());
-                requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType));
+                requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)).addListener(ChannelFutureListener.CLOSE);
             }
         }).channel().closeFuture().addListener(f -> {
             if (requestCtx.channel().isActive()) {

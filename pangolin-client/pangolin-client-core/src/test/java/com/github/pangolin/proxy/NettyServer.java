@@ -69,8 +69,8 @@ public class NettyServer {
     public NettyServer(final String listenHost, final int listenPort) {
         this(
                 listenHost, listenPort,
-                new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocketTunnelServer-boss", true)),
-                new NioEventLoopGroup(0, new DefaultThreadFactory("WebSocketTunnelServer-workers", true))
+                new NioEventLoopGroup(2, new DefaultThreadFactory("WebSocketTunnelServer-boss", true)),
+                new NioEventLoopGroup(4, new DefaultThreadFactory("WebSocketTunnelServer-workers", true))
         );
     }
 

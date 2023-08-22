@@ -3,6 +3,7 @@ package com.github.pangolin.proxy.client.socks5;
 import com.github.pangolin.proxy.NettyServer;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
@@ -52,7 +53,8 @@ public class Socks5WebSocketProxyServer extends NettyServer {
         return super.start(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new Socks5WebSocketProxyServerHandler(webSocketProxyServerEndpoint, webSocketProxyServerProtocol, bossGroup));
+                final NioEventLoopGroup proxyGroup = new NioEventLoopGroup(4);
+                ch.pipeline().addLast(new Socks5WebSocketProxyServerHandler(webSocketProxyServerEndpoint, webSocketProxyServerProtocol, proxyGroup));
             }
         });
     }
