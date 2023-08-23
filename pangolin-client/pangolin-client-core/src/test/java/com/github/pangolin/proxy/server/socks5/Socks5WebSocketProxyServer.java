@@ -59,7 +59,7 @@ public class Socks5WebSocketProxyServer extends NettyServer {
 
     public static void main(String[] args) throws InterruptedException, SSLException, CertificateException, ExecutionException {
         final int listenPort = 1008;
-        final URI webSocketProxyServerEndpoint = URI.create("wss://127.0.0.1:8888/ws");
+        final URI webSocketProxyServerEndpoint = URI.create("ws://127.0.0.1:8888/ws/echo");
         final String webSocketProxyServerProtocol = null;
         final Socks5WebSocketProxyServer server = new Socks5WebSocketProxyServer(listenPort, webSocketProxyServerEndpoint, webSocketProxyServerProtocol);
         final Channel channel = server.start();

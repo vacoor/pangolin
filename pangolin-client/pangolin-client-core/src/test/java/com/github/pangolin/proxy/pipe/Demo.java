@@ -55,15 +55,15 @@ public class Demo {
 
             @Override
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-                ChannelHandlerContext backhaul = webSocketBackhaulLinkPromise.sync().getNow();
+//                ChannelHandlerContext backhaul = webSocketBackhaulLinkPromise.sync().getNow();
                 System.out.println("ws1: " + msg);
-                Redirects.webSocketRedirectToWebSocket(backhaul).channelRead(ctx, msg);
+//                Redirects.webSocketRedirectToWebSocket(backhaul).channelRead(ctx, msg);
             }
 
             @Override
             public void userEventTriggered(final ChannelHandlerContext webSocketContext1, final Object evt) throws Exception {
                 if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
-//                    webSocketContext1.channel().config().setAutoRead(false);
+                    webSocketContext1.channel().config().setAutoRead(false);
 
 
                     openWebSocketChannel(group, webSocketEndpoint2, webSocketProtocol2, new ChannelInboundHandlerAdapter() {
@@ -71,28 +71,29 @@ public class Demo {
                         @Override
                         public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
 //                            super.channelRead(ctx, msg);
-                            if (webSocketContext1.channel().isActive()) {
+//                            if (webSocketContext1.channel().isActive()) {
                                 System.out.println("ws2: " + msg);
-                                codec.channelRead(ctx, msg);
-                            }
+//                                codec.channelRead(ctx, msg);
+//                            }
                         }
 
                         @Override
                         public void userEventTriggered(final ChannelHandlerContext webSocketContext2, final Object evt) throws Exception {
                             if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
-                                /*
                                 System.out.println("OK2");
                                 webSocketContext2.channel().config().setAutoRead(false);
 
+                                webSocketContext2.pipeline().replace(webSocketContext2.name(), null, pipeWebSocket(webSocketContext1));
+                                webSocketContext1.pipeline().replace(webSocketContext1.name(), null, pipeWebSocket(webSocketContext2));
+                                /*
                                 webSocketContext2.pipeline().addAfter(webSocketContext2.name(), null, pipeWebSocket(webSocketContext1));
                                 webSocketContext1.pipeline().addAfter(webSocketContext1.name(), null, pipeWebSocket(webSocketContext2));
 
                                 webSocketContext2.pipeline().remove(webSocketContext2.name());
                                 webSocketContext1.pipeline().remove(webSocketContext1.name());
-
-                                webSocketContext2.channel().config().setAutoRead(true);
-                                webSocketContext1.channel().config().setAutoRead(true);
                                 */
+                                webSocketContext2.channel().config().setAutoRead(true);
+
                                 webSocketBackhaulLinkPromise.setSuccess(webSocketContext2);
                             }
                         }
@@ -100,7 +101,7 @@ public class Demo {
                         public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
                             super.exceptionCaught(ctx, cause);
                         }
-                    }).channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
+                    }).sync().channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
                         @Override
                         public void operationComplete(final Future<? super Void> future) throws Exception {
                             if (webSocketContext1.channel().isActive()) {
@@ -108,8 +109,9 @@ public class Demo {
                             }
                         }
                     });
-//                    webSocketBackhaulLinkPromise.sync();
-//                    System.out.println("OK1");
+                    webSocketBackhaulLinkPromise.sync();
+                    webSocketContext1.channel().config().setAutoRead(true);
+                    System.out.println("OK1");
                 }
             }
         });
@@ -142,9 +144,9 @@ public class Demo {
     public static void main(String[] args) throws Exception {
         final NioEventLoopGroup g = new NioEventLoopGroup(2);
         final ChannelFuture future = forwardToWebSocket2("1", g,
-                URI.create("ws://127.0.0.1:8899/ws/echo"), "",
+                URI.create("ws://127.0.0.1:8888/ws/echo"), "",
                 // URI.create("ws://127.0.0.1:2345/tunnel?id=WEBSOCKET-TEST"), "TUNNEL_RESPONSE",
-                URI.create("ws://127.0.0.1:8899/ws/echo"), ""
+                URI.create("ws://127.0.0.1:8888/ws/echo"), ""
         );
         future.sync().channel().closeFuture().addListener(new ChannelFutureListener() {
             @Override

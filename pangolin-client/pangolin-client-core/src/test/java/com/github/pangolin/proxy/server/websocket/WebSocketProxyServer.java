@@ -61,7 +61,7 @@ public class WebSocketProxyServer extends NettyServer {
     }
 
     public static void main(String[] args) throws InterruptedException, SSLException, CertificateException, ExecutionException {
-        final WebSocketProxyServer server = new WebSocketProxyServer(8888, true);
+        final WebSocketProxyServer server = new WebSocketProxyServer(1008, false);
         final Channel channel = server.start();
         channel.closeFuture().sync().get();
     }
