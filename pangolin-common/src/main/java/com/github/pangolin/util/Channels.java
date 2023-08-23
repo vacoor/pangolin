@@ -2,6 +2,7 @@ package com.github.pangolin.util;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -50,7 +51,13 @@ public class Channels {
         return b.connect(hostname, port);
     }
 
-    public static void closeWebSocketOnChannelClose(final Channel channel, final ChannelHandlerContext webSocketContext) {
+    public static void closeOnFlush(final Channel channel) {
+        if (null != channel && channel.isActive()) {
+            channel.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        }
+    }
+
+    public static void closeWebSocketOnClose(final Channel channel, final ChannelHandlerContext webSocketContext) {
         channel.closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
@@ -61,7 +68,7 @@ public class Channels {
         });
     }
 
-    public static void shutdownGroupOnChannelClose(final Channel channel, final EventLoopGroup eventLoopGroup) {
+    public static void shutdownGroupOnClose(final Channel channel, final EventLoopGroup eventLoopGroup) {
         channel.closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) {

@@ -2,13 +2,25 @@ package com.github.pangolin.util;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandler;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.MessageToMessageDecoder;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.ContinuationWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Slf4j
@@ -22,26 +34,31 @@ public abstract class Redirects {
             @Override
             public void channelInactive(final ChannelHandlerContext nativeSocketContext) {
                 if (targetSocketContext.channel().isActive()) {
-                    log.debug("{} Socket <-> Socket PIPE the input has been closed, the output will be closed: {}", nativeSocketContext.channel(), targetSocketContext.channel());
-                    targetSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    log.debug("[{}(!) => {}] input has been closed, output will be closed", nativeSocketContext.channel().remoteAddress(), targetSocketContext.channel().remoteAddress());
+                    Channels.closeOnFlush(targetSocketContext.channel());
                 }
             }
 
             @Override
             public void channelRead(final ChannelHandlerContext nativeSocketContext, final Object msg) throws Exception {
                 if (targetSocketContext.channel().isActive()) {
+                    if (log.isDebugEnabled()) {
+                        final Object msgToLog = msg instanceof ByteBuf ? ((ByteBuf) msg).toString(StandardCharsets.UTF_8) : msg;
+                        log.debug("[{} => {}]: {}", nativeSocketContext.channel().remoteAddress(), targetSocketContext.channel().remoteAddress(), msgToLog);
+                    }
                     targetSocketContext.writeAndFlush(msg);
                 } else {
-                    targetSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    log.warn("[{} => {}(!)] output has been closed, input will be closed", nativeSocketContext.channel().remoteAddress(), targetSocketContext.channel().remoteAddress());
                     ReferenceCountUtil.release(msg);
+                    Channels.closeOnFlush(targetSocketContext.channel());
                 }
             }
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext nativeSocketContext, final Throwable cause) throws Exception {
-                log.warn("{} Software caused connection abort: {}, -> {}", nativeSocketContext.channel(), cause.getMessage(), targetSocketContext.channel());
-                nativeSocketContext.close();
-                targetSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                log.warn("[{}(!) => {}] Software caused connection abort: {}", nativeSocketContext.channel().remoteAddress(), targetSocketContext.channel().remoteAddress(), cause.getMessage());
+                Channels.closeOnFlush(nativeSocketContext.channel());
+                Channels.closeOnFlush(targetSocketContext.channel());
             }
         };
     }
