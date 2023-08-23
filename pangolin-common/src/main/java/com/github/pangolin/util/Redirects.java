@@ -12,6 +12,7 @@ import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.ContinuationWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
@@ -29,159 +30,137 @@ public abstract class Redirects {
     private Redirects() {
     }
 
-    public static ChannelInboundHandler socketRedirectToSocket(final ChannelHandlerContext targetSocketContext) {
+    public static ChannelInboundHandler socketRedirectToSocket(final ChannelHandlerContext outCtx) {
+
         return new SocketInboundHandlerAdaptor() {
             @Override
-            public void channelInactive(final ChannelHandlerContext nativeSocketContext) {
-                if (targetSocketContext.channel().isActive()) {
-                    log.debug("[{}(!) => {}] input has been closed, output will be closed", nativeSocketContext.channel().remoteAddress(), targetSocketContext.channel().remoteAddress());
-                    Channels.closeOnFlush(targetSocketContext.channel());
+            public void channelInactive(final ChannelHandlerContext inCtx) {
+                if (outCtx.channel().isActive()) {
+                    log.info("[br@tcp {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
+                    Channels.closeOnFlush(outCtx.channel());
                 }
             }
 
             @Override
-            public void channelRead(final ChannelHandlerContext nativeSocketContext, final Object msg) throws Exception {
-                if (targetSocketContext.channel().isActive()) {
+            public void channelRead(final ChannelHandlerContext inCtx, final Object msg) throws Exception {
+                if (outCtx.channel().isActive()) {
                     if (log.isDebugEnabled()) {
                         final Object msgToLog = msg instanceof ByteBuf ? ((ByteBuf) msg).toString(StandardCharsets.UTF_8) : msg;
-                        log.debug("[{} => {}]: {}", nativeSocketContext.channel().remoteAddress(), targetSocketContext.channel().remoteAddress(), msgToLog);
+                        log.debug("[br@tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
                     }
-                    targetSocketContext.writeAndFlush(msg);
+                    outCtx.writeAndFlush(msg);
                 } else {
-                    log.warn("[{} => {}(!)] output has been closed, input will be closed", nativeSocketContext.channel().remoteAddress(), targetSocketContext.channel().remoteAddress());
                     ReferenceCountUtil.release(msg);
-                    Channels.closeOnFlush(targetSocketContext.channel());
+                    log.error("[br@tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
+                    Channels.closeOnFlush(outCtx.channel());
                 }
             }
 
             @Override
-            public void exceptionCaught(final ChannelHandlerContext nativeSocketContext, final Throwable cause) throws Exception {
-                log.warn("[{}(!) => {}] Software caused connection abort: {}", nativeSocketContext.channel().remoteAddress(), targetSocketContext.channel().remoteAddress(), cause.getMessage());
-                Channels.closeOnFlush(nativeSocketContext.channel());
-                Channels.closeOnFlush(targetSocketContext.channel());
+            public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) throws Exception {
+                log.error("[br@tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+                Channels.closeOnFlush(inCtx.channel());
+                Channels.closeOnFlush(outCtx.channel());
             }
         };
     }
 
-    public static ChannelInboundHandler socketRedirectToWebSocket(final ChannelHandlerContext webSocketContext) {
+    public static ChannelInboundHandler socketRedirectToWebSocket(final ChannelHandlerContext outCtx) {
         return new SocketInboundHandlerAdaptor() {
+
             @Override
-            public void channelInactive(final ChannelHandlerContext nativeSocketContext) {
-                if (webSocketContext.channel().isActive()) {
-                    log.debug("{} Socket <-> WebSocket PIPE the input has been closed, the output will be closed: {}", nativeSocketContext.channel(), webSocketContext.channel());
-                    WebSocketUtils.goingAwayClose(webSocketContext, "Connection closed");
+            public void channelInactive(final ChannelHandlerContext inCtx) {
+                if (outCtx.channel().isActive()) {
+                    log.info("[br@tcp/ws {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
+                    WebSocketUtils.normalClose(outCtx, "Connection closed");
                 }
             }
 
             @Override
-            public void channelRead(final ChannelHandlerContext nativeSocketContext, final Object msg) throws Exception {
-                if (webSocketContext.channel().isActive()) {
+            public void channelRead(final ChannelHandlerContext inCtx, final Object msg) throws Exception {
+                if (outCtx.channel().isActive()) {
                     if (msg instanceof ByteBuf) {
-                        webSocketContext.writeAndFlush(new BinaryWebSocketFrame((ByteBuf) msg));
+                        if (log.isDebugEnabled()) {
+                            final String msgToLog = ((ByteBuf) msg).toString(StandardCharsets.UTF_8);
+                            log.debug("[br@tcp/ws {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
+                        }
+                        outCtx.writeAndFlush(new BinaryWebSocketFrame((ByteBuf) msg));
                     } else {
                         throw new UnsupportedOperationException("Unexpect socket message: " + msg);
                     }
                 } else {
                     ReferenceCountUtil.release(msg);
+                    log.error("[br@tcp/ws {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
+                    Channels.closeOnFlush(inCtx.channel());
                 }
             }
 
             @Override
-            public void exceptionCaught(final ChannelHandlerContext nativeSocketContext, final Throwable cause) throws Exception {
-                log.warn("{} Software caused connection abort: {}, -> {}", nativeSocketContext.channel(), cause.getMessage(), webSocketContext.channel());
-                nativeSocketContext.close();
-                WebSocketUtils.internalErrorClose(webSocketContext, cause.getMessage());
+            public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) throws Exception {
+                log.error("[br@tcp/ws {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+                Channels.closeOnFlush(inCtx.channel());
+                WebSocketUtils.internalErrorClose(outCtx, cause.getMessage());
             }
         };
     }
 
 
-    public static ChannelInboundHandler webSocketRedirectToSocket(final ChannelHandlerContext nativeSocketContext) {
+    public static ChannelInboundHandler webSocketRedirectToSocket(final ChannelHandlerContext outCtx) {
         return new WebSocketInboundHandlerAdaptor() {
 
             @Override
-            public void channelInactive(final ChannelHandlerContext webSocketContext) {
-                if (nativeSocketContext.channel().isActive()) {
-                    log.info("{} WebSocket <-> Socket PIPE the input has been closed, the output will be closed: {}", webSocketContext.channel(), nativeSocketContext.channel());
-                    nativeSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            public void channelInactive(final ChannelHandlerContext inCtx) {
+                if (outCtx.channel().isActive()) {
+                    log.error("[br@ws/tcp {}(!) => {} Connection lost: The input closed the connection, the output will be closed", stringify(inCtx), stringify(outCtx));
+                    Channels.closeOnFlush(outCtx.channel());
                 }
             }
 
             @Override
-            public void channelRead(final ChannelHandlerContext webSocketContext, final Object msg) {
-                if (nativeSocketContext.channel().isActive()) {
-                    if (msg instanceof BinaryWebSocketFrame || msg instanceof TextWebSocketFrame || msg instanceof ContinuationWebSocketFrame) {
-                        final ByteBuf buf = ((WebSocketFrame) msg).content();
-                        nativeSocketContext.writeAndFlush(buf);
-                    } else if (msg instanceof CloseWebSocketFrame) {
+            public void channelRead(final ChannelHandlerContext inCtx, final Object msg) {
+                if (outCtx.channel().isActive()) {
+                    if (msg instanceof CloseWebSocketFrame) {
                         final CloseWebSocketFrame c = (CloseWebSocketFrame) msg;
-                        log.info("{} WebSocket connection closed by {}/{}", webSocketContext.channel(), c.statusCode(), c.reasonText());
-                        try {
-                            webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                            nativeSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                        } finally {
-                            c.release();
+
+                        log.info("[br@ws/tcp {}(!) => {}] Connection closed by {}/{}", stringify(inCtx), stringify(outCtx), c.statusCode(), c.reasonText());
+
+                        ReferenceCountUtil.release(msg);
+                        Channels.closeOnFlush(inCtx.channel());
+                        Channels.closeOnFlush(outCtx.channel());
+                    } else if (msg instanceof BinaryWebSocketFrame || msg instanceof TextWebSocketFrame || msg instanceof ContinuationWebSocketFrame) {
+                        if (log.isDebugEnabled()) {
+                            final String msgToLog = ((WebSocketFrame) msg).content().toString(StandardCharsets.UTF_8);
+                            log.debug("[br@ws/tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
                         }
+                        outCtx.writeAndFlush(((WebSocketFrame) msg).content());
+                    } else if ((msg instanceof PingWebSocketFrame) || (msg instanceof PongWebSocketFrame)) {
+                        ReferenceCountUtil.release(msg);
                     } else {
                         throw new UnsupportedOperationException("Unexpect websocket message: " + msg);
                     }
                 } else {
                     ReferenceCountUtil.release(msg);
+                    log.error("[br@ws/tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
+                    WebSocketUtils.goingAwayClose(inCtx, "Connection lost");
                 }
             }
 
             @Override
-            public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) {
-                log.warn("{} Software caused connection abort: {}, -> {}", webSocketContext.channel(), cause.getMessage(), nativeSocketContext.channel(), cause);
+            public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) {
+                log.error("[br@ws/tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
 
-                WebSocketUtils.internalErrorClose(webSocketContext, cause.getMessage());
-                nativeSocketContext.close();
+                WebSocketUtils.internalErrorClose(inCtx, cause.getMessage());
+                Channels.closeOnFlush(outCtx.channel());
             }
         };
     }
 
-    public static ChannelInboundHandler webSocketRedirectToWebSocket(final ChannelHandlerContext targetWebSocketContext) {
+    private static String stringify(final ChannelHandlerContext ctx) {
+        return ctx.channel().remoteAddress().toString();
+    }
+
+    public static ChannelInboundHandler webSocketRedirectToWebSocket(final ChannelHandlerContext outCtx) {
         return new WebSocketInboundHandlerAdaptor() {
-            @Override
-            public void channelInactive(final ChannelHandlerContext sourceWebSocketContext) {
-                if (targetWebSocketContext.channel().isActive()) {
-                    // 非正常关闭, 另一侧可能没有关闭.
-                    log.warn("{} WebSocket PIPE the input has been closed, the output will be closed: {}", sourceWebSocketContext.channel(), targetWebSocketContext.channel());
-                    targetWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                }
-            }
-
-            @Override
-            public void channelRead(final ChannelHandlerContext sourceWebSocketContext, final Object msg) {
-                if (targetWebSocketContext.channel().isActive()) {
-                    targetWebSocketContext.writeAndFlush(msg);
-                } else {
-                    ReferenceCountUtil.release(msg);
-                }
-
-                /*-
-                 * 对于 CloseWebSocketFrame:
-                 * 服务端无法收到 @see io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.decode
-                 * 客户端需要设置 @see io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler#handleCloseFrames
-                 * 这里通过 #handlerAdded 来处理
-                 */
-                if (msg instanceof CloseWebSocketFrame) {
-                    handleCloseFrame((CloseWebSocketFrame) msg, sourceWebSocketContext, targetWebSocketContext);
-                }
-            }
-
-            private void handleCloseFrame(final CloseWebSocketFrame c,
-                                          final ChannelHandlerContext sourceWebSocketContext,
-                                          final ChannelHandlerContext targetWebSocketContext) {
-                c.retain();
-                log.info("{} WebSocket connection closed by {}/{}", sourceWebSocketContext.channel(), c.statusCode(), c.reasonText());
-                if (targetWebSocketContext.channel().isActive()) {
-                    targetWebSocketContext.writeAndFlush(c).addListener(ChannelFutureListener.CLOSE);
-                } else {
-                    c.release();
-                }
-                sourceWebSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-            }
 
             @Override
             public void handlerAdded(final ChannelHandlerContext webSocketContext) throws Exception {
@@ -192,21 +171,76 @@ public abstract class Redirects {
                     cp.addBefore(contextToUse.name(), "WsCloser", new MessageToMessageDecoder<CloseWebSocketFrame>() {
                         @Override
                         protected void decode(final ChannelHandlerContext ctx, final CloseWebSocketFrame c, final List<Object> out) throws Exception {
-                            handleCloseFrame(c, ctx, targetWebSocketContext);
+                            closeGracefully(c, ctx, outCtx);
                         }
                     });
                 }
             }
 
             @Override
-            public void exceptionCaught(final ChannelHandlerContext sourceWebSocketContext, final Throwable cause) {
-                log.warn("{} Software caused connection abort: {}, -> {}", sourceWebSocketContext.channel(), cause.getMessage(), targetWebSocketContext.channel(), cause);
-                WebSocketUtils.internalErrorClose(sourceWebSocketContext, cause.getMessage());
-                WebSocketUtils.internalErrorClose(targetWebSocketContext, cause.getMessage());
+            public void channelInactive(final ChannelHandlerContext inCtx) {
+                if (outCtx.channel().isActive()) {
+                    log.error("[br@ws {}(!) => {}] Connection lost: The input closed the connection, the output will be closed", stringify(inCtx), stringify(outCtx));
+                    WebSocketUtils.goingAwayClose(outCtx, "Connection lost");
+                }
+            }
+
+            @Override
+            public void channelRead(final ChannelHandlerContext inCtx, final Object msg) {
+                if (outCtx.channel().isActive()) {
+                    if (log.isDebugEnabled()) {
+                        Object msgToLog = msg;
+                        if (msg instanceof TextWebSocketFrame) {
+                            msgToLog = ((TextWebSocketFrame) msg).text();
+                        } else if (msg instanceof PingWebSocketFrame) {
+                            msgToLog = "[PING]";
+                        } else if (msg instanceof PongWebSocketFrame) {
+                            msgToLog = "[PONG]";
+                        } else if (msg instanceof CloseWebSocketFrame) {
+                            final CloseWebSocketFrame c = (CloseWebSocketFrame) msg;
+                            msgToLog = "[CLOSE] " + c.statusCode() + "/" + c.reasonText();
+                        } else if (msg instanceof WebSocketFrame) {
+                            msgToLog = ((WebSocketFrame) msg).content().toString(StandardCharsets.UTF_8);
+                        }
+                        log.debug("[br@ws {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
+                    }
+
+                    /*-
+                     * 对于 CloseWebSocketFrame:
+                     * 服务端无法收到 @see io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.decode
+                     * 客户端需要设置 @see io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler#handleCloseFrames
+                     * 这里通过 #handlerAdded 来处理
+                     */
+                    if (!(msg instanceof CloseWebSocketFrame)) {
+                        outCtx.writeAndFlush(msg);
+                    } else {
+                        closeGracefully((CloseWebSocketFrame) msg, inCtx, outCtx);
+                    }
+                } else {
+                    ReferenceCountUtil.release(msg);
+                    log.error("[br@ws {} => {}(!)] Output has been closed, input will be closed", stringify(inCtx), stringify(outCtx));
+                    WebSocketUtils.goingAwayClose(inCtx, "Connection lost");
+                }
+            }
+
+            private void closeGracefully(final CloseWebSocketFrame c, final ChannelHandlerContext inCtx, final ChannelHandlerContext outCtx) {
+                log.info("[br@ws {}(!) => {}] Connection closed by {}/{}", stringify(inCtx), stringify(outCtx), c.statusCode(), c.reasonText());
+                if (outCtx.channel().isActive()) {
+                    outCtx.writeAndFlush(c).addListener(ChannelFutureListener.CLOSE);
+                } else {
+                    c.release();
+                }
+                Channels.closeOnFlush(inCtx.channel());
+            }
+
+            @Override
+            public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) {
+                log.error("[br@ws {}(!) =>{}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+                WebSocketUtils.internalErrorClose(inCtx, cause.getMessage());
+                WebSocketUtils.internalErrorClose(outCtx, cause.getMessage());
             }
         };
     }
-
 
     private static abstract class SocketInboundHandlerAdaptor extends ChannelInboundHandlerAdapter {
         @Override

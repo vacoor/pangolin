@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.bridge;
+package com.github.pangolin.proxy.client;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
@@ -51,7 +51,7 @@ public class Socks5ProxyClientHandler extends ProxyClientHandler {
 
     @Override
     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
-        ctx.fireChannelActive();
+//        ctx.fireChannelActive();
         ctx.writeAndFlush(createInitialRequest());
     }
 

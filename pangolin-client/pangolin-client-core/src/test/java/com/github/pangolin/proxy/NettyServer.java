@@ -93,8 +93,8 @@ public class NettyServer {
         }
 
         final ChannelFuture cf = Channels.listen(listenHost, listenPort, bossGroup, workersGroup, initializer);
-        Channels.shutdownGroupOnChannelClose(cf.channel(), bossGroup);
-        Channels.shutdownGroupOnChannelClose(cf.channel(), workersGroup);
+        Channels.shutdownGroupOnClose(cf.channel(), bossGroup);
+        Channels.shutdownGroupOnClose(cf.channel(), workersGroup);
 
         return serverChannel = cf.sync().channel();
     }

@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.bridge;
+package com.github.pangolin.proxy.client;
 
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -29,6 +29,12 @@ public abstract class ProxyClientHandler extends ChannelDuplexHandler {
     }
 
     @Override
+    public void channelActive(final ChannelHandlerContext ctx) throws Exception {
+        // super.channelActive(ctx);
+        System.out.println();
+    }
+
+    @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         super.handlerAdded(ctx);
     }
@@ -49,7 +55,7 @@ public abstract class ProxyClientHandler extends ChannelDuplexHandler {
             suppressChannelReadComplete = true;
             Throwable cause = null;
             try {
-                final boolean initialized = !channelRead0(ctx, msg);
+                final boolean initialized = channelRead0(ctx, msg);
                 if (initialized) {
                     channelProxied(ctx);
                 }
@@ -57,7 +63,9 @@ public abstract class ProxyClientHandler extends ChannelDuplexHandler {
                 cause = t;
             } finally {
                 ReferenceCountUtil.release(msg);
-                exceptionCaught(ctx, cause);
+                if (null != cause) {
+                    exceptionCaught(ctx, cause);
+                }
             }
         } else {
             // Received a message after the connection has been established; pass through.
@@ -100,6 +108,7 @@ public abstract class ProxyClientHandler extends ChannelDuplexHandler {
         if (flushed) {
             ctx.flush();
         }
+        ctx.fireChannelActive();
     }
 
     protected void channelProxyFailure(final ChannelHandlerContext ctx, final Throwable cause) {

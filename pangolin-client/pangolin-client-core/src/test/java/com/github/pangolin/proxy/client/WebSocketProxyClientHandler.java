@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.bridge;
+package com.github.pangolin.proxy.client;
 
 import com.github.pangolin.util.Channels;
 import io.netty.channel.ChannelDuplexHandler;
@@ -8,6 +8,7 @@ import io.netty.channel.ChannelPromise;
 import io.netty.channel.PendingWriteQueue;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
+import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
@@ -17,6 +18,7 @@ import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketCl
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.util.ReferenceCountUtil;
 
 import javax.net.ssl.SSLException;
 import java.net.InetSocketAddress;
@@ -33,10 +35,11 @@ import java.nio.channels.ConnectionPendingException;
 public class WebSocketProxyClientHandler extends ChannelDuplexHandler {
     private static final int MAX_HTTP_CONTENT_LENGTH = 1024 * 1024 * 8;
 
-    private boolean initialized = false;
-    private boolean pending = false;
+    private boolean pending = true;
     private boolean flushed = false;
+    private boolean initialized = false;
     private PendingWriteQueue pendingWrites;
+    private boolean suppressChannelReadComplete;
 
     private final URI webSocketUrl;
     private final String webSocketProtocol;
@@ -63,8 +66,8 @@ public class WebSocketProxyClientHandler extends ChannelDuplexHandler {
         cp.addBefore(ctx.name(), null, new HttpClientCodec());
         cp.addBefore(ctx.name(), null, new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
         cp.addBefore(ctx.name(), null, WebSocketClientCompressionHandler.INSTANCE);
-        cp.addBefore(ctx.name(), null, new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
-                webSocketUrl, WebSocketVersion.V13, webSocketProtocol, true, new DefaultHttpHeaders(), 65536, false, true
+        cp.addAfter(ctx.name(), null, new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
+                webSocketUrl, WebSocketVersion.V13, webSocketProtocol, true, new DefaultHttpHeaders(), 65536, true, true
         ), false));
     }
 
@@ -97,9 +100,52 @@ public class WebSocketProxyClientHandler extends ChannelDuplexHandler {
     @Override
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
         if (pending) {
-            throw new ConnectionPendingException();
+            suppressChannelReadComplete = true;
+            try {
+                final boolean done = channelRead0(ctx, msg);
+                if (done) {
+                    // XXX
+                    channelProxyConnected(ctx);
+
+                    pending = false;
+                    writePendingWrites();
+                    if (flushed) {
+                        ctx.flush();
+                    }
+                }
+            } finally {
+                ReferenceCountUtil.release(msg);
+            }
+        } else {
+            suppressChannelReadComplete = false;
+            ctx.fireChannelRead(msg);
         }
-        super.channelRead(ctx, msg);
+    }
+
+    protected void channelProxyConnected(final ChannelHandlerContext ctx) {
+        ctx.fireUserEventTriggered("Proxied");
+    }
+
+    @Override
+    public void channelReadComplete(final ChannelHandlerContext ctx) throws Exception {
+        if (suppressChannelReadComplete) {
+            suppressChannelReadComplete = false;
+            if (!ctx.channel().config().isAutoRead()) {
+                ctx.read();
+            }
+        } else {
+            ctx.fireChannelReadComplete();
+        }
+    }
+
+    private boolean channelRead0(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+        if (msg instanceof FullHttpResponse) {
+            final FullHttpResponse httpResponse = (FullHttpResponse) msg;
+            ctx.fireChannelRead(msg);
+            return true;
+        } else {
+        }
+        return false;
     }
 
     @Override
@@ -140,8 +186,7 @@ public class WebSocketProxyClientHandler extends ChannelDuplexHandler {
     @Override
     public void write(final ChannelHandlerContext ctx, final Object msg, final ChannelPromise promise) throws Exception {
         if (!initialized) {
-            final ChannelHandlerContext toProxyServerCtx = ctx.pipeline().context(WebSocketClientProtocolHandler.class);
-            toProxyServerCtx.write(msg);
+            ctx.write(msg, promise);
         } else if (pending) {
             addPendingWrite(ctx, msg, promise);
         } else {
@@ -153,8 +198,8 @@ public class WebSocketProxyClientHandler extends ChannelDuplexHandler {
     @Override
     public void flush(final ChannelHandlerContext ctx) throws Exception {
         if (!initialized) {
-            final ChannelHandlerContext toProxyServerCtx = ctx.pipeline().context(WebSocketClientProtocolHandler.class);
-            toProxyServerCtx.flush();
+            ctx.flush();
+            initialized = true;
         } else if (pending) {
             flushed = true;
         } else {

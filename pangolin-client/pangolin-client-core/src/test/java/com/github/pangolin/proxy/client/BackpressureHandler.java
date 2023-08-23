@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.bridge;
+package com.github.pangolin.proxy.client;
 
 import com.github.pangolin.util.Channels;
 import io.netty.channel.ChannelDuplexHandler;
