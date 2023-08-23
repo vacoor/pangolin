@@ -31,7 +31,7 @@ import java.util.Collections;
  * @author changhe.yang
  * @since 20230821
  */
-public class Socks5ProxyClientHandler extends ChannelProxyClientHandler {
+public class Socks5ProxyClientHandler extends ProxyClientHandler {
     private static final String SOCKS5_DECODER_NAME = "SOCKS5_DECODER";
 
     public Socks5ProxyClientHandler(final SocketAddress proxyServerAddress) {

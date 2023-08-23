@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.server;
+package com.github.pangolin.proxy.server.websocket;
 
 import com.github.pangolin.proxy.NettyServer;
 import io.netty.channel.Channel;

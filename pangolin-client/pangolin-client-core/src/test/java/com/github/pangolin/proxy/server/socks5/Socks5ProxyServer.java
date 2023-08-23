@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.client.socks4;
+package com.github.pangolin.proxy.server.socks5;
 
 import com.github.pangolin.proxy.NettyServer;
 import io.netty.channel.Channel;
@@ -17,14 +17,14 @@ import java.util.concurrent.ExecutionException;
  * @since 20210825
  */
 @Slf4j
-public class Socks4ProxyServer extends NettyServer {
+public class Socks5ProxyServer extends NettyServer {
 
     /**
      * 创建隧道服务实例.
      *
      * @param listenPort 监听端口
      */
-    public Socks4ProxyServer(final int listenPort) {
+    public Socks5ProxyServer(final int listenPort) {
         this(null, listenPort);
     }
 
@@ -34,7 +34,7 @@ public class Socks4ProxyServer extends NettyServer {
      * @param listenHost 监听地址
      * @param listenPort 监听端口
      */
-    public Socks4ProxyServer(final String listenHost, final int listenPort) {
+    public Socks5ProxyServer(final String listenHost, final int listenPort) {
         super(listenHost, listenPort);
     }
 
@@ -47,14 +47,14 @@ public class Socks4ProxyServer extends NettyServer {
         return super.start(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new Socks4ProxyServerHandler(workersGroup));
+                ch.pipeline().addLast(new Socks5ProxyServerHandler(workersGroup));
             }
         });
     }
 
     public static void main(String[] args) throws InterruptedException, SSLException, CertificateException, ExecutionException {
         final int listenPort = 1008;
-        final Socks4ProxyServer server = new Socks4ProxyServer(listenPort);
+        final Socks5ProxyServer server = new Socks5ProxyServer(listenPort);
         final Channel channel = server.start();
         channel.closeFuture().sync().get();
     }

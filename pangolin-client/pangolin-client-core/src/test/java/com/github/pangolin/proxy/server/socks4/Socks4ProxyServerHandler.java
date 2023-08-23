@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.client.socks4;
+package com.github.pangolin.proxy.server.socks4;
 
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;

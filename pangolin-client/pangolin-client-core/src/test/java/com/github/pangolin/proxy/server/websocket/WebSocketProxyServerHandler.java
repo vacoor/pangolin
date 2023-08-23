@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.server;
+package com.github.pangolin.proxy.server.websocket;
 
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;

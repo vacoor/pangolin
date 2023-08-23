@@ -1,8 +1,8 @@
-package com.github.pangolin.proxy.client;
+package com.github.pangolin.proxy.server;
 
 import com.github.pangolin.proxy.NettyServer;
-import com.github.pangolin.proxy.client.socks4.Socks4ProxyServerHandler;
-import com.github.pangolin.proxy.client.socks5.Socks5ProxyServerHandler;
+import com.github.pangolin.proxy.server.socks4.Socks4ProxyServerHandler;
+import com.github.pangolin.proxy.server.socks5.Socks5ProxyServerHandler;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;

@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.client.socks5;
+package com.github.pangolin.proxy.server.socks5;
 
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;

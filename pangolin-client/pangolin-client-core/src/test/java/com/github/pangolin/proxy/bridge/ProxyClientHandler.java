@@ -15,7 +15,7 @@ import java.nio.channels.ConnectionPendingException;
  * @author changhe.yang
  * @since 20230821
  */
-public abstract class ChannelProxyClientHandler extends ChannelDuplexHandler {
+public abstract class ProxyClientHandler extends ChannelDuplexHandler {
     private boolean pending = true;
     private boolean flushed = false;
     private PendingWriteQueue pendingWrites;
@@ -24,7 +24,7 @@ public abstract class ChannelProxyClientHandler extends ChannelDuplexHandler {
     private final SocketAddress proxyServerAddress;
     private volatile transient SocketAddress delegateAddress;
 
-    public ChannelProxyClientHandler(final SocketAddress proxyServerAddress) {
+    public ProxyClientHandler(final SocketAddress proxyServerAddress) {
         this.proxyServerAddress = proxyServerAddress;
     }
 
