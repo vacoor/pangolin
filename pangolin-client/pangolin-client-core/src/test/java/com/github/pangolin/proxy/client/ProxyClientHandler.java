@@ -108,7 +108,7 @@ public abstract class ProxyClientHandler extends ChannelDuplexHandler {
         if (flushed) {
             ctx.flush();
         }
-        ctx.fireChannelActive();
+//        ctx.fireChannelActive();
     }
 
     protected void channelProxyFailure(final ChannelHandlerContext ctx, final Throwable cause) {
