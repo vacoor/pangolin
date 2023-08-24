@@ -12,6 +12,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
+import io.netty.handler.flow.FlowControlHandler;
 import io.netty.resolver.NoopAddressResolverGroup;
 import io.netty.util.ReferenceCountUtil;
 
@@ -33,26 +34,36 @@ public class ProxyClient {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
 //                final URI webSocketEndpoint = URI.create("ws://127.0.0.1:1008/ws");
-                final URI webSocketEndpoint = URI.create("ws://127.0.0.1:8899/ws/echo");
+                final URI webSocketEndpoint = URI.create("ws://127.0.0.1:8888/ws/echo");
                 final String webSocketProtocol = "";
 
                 ch.pipeline().addLast(new HttpClientCodec());
                 ch.pipeline().addLast(new HttpObjectAggregator(1024 * 1024 * 8));
+                ch.pipeline().addLast(new FlowControlHandler());
                 ch.pipeline().addLast(new WebSocketProxyClientHandler2(
                         webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, 65536, true, true
                 ));
 //                ch.pipeline().addFirst(new Socks5ProxyHandler(new InetSocketAddress("127.0.0.1", 1008)));
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
+                    public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
+                        if ("XX".equals(evt)) {
+                            System.out.println("XX");
+                            ctx.channel().config().setAutoRead(false);
+                        }
+                    }
+
+                    @Override
                     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
                         ctx.executor().schedule(() -> {
-                            String get = "GET / HTTP/1.1\r\n" +
-                                    "Host: www.baidu.com\r\n" +
-                                    "User-Agent: curl/7.67.0\r\n" +
-                                    "Accept: */*\r\n" +
-                                    "\r\n";
-                            ctx.writeAndFlush(Unpooled.wrappedBuffer(get.getBytes(StandardCharsets.UTF_8)));
-                        }, 3, TimeUnit.SECONDS);
+                            // String get = "GET / HTTP/1.1\r\n" +
+                            //         "Host: www.baidu.com\r\n" +
+                            //         "User-Agent: curl/7.67.0\r\n" +
+                            //         "Accept: */*\r\n" +
+                            //         "\r\n";
+                            // ctx.writeAndFlush(Unpooled.wrappedBuffer(get.getBytes(StandardCharsets.UTF_8)));
+                            ctx.channel().config().setAutoRead(true);
+                        }, 10, TimeUnit.SECONDS);
                     }
 
                     @Override

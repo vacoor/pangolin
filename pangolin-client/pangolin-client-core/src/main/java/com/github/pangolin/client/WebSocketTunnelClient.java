@@ -9,10 +9,8 @@ import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpRequest;
-import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.*;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler.ClientHandshakeStateEvent;
-import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
@@ -154,9 +152,32 @@ public class WebSocketTunnelClient {
             final URI target = URI.create(segments[1]);
             final String endpoint = serverEndpoint.getScheme() + "://" + serverEndpoint.getHost() + ":" + serverEndpoint.getPort() + serverEndpoint.getPath();
             if ("tcp".equalsIgnoreCase(target.getScheme())) {
-                WebSocketForwarder.forwardToNativeSocket2(id, URI.create(endpoint + "?id=" + id), "TUNNEL_RESPONSE", target);
+                final URI backhaulWebSocketUri = URI.create(endpoint + "?id=" + id);
+                /*
+                final WebSocketClientHandshaker backhaulHandshaker = WebSocketClientHandshakerFactory.newHandshaker(
+                        backhaulWebSocketUri, WebSocketVersion.V13, "TUNNEL_RESPONSE",
+                        true, null
+                );
+
+                final InetSocketAddress targetAddr = new InetSocketAddress(target.getHost(), target.getPort());
+                WebSocketForwarder.br(targetAddr, backhaulHandshaker, workerGroup);
+                */
+                 WebSocketForwarder.forwardToNativeSocket2(id, backhaulWebSocketUri, "TUNNEL_RESPONSE", target);
             } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
-                WebSocketForwarder.forwardToWebSocket2(id, URI.create(endpoint + "?id=" + id), "TUNNEL_RESPONSE", target, null);
+//                WebSocketForwarder.forwardToWebSocket2(id, URI.create(endpoint + "?id=" + id), "TUNNEL_RESPONSE", target, null);
+
+                /*
+                final URI backhaulWebSocketUri = URI.create(endpoint + "?id=" + id);
+                final WebSocketClientHandshaker backhaulHandshaker = WebSocketClientHandshakerFactory.newHandshaker(
+                        backhaulWebSocketUri, WebSocketVersion.V13, "TUNNEL_RESPONSE",
+                        true, null
+                );
+                final WebSocketClientHandshaker upstreamHandshaker = WebSocketClientHandshakerFactory.newHandshaker(
+                        target, WebSocketVersion.V13, null,
+                        true, null
+                );
+                WebSocketForwarder.br(upstreamHandshaker, backhaulHandshaker, workerGroup);
+                */
             }
         }
     }

@@ -1,28 +1,17 @@
 package com.github.pangolin.util;
 
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandler;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
-import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
-import io.netty.handler.codec.http.websocketx.WebSocketVersion;
+import io.netty.handler.codec.http.websocketx.*;
 import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketClientCompressionHandler;
+import io.netty.handler.flow.FlowControlHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
@@ -34,6 +23,7 @@ import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
+import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 
@@ -91,15 +81,31 @@ public class WebSocketForwarder {
         });
     }
 
-    public static ChannelFuture br(final SocketAddress upstream, final SocketAddress downstream, final NioEventLoopGroup brGroup) throws InterruptedException {
+    public static ChannelFuture br(final SocketAddress upstream, final WebSocketClientHandshaker downstream, final EventLoopGroup brGroup) throws InterruptedException {
         return Channels.open(upstream, false, brGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelActive(final ChannelHandlerContext upstreamCtx) throws Exception {
-                Channels.open(downstream, false, brGroup, new ChannelInboundHandlerAdapter() {
+                openWs(downstream, brGroup, new ChannelInboundHandlerAdapter() {
                     @Override
-                    public void channelActive(final ChannelHandlerContext downstreamCtx) throws Exception {
-                        upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", Redirects.socketRedirectToSocket(downstreamCtx));
-                        downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", Redirects.socketRedirectToSocket(upstreamCtx));
+                    public void handlerAdded(final ChannelHandlerContext downstreamCtx) throws Exception {
+                        final ChannelPipeline cp = downstreamCtx.pipeline();
+                        if (null == cp.get(FlowControlHandler.class)) {
+                            final ChannelHandlerContext wsCtx = cp.context(WebSocketClientProtocolHandler.class);
+                            cp.addBefore(wsCtx.name(), FlowControlHandler.class.getName(), new FlowControlHandler());
+                        }
+                    }
+
+                    @Override
+                    public void userEventTriggered(final ChannelHandlerContext downstreamCtx, final Object evt) throws Exception {
+                        if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+                            downstreamCtx.channel().config().setAutoRead(false);
+
+                            upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", Redirects.socketRedirectToWebSocket(downstreamCtx));
+                            downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", Redirects.webSocketRedirectToSocket(upstreamCtx));
+
+                            upstreamCtx.channel().config().setAutoRead(true);
+                            downstreamCtx.channel().config().setAutoRead(true);
+                        }
                     }
                 }).addListener(new ChannelFutureListener() {
                     @Override
@@ -113,6 +119,83 @@ public class WebSocketForwarder {
             }
         }).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
     }
+
+    public static ChannelFuture br(final WebSocketClientHandshaker upstream, final WebSocketClientHandshaker downstream, final EventLoopGroup brGroup) throws InterruptedException, SSLException {
+        return openWs(upstream, brGroup, new ChannelInboundHandlerAdapter() {
+
+            @Override
+            public void handlerAdded(final ChannelHandlerContext upstreamCtx) throws Exception {
+                final ChannelPipeline cp = upstreamCtx.pipeline();
+                if (null == cp.get(FlowControlHandler.class)) {
+                    final ChannelHandlerContext wsCtx = cp.context(WebSocketClientProtocolHandler.class);
+                    cp.addBefore(wsCtx.name(), FlowControlHandler.class.getName(), new FlowControlHandler());
+                }
+            }
+
+            @Override
+            public void userEventTriggered(final ChannelHandlerContext upstreamCtx, final Object evt) throws Exception {
+                if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+                    upstreamCtx.channel().config().setAutoRead(false);
+                    openWs(downstream, brGroup, new ChannelInboundHandlerAdapter() {
+                        @Override
+                        public void handlerAdded(final ChannelHandlerContext downstreamCtx) throws Exception {
+                            final ChannelPipeline cp = downstreamCtx.pipeline();
+                            if (null == cp.get(FlowControlHandler.class)) {
+                                final ChannelHandlerContext wsCtx = cp.context(WebSocketClientProtocolHandler.class);
+                                cp.addBefore(wsCtx.name(), FlowControlHandler.class.getName(), new FlowControlHandler());
+                            }
+                        }
+
+                        @Override
+                        public void userEventTriggered(final ChannelHandlerContext downstreamCtx, final Object evt) throws Exception {
+                            if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+                                downstreamCtx.channel().config().setAutoRead(false);
+
+                                upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", Redirects.webSocketRedirectToWebSocket(downstreamCtx));
+                                downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", Redirects.webSocketRedirectToWebSocket(upstreamCtx));
+
+                                upstreamCtx.channel().config().setAutoRead(true);
+                                downstreamCtx.channel().config().setAutoRead(true);
+                            }
+                        }
+                    }).addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(final ChannelFuture future) throws Exception {
+                            if (!future.isSuccess()) {
+                                future.channel().close();
+                                upstreamCtx.channel().close();
+                            }
+                        }
+                    });
+                }
+            }
+        }).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
+    }
+
+    private static ChannelFuture openWs(final WebSocketClientHandshaker handshaker,
+                                        final EventLoopGroup group, final ChannelHandler... wsHandlers) throws InterruptedException, SSLException {
+        final URI webSocketEndpoint = handshaker.uri();
+        final InetSocketAddress remoteAddress = new InetSocketAddress(webSocketEndpoint.getHost(), webSocketEndpoint.getPort());
+        final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
+        final SslContext sslContext = isSecure ? createClientSslContext() : null;
+
+        return Channels.open(remoteAddress, null, true, group, new ChannelInitializer<SocketChannel>() {
+
+            @Override
+            protected void initChannel(final SocketChannel ch) throws Exception {
+                final ChannelPipeline cp = ch.pipeline();
+                if (null != sslContext) {
+                    cp.addLast(sslContext.newHandler(ch.alloc()));
+                }
+                cp.addLast(new HttpClientCodec());
+                cp.addLast(new HttpObjectAggregator(1024 * 1024 * 8));
+                cp.addLast(new WebSocketClientProtocolHandler(handshaker));
+                cp.addLast(wsHandlers);
+            }
+
+        });
+    }
+
 
     public static Channel forwardToNativeSocket2(final String id,
                                                  final URI webSocketEndpoint1, final String webSocketProtocol1,
@@ -163,7 +246,7 @@ public class WebSocketForwarder {
 
     public static Channel openWebSocketChannel(final URI webSocketEndpoint, final String webSocketProtocol, final ChannelHandler... webSocketHandlers) throws SSLException, InterruptedException {
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
-        final SslContext context = isSecure ? createSslContext() : null;
+        final SslContext context = isSecure ? createClientSslContext() : null;
         final int portToUse = 0 < webSocketEndpoint.getPort() ? webSocketEndpoint.getPort() : (isSecure ? 443 : 80);
 
         final EventLoopGroup webSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-MASTER", true));
@@ -185,7 +268,7 @@ public class WebSocketForwarder {
         });
     }
 
-    private static SslContext createSslContext() throws SSLException {
+    private static SslContext createClientSslContext() throws SSLException {
         return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
     }
 

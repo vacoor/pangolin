@@ -139,6 +139,7 @@ public class WebSocketProxyClientHandler2 extends ProxyClientHandler {
             throw new IllegalStateException();
         }
         handshaker.finishHandshake(ctx.channel(), httpResponse);
+        ctx.fireUserEventTriggered("XX");
         return true;
     }
 

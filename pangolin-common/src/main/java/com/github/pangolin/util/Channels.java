@@ -3,20 +3,16 @@ package com.github.pangolin.util;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.resolver.AddressResolverGroup;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.net.URI;
 
 public class Channels {
 
@@ -35,11 +31,6 @@ public class Channels {
         } else {
             return serverBootstrap.bind(listenHost, listenPort);
         }
-    }
-
-    public static ChannelFuture open(final String hostname, final int port,
-                                     final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
-        return open(hostname, port, true, group, initializer);
     }
 
     public static ChannelFuture open(final String hostname, final int port, final boolean autoRead,
@@ -70,30 +61,30 @@ public class Channels {
         return b.connect(remoteAddress);
     }
 
-        public static void closeOnFlush ( final Channel channel){
-            if (null != channel && channel.isActive()) {
-                channel.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-            }
+    public static void closeOnFlush(final Channel channel) {
+        if (null != channel && channel.isActive()) {
+            channel.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
-
-        public static void closeWebSocketOnClose ( final Channel channel, final ChannelHandlerContext webSocketContext){
-            channel.closeFuture().addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(final ChannelFuture future) throws Exception {
-                    if (webSocketContext.channel().isActive()) {
-                        WebSocketUtils.normalClose(webSocketContext, "Disconnect");
-                    }
-                }
-            });
-        }
-
-        public static void shutdownGroupOnClose ( final Channel channel, final EventLoopGroup eventLoopGroup){
-            channel.closeFuture().addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(final ChannelFuture future) {
-                    eventLoopGroup.shutdownGracefully();
-                }
-            });
-        }
-
     }
+
+    public static void closeWebSocketOnClose(final Channel channel, final ChannelHandlerContext webSocketContext) {
+        channel.closeFuture().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (webSocketContext.channel().isActive()) {
+                    WebSocketUtils.normalClose(webSocketContext, "Disconnect");
+                }
+            }
+        });
+    }
+
+    public static void shutdownGroupOnClose(final Channel channel, final EventLoopGroup eventLoopGroup) {
+        channel.closeFuture().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) {
+                eventLoopGroup.shutdownGracefully();
+            }
+        });
+    }
+
+}
