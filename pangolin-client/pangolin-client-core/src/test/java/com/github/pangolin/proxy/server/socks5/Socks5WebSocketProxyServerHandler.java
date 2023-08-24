@@ -64,7 +64,6 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
                 if (isSecure) {
                     cp.addLast(createClientSslContext().newHandler(ch.alloc()));
                 }
-//                cp.addLast(new IdleStateHandler(0, 0, 50));
                 cp.addLast(new HttpClientCodec(), new HttpObjectAggregator(1024 * 1024 * 8));
 //                cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
                 cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(

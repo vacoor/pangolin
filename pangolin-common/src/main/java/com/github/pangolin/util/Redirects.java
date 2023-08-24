@@ -36,7 +36,7 @@ public abstract class Redirects {
             @Override
             public void channelInactive(final ChannelHandlerContext inCtx) {
                 if (outCtx.channel().isActive()) {
-                    log.info("[br@tcp {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
+                    log.info("[tun@tcp {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
                     Channels.closeOnFlush(outCtx.channel());
                 }
             }
@@ -46,19 +46,19 @@ public abstract class Redirects {
                 if (outCtx.channel().isActive()) {
                     if (log.isDebugEnabled()) {
                         final Object msgToLog = msg instanceof ByteBuf ? ((ByteBuf) msg).toString(StandardCharsets.UTF_8) : msg;
-                        log.debug("[br@tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
+                        log.debug("[tun@tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
                     }
                     outCtx.writeAndFlush(msg);
                 } else {
                     ReferenceCountUtil.release(msg);
-                    log.error("[br@tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
+                    log.error("[tun@tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
                     Channels.closeOnFlush(outCtx.channel());
                 }
             }
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) throws Exception {
-                log.error("[br@tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+                log.error("[tun@tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
                 Channels.closeOnFlush(inCtx.channel());
                 Channels.closeOnFlush(outCtx.channel());
             }
@@ -71,7 +71,7 @@ public abstract class Redirects {
             @Override
             public void channelInactive(final ChannelHandlerContext inCtx) {
                 if (outCtx.channel().isActive()) {
-                    log.info("[br@tcp/ws {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
+                    log.info("[tun@tcp/ws {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
                     WebSocketUtils.normalClose(outCtx, "Connection closed");
                 }
             }
@@ -82,7 +82,7 @@ public abstract class Redirects {
                     if (msg instanceof ByteBuf) {
                         if (log.isDebugEnabled()) {
                             final String msgToLog = ((ByteBuf) msg).toString(StandardCharsets.UTF_8);
-                            log.debug("[br@tcp/ws {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
+                            log.debug("[tun@tcp/ws {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
                         }
                         outCtx.writeAndFlush(new BinaryWebSocketFrame((ByteBuf) msg));
                     } else {
@@ -90,14 +90,14 @@ public abstract class Redirects {
                     }
                 } else {
                     ReferenceCountUtil.release(msg);
-                    log.error("[br@tcp/ws {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
+                    log.error("[tun@tcp/ws {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
                     Channels.closeOnFlush(inCtx.channel());
                 }
             }
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) throws Exception {
-                log.error("[br@tcp/ws {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+                log.error("[tun@tcp/ws {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
                 Channels.closeOnFlush(inCtx.channel());
                 WebSocketUtils.internalErrorClose(outCtx, cause.getMessage());
             }
@@ -111,7 +111,7 @@ public abstract class Redirects {
             @Override
             public void channelInactive(final ChannelHandlerContext inCtx) {
                 if (outCtx.channel().isActive()) {
-                    log.error("[br@ws/tcp {}(!) => {} Connection lost: The input closed the connection, the output will be closed", stringify(inCtx), stringify(outCtx));
+                    log.error("[tun@ws/tcp {}(!) => {} Connection lost: The input closed the connection, the output will be closed", stringify(inCtx), stringify(outCtx));
                     Channels.closeOnFlush(outCtx.channel());
                 }
             }
@@ -122,7 +122,7 @@ public abstract class Redirects {
                     if (msg instanceof CloseWebSocketFrame) {
                         final CloseWebSocketFrame c = (CloseWebSocketFrame) msg;
 
-                        log.info("[br@ws/tcp {}(!) => {}] Connection closed by {}/{}", stringify(inCtx), stringify(outCtx), c.statusCode(), c.reasonText());
+                        log.info("[tun@ws/tcp {}(!) => {}] Connection closed by {}/{}", stringify(inCtx), stringify(outCtx), c.statusCode(), c.reasonText());
 
                         ReferenceCountUtil.release(msg);
                         Channels.closeOnFlush(inCtx.channel());
@@ -130,7 +130,7 @@ public abstract class Redirects {
                     } else if (msg instanceof BinaryWebSocketFrame || msg instanceof TextWebSocketFrame || msg instanceof ContinuationWebSocketFrame) {
                         if (log.isDebugEnabled()) {
                             final String msgToLog = ((WebSocketFrame) msg).content().toString(StandardCharsets.UTF_8);
-                            log.debug("[br@ws/tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
+                            log.debug("[tun@ws/tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
                         }
                         outCtx.writeAndFlush(((WebSocketFrame) msg).content());
                     } else if ((msg instanceof PingWebSocketFrame) || (msg instanceof PongWebSocketFrame)) {
@@ -140,14 +140,14 @@ public abstract class Redirects {
                     }
                 } else {
                     ReferenceCountUtil.release(msg);
-                    log.error("[br@ws/tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
+                    log.error("[tun@ws/tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
                     WebSocketUtils.goingAwayClose(inCtx, "Connection lost");
                 }
             }
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) {
-                log.error("[br@ws/tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+                log.error("[tun@ws/tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
 
                 WebSocketUtils.internalErrorClose(inCtx, cause.getMessage());
                 Channels.closeOnFlush(outCtx.channel());
@@ -180,7 +180,7 @@ public abstract class Redirects {
             @Override
             public void channelInactive(final ChannelHandlerContext inCtx) {
                 if (outCtx.channel().isActive()) {
-                    log.error("[br@ws {}(!) => {}] Connection lost: The input closed the connection, the output will be closed", stringify(inCtx), stringify(outCtx));
+                    log.error("[tun@ws {}(!) => {}] Connection lost: The input closed the connection, the output will be closed", stringify(inCtx), stringify(outCtx));
                     WebSocketUtils.goingAwayClose(outCtx, "Connection lost");
                 }
             }
@@ -202,7 +202,7 @@ public abstract class Redirects {
                         } else if (msg instanceof WebSocketFrame) {
                             msgToLog = ((WebSocketFrame) msg).content().toString(StandardCharsets.UTF_8);
                         }
-                        log.debug("[br@ws {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
+                        log.debug("[tun@ws {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
                     }
 
                     /*-
@@ -218,13 +218,13 @@ public abstract class Redirects {
                     }
                 } else {
                     ReferenceCountUtil.release(msg);
-                    log.error("[br@ws {} => {}(!)] Output has been closed, input will be closed", stringify(inCtx), stringify(outCtx));
+                    log.error("[tun@ws {} => {}(!)] Output has been closed, input will be closed", stringify(inCtx), stringify(outCtx));
                     WebSocketUtils.goingAwayClose(inCtx, "Connection lost");
                 }
             }
 
             private void closeGracefully(final CloseWebSocketFrame c, final ChannelHandlerContext inCtx, final ChannelHandlerContext outCtx) {
-                log.info("[br@ws {}(!) => {}] Connection closed by {}/{}", stringify(inCtx), stringify(outCtx), c.statusCode(), c.reasonText());
+                log.info("[tun@ws {}(!) => {}] Connection closed by {}/{}", stringify(inCtx), stringify(outCtx), c.statusCode(), c.reasonText());
                 if (outCtx.channel().isActive()) {
                     outCtx.writeAndFlush(c).addListener(ChannelFutureListener.CLOSE);
                 } else {
@@ -235,7 +235,7 @@ public abstract class Redirects {
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) {
-                log.error("[br@ws {}(!) =>{}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+                log.error("[tun@ws {}(!) =>{}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
                 WebSocketUtils.internalErrorClose(inCtx, cause.getMessage());
                 WebSocketUtils.internalErrorClose(outCtx, cause.getMessage());
             }

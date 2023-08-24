@@ -13,6 +13,9 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.resolver.AddressResolverGroup;
+
+import java.net.SocketAddress;
 
 public class Channels {
 
@@ -38,16 +41,20 @@ public class Channels {
         return open(hostname, port, true, group, initializer);
     }
 
+    public static ChannelFuture open(final String hostname, final int port, final boolean autoRead,
+                                     final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
+        return open(hostname, port, null, autoRead, group, initializer);
+    }
+
     public static ChannelFuture open(final String hostname, final int port,
-                                     final boolean autoRead, final EventLoopGroup group,
-                                     final ChannelHandler initializer) throws InterruptedException {
+                                     final AddressResolverGroup<SocketAddress> resolver, final boolean autoRead,
+                                     final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
         final Bootstrap b = new Bootstrap();
         b.option(ChannelOption.AUTO_READ, autoRead);
         b.option(ChannelOption.TCP_NODELAY, true);
         b.option(ChannelOption.SO_KEEPALIVE, true);
         b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10000);
-        b.group(group).channel(NioSocketChannel.class).handler(initializer);
-        // return b.connect(hostname, port).sync().channel();
+        b.resolver(resolver).group(group).channel(NioSocketChannel.class).handler(initializer);
         return b.connect(hostname, port);
     }
 

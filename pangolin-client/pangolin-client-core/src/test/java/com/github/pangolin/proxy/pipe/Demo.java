@@ -45,13 +45,14 @@ public class Demo {
                                                     final NioEventLoopGroup group,
                                                     final URI webSocketEndpoint1, final String webSocketProtocol1,
                                                     final URI webSocketEndpoint2, final String webSocketProtocol2) throws SSLException, InterruptedException {
-        return openWebSocketChannel(group, webSocketEndpoint1, webSocketProtocol1, new ChannelInboundHandlerAdapter() {
+        return openWebSocketChannel(group, webSocketEndpoint1, webSocketProtocol1, true, new ChannelInboundHandlerAdapter() {
             final Promise<ChannelHandlerContext> webSocketBackhaulLinkPromise = GlobalEventExecutor.INSTANCE.newPromise();
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
                 super.exceptionCaught(ctx, cause);
             }
+
 
             @Override
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
@@ -61,12 +62,17 @@ public class Demo {
             }
 
             @Override
+            public void channelActive(final ChannelHandlerContext ctx) throws Exception {
+                super.channelActive(ctx);
+            }
+
+            @Override
             public void userEventTriggered(final ChannelHandlerContext webSocketContext1, final Object evt) throws Exception {
                 if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
                     webSocketContext1.channel().config().setAutoRead(false);
 
 
-                    openWebSocketChannel(group, webSocketEndpoint2, webSocketProtocol2, new ChannelInboundHandlerAdapter() {
+                    openWebSocketChannel(group, webSocketEndpoint2, webSocketProtocol2, false, new ChannelInboundHandlerAdapter() {
                         ChannelInboundHandler codec = Redirects.webSocketRedirectToWebSocket(webSocketContext1);
                         @Override
                         public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
@@ -117,13 +123,13 @@ public class Demo {
         });
     }
 
-    public static ChannelFuture openWebSocketChannel(final NioEventLoopGroup webSocketGroup, final URI webSocketEndpoint, final String webSocketProtocol, final ChannelHandler... webSocketHandlers) throws SSLException, InterruptedException {
+    public static ChannelFuture openWebSocketChannel(final NioEventLoopGroup webSocketGroup, final URI webSocketEndpoint, final String webSocketProtocol, final boolean autoRead, final ChannelHandler... webSocketHandlers) throws SSLException, InterruptedException {
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
 //        final SslContext context = isSecure ? createSslContext() : null;
         final int portToUse = 0 < webSocketEndpoint.getPort() ? webSocketEndpoint.getPort() : (isSecure ? 443 : 80);
 
 //        final EventLoopGroup webSocketGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocket-PIPE-MASTER", true));
-        return Channels.open(webSocketEndpoint.getHost(), portToUse, webSocketGroup, new ChannelInitializer<SocketChannel>() {
+        return Channels.open(webSocketEndpoint.getHost(), portToUse, autoRead, webSocketGroup, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) {
                 final ChannelPipeline cp = ch.pipeline();

@@ -9,16 +9,12 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
-import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
+import io.netty.resolver.NoopAddressResolverGroup;
 import io.netty.util.ReferenceCountUtil;
 
-import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
@@ -29,31 +25,23 @@ import java.util.concurrent.TimeUnit;
  * @author changhe.yang
  * @since 20230823
  */
-public class ProxyClientDemo {
+public class ProxyClient {
     public static void main(String[] args) throws Exception {
         final NioEventLoopGroup ioGroup = new NioEventLoopGroup();
-        ChannelFuture cf = Channels.open("112.80.248.75", 80, new NioEventLoopGroup(), new ChannelInitializer<SocketChannel>() {
+//        ChannelFuture cf = Channels.open("112.80.248.75", 80, new NioEventLoopGroup(), new ChannelInitializer<SocketChannel>() {
+        ChannelFuture cf = Channels.open("www.sdf8aonf.com", 80, NoopAddressResolverGroup.INSTANCE, true, new NioEventLoopGroup(), new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-//                 ch.pipeline().addFirst(new Socks5ProxyClientHandler(new InetSocketAddress("127.0.0.1", 1008)));
-
-
-                final DefaultHttpHeaders httpHeaders = new DefaultHttpHeaders();
-                httpHeaders.set("X-TARGET-ADDRESS", "112.80.248.75");
-                httpHeaders.setInt("X-TARGET-PORT", 80);
-
 //                final URI webSocketEndpoint = URI.create("ws://127.0.0.1:1008/ws");
-                final URI webSocketEndpoint = URI.create("ws://127.0.0.1:8888/ws/echo");
+                final URI webSocketEndpoint = URI.create("ws://127.0.0.1:8899/ws/echo");
                 final String webSocketProtocol = "";
-                final WebSocketClientHandshaker handshaker = WebSocketClientHandshakerFactory.newHandshaker(
-                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, httpHeaders, 65536, true, true
-                );
+
                 ch.pipeline().addFirst(new HttpClientCodec(), new HttpObjectAggregator(1024 * 1024 * 8));
-                ch.pipeline().addLast(new WebSocketProxyClientHandler2(new InetSocketAddress(webSocketEndpoint.getHost(), webSocketEndpoint.getPort()), handshaker));
+                ch.pipeline().addLast(new WebSocketProxyClientHandler2(
+                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, 65536, true, true
+                ));
 //                ch.pipeline().addFirst(new Socks5ProxyHandler(new InetSocketAddress("127.0.0.1", 1008)));
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
-
-
                     @Override
                     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
                         ctx.executor().schedule(() -> {
