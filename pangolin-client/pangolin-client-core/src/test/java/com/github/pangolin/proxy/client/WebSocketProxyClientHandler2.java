@@ -118,7 +118,7 @@ public class WebSocketProxyClientHandler2 extends ProxyClientHandler {
                 allowExtensions, customHandshakeHttpHeadersToUse, maxFramePayloadLength, performMasking, allowMaskMismatch
         );
 
-        handshaker.handshake(new CtxWriteChannel(ctx)).addListener(new ChannelFutureListener() {
+        handshaker.handshake(new CtxWriteDelegatingChannel(ctx)).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 if (!future.isSuccess()) {
@@ -170,11 +170,11 @@ public class WebSocketProxyClientHandler2 extends ProxyClientHandler {
         }
     }
 
-    private static class CtxWriteChannel implements Channel {
+    private static class CtxWriteDelegatingChannel implements Channel {
         private final Channel delegate;
         private final ChannelHandlerContext ctx;
 
-        CtxWriteChannel(final ChannelHandlerContext ctx) {
+        CtxWriteDelegatingChannel(final ChannelHandlerContext ctx) {
             this.ctx = ctx;
             this.delegate = ctx.channel();
         }

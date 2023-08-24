@@ -57,10 +57,10 @@ public abstract class ProxyClientHandler extends ChannelDuplexHandler {
             try {
                 final boolean initialized = channelRead0(ctx, msg);
                 if (initialized) {
-                    suppressChannelReadComplete = false;
                     channelProxied(ctx);
+                    ctx.pipeline().remove(this);
+                    suppressChannelReadComplete = false;
                 }
-                ctx.pipeline().remove(this);
             } catch (final Throwable t) {
                 cause = t;
             } finally {

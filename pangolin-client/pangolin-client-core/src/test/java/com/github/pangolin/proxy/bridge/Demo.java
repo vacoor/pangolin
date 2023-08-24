@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.pipe;
+package com.github.pangolin.proxy.bridge;
 
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
