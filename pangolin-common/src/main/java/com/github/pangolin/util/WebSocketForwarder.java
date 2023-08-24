@@ -1,14 +1,27 @@
-package com.github.pangolin.util;;
+package com.github.pangolin.util;
 
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandler;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketClientCompressionHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
@@ -21,7 +34,10 @@ import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
+import java.net.SocketAddress;
 import java.net.URI;
+
+;
 
 /**
  * WebSocket 数据转发.
@@ -75,6 +91,28 @@ public class WebSocketForwarder {
         });
     }
 
+    public static ChannelFuture br(final SocketAddress upstream, final SocketAddress downstream, final NioEventLoopGroup brGroup) throws InterruptedException {
+        return Channels.open(upstream, false, brGroup, new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelActive(final ChannelHandlerContext upstreamCtx) throws Exception {
+                Channels.open(downstream, false, brGroup, new ChannelInboundHandlerAdapter() {
+                    @Override
+                    public void channelActive(final ChannelHandlerContext downstreamCtx) throws Exception {
+                        upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", Redirects.socketRedirectToSocket(downstreamCtx));
+                        downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", Redirects.socketRedirectToSocket(upstreamCtx));
+                    }
+                }).addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(final ChannelFuture future) throws Exception {
+                        if (!future.isSuccess()) {
+                            future.channel().close();
+                            upstreamCtx.channel().close();
+                        }
+                    }
+                });
+            }
+        }).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
+    }
 
     public static Channel forwardToNativeSocket2(final String id,
                                                  final URI webSocketEndpoint1, final String webSocketProtocol1,

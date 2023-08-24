@@ -36,7 +36,8 @@ public class ProxyClient {
                 final URI webSocketEndpoint = URI.create("ws://127.0.0.1:8899/ws/echo");
                 final String webSocketProtocol = "";
 
-                ch.pipeline().addFirst(new HttpClientCodec(), new HttpObjectAggregator(1024 * 1024 * 8));
+                ch.pipeline().addLast(new HttpClientCodec());
+                ch.pipeline().addLast(new HttpObjectAggregator(1024 * 1024 * 8));
                 ch.pipeline().addLast(new WebSocketProxyClientHandler2(
                         webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, 65536, true, true
                 ));
