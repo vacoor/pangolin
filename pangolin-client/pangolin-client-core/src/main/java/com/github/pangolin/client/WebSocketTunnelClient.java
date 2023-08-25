@@ -1,23 +1,28 @@
 package com.github.pangolin.client;
 
+import com.github.pangolin.util.Channels2;
 import com.github.pangolin.util.WebSocketForwarder;
 import com.github.pangolin.util.WebSocketUtils;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.http.HttpHeaderNames;
-import io.netty.handler.codec.http.HttpHeaderValues;
+import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpHeaders;
-import io.netty.handler.codec.http.HttpRequest;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler.ClientHandshakeStateEvent;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import java.net.URI;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -78,23 +83,20 @@ public class WebSocketTunnelClient {
     }
 
     private Channel connect() throws IOException, InterruptedException {
-        return connect(createWebSocketTunnelClientHandler());
+        final HttpHeaders customHttpHeaders = new DefaultHttpHeaders();
+        return WebSocketForwarder.openWebSocketChannel(serverEndpoint, AGENT_REGISTER_PROTOCOL, customHttpHeaders, createWebSocketTunnelClientHandler(customHttpHeaders));
     }
 
-    private Channel connect(final ChannelHandler... handlers) throws IOException, InterruptedException {
-        return WebSocketForwarder.openWebSocketChannel(serverEndpoint, AGENT_REGISTER_PROTOCOL, new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel ch) throws Exception {
-                final ChannelPipeline cp = ch.pipeline();
-                // cp.addLast(new IdleStateHandler(0, 0, 50));
-                cp.addLast(new WebSocketTunnelHandshakeHandler(name));
-                cp.addLast(handlers);
-            }
-        });
-    }
-
-    private SimpleChannelInboundHandler<WebSocketFrame> createWebSocketTunnelClientHandler() {
+    private SimpleChannelInboundHandler<WebSocketFrame> createWebSocketTunnelClientHandler(final HttpHeaders customHttpHeaders) {
         return new SimpleChannelInboundHandler<WebSocketFrame>() {
+            @Override
+            public void channelActive(final ChannelHandlerContext ctx) throws Exception {
+                final InetSocketAddress localAddress = (InetSocketAddress) ctx.channel().localAddress();
+                customHttpHeaders.set("X-Node-Name", name);
+                customHttpHeaders.set("X-Node-Version", "1.0");
+                customHttpHeaders.set("X-Node-Intranet", localAddress.getHostString());
+                super.channelActive(ctx);
+            }
 
             @Override
             public void channelUnregistered(final ChannelHandlerContext ctx) throws Exception {
@@ -153,68 +155,19 @@ public class WebSocketTunnelClient {
             final String endpoint = serverEndpoint.getScheme() + "://" + serverEndpoint.getHost() + ":" + serverEndpoint.getPort() + serverEndpoint.getPath();
             if ("tcp".equalsIgnoreCase(target.getScheme())) {
                 final URI backhaulWebSocketUri = URI.create(endpoint + "?id=" + id);
-                /*
-                final WebSocketClientHandshaker backhaulHandshaker = WebSocketClientHandshakerFactory.newHandshaker(
-                        backhaulWebSocketUri, WebSocketVersion.V13, "TUNNEL_RESPONSE",
-                        true, null
-                );
-
-                final InetSocketAddress targetAddr = new InetSocketAddress(target.getHost(), target.getPort());
-                WebSocketForwarder.br(targetAddr, backhaulHandshaker, workerGroup);
-                */
-                 WebSocketForwarder.forwardToNativeSocket2(id, backhaulWebSocketUri, "TUNNEL_RESPONSE", target);
+                final WebSocketClientHandshaker backhaulHandshaker = newHandshaker(backhaulWebSocketUri, "TUNNEL_RESPONSE", null);
+                Channels2.pipe(new InetSocketAddress(target.getHost(), target.getPort()), backhaulHandshaker, workerGroup);
             } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
-//                WebSocketForwarder.forwardToWebSocket2(id, URI.create(endpoint + "?id=" + id), "TUNNEL_RESPONSE", target, null);
-
-                /*
                 final URI backhaulWebSocketUri = URI.create(endpoint + "?id=" + id);
-                final WebSocketClientHandshaker backhaulHandshaker = WebSocketClientHandshakerFactory.newHandshaker(
-                        backhaulWebSocketUri, WebSocketVersion.V13, "TUNNEL_RESPONSE",
-                        true, null
-                );
-                final WebSocketClientHandshaker upstreamHandshaker = WebSocketClientHandshakerFactory.newHandshaker(
-                        target, WebSocketVersion.V13, null,
-                        true, null
-                );
-                WebSocketForwarder.br(upstreamHandshaker, backhaulHandshaker, workerGroup);
-                */
+                final WebSocketClientHandshaker backhaulHandshaker = newHandshaker(backhaulWebSocketUri, "TUNNEL_RESPONSE", null);
+                final WebSocketClientHandshaker upstreamHandshaker = newHandshaker(target, null, null);
+                Channels2.pipe(upstreamHandshaker, backhaulHandshaker, workerGroup);
             }
         }
     }
 
-    class WebSocketTunnelHandshakeHandler extends ChannelOutboundHandlerAdapter {
-        private final String name;
-
-        private WebSocketTunnelHandshakeHandler(final String name) {
-            this.name = name;
-        }
-
-        @Override
-        public void write(final ChannelHandlerContext ctx, final Object msg, final ChannelPromise promise) throws Exception {
-            if (msg instanceof HttpRequest) {
-                final HttpHeaders httpHeaders = ((HttpRequest) msg).headers();
-                if (httpHeaders.contains(HttpHeaderNames.UPGRADE, HttpHeaderValues.WEBSOCKET, true)) {
-                    final SocketAddress socketAddress = ctx.channel().localAddress();
-                    String addressToUse = socketAddress.toString();
-                    if (socketAddress instanceof InetSocketAddress) {
-                        final InetSocketAddress address = (InetSocketAddress) socketAddress;
-                        addressToUse = address.getAddress().getHostAddress();
-                    }
-                    httpHeaders.set("X-Node-Name", name);
-                    httpHeaders.set("X-Node-Version", "1.0");
-                    httpHeaders.set("X-Node-Intranet", addressToUse);
-
-                    promise.addListener(new ChannelFutureListener() {
-                        @Override
-                        public void operationComplete(ChannelFuture future) {
-                            ctx.pipeline().remove(ctx.name());
-                        }
-                    });
-                }
-            }
-            super.write(ctx, msg, promise);
-        }
-
+    private WebSocketClientHandshaker newHandshaker(final URI webSocketEndpoint, final String subprotocol, final HttpHeaders customHttpHeaders) {
+        return WebSocketClientHandshakerFactory.newHandshaker(webSocketEndpoint, WebSocketVersion.V13, subprotocol, true, customHttpHeaders);
     }
 
     public static void main(String[] args) throws Exception {

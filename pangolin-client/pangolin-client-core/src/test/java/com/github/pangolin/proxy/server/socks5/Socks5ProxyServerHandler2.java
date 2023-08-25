@@ -2,7 +2,7 @@ package com.github.pangolin.proxy.server.socks5;
 
 import com.github.pangolin.proxy.client.Socks5ProxyClientHandler;
 import com.github.pangolin.util.Channels;
-import com.github.pangolin.util.Redirects;
+import com.github.pangolin.util.SocketInboundRedirectHandler;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -150,8 +150,8 @@ public class Socks5ProxyServerHandler2 extends ChannelInboundHandlerAdapter {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
                 delegateCtx.pipeline().addFirst(new Socks5ProxyClientHandler(new InetSocketAddress("127.0.0.1", 1008)));
-                delegateCtx.pipeline().replace(this, null, Redirects.socketRedirectToSocket(requestCtx));
-                requestCtx.pipeline().replace(requestCtx.handler(), null, Redirects.socketRedirectToSocket(delegateCtx));
+                delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(requestCtx));
+                requestCtx.pipeline().replace(requestCtx.handler(), null, new SocketInboundRedirectHandler(delegateCtx));
 
                 delegateCtx.channel().config().setAutoRead(true);
                 requestCtx.channel().config().setAutoRead(true);

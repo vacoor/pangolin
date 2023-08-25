@@ -4,15 +4,25 @@ import com.github.pangolin.server.shell.ConsoleLineReader;
 import com.github.pangolin.server.shell.LineReader;
 import com.github.pangolin.server.shell.WebSocketTerminal;
 import com.github.pangolin.server.shell.WebSocketTunnelShell;
-import com.github.pangolin.util.WebSocketForwarder;
+import com.github.pangolin.util.Channels;
+import com.github.pangolin.util.Redirects;
+import com.github.pangolin.util.SocketOverWebSocketDecodeHandler;
+import com.github.pangolin.util.SocketOverWebSocketEncodeHandler;
 import com.github.pangolin.util.WebSocketUtils;
-import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ConnectTimeoutException;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
@@ -22,22 +32,35 @@ import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
 import io.netty.handler.ssl.SslContext;
-import io.netty.handler.ssl.SslContextBuilder;
-import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.handler.timeout.IdleStateEvent;
-import io.netty.handler.timeout.IdleStateHandler;
-import io.netty.util.concurrent.*;
+import io.netty.util.concurrent.DefaultThreadFactory;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.FutureListener;
+import io.netty.util.concurrent.GenericFutureListener;
+import io.netty.util.concurrent.GlobalEventExecutor;
+import io.netty.util.concurrent.Promise;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
+import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -50,7 +73,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * @since 20210825
  */
 @Slf4j
-public class WebSocketTunnelServer {
+public class WebSocketBackhaullProxyServer {
     /**
      * 空字符串.
      */
@@ -121,12 +144,12 @@ public class WebSocketTunnelServer {
     /**
      * 服务 event loop group.
      */
-    private final NioEventLoopGroup bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocketTunnelServer-boss", true));
+    private final NioEventLoopGroup bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocketBackhaullProxyServer-boss", true));
 
     /**
      * 处理 event loop group.
      */
-    private final NioEventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("WebSocketTunnelServer-workers", true));
+    private final NioEventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("WebSocketBackhaullProxyServer-workers", true));
 
     /**
      *
@@ -168,7 +191,7 @@ public class WebSocketTunnelServer {
      * @param endpointPath 接入点路径
      * @param useSsl       是否使用 SSL
      */
-    public WebSocketTunnelServer(final int listenPort, final String endpointPath, final boolean useSsl) {
+    public WebSocketBackhaullProxyServer(final int listenPort, final String endpointPath, final boolean useSsl) {
         this(null, listenPort, endpointPath, useSsl);
     }
 
@@ -180,7 +203,7 @@ public class WebSocketTunnelServer {
      * @param endpointPath 接入点路径
      * @param useSsl       是否使用 SSL
      */
-    public WebSocketTunnelServer(final String listenHost, final int listenPort, final String endpointPath, final boolean useSsl) {
+    public WebSocketBackhaullProxyServer(final String listenHost, final int listenPort, final String endpointPath, final boolean useSsl) {
         this.listenHost = listenHost;
         this.listenPort = listenPort;
         this.endpointPath = endpointPath;
@@ -224,17 +247,12 @@ public class WebSocketTunnelServer {
     private Channel listenTcp(final String listenHost, final int listenPort,
                               final NioEventLoopGroup bossGroup, final NioEventLoopGroup workerGroup,
                               final ChannelHandler initializer) throws InterruptedException {
-        final ServerBootstrap serverBootstrap = new ServerBootstrap();
-        serverBootstrap.option(ChannelOption.SO_REUSEADDR, true);
-        serverBootstrap.childOption(ChannelOption.TCP_NODELAY, true);
-        serverBootstrap.childOption(ChannelOption.SO_KEEPALIVE, true);
-        serverBootstrap.group(bossGroup, workerGroup).channel(NioServerSocketChannel.class);
-        serverBootstrap.childHandler(initializer);
+        final ChannelFuture serverChannelFuture = Channels.listen(listenHost, listenPort, bossGroup, workerGroup, initializer);
 
         if (null == listenHost) {
-            return serverBootstrap.bind(listenPort).sync().channel();
+            return serverChannelFuture.sync().channel();
         } else {
-            return serverBootstrap.bind(listenHost, listenPort).sync().channel();
+            return serverChannelFuture.sync().channel();
         }
     }
 
@@ -253,8 +271,7 @@ public class WebSocketTunnelServer {
      * @return ssl context
      */
     private SslContext createSslContext() throws SSLException, CertificateException {
-        final SelfSignedCertificate ssc = new SelfSignedCertificate();
-        return SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey()).build();
+        return Channels.createServerSslContext();
     }
 
     /**
@@ -498,11 +515,8 @@ public class WebSocketTunnelServer {
                     final ChannelHandlerContext webSocketBackhaulLink = backhaulFuture.getNow();
                     webSocketBackhaulLink.channel().config().setAutoRead(false);
 
-                    webSocketAccessLink.pipeline().remove(webSocketAccessLink.handler());
-                    webSocketBackhaulLink.pipeline().remove(webSocketBackhaulLink.handler());
-
-                    webSocketAccessLink.pipeline().addLast(WebSocketForwarder.pipeWebSocket(webSocketBackhaulLink));
-                    webSocketBackhaulLink.pipeline().addLast(WebSocketForwarder.pipeWebSocket(webSocketAccessLink));
+                    webSocketAccessLink.pipeline().replace(webSocketAccessLink.name(), null, Redirects.webSocketRedirectToWebSocket(webSocketBackhaulLink));
+                    webSocketBackhaulLink.pipeline().replace(webSocketBackhaulLink.name(), null, Redirects.webSocketRedirectToWebSocket(webSocketAccessLink));
 
                     webSocketAccessLink.channel().config().setAutoRead(true);
                     webSocketBackhaulLink.channel().config().setAutoRead(true);
@@ -569,11 +583,8 @@ public class WebSocketTunnelServer {
                     final ChannelHandlerContext webSocketBackhaulLink = backhaulFuture.getNow();
                     webSocketBackhaulLink.channel().config().setAutoRead(false);
 
-                    nativeSocketAccessLink.pipeline().remove(nativeSocketAccessLink.handler());
-                    webSocketBackhaulLink.pipeline().remove(webSocketBackhaulLink.handler());
-
-                    nativeSocketAccessLink.pipeline().addLast(WebSocketForwarder.adaptSocketToWebSocket(webSocketBackhaulLink));
-                    webSocketBackhaulLink.pipeline().addLast(WebSocketForwarder.adaptWebSocketToSocket(nativeSocketAccessLink));
+                    nativeSocketAccessLink.pipeline().replace(nativeSocketAccessLink.name(), null, new SocketOverWebSocketEncodeHandler(webSocketBackhaulLink));
+                    webSocketBackhaulLink.pipeline().replace(webSocketBackhaulLink.name(), null, new SocketOverWebSocketDecodeHandler(nativeSocketAccessLink));
 
                     nativeSocketAccessLink.channel().config().setAutoRead(true);
                     webSocketBackhaulLink.channel().config().setAutoRead(true);

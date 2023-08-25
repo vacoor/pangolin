@@ -1,18 +1,24 @@
 package com.github.pangolin.proxy.server.socks4;
 
 import com.github.pangolin.util.Channels;
-import com.github.pangolin.util.Redirects;
+import com.github.pangolin.util.SocketInboundRedirectHandler;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.handler.codec.socksx.v4.*;
+import io.netty.handler.codec.socksx.v4.DefaultSocks4CommandResponse;
+import io.netty.handler.codec.socksx.v4.Socks4CommandRequest;
+import io.netty.handler.codec.socksx.v4.Socks4CommandStatus;
+import io.netty.handler.codec.socksx.v4.Socks4CommandType;
+import io.netty.handler.codec.socksx.v4.Socks4Message;
+import io.netty.handler.codec.socksx.v4.Socks4ServerDecoder;
+import io.netty.handler.codec.socksx.v4.Socks4ServerEncoder;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * TODO DOC ME!.
+ * SOCKS4.
  *
  * @author changhe.yang
  * @since 20230821
@@ -90,12 +96,15 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
         final int port = request.dstPort();
         final String address = request.dstAddr();
 
+        /*-
+         *
+         */
         requestCtx.channel().config().setAutoRead(false);
         Channels.open(address, port, false, group, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
-                delegateCtx.pipeline().replace(this, null, Redirects.socketRedirectToSocket(requestCtx));
-                requestCtx.pipeline().replace(requestCtx.handler(), null, Redirects.socketRedirectToSocket(delegateCtx));
+                delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(requestCtx));
+                requestCtx.pipeline().replace(requestCtx.handler(), null, new SocketInboundRedirectHandler(delegateCtx));
 
                 delegateCtx.channel().config().setAutoRead(true);
                 requestCtx.channel().config().setAutoRead(true);

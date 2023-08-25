@@ -5,14 +5,18 @@ import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.resolver.AddressResolverGroup;
 
+import javax.net.ssl.SSLException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.net.URI;
+import java.security.cert.CertificateException;
 
 public class Channels {
 
@@ -20,7 +24,8 @@ public class Channels {
                                        final NioEventLoopGroup bossGroup, final NioEventLoopGroup workerGroup,
                                        final ChannelHandler initializer) throws InterruptedException {
         final ServerBootstrap serverBootstrap = new ServerBootstrap();
-        serverBootstrap.option(ChannelOption.SO_REUSEADDR, true);
+//        serverBootstrap.option(ChannelOption.SO_REUSEADDR, true);
+        serverBootstrap.option(ChannelOption.SO_REUSEADDR, false);
         serverBootstrap.childOption(ChannelOption.TCP_NODELAY, true);
         serverBootstrap.childOption(ChannelOption.SO_KEEPALIVE, true);
         serverBootstrap.group(bossGroup, workerGroup).channel(NioServerSocketChannel.class);
@@ -87,4 +92,17 @@ public class Channels {
         });
     }
 
+    /**
+     * Create an ssl context.
+     *
+     * @return ssl context
+     */
+    public static SslContext createServerSslContext() throws SSLException, CertificateException {
+        final SelfSignedCertificate ssc = new SelfSignedCertificate();
+        return SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey()).build();
+    }
+
+    public static SslContext createClientSslContext() throws SSLException {
+        return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
+    }
 }

@@ -1,7 +1,7 @@
 package com.github.pangolin.proxy.server.socks5;
 
 import com.github.pangolin.util.Channels;
-import com.github.pangolin.util.Redirects;
+import com.github.pangolin.util.SocketInboundRedirectHandler;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -9,7 +9,22 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.codec.ByteToMessageDecoder;
-import io.netty.handler.codec.socksx.v5.*;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5CommandResponse;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5InitialResponse;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5PasswordAuthResponse;
+import io.netty.handler.codec.socksx.v5.Socks5AddressType;
+import io.netty.handler.codec.socksx.v5.Socks5AuthMethod;
+import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
+import io.netty.handler.codec.socksx.v5.Socks5CommandRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5CommandStatus;
+import io.netty.handler.codec.socksx.v5.Socks5CommandType;
+import io.netty.handler.codec.socksx.v5.Socks5InitialRequest;
+import io.netty.handler.codec.socksx.v5.Socks5InitialRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5Message;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequest;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthStatus;
+import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -131,8 +146,8 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         Channels.open(address, port, false, proxyWorkersGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
-                delegateCtx.pipeline().replace(this, null, Redirects.socketRedirectToSocket(requestCtx));
-                requestCtx.pipeline().replace(requestCtx.handler(), null, Redirects.socketRedirectToSocket(delegateCtx));
+                delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(requestCtx));
+                requestCtx.pipeline().replace(requestCtx.handler(), null, new SocketInboundRedirectHandler(delegateCtx));
 
                 delegateCtx.channel().config().setAutoRead(true);
                 requestCtx.channel().config().setAutoRead(true);

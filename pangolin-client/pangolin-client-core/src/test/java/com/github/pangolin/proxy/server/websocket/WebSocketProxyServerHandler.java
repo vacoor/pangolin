@@ -1,7 +1,8 @@
 package com.github.pangolin.proxy.server.websocket;
 
 import com.github.pangolin.util.Channels;
-import com.github.pangolin.util.Redirects;
+import com.github.pangolin.util.SocketOverWebSocketDecodeHandler;
+import com.github.pangolin.util.SocketOverWebSocketEncodeHandler;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -149,8 +150,8 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
                 Channels.open(hostname, port, false, proxyWorkersGroup, new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
-                        ctx.pipeline().addBefore(ctx.name(), "WebSocket->Socket", Redirects.webSocketRedirectToSocket(targetCtx));
-                        targetCtx.pipeline().replace(targetCtx.name(), "Socket->WebSocket", Redirects.socketRedirectToWebSocket(ctx));
+                        ctx.pipeline().addBefore(ctx.name(), "WebSocket->Socket", new SocketOverWebSocketDecodeHandler(targetCtx));
+                        targetCtx.pipeline().replace(targetCtx.name(), "Socket->WebSocket", new SocketOverWebSocketEncodeHandler(ctx));
 
                         ctx.channel().config().setAutoRead(true);
                         targetCtx.channel().config().setAutoRead(true);
@@ -175,7 +176,7 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
                             }
                         });
                         /*
-                        */
+                         */
                         setHandshaker(ctx.channel(), handshaker);
                         /*
                         ctx.pipeline().replace(this, "WS403Responder", new ChannelInboundHandlerAdapter() {

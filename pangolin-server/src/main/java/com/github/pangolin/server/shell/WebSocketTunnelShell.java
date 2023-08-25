@@ -1,6 +1,6 @@
 package com.github.pangolin.server.shell;
 
-import com.github.pangolin.server.WebSocketTunnelServer;
+import com.github.pangolin.server.WebSocketBackhaullProxyServer;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 
 public class WebSocketTunnelShell {
     private boolean breakOnNull;
-    private WebSocketTunnelServer server;
+    private WebSocketBackhaullProxyServer server;
 
     protected final LineReader reader;
     protected final PrintStream output;
@@ -23,7 +23,7 @@ public class WebSocketTunnelShell {
 
     private Map<String, String> forwardHostnameAliasMap;
 
-    public WebSocketTunnelShell(final WebSocketTunnelServer server, final LineReader reader, final PrintStream output,
+    public WebSocketTunnelShell(final WebSocketBackhaullProxyServer server, final LineReader reader, final PrintStream output,
                                 final Map<String, String> forwardHostnameAliasMap) {
         this.server = server;
         this.reader = reader;
@@ -105,15 +105,15 @@ public class WebSocketTunnelShell {
             final String action = args[1];
             if ("list".equals(action)) {
                 final String prefix = args.length > 2 ? args[2] : "";
-                final Collection<WebSocketTunnelServer.Broker> nodes = server.getBrokers();
-                for (WebSocketTunnelServer.Broker node : nodes) {
+                final Collection<WebSocketBackhaullProxyServer.Broker> nodes = server.getBrokers();
+                for (WebSocketBackhaullProxyServer.Broker node : nodes) {
                     if (node.name().startsWith(prefix)) {
                         out.println(node);
                     }
                 }
             } else if ("remove".equals(action)) {
                 final String brokerKey = args[2];
-                final WebSocketTunnelServer.Broker broker = server.lookupBroker(brokerKey);
+                final WebSocketBackhaullProxyServer.Broker broker = server.lookupBroker(brokerKey);
                 if (null == broker) {
                     out.println(String.format("Broker '%s' not exists", brokerKey));
                 } else {
@@ -136,11 +136,11 @@ public class WebSocketTunnelShell {
             if ("list".equals(action)) {
                 final String option = args.length > 2 ? args[2] : "";
                 final boolean isL = "-l".equals(option);
-                Collection<WebSocketTunnelServer.PortForwarding2> forwards = server.getAccessRules();
-                for (WebSocketTunnelServer.PortForwarding2 forward : forwards) {
+                Collection<WebSocketBackhaullProxyServer.PortForwarding2> forwards = server.getAccessRules();
+                for (WebSocketBackhaullProxyServer.PortForwarding2 forward : forwards) {
                     out.println(forward);
                     if (isL) {
-                        for (WebSocketTunnelServer.Connection link : server.getConnections(forward)) {
+                        for (WebSocketBackhaullProxyServer.Connection link : server.getConnections(forward)) {
                             out.println("  |- " + link);
                         }
                     }
@@ -201,7 +201,7 @@ public class WebSocketTunnelShell {
     }
 
     public static void main(String[] args) throws Exception {
-        final WebSocketTunnelServer server = new WebSocketTunnelServer("0.0.0.0", 2345, "/tunnel", false);
+        final WebSocketBackhaullProxyServer server = new WebSocketBackhaullProxyServer("0.0.0.0", 2345, "/tunnel", false);
         server.start();
         new WebSocketTunnelShell(server, new GenericLineReader(System.in, System.out), System.out, null).run();
     }

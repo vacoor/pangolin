@@ -1,6 +1,6 @@
 package com.github.pangolin.server.shell;
 
-import com.github.pangolin.server.WebSocketTunnelServer;
+import com.github.pangolin.server.WebSocketBackhaullProxyServer;
 import jline.console.completer.Completer;
 
 import java.util.List;
@@ -8,16 +8,16 @@ import java.util.Set;
 import java.util.TreeSet;
 
 public class WebSocketBrokerCompleter implements Completer {
-    private final WebSocketTunnelServer server;
+    private final WebSocketBackhaullProxyServer server;
 
-    public WebSocketBrokerCompleter(final WebSocketTunnelServer server) {
+    public WebSocketBrokerCompleter(final WebSocketBackhaullProxyServer server) {
         this.server = server;
     }
 
     @Override
     public int complete(final String buffer, final int cursor, final List<CharSequence> candidates) {
         final Set<String> names = new TreeSet<>();
-        for (WebSocketTunnelServer.Broker node : server.getBrokers()) {
+        for (WebSocketBackhaullProxyServer.Broker node : server.getBrokers()) {
             names.add(node.name());
         }
 
