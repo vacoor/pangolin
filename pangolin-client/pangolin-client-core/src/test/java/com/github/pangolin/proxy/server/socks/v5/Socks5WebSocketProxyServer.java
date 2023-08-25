@@ -1,12 +1,14 @@
-package com.github.pangolin.proxy.server.socks5;
+package com.github.pangolin.proxy.server.socks.v5;
 
-import com.github.pangolin.proxy.NettyServer;
-import io.netty.channel.Channel;
+import com.github.pangolin.proxy.server.NettyServer;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
 import java.util.concurrent.ExecutionException;
@@ -26,7 +28,7 @@ public class Socks5WebSocketProxyServer extends NettyServer {
         this.webSocketProxyServerProtocol = webSocketProxyServerProtocol;
     }
 
-    public Channel start() throws InterruptedException, CertificateException, SSLException {
+    public ChannelFuture start() throws InterruptedException, CertificateException, SSLException {
         return super.start(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
@@ -37,6 +39,16 @@ public class Socks5WebSocketProxyServer extends NettyServer {
 
     public static void main(String[] args) throws InterruptedException, SSLException, CertificateException, ExecutionException {
         final URI webSocketProxyServerEndpoint = URI.create("ws://127.0.0.1:8888/ws/echo");
-        new Socks5WebSocketProxyServer(1008, webSocketProxyServerEndpoint, null).start().closeFuture().sync().await();
+        new Socks5WebSocketProxyServer(1080, webSocketProxyServerEndpoint, null).start().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (future.isSuccess()) {
+                    final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
+                    System.out.println(String.format("Server started on %s:%s", localAddress.getHostString(), localAddress.getPort()));
+                } else {
+                    future.cause().printStackTrace();
+                }
+            }
+        }).sync().channel().closeFuture().sync().await();
     }
 }

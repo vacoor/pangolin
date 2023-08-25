@@ -1,24 +1,14 @@
-package com.github.pangolin.proxy.server.socks4;
+package com.github.pangolin.proxy.server.socks.v4;
 
 import com.github.pangolin.util.Channels;
-import com.github.pangolin.util.SocketInboundRedirectHandler;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.handler.codec.socksx.v4.DefaultSocks4CommandResponse;
-import io.netty.handler.codec.socksx.v4.Socks4CommandRequest;
-import io.netty.handler.codec.socksx.v4.Socks4CommandStatus;
-import io.netty.handler.codec.socksx.v4.Socks4CommandType;
-import io.netty.handler.codec.socksx.v4.Socks4Message;
-import io.netty.handler.codec.socksx.v4.Socks4ServerDecoder;
-import io.netty.handler.codec.socksx.v4.Socks4ServerEncoder;
+import com.github.pangolin.handler.SocketInboundRedirectHandler;
+import io.netty.channel.*;
+import io.netty.handler.codec.socksx.v4.*;
+import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class Socks4ProxyServerHandler extends SimpleChannelInboundHandler<Object> {
+public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
     private static final String NONE = "";
 
     private final String uid;
@@ -58,31 +48,35 @@ public class Socks4ProxyServerHandler extends SimpleChannelInboundHandler<Object
     }
 
     @Override
-    public void channelRead0(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-        if (msg instanceof Socks4Message && ((Socks4Message) msg).decoderResult().isSuccess()) {
-            if (msg instanceof Socks4CommandRequest) {
-                final Socks4CommandRequest request = (Socks4CommandRequest) msg;
-                final String requestUid = request.userId();
-                final Socks4CommandType type = request.type();
+    public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+        try {
+            if (msg instanceof Socks4Message && ((Socks4Message) msg).decoderResult().isSuccess()) {
+                if (msg instanceof Socks4CommandRequest) {
+                    final Socks4CommandRequest request = (Socks4CommandRequest) msg;
+                    final String requestUid = request.userId();
+                    final Socks4CommandType type = request.type();
 
-                if (!nullSafeEquals(uid, requestUid)) {
-                    ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_AUTH_FAILURE)).addListener(ChannelFutureListener.CLOSE);
-                } else if (!Socks4CommandType.CONNECT.equals(type)) {
-                    ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.REJECTED_OR_FAILED)).addListener(ChannelFutureListener.CLOSE);
+                    if (!nullSafeEquals(uid, requestUid)) {
+                        ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_AUTH_FAILURE)).addListener(ChannelFutureListener.CLOSE);
+                    } else if (!Socks4CommandType.CONNECT.equals(type)) {
+                        ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.REJECTED_OR_FAILED)).addListener(ChannelFutureListener.CLOSE);
+                    } else {
+                        connect(request, ctx, proxyGroup);
+                    }
                 } else {
-                    connect(request, ctx, proxyGroup);
+                    Channels.closeOnFlush(ctx.channel());
+                    log.error("Connection closed by Malformed Packet: {}", msg);
                 }
             } else {
                 Channels.closeOnFlush(ctx.channel());
                 log.error("Connection closed by Malformed Packet: {}", msg);
             }
-        } else {
-            Channels.closeOnFlush(ctx.channel());
-            log.error("Connection closed by Malformed Packet: {}", msg);
+        } finally {
+            ReferenceCountUtil.release(msg);
         }
     }
 
-    private void connect(final Socks4CommandRequest request, final ChannelHandlerContext requestCtx, final EventLoopGroup proxyGroup) throws InterruptedException {
+    private void connect(final Socks4CommandRequest request, final ChannelHandlerContext requestCtx, final EventLoopGroup proxyGroup) throws Exception {
         final int port = request.dstPort();
         final String address = request.dstAddr();
 

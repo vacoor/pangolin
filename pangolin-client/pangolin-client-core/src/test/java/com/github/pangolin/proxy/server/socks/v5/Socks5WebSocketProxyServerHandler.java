@@ -1,27 +1,20 @@
-package com.github.pangolin.proxy.server.socks5;
+package com.github.pangolin.proxy.server.socks.v5;
 
 import com.github.pangolin.util.Channels;
-import com.github.pangolin.util.SocketOverWebSocketDecodeHandler;
-import com.github.pangolin.util.SocketOverWebSocketEncodeHandler;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoopGroup;
+import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
+import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
-import io.netty.handler.codec.socksx.v5.DefaultSocks5CommandResponse;
-import io.netty.handler.codec.socksx.v5.Socks5AddressType;
-import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
-import io.netty.handler.codec.socksx.v5.Socks5CommandStatus;
-import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
+import io.netty.handler.codec.socksx.v5.*;
+import io.netty.handler.ssl.SslContext;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
@@ -42,7 +35,7 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
     }
 
     @Override
-    protected void connect(final Socks5CommandRequest request, final ChannelHandlerContext requestCtx, final EventLoopGroup proxyGroup) throws InterruptedException {
+    protected void connect(final Socks5CommandRequest request, final ChannelHandlerContext requestCtx, final EventLoopGroup proxyGroup) throws Exception {
         final int port = request.dstPort();
         final String address = request.dstAddr();
         final Socks5AddressType addressType = request.dstAddrType();
@@ -50,22 +43,20 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
         requestCtx.channel().config().setAutoRead(false);
 
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
-
-        final DefaultHttpHeaders httpHeaders = new DefaultHttpHeaders();
-        httpHeaders.set("X-TARGET-ADDRESS", address);
-        httpHeaders.setInt("X-TARGET-PORT", port);
-
+        final SslContext context = isSecure ? Channels.createClientSslContext() : null;
+        final HttpHeaders handshakeHeaders = newHandshakeHeaders(request, requestCtx);
         Channels.open(webSocketEndpoint.getHost(), webSocketEndpoint.getPort(), true, proxyGroup, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();
-                if (isSecure) {
-                    cp.addLast(Channels.createClientSslContext().newHandler(ch.alloc()));
+                if (null != context) {
+                    cp.addLast(context.newHandler(ch.alloc()));
                 }
-                cp.addLast(new HttpClientCodec(), new HttpObjectAggregator(1024 * 1024 * 8));
-//                cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
+                cp.addLast(new HttpClientCodec());
+                cp.addLast(new HttpObjectAggregator(1024 * 1024 * 8));
+                // cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
                 cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
-                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, httpHeaders, 65536, true, true
+                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, handshakeHeaders, 65536, true, true
                 ), false));
                 cp.addLast(new ChannelInboundHandlerAdapter() {
                     @Override
@@ -97,5 +88,12 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
                 Channels.closeOnFlush(requestCtx.channel());
             }
         });
+    }
+
+    private HttpHeaders newHandshakeHeaders(final Socks5CommandRequest request, final ChannelHandlerContext ctx) {
+        final DefaultHttpHeaders httpHeaders = new DefaultHttpHeaders();
+        httpHeaders.set("X-TARGET-ADDRESS", request.dstAddr());
+        httpHeaders.setInt("X-TARGET-PORT", request.dstPort());
+        return httpHeaders;
     }
 }

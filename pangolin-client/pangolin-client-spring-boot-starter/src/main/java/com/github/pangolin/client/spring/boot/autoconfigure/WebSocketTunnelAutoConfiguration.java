@@ -1,8 +1,6 @@
 package com.github.pangolin.client.spring.boot.autoconfigure;
 
 import com.github.pangolin.client.WebSocketTunnelClient;
-import com.github.pangolin.client.servlet.WebSocketTunnelServlet;
-import org.springframework.boot.web.servlet.ServletComponentScan;
 import org.springframework.context.EnvironmentAware;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,7 +21,6 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  */
 @Configuration
-@ServletComponentScan(basePackageClasses = {WebSocketTunnelServlet.class})
 public class WebSocketTunnelAutoConfiguration implements EnvironmentAware {
     private static final String WS_SERVER_URL_PROPERTY = "spring.management.tunnel";
 

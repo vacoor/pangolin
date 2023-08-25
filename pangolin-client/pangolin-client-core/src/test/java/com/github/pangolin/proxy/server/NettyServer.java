@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy;
+package com.github.pangolin.proxy.server;
 
 import com.github.pangolin.util.Channels;
 import io.netty.channel.Channel;
@@ -6,9 +6,6 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContext;
-import io.netty.handler.ssl.SslContextBuilder;
-import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
 
@@ -49,7 +46,7 @@ public class NettyServer {
     /**
      *
      */
-    protected Channel serverChannel;
+    protected ChannelFuture serverChannelFuture;
 
     /**
      * 创建隧道服务实例.
@@ -87,16 +84,16 @@ public class NettyServer {
      *
      * @return 服务通道
      */
-    public Channel start(final ChannelInboundHandler initializer) throws InterruptedException, CertificateException, SSLException {
+    public ChannelFuture start(final ChannelInboundHandler initializer) throws InterruptedException, CertificateException, SSLException {
         if (!startup.compareAndSet(false, true)) {
-            return serverChannel;
+            return serverChannelFuture;
         }
 
         final ChannelFuture cf = Channels.listen(listenHost, listenPort, bossGroup, workerGroup, initializer);
         Channels.shutdownGroupOnClose(cf.channel(), bossGroup);
         Channels.shutdownGroupOnClose(cf.channel(), workerGroup);
 
-        return serverChannel = cf.sync().channel();
+        return serverChannelFuture = cf;
     }
 
     /**
@@ -105,12 +102,11 @@ public class NettyServer {
      * @return ssl context
      */
     protected SslContext createServerSslContext() throws SSLException, CertificateException {
-        final SelfSignedCertificate ssc = new SelfSignedCertificate();
-        return SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey()).build();
+        return Channels.createServerSslContext();
     }
 
     protected SslContext createClientSslContext() throws SSLException {
-        return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
+        return Channels.createClientSslContext();
     }
 
 
@@ -118,8 +114,11 @@ public class NettyServer {
      * 关闭服务器.
      */
     public void shutdownGracefully() {
-        if (null != serverChannel) {
-            serverChannel.close();
+        if (null != serverChannelFuture) {
+            final Channel channel = serverChannelFuture.channel();
+            if (channel.isActive()) {
+                channel.close();
+            }
         }
         bossGroup.shutdownGracefully();
         workerGroup.shutdownGracefully();

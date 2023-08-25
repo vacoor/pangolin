@@ -35,7 +35,7 @@ public class ConsoleLineReader implements LineReader {
         }
         console.setExpandEvents(false);
 
-        final WebSocketBrokerCompleter webSocketBrokerCompleter = new WebSocketBrokerCompleter(server);
+        final WebSocketBackhaulAgentCompleter webSocketBackhaulAgentCompleter = new WebSocketBackhaulAgentCompleter(server);
         /*-
          * forward
          */
@@ -43,9 +43,9 @@ public class ConsoleLineReader implements LineReader {
         final AggregateCompleter completer = new AggregateCompleter();
         completer.getCompleters().add(new StringsCompleter("exit"));
         completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("broker"), new StringsCompleter("list"), NullCompleter.INSTANCE));
-        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("broker"), new StringsCompleter("remove"), webSocketBrokerCompleter, NullCompleter.INSTANCE));
+        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("broker"), new StringsCompleter("remove"), webSocketBackhaulAgentCompleter, NullCompleter.INSTANCE));
         completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("list"), NullCompleter.INSTANCE));
-        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("add"), NullCompleter.INSTANCE, webSocketBrokerCompleter, NullCompleter.INSTANCE));
+        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("add"), NullCompleter.INSTANCE, webSocketBackhaulAgentCompleter, NullCompleter.INSTANCE));
         completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("remove"), NullCompleter.INSTANCE));
         completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("kill"), NullCompleter.INSTANCE));
         console.addCompleter(completer);

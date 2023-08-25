@@ -21,10 +21,6 @@
             <artifactId>pangolin-client-core</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.github.nomou.pangolin</groupId>
-            <artifactId>pangolin-client-servlet</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-autoconfigure</artifactId>
             <version>${spring-boot.version}</version>

@@ -2,12 +2,12 @@ package com.github.pangolin.server;
 
 import com.github.pangolin.server.shell.ConsoleLineReader;
 import com.github.pangolin.server.shell.LineReader;
+import com.github.pangolin.server.shell.WebSocketBackhaulProxyServerShell;
 import com.github.pangolin.server.shell.WebSocketTerminal;
-import com.github.pangolin.server.shell.WebSocketTunnelShell;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
-import com.github.pangolin.util.SocketOverWebSocketDecodeHandler;
-import com.github.pangolin.util.SocketOverWebSocketEncodeHandler;
+import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
+import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
 import com.github.pangolin.util.WebSocketUtils;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
@@ -115,14 +115,14 @@ public class WebSocketBackhaullProxyServer {
     private static final String ALL_PROTOCOLS = PROTOCOL_TUNNEL_REQUEST + "," + PROTOCOL_AGENT_REGISTER + "," + PROTOCOL_TUNNEL_RESPONSE + "," + PROTOCOL_TUNNEL_MANAGEMENT;
 
     /**
-     * 已注册的broker节点(id:broker).
+     * 已注册的broker节点(id:agent).
      */
-    private final ConcurrentMap<String, Broker> registeredBrokers = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Agent> registeredAgents = new ConcurrentHashMap<>();
 
     /**
      * 存活的连接信息(id:连接).
      */
-    private final ConcurrentMap<String, Connection> connectionMap = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Tunnel> tunnelMap = new ConcurrentHashMap<>();
 
     /**
      * 开启的端口转发信息(port:转发信息).
@@ -257,10 +257,10 @@ public class WebSocketBackhaullProxyServer {
     }
 
     public void expiredCheck() {
-        for (Map.Entry<String, Broker> entry : registeredBrokers.entrySet()) {
+        for (Map.Entry<String, Agent> entry : registeredAgents.entrySet()) {
             if (!entry.getValue().bus.channel().isActive()) {
                 log.warn("Expired: {}", entry.getValue());
-                registeredBrokers.remove(entry.getKey());
+                registeredAgents.remove(entry.getKey());
             }
         }
     }
@@ -367,8 +367,8 @@ public class WebSocketBackhaullProxyServer {
      * @param brokerKey 节点标识
      * @return 通信总线
      */
-    public Broker lookupBroker(final String brokerKey) {
-        return registeredBrokers.get(brokerKey);
+    public Agent lookupBroker(final String brokerKey) {
+        return registeredAgents.get(brokerKey);
     }
 
     /* ***************** 节点注册 [[ **************** */
@@ -399,9 +399,9 @@ public class WebSocketBackhaullProxyServer {
 
         // XXX encode as name
         final String nodeId = String.format("%s@%s/%s", nodeName, nodeIntranet, nodeExtranet);
-        final Broker node = new Broker(nodeId, nodeName, nodeVersion, nodeExtranet, nodeIntranet, webSocketContext);
+        final Agent node = new Agent(nodeId, nodeName, nodeVersion, nodeExtranet, nodeIntranet, webSocketContext);
         // TODO register by nodeId
-        if (null == registeredBrokers.putIfAbsent(nodeName, node)) {
+        if (null == registeredAgents.putIfAbsent(nodeName, node)) {
             webSocketContext.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
                 @Override
                 public void operationComplete(final Future<? super Void> future) {
@@ -422,35 +422,35 @@ public class WebSocketBackhaullProxyServer {
      * 节点取消注册.
      *
      * @param nodeKey 节点标识
-     * @param broker  节点信息
+     * @param agent  节点信息
      */
-    private void nodeUnregistered(final String nodeKey, final Broker broker) {
-        if (registeredBrokers.remove(nodeKey, broker)) {
-            log.info("{} Node unregistered: {}", broker.bus.channel(), broker);
+    private void nodeUnregistered(final String nodeKey, final Agent agent) {
+        if (registeredAgents.remove(nodeKey, agent)) {
+            log.info("{} Node unregistered: {}", agent.bus.channel(), agent);
 
             try {
-                this.onNodeUnregisteredClose(broker);
+                this.onNodeUnregisteredClose(agent);
             } finally {
-                if (broker.bus.channel().isOpen()) {
-                    WebSocketUtils.normalClose(broker.bus, "UNREGISTER");
+                if (agent.bus.channel().isOpen()) {
+                    WebSocketUtils.normalClose(agent.bus, "UNREGISTER");
                 }
             }
         } else {
-            log.error("{} Node unregister failure: '{}' not found in registry", broker.bus.channel(), broker);
+            log.error("{} Node unregister failure: '{}' not found in registry", agent.bus.channel(), agent);
         }
     }
 
     /**
      * 节点取消注册关闭.
      */
-    private void onNodeUnregisteredClose(final Broker broker) {
+    private void onNodeUnregisteredClose(final Agent agent) {
         /*-
          * 关闭所有对应的监听端口服务.
          */
         final Set<Integer> destroy = new TreeSet<>();
         for (final Map.Entry<Integer, PortForwarding2> mapping : portForwardingMap2.entrySet()) {
             final PortForwarding2 forwarding = mapping.getValue();
-            if (broker.equals(forwarding.getBroker())) {
+            if (agent.equals(forwarding.getAgent())) {
                 destroy.add(mapping.getKey());
             }
         }
@@ -469,9 +469,9 @@ public class WebSocketBackhaullProxyServer {
         final String tunnel = parameters.get("tunnel");
         final String target = parameters.get("target");
 
-        final Broker broker = lookupBroker(tunnel);
-        if (null != broker) {
-            final ChannelHandlerContext bus = broker.bus;
+        final Agent agent = lookupBroker(tunnel);
+        if (null != agent) {
+            final ChannelHandlerContext bus = agent.bus;
             final String id = "ws:" + id(webSocketAccessLink.channel());
             final Promise<ChannelHandlerContext> webSocketBackhaulPromise = webSocketTunnelRequested(id, tunnel, webSocketAccessLink);
             final String webSocketBackhaulRequest = id + "->" + target;
@@ -484,7 +484,7 @@ public class WebSocketBackhaullProxyServer {
             waitBackhaulLinkUntilTimeout(webSocketBackhaulPromise);
         } else {
             log.warn("{} Not found tunnel: {}, will close", webSocketAccessLink.channel(), tunnel);
-            WebSocketUtils.policyViolationClose(webSocketAccessLink, "Broker unavailable");
+            WebSocketUtils.policyViolationClose(webSocketAccessLink, "Agent unavailable");
         }
     }
 
@@ -502,8 +502,8 @@ public class WebSocketBackhaullProxyServer {
         }
 
         final Promise<ChannelHandlerContext> webSocketBackhaulLinkPromise = GlobalEventExecutor.INSTANCE.newPromise();
-        final Connection connection = new Connection(accessRequestId, nodeKey, webSocketAccessLink, webSocketBackhaulLinkPromise);
-        if (null != connectionMap.putIfAbsent(accessRequestId, connection)) {
+        final Tunnel tunnel = new Tunnel(accessRequestId, nodeKey, webSocketAccessLink, webSocketBackhaulLinkPromise);
+        if (null != tunnelMap.putIfAbsent(accessRequestId, tunnel)) {
             throw new IllegalStateException(String.format("%s access link id '%s' is already used", webSocketAccessLink.channel(), accessRequestId));
         }
 
@@ -539,12 +539,12 @@ public class WebSocketBackhaullProxyServer {
                     log.debug("{} Tunnel closed, access link: {}", webSocketAccessLink.channel(), accessRequestId);
                 }
 
-                final ChannelHandlerContext webSocketBackhaulLink = connection.backhaulLinkPromise.getNow();
+                final ChannelHandlerContext webSocketBackhaulLink = tunnel.backhaulLinkPromise.getNow();
                 if (null != webSocketBackhaulLink && webSocketBackhaulLink.channel().isOpen()) {
                     // XXX WebSocketUtils.normalClose(webSocketBackhaulLink, "");
                     webSocketBackhaulLink.close();
                 }
-                connectionMap.remove(accessRequestId, connection);
+                tunnelMap.remove(accessRequestId, tunnel);
             }
         });
 
@@ -570,8 +570,8 @@ public class WebSocketBackhaullProxyServer {
         }
 
         final Promise<ChannelHandlerContext> webSocketBackhaulLinkPromise = GlobalEventExecutor.INSTANCE.newPromise();
-        final Connection connection = new Connection(accessRequestId, nodeKey, nativeSocketAccessLink, webSocketBackhaulLinkPromise);
-        if (null != connectionMap.putIfAbsent(accessRequestId, connection)) {
+        final Tunnel tunnel = new Tunnel(accessRequestId, nodeKey, nativeSocketAccessLink, webSocketBackhaulLinkPromise);
+        if (null != tunnelMap.putIfAbsent(accessRequestId, tunnel)) {
             throw new IllegalStateException(String.format("%s request id '%s' is already used", nativeSocketAccessLink.channel(), accessRequestId));
         }
 
@@ -605,12 +605,12 @@ public class WebSocketBackhaullProxyServer {
             @Override
             public void operationComplete(final Future<? super Void> future) throws Exception {
                 if (log.isDebugEnabled()) {
-                    log.debug("{} Connection closed", nativeSocketAccessLink.channel());
+                    log.debug("{} Tunnel closed", nativeSocketAccessLink.channel());
                 }
-                if (null != connection.backhaulLinkPromise.getNow()) {
-                    connection.backhaulLinkPromise.getNow().close();
+                if (null != tunnel.backhaulLinkPromise.getNow()) {
+                    tunnel.backhaulLinkPromise.getNow().close();
                 }
-                connectionMap.remove(accessRequestId, connection);
+                tunnelMap.remove(accessRequestId, tunnel);
             }
         });
 
@@ -628,9 +628,9 @@ public class WebSocketBackhaullProxyServer {
 
         // XXX 考虑是否验证来源.
         final String accessRequestId = determineQueryParameters(handshake.requestUri()).get("id");
-        final Connection connection = connectionMap.get(accessRequestId);
-        if (null != connection && !connection.backhaulLinkPromise.isDone()) {
-            connection.backhaulLinkPromise.setSuccess(backhaulLink);
+        final Tunnel tunnel = tunnelMap.get(accessRequestId);
+        if (null != tunnel && !tunnel.backhaulLinkPromise.isDone()) {
+            tunnel.backhaulLinkPromise.setSuccess(backhaulLink);
         } else {
             log.warn("{} The corresponding tunnel access link cannot be found, it may have timed out: {}", backhaulLink.channel(), accessRequestId);
             WebSocketUtils.goingAwayClose(backhaulLink, "TUNNEL_REQUEST_NOT_FOUND");
@@ -646,7 +646,7 @@ public class WebSocketBackhaullProxyServer {
         final OutputStream innerOut = new WebSocketBinaryOutputStream(webSocketTunnelContext);
         final WebSocketTerminal terminal = new WebSocketTerminal();
         final LineReader reader = new ConsoleLineReader(this, innerIn, innerOut, terminal);
-        new WebSocketTunnelShell(this, reader, new PrintStream(innerOut), null).start();
+        new WebSocketBackhaulProxyServerShell(this, reader, new PrintStream(innerOut), null).start();
 
         webSocketTunnelContext.pipeline().addLast(new SimpleChannelInboundHandler<WebSocketFrame>() {
             @Override
@@ -689,10 +689,10 @@ public class WebSocketBackhaullProxyServer {
      * @return 如果隧道存在返回true, 否则false
      */
     public boolean kill(final String linkId) {
-        final Connection connection = connectionMap.get(linkId);
-        if (null != connection) {
-            final ChannelHandlerContext backhaul = connection.backhaulLinkPromise.getNow();
-            connection.accessLink.channel().close();
+        final Tunnel tunnel = tunnelMap.get(linkId);
+        if (null != tunnel) {
+            final ChannelHandlerContext backhaul = tunnel.backhaulLinkPromise.getNow();
+            tunnel.accessLink.channel().close();
             backhaul.channel().close();
             return true;
         }
@@ -716,8 +716,8 @@ public class WebSocketBackhaullProxyServer {
      * ************************ */
 
     public Channel forward(final int listenPort, final String nodeKey, final String toHost, final int toPort) throws InterruptedException {
-        final Broker broker = this.lookupBroker(nodeKey);
-        if (null == broker) {
+        final Agent agent = this.lookupBroker(nodeKey);
+        if (null == agent) {
             throw new IllegalStateException("TUNNEL_NOT_FOUND:" + nodeKey);
         }
 
@@ -744,17 +744,17 @@ public class WebSocketBackhaullProxyServer {
                         if (log.isDebugEnabled()) {
                             log.debug("{} Try open native tunnel: {}", nativeSocketChannel, backhaulRequest);
                         }
-                        broker.bus.writeAndFlush(new TextWebSocketFrame(backhaulRequest));
+                        agent.bus.writeAndFlush(new TextWebSocketFrame(backhaulRequest));
                         waitBackhaulLinkUntilTimeout(backhaulLinkPromise);
                     }
                 });
             }
         });
 
-        final PortForwarding2 pf = new PortForwarding2(listenPort, listenChannel, broker, target);
+        final PortForwarding2 pf = new PortForwarding2(listenPort, listenChannel, agent, target);
         portForwardingMap2.putIfAbsent(listenPort, pf);
 
-//        final PortForwarding forwarding = new PortForwarding(listenChannel, broker, toHost + ":" + toPort);
+//        final PortForwarding forwarding = new PortForwarding(listenChannel, agent, toHost + ":" + toPort);
 //        tcpForwardRuleMap.put(listenPort, forwarding);
 //        tcpListenChannelMap.putIfAbsent(nodeKey, new CopyOnWriteArrayList<Channel>());
 
@@ -781,14 +781,14 @@ public class WebSocketBackhaullProxyServer {
         private final int listenPort;
         private final Channel listenChannel;
 
-        private final Broker broker;
+        private final Agent agent;
         private final String target;
 
         @Override
         public String toString() {
             final SocketAddress localAddr = listenChannel.localAddress();
-            final String nodeName = broker.name;
-            final String nodeAddress = broker.intranet + "%" + broker.extranet;
+            final String nodeName = agent.name;
+            final String nodeAddress = agent.intranet + "%" + agent.extranet;
             return localAddr + " -> " + nodeName + "[" + nodeAddress + "] -> " + target;
         }
     }
@@ -838,8 +838,8 @@ public class WebSocketBackhaullProxyServer {
      *
      * @return 节点名称
      */
-    public Collection<Broker> getBrokers() {
-        return registeredBrokers.values();
+    public Collection<Agent> getBrokers() {
+        return registeredAgents.values();
     }
 
     /**
@@ -858,12 +858,12 @@ public class WebSocketBackhaullProxyServer {
      *
      * @param rule 转发规则
      */
-    public List<Connection> getConnections(final PortForwarding2 rule) {
-        final List<Connection> candidates = new LinkedList<>();
-        for (final Connection link : connectionMap.values()) {
+    public List<Tunnel> getConnections(final PortForwarding2 rule) {
+        final List<Tunnel> candidates = new LinkedList<>();
+        for (final Tunnel link : tunnelMap.values()) {
             int port = ((InetSocketAddress) link.accessLink.channel().localAddress()).getPort();
             int port2 = ((InetSocketAddress) rule.listenChannel.localAddress()).getPort();
-            final String node = rule.broker.name;
+            final String node = rule.agent.name;
             String node2 = link.nodeKey;
             if (port == port2 && node.equals(node2)) {
                 candidates.add(link);
@@ -875,9 +875,9 @@ public class WebSocketBackhaullProxyServer {
     /* ********************************** */
 
     /**
-     * Broker 节点.
+     * Agent 节点.
      */
-    public class Broker {
+    public class Agent {
         /**
          * 节点 ID.
          */
@@ -908,8 +908,8 @@ public class WebSocketBackhaullProxyServer {
          */
         private final ChannelHandlerContext bus;
 
-        Broker(final String id, final String name, final String version,
-               final String extranet, final String intranet, final ChannelHandlerContext bus) {
+        Agent(final String id, final String name, final String version,
+              final String extranet, final String intranet, final ChannelHandlerContext bus) {
             this.id = id;
             this.name = name;
             this.version = version;
@@ -937,7 +937,7 @@ public class WebSocketBackhaullProxyServer {
      */
     @Getter
     @AllArgsConstructor
-    public class Connection {
+    public class Tunnel {
         /**
          * 接入ID.
          */
@@ -978,16 +978,16 @@ public class WebSocketBackhaullProxyServer {
      */
     public class PortForwarding {
         private final Channel serverChannel;
-        private final Broker node;
+        private final Agent node;
         private final String target;
 
-        private PortForwarding(final Channel serverChannel, final Broker node, final String target) {
+        private PortForwarding(final Channel serverChannel, final Agent node, final String target) {
             this.serverChannel = serverChannel;
             this.node = node;
             this.target = target;
         }
 
-        public Broker getNode() {
+        public Agent getNode() {
             return node;
         }
     }
@@ -1023,7 +1023,7 @@ public class WebSocketBackhaullProxyServer {
         @Override
         public void flush() throws IOException {
             try {
-                webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).await();
+                webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).sync();
             } catch (final InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException(e.getMessage());

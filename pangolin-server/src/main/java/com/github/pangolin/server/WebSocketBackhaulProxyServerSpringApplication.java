@@ -3,7 +3,7 @@ package com.github.pangolin.server;
 import com.github.pangolin.server.shell.ConsoleLineReader;
 import com.github.pangolin.server.shell.GenericLineReader;
 import com.github.pangolin.server.shell.LineReader;
-import com.github.pangolin.server.shell.WebSocketTunnelShell;
+import com.github.pangolin.server.shell.WebSocketBackhaulProxyServerShell;
 import io.netty.channel.Channel;
 import jline.Terminal;
 import jline.TerminalFactory;
@@ -61,8 +61,8 @@ public class WebSocketBackhaulProxyServerSpringApplication {
 
         final Terminal terminal = TerminalFactory.create();
         final LineReader lineReader = !terminal.isEchoEnabled() && !terminal.isAnsiSupported() ? new GenericLineReader(System.in, System.out) : new ConsoleLineReader(server, System.in, System.out, terminal);
-        new WebSocketTunnelShell(server, lineReader, System.out, (Map) props).run();
-        // new WebSocketTunnelShell(server, new GenericLineReader(System.in, System.out), System.out).run();
+        new WebSocketBackhaulProxyServerShell(server, lineReader, System.out, (Map) props).run();
+        // new WebSocketBackhaulProxyServerShell(server, new GenericLineReader(System.in, System.out), System.out).run();
     }
 
 }

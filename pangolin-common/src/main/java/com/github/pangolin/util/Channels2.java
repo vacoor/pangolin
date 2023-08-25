@@ -1,5 +1,8 @@
 package com.github.pangolin.util;
 
+import com.github.pangolin.handler.SocketInboundRedirectHandler;
+import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
+import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
@@ -153,7 +156,7 @@ public class Channels2 {
         }).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
     }
 
-    private static ChannelFuture openWs(final WebSocketClientHandshaker handshaker,
+    public static ChannelFuture openWs(final WebSocketClientHandshaker handshaker,
                                         final EventLoopGroup group, final ChannelHandler... wsHandlers) throws InterruptedException, SSLException {
         final URI webSocketEndpoint = handshaker.uri();
         final InetSocketAddress remoteAddress = new InetSocketAddress(webSocketEndpoint.getHost(), webSocketEndpoint.getPort());

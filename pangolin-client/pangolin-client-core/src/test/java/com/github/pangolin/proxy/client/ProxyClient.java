@@ -33,7 +33,7 @@ public class ProxyClient {
         ChannelFuture cf = Channels.open("www.sdf8aonf.com", 80, NoopAddressResolverGroup.INSTANCE, true, new NioEventLoopGroup(), new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-//                final URI webSocketEndpoint = URI.create("ws://127.0.0.1:1008/ws");
+//                final URI webSocketEndpoint = URI.create("ws://127.0.0.1:1080/ws");
                 final URI webSocketEndpoint = URI.create("ws://127.0.0.1:8888/ws/echo");
                 final String webSocketProtocol = "";
 
@@ -43,7 +43,7 @@ public class ProxyClient {
                 ch.pipeline().addLast(new WebSocketProxyClientHandler2(
                         webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, 65536, true, true
                 ));
-//                ch.pipeline().addFirst(new Socks5ProxyHandler(new InetSocketAddress("127.0.0.1", 1008)));
+//                ch.pipeline().addFirst(new Socks5ProxyHandler(new InetSocketAddress("127.0.0.1", 1080)));
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
