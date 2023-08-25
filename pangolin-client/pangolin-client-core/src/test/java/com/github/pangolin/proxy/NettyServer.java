@@ -29,7 +29,7 @@ public class NettyServer {
     /**
      * 处理 event loop group.
      */
-    protected final NioEventLoopGroup workersGroup;
+    protected final NioEventLoopGroup workerGroup;
 
     /**
      *
@@ -75,11 +75,11 @@ public class NettyServer {
     }
 
     public NettyServer(final String listenHost, final int listenPort,
-                       final NioEventLoopGroup bossGroup, final NioEventLoopGroup workersGroup) {
+                       final NioEventLoopGroup bossGroup, final NioEventLoopGroup workerGroup) {
         this.listenHost = listenHost;
         this.listenPort = listenPort;
         this.bossGroup = bossGroup;
-        this.workersGroup = workersGroup;
+        this.workerGroup = workerGroup;
     }
 
     /**
@@ -92,9 +92,9 @@ public class NettyServer {
             return serverChannel;
         }
 
-        final ChannelFuture cf = Channels.listen(listenHost, listenPort, bossGroup, workersGroup, initializer);
+        final ChannelFuture cf = Channels.listen(listenHost, listenPort, bossGroup, workerGroup, initializer);
         Channels.shutdownGroupOnClose(cf.channel(), bossGroup);
-        Channels.shutdownGroupOnClose(cf.channel(), workersGroup);
+        Channels.shutdownGroupOnClose(cf.channel(), workerGroup);
 
         return serverChannel = cf.sync().channel();
     }
@@ -122,7 +122,7 @@ public class NettyServer {
             serverChannel.close();
         }
         bossGroup.shutdownGracefully();
-        workersGroup.shutdownGracefully();
+        workerGroup.shutdownGracefully();
     }
 
 }

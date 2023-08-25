@@ -1,7 +1,6 @@
 package com.github.pangolin.client;
 
 import com.github.pangolin.util.Channels2;
-import com.github.pangolin.util.WebSocketForwarder;
 import com.github.pangolin.util.WebSocketUtils;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
@@ -84,7 +83,7 @@ public class WebSocketTunnelClient {
 
     private Channel connect() throws IOException, InterruptedException {
         final HttpHeaders customHttpHeaders = new DefaultHttpHeaders();
-        return WebSocketForwarder.openWebSocketChannel(serverEndpoint, AGENT_REGISTER_PROTOCOL, customHttpHeaders, createWebSocketTunnelClientHandler(customHttpHeaders));
+        return WebSocketUtils.openWebSocketChannel(serverEndpoint, AGENT_REGISTER_PROTOCOL, customHttpHeaders, createWebSocketTunnelClientHandler(customHttpHeaders));
     }
 
     private SimpleChannelInboundHandler<WebSocketFrame> createWebSocketTunnelClientHandler(final HttpHeaders customHttpHeaders) {

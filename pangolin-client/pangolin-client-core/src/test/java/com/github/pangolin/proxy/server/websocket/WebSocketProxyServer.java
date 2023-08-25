@@ -12,7 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
 import java.security.cert.CertificateException;
-import java.util.concurrent.ExecutionException;
 
 @Slf4j
 public class WebSocketProxyServer extends NettyServer {
@@ -20,33 +19,16 @@ public class WebSocketProxyServer extends NettyServer {
 
     private final boolean isSecure;
 
-    /**
-     * 创建隧道服务实例.
-     *
-     * @param listenPort 监听端口
-     */
     public WebSocketProxyServer(final int listenPort, final boolean isSecure) {
         this(null, listenPort, isSecure);
     }
 
-    /**
-     * 创建隧道服务实例.
-     *
-     * @param listenHost 监听地址
-     * @param listenPort 监听端口
-     */
     public WebSocketProxyServer(final String listenHost, final int listenPort, final boolean isSecure) {
         super(listenHost, listenPort, new NioEventLoopGroup(2), new NioEventLoopGroup(100));
         this.isSecure = isSecure;
     }
 
-    /**
-     * 启动服务.
-     *
-     * @return 服务通道
-     */
     public Channel start() throws InterruptedException, CertificateException, SSLException {
-
         return super.start(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
@@ -55,14 +37,16 @@ public class WebSocketProxyServer extends NettyServer {
                     cp.addLast(createServerSslContext().newHandler(ch.alloc()));
                 }
                 cp.addLast(new HttpServerCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
-                cp.addLast(new WebSocketProxyServerHandler(workersGroup, "/ws", "*", false, 65536, true, true));
+                cp.addLast(new WebSocketProxyServerHandler(
+                        workerGroup, "/ws", "*",
+                        false, 65536, true, true
+                ));
             }
         });
     }
 
-    public static void main(String[] args) throws InterruptedException, SSLException, CertificateException, ExecutionException {
-        final WebSocketProxyServer server = new WebSocketProxyServer(1008, false);
-        final Channel channel = server.start();
-        channel.closeFuture().sync().get();
+    public static void main(String[] args) throws Exception {
+        new WebSocketProxyServer(1008, false).start().closeFuture().sync().await();
     }
+
 }

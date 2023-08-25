@@ -10,10 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.nio.charset.StandardCharsets;
 
 /**
- * TODO DOC ME!.
- *
- * @author changhe.yang
- * @since 20230825
+ * socket over websocket.
  */
 @Slf4j
 public class SocketOverWebSocketEncodeHandler extends ChannelInboundHandlerAdapter {
@@ -41,6 +38,7 @@ public class SocketOverWebSocketEncodeHandler extends ChannelInboundHandlerAdapt
                 }
                 outCtx.writeAndFlush(new BinaryWebSocketFrame(ReferenceCountUtil.retain((ByteBuf) msg)));
             } else {
+                ReferenceCountUtil.release(msg);
                 throw new UnsupportedOperationException("Unexpect socket message: " + msg);
             }
         } else {

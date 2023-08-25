@@ -13,7 +13,6 @@
     <packaging>pom</packaging>
     <modules>
         <module>pangolin-client-core</module>
-        <module>pangolin-client-servlet</module>
         <module>pangolin-client-spring-boot-starter</module>
     </modules>
 </project>

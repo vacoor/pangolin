@@ -2,12 +2,12 @@ package com.github.pangolin.proxy.server.socks4;
 
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.SocketInboundRedirectHandler;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
-import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.socksx.v4.DefaultSocks4CommandResponse;
 import io.netty.handler.codec.socksx.v4.Socks4CommandRequest;
 import io.netty.handler.codec.socksx.v4.Socks4CommandStatus;
@@ -17,26 +17,20 @@ import io.netty.handler.codec.socksx.v4.Socks4ServerDecoder;
 import io.netty.handler.codec.socksx.v4.Socks4ServerEncoder;
 import lombok.extern.slf4j.Slf4j;
 
-/**
- * SOCKS4.
- *
- * @author changhe.yang
- * @since 20230821
- */
 @Slf4j
-public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
+public class Socks4ProxyServerHandler extends SimpleChannelInboundHandler<Object> {
     private static final String NONE = "";
 
     private final String uid;
-    private final NioEventLoopGroup proxyWorkersGroup;
+    private final EventLoopGroup proxyGroup;
 
-    public Socks4ProxyServerHandler(final NioEventLoopGroup proxyWorkersGroup) {
-        this(NONE, proxyWorkersGroup);
+    public Socks4ProxyServerHandler(final EventLoopGroup proxyGroup) {
+        this(NONE, proxyGroup);
     }
 
-    public Socks4ProxyServerHandler(final String uid, final NioEventLoopGroup proxyWorkersGroup) {
+    public Socks4ProxyServerHandler(final String uid, final EventLoopGroup proxyGroup) {
         this.uid = null != uid ? uid : NONE;
-        this.proxyWorkersGroup = proxyWorkersGroup;
+        this.proxyGroup = proxyGroup;
     }
 
     @Override
@@ -64,43 +58,36 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
     }
 
     @Override
-    public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-        if (msg instanceof Socks4Message) {
-            final Socks4Message socks4Msg = (Socks4Message) msg;
-            if (!socks4Msg.decoderResult().isSuccess()) {
-                log.error("not support message: {}", msg);
-                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                return;
-            }
-
+    public void channelRead0(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+        if (msg instanceof Socks4Message && ((Socks4Message) msg).decoderResult().isSuccess()) {
             if (msg instanceof Socks4CommandRequest) {
                 final Socks4CommandRequest request = (Socks4CommandRequest) msg;
-                final Socks4CommandType type = request.type();
                 final String requestUid = request.userId();
-                if (nullSafeEquals(uid, requestUid) && Socks4CommandType.CONNECT.equals(type)) {
-                    connectToTarget(proxyWorkersGroup, ctx, request);
-                } else {
+                final Socks4CommandType type = request.type();
+
+                if (!nullSafeEquals(uid, requestUid)) {
+                    ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_AUTH_FAILURE)).addListener(ChannelFutureListener.CLOSE);
+                } else if (!Socks4CommandType.CONNECT.equals(type)) {
                     ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.REJECTED_OR_FAILED)).addListener(ChannelFutureListener.CLOSE);
+                } else {
+                    connect(request, ctx, proxyGroup);
                 }
             } else {
-                log.error("illegal message: {}", msg);
-                ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.REJECTED_OR_FAILED)).addListener(ChannelFutureListener.CLOSE);
+                Channels.closeOnFlush(ctx.channel());
+                log.error("Connection closed by Malformed Packet: {}", msg);
             }
         } else {
-            log.error("not support message: {}", msg);
-            ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            Channels.closeOnFlush(ctx.channel());
+            log.error("Connection closed by Malformed Packet: {}", msg);
         }
     }
 
-    protected void connectToTarget(final NioEventLoopGroup group, final ChannelHandlerContext requestCtx, Socks4CommandRequest request) throws InterruptedException {
+    private void connect(final Socks4CommandRequest request, final ChannelHandlerContext requestCtx, final EventLoopGroup proxyGroup) throws InterruptedException {
         final int port = request.dstPort();
         final String address = request.dstAddr();
 
-        /*-
-         *
-         */
         requestCtx.channel().config().setAutoRead(false);
-        Channels.open(address, port, false, group, new ChannelInboundHandlerAdapter() {
+        Channels.open(address, port, false, proxyGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
                 delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(requestCtx));
@@ -109,18 +96,18 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 delegateCtx.channel().config().setAutoRead(true);
                 requestCtx.channel().config().setAutoRead(true);
             }
-        }).addListener(f -> {
-            if (f.isSuccess()) {
-                log.debug("连接到目标地址({}:{})成功", address, port);
+        }).addListener(future -> {
+            if (future.isSuccess()) {
+                log.info("Connection to {}:{}: Connected", address, port);
                 requestCtx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.SUCCESS)).addListener(g -> requestCtx.pipeline().remove(Socks4ServerEncoder.INSTANCE));
             } else {
-                log.warn("连接到目标地址({}:{})失败: {}", address, port, f.cause());
+                log.warn("Failed to Connect to {}:{}: {}", address, port, future.cause());
                 requestCtx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_UNREACHABLE)).addListener(ChannelFutureListener.CLOSE);
             }
-        }).channel().closeFuture().addListener(f -> {
+        }).channel().closeFuture().addListener(future -> {
             if (requestCtx.channel().isActive()) {
-                log.info("目标地址({}:{})断开连接", address, port, f.cause());
-                requestCtx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                log.info("Connection to {}:{} closed", address, port);
+                Channels.closeOnFlush(requestCtx.channel());
             }
         });
     }

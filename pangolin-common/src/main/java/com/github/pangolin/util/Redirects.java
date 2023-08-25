@@ -1,6 +1,5 @@
 package com.github.pangolin.util;
 
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandler;
@@ -14,7 +13,6 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
-import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -32,7 +30,7 @@ public abstract class Redirects {
     }
 
     public static ChannelInboundHandler webSocketRedirectToWebSocket(final ChannelHandlerContext outCtx) {
-        return new WebSocketInboundHandlerAdaptor() {
+        return new ChannelInboundHandlerAdapter() {
 
             @Override
             public void handlerAdded(final ChannelHandlerContext webSocketContext) throws Exception {
@@ -113,21 +111,4 @@ public abstract class Redirects {
             }
         };
     }
-
-    private static abstract class WebSocketInboundHandlerAdaptor extends ChannelInboundHandlerAdapter {
-        @Override
-        public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
-            if (evt instanceof IdleStateEvent) {
-                ctx.writeAndFlush(new PingWebSocketFrame());
-            }
-            super.userEventTriggered(ctx, evt);
-        }
-
-        @Override
-        public void channelActive(final ChannelHandlerContext webSocketContext) {
-            webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER);
-        }
-
-    }
-
 }

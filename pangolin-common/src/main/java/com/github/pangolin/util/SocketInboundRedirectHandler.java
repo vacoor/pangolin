@@ -9,10 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.nio.charset.StandardCharsets;
 
 /**
- * TODO DOC ME!.
- *
- * @author changhe.yang
- * @since 20230825
+ * socket to socket.
  */
 @Slf4j
 public class SocketInboundRedirectHandler extends ChannelInboundHandlerAdapter {
@@ -23,7 +20,7 @@ public class SocketInboundRedirectHandler extends ChannelInboundHandlerAdapter {
     }
 
     @Override
-    public void channelInactive(final ChannelHandlerContext inCtx) {
+    public void channelInactive(final ChannelHandlerContext inCtx) throws Exception {
         if (outCtx.channel().isActive()) {
             log.info("[tun@tcp {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
             Channels.closeOnFlush(outCtx.channel());
@@ -33,9 +30,9 @@ public class SocketInboundRedirectHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(final ChannelHandlerContext inCtx, final Object msg) throws Exception {
         if (outCtx.channel().isActive()) {
-            if (log.isDebugEnabled()) {
+            if (log.isTraceEnabled()) {
                 final Object msgToLog = msg instanceof ByteBuf ? ((ByteBuf) msg).toString(StandardCharsets.UTF_8) : msg;
-                log.debug("[tun@tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
+                log.trace("[tun@tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
             }
             outCtx.writeAndFlush(msg);
         } else {

@@ -12,10 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.nio.charset.StandardCharsets;
 
 /**
- * TODO DOC ME!.
- *
- * @author changhe.yang
- * @since 20230825
+ * socket over websocket.
  */
 @Slf4j
 public class SocketOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter {
@@ -57,7 +54,12 @@ public class SocketOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapt
                 }
                 outCtx.writeAndFlush(((WebSocketFrame) msg).content());
             } else {
-                throw new UnsupportedOperationException("Unexpect websocket message: " + msg);
+                ReferenceCountUtil.release(msg);
+
+                // XXX
+                log.error("Unexpect websocket message: {}, will be closed", msg);
+                WebSocketUtils.unsupportedDataClose(inCtx, "Unexpect websocket message");
+                Channels.closeOnFlush(outCtx.channel());
             }
         } else {
             ReferenceCountUtil.release(msg);

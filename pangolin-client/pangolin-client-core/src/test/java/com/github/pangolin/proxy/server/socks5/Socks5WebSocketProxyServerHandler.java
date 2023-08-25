@@ -3,12 +3,12 @@ package com.github.pangolin.proxy.server.socks5;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.SocketOverWebSocketDecodeHandler;
 import com.github.pangolin.util.SocketOverWebSocketEncodeHandler;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
@@ -22,20 +22,10 @@ import io.netty.handler.codec.socksx.v5.Socks5AddressType;
 import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
 import io.netty.handler.codec.socksx.v5.Socks5CommandStatus;
 import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
-import io.netty.handler.ssl.SslContext;
-import io.netty.handler.ssl.SslContextBuilder;
-import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.net.ssl.SSLException;
 import java.net.URI;
 
-/**
- * TODO DOC ME!.
- *
- * @author changhe.yang
- * @since 20230821
- */
 @Slf4j
 public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler {
     private final URI webSocketEndpoint;
@@ -52,7 +42,7 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
     }
 
     @Override
-    protected void connectToTarget(final NioEventLoopGroup proxyWorkersGroup, final ChannelHandlerContext requestCtx, Socks5CommandRequest request) throws InterruptedException {
+    protected void connect(final Socks5CommandRequest request, final ChannelHandlerContext requestCtx, final EventLoopGroup proxyGroup) throws InterruptedException {
         final int port = request.dstPort();
         final String address = request.dstAddr();
         final Socks5AddressType addressType = request.dstAddrType();
@@ -60,18 +50,17 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
         requestCtx.channel().config().setAutoRead(false);
 
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
-        final int portToUse = 0 < webSocketEndpoint.getPort() ? webSocketEndpoint.getPort() : (isSecure ? 443 : 80);
 
         final DefaultHttpHeaders httpHeaders = new DefaultHttpHeaders();
         httpHeaders.set("X-TARGET-ADDRESS", address);
         httpHeaders.setInt("X-TARGET-PORT", port);
 
-        Channels.open(webSocketEndpoint.getHost(), portToUse, true, proxyWorkersGroup, new ChannelInitializer<SocketChannel>() {
+        Channels.open(webSocketEndpoint.getHost(), webSocketEndpoint.getPort(), true, proxyGroup, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();
                 if (isSecure) {
-                    cp.addLast(createClientSslContext().newHandler(ch.alloc()));
+                    cp.addLast(Channels.createClientSslContext().newHandler(ch.alloc()));
                 }
                 cp.addLast(new HttpClientCodec(), new HttpObjectAggregator(1024 * 1024 * 8));
 //                cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
@@ -95,23 +84,18 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
                     }
                 });
             }
-        }).addListener(f -> {
-            if (f.isSuccess()) {
-                log.debug("连接到目标地址({}/{}:{})成功", addressType, address, port);
+        }).addListener(future -> {
+            if (future.isSuccess()) {
+                log.info("Connection to {}:{}: Connected", address, port);
             } else {
-                log.warn("连接到目标地址({}/{}:{})失败: {}", addressType, address, port, f.cause());
+                log.warn("Failed to Connect to {}:{}: {}", address, port, future.cause());
                 requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)).addListener(ChannelFutureListener.CLOSE);
             }
         }).channel().closeFuture().addListener(f -> {
             if (requestCtx.channel().isActive()) {
-                log.info("目标地址({}/{}:{})断开连接", addressType, address, port, f.cause());
-                requestCtx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                log.info("Connection to {}:{} closed", address, port);
+                Channels.closeOnFlush(requestCtx.channel());
             }
         });
     }
-
-    private SslContext createClientSslContext() throws SSLException {
-        return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-    }
-
 }

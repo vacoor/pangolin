@@ -59,10 +59,10 @@ public class SocksProxyServer extends NettyServer {
                     @Override
                     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                         if (msg instanceof Socks4Message) {
-                            ctx.pipeline().addAfter(ctx.name(), null, new Socks4ProxyServerHandler(workersGroup));
+                            ctx.pipeline().addAfter(ctx.name(), null, new Socks4ProxyServerHandler(workerGroup));
                             ctx.pipeline().remove(this);
                         } else if (msg instanceof Socks5Message) {
-                            ctx.pipeline().addAfter(ctx.name(), null, new Socks5ProxyServerHandler(workersGroup));
+                            ctx.pipeline().addAfter(ctx.name(), null, new Socks5ProxyServerHandler(workerGroup));
                             ctx.pipeline().remove(this);
                         }
                         super.channelRead(ctx, msg);
