@@ -35,7 +35,7 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
     }
 
     @Override
-    protected void connect(final Socks5CommandRequest request, final ChannelHandlerContext requestCtx, final EventLoopGroup proxyGroup) throws Exception {
+    protected void connect(final ChannelHandlerContext requestCtx, final Socks5CommandRequest request, final EventLoopGroup proxyGroup) throws Exception {
         final int port = request.dstPort();
         final String address = request.dstAddr();
         final Socks5AddressType addressType = request.dstAddrType();

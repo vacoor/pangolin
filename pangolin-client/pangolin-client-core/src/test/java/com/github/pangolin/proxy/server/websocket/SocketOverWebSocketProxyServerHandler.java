@@ -71,7 +71,7 @@ public class SocketOverWebSocketProxyServerHandler extends ChannelInboundHandler
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         /*-
-         * WebSocketServerProtocolHandshakeHandler
+         * WebSocketServerProtocolHandshakeHandler --> 403
          * Utf8FrameValidator
          * WebSocketServerProtocolHandler
          *   |- handle close frame
@@ -167,8 +167,6 @@ public class SocketOverWebSocketProxyServerHandler extends ChannelInboundHandler
                 }).addListener(f -> {
                     if (f.isSuccess()) {
 //                    log.debug("连接到目标地址({}/{}:{})成功", addrType, addr, port);
-//                    requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addrType));
-
                         final ChannelFuture handshakeFuture = handshaker.handshake(ctx.channel(), req);
                         handshakeFuture.addListener(new ChannelFutureListener() {
                             @Override
@@ -177,13 +175,11 @@ public class SocketOverWebSocketProxyServerHandler extends ChannelInboundHandler
                                     ctx.fireExceptionCaught(future.cause());
                                 } else {
                                     // Kept for compatibility
-//                            ctx.fireUserEventTriggered(WebSocketServerProtocolHandler.ServerHandshakeStateEvent.HANDSHAKE_COMPLETE);
-//                            ctx.fireUserEventTriggered(new WebSocketServerProtocolHandler.HandshakeComplete(req.uri(), req.headers(), handshaker.selectedSubprotocol()));
+                                    // ctx.fireUserEventTriggered(WebSocketServerProtocolHandler.ServerHandshakeStateEvent.HANDSHAKE_COMPLETE);
+                                    // ctx.fireUserEventTriggered(new WebSocketServerProtocolHandler.HandshakeComplete(req.uri(), req.headers(), handshaker.selectedSubprotocol()));
                                 }
                             }
                         });
-                        /*
-                         */
                         setHandshaker(ctx.channel(), handshaker);
                         /*
                         ctx.pipeline().replace(this, "WS403Responder", new ChannelInboundHandlerAdapter() {

@@ -1,7 +1,7 @@
 package com.github.pangolin.proxy.server.socks.v4;
 
-import com.github.pangolin.util.Channels;
 import com.github.pangolin.handler.SocketInboundRedirectHandler;
+import com.github.pangolin.util.Channels;
 import io.netty.channel.*;
 import io.netty.handler.codec.socksx.v4.*;
 import io.netty.util.ReferenceCountUtil;
@@ -61,7 +61,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                     } else if (!Socks4CommandType.CONNECT.equals(type)) {
                         ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.REJECTED_OR_FAILED)).addListener(ChannelFutureListener.CLOSE);
                     } else {
-                        connect(request, ctx, proxyGroup);
+                        connect(ctx, request, proxyGroup);
                     }
                 } else {
                     Channels.closeOnFlush(ctx.channel());
@@ -76,32 +76,32 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
-    private void connect(final Socks4CommandRequest request, final ChannelHandlerContext requestCtx, final EventLoopGroup proxyGroup) throws Exception {
+    protected void connect(final ChannelHandlerContext ctx, final Socks4CommandRequest request, final EventLoopGroup proxyGroup) throws Exception {
         final int port = request.dstPort();
         final String address = request.dstAddr();
 
-        requestCtx.channel().config().setAutoRead(false);
+        ctx.channel().config().setAutoRead(false);
         Channels.open(address, port, false, proxyGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
-                delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(requestCtx));
-                requestCtx.pipeline().replace(requestCtx.handler(), null, new SocketInboundRedirectHandler(delegateCtx));
+                delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(ctx));
+                ctx.pipeline().replace(ctx.handler(), null, new SocketInboundRedirectHandler(delegateCtx));
 
                 delegateCtx.channel().config().setAutoRead(true);
-                requestCtx.channel().config().setAutoRead(true);
+                ctx.channel().config().setAutoRead(true);
             }
         }).addListener(future -> {
             if (future.isSuccess()) {
                 log.info("Connection to {}:{}: Connected", address, port);
-                requestCtx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.SUCCESS)).addListener(g -> requestCtx.pipeline().remove(Socks4ServerEncoder.INSTANCE));
+                ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.SUCCESS)).addListener(g -> ctx.pipeline().remove(Socks4ServerEncoder.INSTANCE));
             } else {
                 log.warn("Failed to Connect to {}:{}: {}", address, port, future.cause());
-                requestCtx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_UNREACHABLE)).addListener(ChannelFutureListener.CLOSE);
+                ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_UNREACHABLE)).addListener(ChannelFutureListener.CLOSE);
             }
         }).channel().closeFuture().addListener(future -> {
-            if (requestCtx.channel().isActive()) {
+            if (ctx.channel().isActive()) {
                 log.info("Connection to {}:{} closed", address, port);
-                Channels.closeOnFlush(requestCtx.channel());
+                Channels.closeOnFlush(ctx.channel());
             }
         });
     }

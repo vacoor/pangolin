@@ -113,7 +113,7 @@ public class WebSocketBackhaulProxyServerShell {
                 }
             } else if ("remove".equals(action)) {
                 final String brokerKey = args[2];
-                final WebSocketBackhaullProxyServer.Agent agent = server.lookupBroker(brokerKey);
+                final WebSocketBackhaullProxyServer.Agent agent = server.lookupAgent(brokerKey);
                 if (null == agent) {
                     out.println(String.format("Agent '%s' not exists", brokerKey));
                 } else {

@@ -53,6 +53,7 @@ public class Channels2 {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
                         if (!future.isSuccess()) {
+                            // upstreamCtx.fireExceptionCaught(future.cause());
                             future.channel().close();
                             upstreamCtx.channel().close();
                         }

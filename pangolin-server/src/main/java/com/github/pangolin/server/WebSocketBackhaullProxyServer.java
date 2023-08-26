@@ -1,26 +1,17 @@
 package com.github.pangolin.server;
 
+import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
+import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
 import com.github.pangolin.server.shell.ConsoleLineReader;
 import com.github.pangolin.server.shell.LineReader;
 import com.github.pangolin.server.shell.WebSocketBackhaulProxyServerShell;
 import com.github.pangolin.server.shell.WebSocketTerminal;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
-import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
-import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
 import com.github.pangolin.util.WebSocketUtils;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ConnectTimeoutException;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpHeaders;
@@ -33,34 +24,18 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.timeout.IdleStateEvent;
-import io.netty.util.concurrent.DefaultThreadFactory;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.FutureListener;
-import io.netty.util.concurrent.GenericFutureListener;
-import io.netty.util.concurrent.GlobalEventExecutor;
-import io.netty.util.concurrent.Promise;
+import io.netty.util.concurrent.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
-import java.io.PrintStream;
+import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -297,7 +272,7 @@ public class WebSocketBackhaullProxyServer {
                     /*-
                      * 中继节点注册.
                      */
-                    brokerRegistered(webSocketContext, handshake);
+                    agentRegistered(webSocketContext, handshake);
                 } else if (PROTOCOL_TUNNEL_REQUEST.equalsIgnoreCase(subprotocol)) {
                     /*-
                      * 隧道打开请求.
@@ -364,11 +339,11 @@ public class WebSocketBackhaullProxyServer {
     /**
      * 查找通信链接.
      *
-     * @param brokerKey 节点标识
+     * @param agentKey 节点标识
      * @return 通信总线
      */
-    public Agent lookupBroker(final String brokerKey) {
-        return registeredAgents.get(brokerKey);
+    public Agent lookupAgent(final String agentKey) {
+        return registeredAgents.get(agentKey);
     }
 
     /* ***************** 节点注册 [[ **************** */
@@ -379,7 +354,7 @@ public class WebSocketBackhaullProxyServer {
      * @param webSocketContext 节点注册上下文
      * @param handshake        节点注册握手信息
      */
-    private void brokerRegistered(final ChannelHandlerContext webSocketContext, final HandshakeComplete handshake) {
+    private void agentRegistered(final ChannelHandlerContext webSocketContext, final HandshakeComplete handshake) {
         final HttpHeaders headers = handshake.requestHeaders();
         final String nodeName = headers.getAsString("X-Node-Name");
         final String nodeVersion = headers.getAsString("X-Node-Version");
@@ -408,7 +383,7 @@ public class WebSocketBackhaullProxyServer {
                     if (log.isDebugEnabled()) {
                         log.debug("{} Node '{}' connection loosed", webSocketContext.channel(), nodeName);
                     }
-                    nodeUnregistered(nodeName, node);
+                    agentUnregistered(nodeName, node);
                 }
             });
             log.info("{} Node '{}' registered, version: {}, address: {}/{}", webSocketContext.channel(), nodeName, nodeVersion, nodeExtranet, nodeIntranet);
@@ -422,9 +397,9 @@ public class WebSocketBackhaullProxyServer {
      * 节点取消注册.
      *
      * @param nodeKey 节点标识
-     * @param agent  节点信息
+     * @param agent   节点信息
      */
-    private void nodeUnregistered(final String nodeKey, final Agent agent) {
+    private void agentUnregistered(final String nodeKey, final Agent agent) {
         if (registeredAgents.remove(nodeKey, agent)) {
             log.info("{} Node unregistered: {}", agent.bus.channel(), agent);
 
@@ -469,7 +444,7 @@ public class WebSocketBackhaullProxyServer {
         final String tunnel = parameters.get("tunnel");
         final String target = parameters.get("target");
 
-        final Agent agent = lookupBroker(tunnel);
+        final Agent agent = lookupAgent(tunnel);
         if (null != agent) {
             final ChannelHandlerContext bus = agent.bus;
             final String id = "ws:" + id(webSocketAccessLink.channel());
@@ -716,7 +691,7 @@ public class WebSocketBackhaullProxyServer {
      * ************************ */
 
     public Channel forward(final int listenPort, final String nodeKey, final String toHost, final int toPort) throws InterruptedException {
-        final Agent agent = this.lookupBroker(nodeKey);
+        final Agent agent = this.lookupAgent(nodeKey);
         if (null == agent) {
             throw new IllegalStateException("TUNNEL_NOT_FOUND:" + nodeKey);
         }

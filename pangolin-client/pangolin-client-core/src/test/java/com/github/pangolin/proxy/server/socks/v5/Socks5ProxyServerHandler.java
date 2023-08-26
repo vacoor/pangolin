@@ -90,7 +90,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                     if (!Socks5CommandType.CONNECT.equals(type)) {
                         ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
                     } else {
-                        connect(request, ctx, proxyGroup);
+                        connect(ctx, request, proxyGroup);
                     }
                 } else {
                     Channels.closeOnFlush(ctx.channel());
@@ -105,7 +105,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
-    protected void connect(final Socks5CommandRequest request, final ChannelHandlerContext requestCtx, final EventLoopGroup proxyGroup) throws Exception {
+    protected void connect(final ChannelHandlerContext requestCtx, final Socks5CommandRequest request, final EventLoopGroup proxyGroup) throws Exception {
         final int port = request.dstPort();
         final String address = request.dstAddr();
         final Socks5AddressType addressType = request.dstAddrType();
