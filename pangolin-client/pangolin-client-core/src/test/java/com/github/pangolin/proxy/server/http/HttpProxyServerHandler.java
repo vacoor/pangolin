@@ -8,6 +8,8 @@ import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.*;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslHandler;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -119,6 +121,11 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         new NettyServer(8080).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
+                /*
+                 curl --proxy-insecure -x https://127.0.0.1:8080 "https://www.baidu.com"
+                 */
+                final SslContext ssl = Channels.createServerSslContext();
+                ch.pipeline().addLast(ssl.newHandler(ch.alloc()));
                 ch.pipeline().addLast(new HttpProxyServerHandler(new NioEventLoopGroup()));
             }
         }).sync().channel().closeFuture().sync();
