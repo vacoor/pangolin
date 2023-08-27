@@ -28,10 +28,17 @@ public class Channels {
     public static ChannelFuture listen(final String listenHost, final int listenPort,
                                        final NioEventLoopGroup bossGroup, final NioEventLoopGroup workerGroup,
                                        final ChannelHandler initializer) throws InterruptedException {
+        return listen(listenHost, listenPort, true, bossGroup, workerGroup, initializer);
+    }
+
+    public static ChannelFuture listen(final String listenHost, final int listenPort, final boolean autoRead,
+                                       final NioEventLoopGroup bossGroup, final NioEventLoopGroup workerGroup,
+                                       final ChannelHandler initializer) throws InterruptedException {
         final ServerBootstrap serverBootstrap = new ServerBootstrap();
         serverBootstrap.option(ChannelOption.SO_REUSEADDR, true);
         serverBootstrap.childOption(ChannelOption.TCP_NODELAY, true);
         serverBootstrap.childOption(ChannelOption.SO_KEEPALIVE, true);
+        serverBootstrap.childOption(ChannelOption.AUTO_READ, autoRead);
         serverBootstrap.group(bossGroup, workerGroup).channel(NioServerSocketChannel.class);
         serverBootstrap.childHandler(initializer);
 

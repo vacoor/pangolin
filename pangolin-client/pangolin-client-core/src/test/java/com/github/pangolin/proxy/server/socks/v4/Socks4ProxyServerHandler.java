@@ -11,15 +11,15 @@ import lombok.extern.slf4j.Slf4j;
 public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
     private static final String NONE = "";
 
-    private final String uid;
+    private final String username;
     private final EventLoopGroup proxyGroup;
 
     public Socks4ProxyServerHandler(final EventLoopGroup proxyGroup) {
         this(NONE, proxyGroup);
     }
 
-    public Socks4ProxyServerHandler(final String uid, final EventLoopGroup proxyGroup) {
-        this.uid = null != uid ? uid : NONE;
+    public Socks4ProxyServerHandler(final String username, final EventLoopGroup proxyGroup) {
+        this.username = null != username ? username : NONE;
         this.proxyGroup = proxyGroup;
     }
 
@@ -56,7 +56,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                     final String requestUid = request.userId();
                     final Socks4CommandType type = request.type();
 
-                    if (!nullSafeEquals(uid, requestUid)) {
+                    if (!nullSafeEquals(username, requestUid)) {
                         ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_AUTH_FAILURE)).addListener(ChannelFutureListener.CLOSE);
                     } else if (!Socks4CommandType.CONNECT.equals(type)) {
                         ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.REJECTED_OR_FAILED)).addListener(ChannelFutureListener.CLOSE);
@@ -92,7 +92,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
             }
         }).addListener(future -> {
             if (future.isSuccess()) {
-                log.info("Connection to {}:{}: Connected", address, port);
+                log.info("Connection to {}:{}: established", address, port);
                 ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.SUCCESS)).addListener(g -> ctx.pipeline().remove(Socks4ServerEncoder.INSTANCE));
             } else {
                 log.warn("Failed to Connect to {}:{}: {}", address, port, future.cause());

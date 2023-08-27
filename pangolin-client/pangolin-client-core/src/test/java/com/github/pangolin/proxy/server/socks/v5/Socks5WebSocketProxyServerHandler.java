@@ -77,7 +77,7 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
             }
         }).addListener(future -> {
             if (future.isSuccess()) {
-                log.info("Connection to {}:{}: Connected", address, port);
+                log.info("Connection to {}:{}: established", address, port);
             } else {
                 log.warn("Failed to Connect to {}:{}: {}", address, port, future.cause());
                 requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)).addListener(ChannelFutureListener.CLOSE);

@@ -29,7 +29,7 @@ public class Socks5WebSocketProxyServer extends NettyServer {
     }
 
     public ChannelFuture start() throws InterruptedException, CertificateException, SSLException {
-        return super.start(new ChannelInitializer<SocketChannel>() {
+        return super.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(new Socks5WebSocketProxyServerHandler(webSocketProxyServerEndpoint, webSocketProxyServerProtocol, workerGroup));
@@ -38,7 +38,7 @@ public class Socks5WebSocketProxyServer extends NettyServer {
     }
 
     public static void main(String[] args) throws InterruptedException, SSLException, CertificateException, ExecutionException {
-        final URI webSocketProxyServerEndpoint = URI.create("ws://127.0.0.1:8888/ws/echo");
+        final URI webSocketProxyServerEndpoint = URI.create("ws://127.0.0.1:1443/ws");
         new Socks5WebSocketProxyServer(1080, webSocketProxyServerEndpoint, null).start().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {

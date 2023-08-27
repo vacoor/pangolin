@@ -31,7 +31,7 @@ public class SocketOverWebSocketProxyServer extends NettyServer {
     }
 
     public ChannelFuture start() throws InterruptedException, CertificateException, SSLException {
-        return super.start(new ChannelInitializer<SocketChannel>() {
+        return super.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();
@@ -48,7 +48,7 @@ public class SocketOverWebSocketProxyServer extends NettyServer {
     }
 
     public static void main(String[] args) throws Exception {
-        new SocketOverWebSocketProxyServer(1080, false).start().addListener(new ChannelFutureListener() {
+        new SocketOverWebSocketProxyServer(1443, false).start().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {

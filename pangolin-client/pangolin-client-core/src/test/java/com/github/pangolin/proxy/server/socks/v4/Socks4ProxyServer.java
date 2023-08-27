@@ -23,7 +23,7 @@ public class Socks4ProxyServer extends NettyServer {
     }
 
     public ChannelFuture start() throws InterruptedException, CertificateException, SSLException {
-        return super.start(new ChannelInitializer<SocketChannel>() {
+        return super.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(new Socks4ProxyServerHandler(workerGroup));

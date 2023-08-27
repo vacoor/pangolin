@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.server.socks.v5;
+package com.github.pangolin.server;
 
 import com.github.pangolin.handler.SocketInboundRedirectHandler;
 import com.github.pangolin.util.Channels;
@@ -122,7 +122,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
             }
         }).addListener(future -> {
             if (future.isSuccess()) {
-                log.info("Connection to {}:{}: established", address, port);
+                log.info("Connection to {}:{}: Connected", address, port);
                 requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(g -> requestCtx.pipeline().remove(Socks5ServerEncoder.DEFAULT));
             } else {
                 log.warn("Failed to Connect to {}:{}: {}", address, port, future.cause());

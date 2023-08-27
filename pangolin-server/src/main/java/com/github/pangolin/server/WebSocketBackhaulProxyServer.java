@@ -48,7 +48,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * @since 20210825
  */
 @Slf4j
-public class WebSocketBackhaullProxyServer {
+public class WebSocketBackhaulProxyServer {
     /**
      * 空字符串.
      */
@@ -119,12 +119,12 @@ public class WebSocketBackhaullProxyServer {
     /**
      * 服务 event loop group.
      */
-    private final NioEventLoopGroup bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocketBackhaullProxyServer-boss", true));
+    private final NioEventLoopGroup bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("WebSocketBackhaulProxyServer-boss", true));
 
     /**
      * 处理 event loop group.
      */
-    private final NioEventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("WebSocketBackhaullProxyServer-workers", true));
+    private final NioEventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("WebSocketBackhaulProxyServer-workers", true));
 
     /**
      *
@@ -166,7 +166,7 @@ public class WebSocketBackhaullProxyServer {
      * @param endpointPath 接入点路径
      * @param useSsl       是否使用 SSL
      */
-    public WebSocketBackhaullProxyServer(final int listenPort, final String endpointPath, final boolean useSsl) {
+    public WebSocketBackhaulProxyServer(final int listenPort, final String endpointPath, final boolean useSsl) {
         this(null, listenPort, endpointPath, useSsl);
     }
 
@@ -178,7 +178,7 @@ public class WebSocketBackhaullProxyServer {
      * @param endpointPath 接入点路径
      * @param useSsl       是否使用 SSL
      */
-    public WebSocketBackhaullProxyServer(final String listenHost, final int listenPort, final String endpointPath, final boolean useSsl) {
+    public WebSocketBackhaulProxyServer(final String listenHost, final int listenPort, final String endpointPath, final boolean useSsl) {
         this.listenHost = listenHost;
         this.listenPort = listenPort;
         this.endpointPath = endpointPath;
@@ -448,14 +448,12 @@ public class WebSocketBackhaullProxyServer {
         if (null != agent) {
             final ChannelHandlerContext bus = agent.bus;
             final String id = "ws:" + id(webSocketAccessLink.channel());
-            final Promise<ChannelHandlerContext> webSocketBackhaulPromise = webSocketTunnelRequested(id, tunnel, webSocketAccessLink);
             final String webSocketBackhaulRequest = id + "->" + target;
-
             if (log.isDebugEnabled()) {
                 log.debug("{} Try open websocket tunnel: {}", webSocketAccessLink.channel(), webSocketBackhaulRequest);
             }
+            final Promise<ChannelHandlerContext> webSocketBackhaulPromise = webSocketTunnelRequested(id, webSocketAccessLink, tunnel, webSocketBackhaulRequest);
 
-            bus.writeAndFlush(new TextWebSocketFrame(webSocketBackhaulRequest));
             waitBackhaulLinkUntilTimeout(webSocketBackhaulPromise);
         } else {
             log.warn("{} Not found tunnel: {}, will close", webSocketAccessLink.channel(), tunnel);
@@ -467,63 +465,36 @@ public class WebSocketBackhaullProxyServer {
      * 请求接入 WebSocket 隧道.
      *
      * @param accessRequestId     接入请求ID
-     * @param webSocketAccessLink 接入链路
+     * @param accessLink 接入链路
      * @return 用于设置回传链接的 promise
      */
-    private Promise<ChannelHandlerContext> webSocketTunnelRequested(final String accessRequestId, final String nodeKey,
-                                                                    final ChannelHandlerContext webSocketAccessLink) {
-        if (log.isDebugEnabled()) {
-            log.debug("{} WebSocket tunnel access link: {}", webSocketAccessLink.channel(), accessRequestId);
-        }
-
-        final Promise<ChannelHandlerContext> webSocketBackhaulLinkPromise = GlobalEventExecutor.INSTANCE.newPromise();
-        final Tunnel tunnel = new Tunnel(accessRequestId, nodeKey, webSocketAccessLink, webSocketBackhaulLinkPromise);
-        if (null != tunnelMap.putIfAbsent(accessRequestId, tunnel)) {
-            throw new IllegalStateException(String.format("%s access link id '%s' is already used", webSocketAccessLink.channel(), accessRequestId));
-        }
-
-        webSocketAccessLink.channel().config().setAutoRead(false);
-        webSocketBackhaulLinkPromise.addListener(new FutureListener<ChannelHandlerContext>() {
+    private Promise<ChannelHandlerContext> webSocketTunnelRequested(final String accessRequestId,final ChannelHandlerContext accessLink, final String nodeKey, final String target) {
+        accessLink.channel().config().setAutoRead(false);
+        Promise<ChannelHandlerContext> backhaulPromise = tunnelRequested(accessRequestId, accessLink, nodeKey, target);
+        backhaulPromise.addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) {
                 if (backhaulFuture.isSuccess()) {
                     final ChannelHandlerContext webSocketBackhaulLink = backhaulFuture.getNow();
                     webSocketBackhaulLink.channel().config().setAutoRead(false);
 
-                    webSocketAccessLink.pipeline().replace(webSocketAccessLink.name(), null, Redirects.webSocketRedirectToWebSocket(webSocketBackhaulLink));
-                    webSocketBackhaulLink.pipeline().replace(webSocketBackhaulLink.name(), null, Redirects.webSocketRedirectToWebSocket(webSocketAccessLink));
+                    accessLink.pipeline().replace(accessLink.name(), null, Redirects.webSocketRedirectToWebSocket(webSocketBackhaulLink));
+                    webSocketBackhaulLink.pipeline().replace(webSocketBackhaulLink.name(), null, Redirects.webSocketRedirectToWebSocket(accessLink));
 
-                    webSocketAccessLink.channel().config().setAutoRead(true);
+                    accessLink.channel().config().setAutoRead(true);
                     webSocketBackhaulLink.channel().config().setAutoRead(true);
 
                     if (log.isDebugEnabled()) {
-                        log.debug("{} WebSocket tunnel open success: {}", webSocketAccessLink.channel(), webSocketBackhaulLink.channel());
+                        log.debug("{} WebSocket tunnel open success: {}", accessLink.channel(), webSocketBackhaulLink.channel());
                     }
                 } else {
                     final Throwable cause = backhaulFuture.cause();
-                    log.error("{} WebSocket tunnel open failure: {}", webSocketAccessLink.channel(), cause.getMessage());
-                    WebSocketUtils.goingAwayClose(webSocketAccessLink, cause.getMessage());
+                    log.error("{} WebSocket tunnel open failure: {}", accessLink.channel(), cause.getMessage());
+                    WebSocketUtils.goingAwayClose(accessLink, cause.getMessage());
                 }
             }
         });
-
-        webSocketAccessLink.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
-            @Override
-            public void operationComplete(final Future<? super Void> future) {
-                if (log.isDebugEnabled()) {
-                    log.debug("{} Tunnel closed, access link: {}", webSocketAccessLink.channel(), accessRequestId);
-                }
-
-                final ChannelHandlerContext webSocketBackhaulLink = tunnel.backhaulLinkPromise.getNow();
-                if (null != webSocketBackhaulLink && webSocketBackhaulLink.channel().isOpen()) {
-                    // XXX WebSocketUtils.normalClose(webSocketBackhaulLink, "");
-                    webSocketBackhaulLink.close();
-                }
-                tunnelMap.remove(accessRequestId, tunnel);
-            }
-        });
-
-        return webSocketBackhaulLinkPromise;
+        return backhaulPromise;
     }
 
     private void waitBackhaulLinkUntilTimeout(final Promise<ChannelHandlerContext> backhaulPromise) throws InterruptedException {
@@ -532,63 +503,74 @@ public class WebSocketBackhaullProxyServer {
         }
     }
 
-    /**
-     * 请求接入 TCP 通道.
-     *
-     * @param accessRequestId        隧道请求 ID
-     * @param nativeSocketAccessLink 请求接入的原生 socket链接
-     * @return 用于设置回传链接的 promise
-     */
-    private Promise<ChannelHandlerContext> nativeTunnelRequested(final String nodeKey, final String accessRequestId, final ChannelHandlerContext nativeSocketAccessLink) {
-        if (log.isDebugEnabled()) {
-            log.debug("{} Native tunnel request: {}", nativeSocketAccessLink.channel(), accessRequestId);
-        }
-
-        final Promise<ChannelHandlerContext> webSocketBackhaulLinkPromise = GlobalEventExecutor.INSTANCE.newPromise();
-        final Tunnel tunnel = new Tunnel(accessRequestId, nodeKey, nativeSocketAccessLink, webSocketBackhaulLinkPromise);
-        if (null != tunnelMap.putIfAbsent(accessRequestId, tunnel)) {
-            throw new IllegalStateException(String.format("%s request id '%s' is already used", nativeSocketAccessLink.channel(), accessRequestId));
-        }
-
-        nativeSocketAccessLink.channel().config().setAutoRead(false);
-        webSocketBackhaulLinkPromise.addListener(new FutureListener<ChannelHandlerContext>() {
+    Promise<ChannelHandlerContext> tcpTunnelRequest(final String id, final ChannelHandlerContext accessLink, final String agentKey, final String target) throws InterruptedException {
+        accessLink.channel().config().setAutoRead(false);
+        final Promise<ChannelHandlerContext> backhaulLinkPromise = tunnelRequested(id, accessLink, agentKey, target);
+        backhaulLinkPromise.addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
-            public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) {
+            public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
-                    final ChannelHandlerContext webSocketBackhaulLink = backhaulFuture.getNow();
-                    webSocketBackhaulLink.channel().config().setAutoRead(false);
+                    final ChannelHandlerContext backhaulLink = backhaulFuture.getNow();
+                    backhaulLink.channel().config().setAutoRead(false);
 
-                    nativeSocketAccessLink.pipeline().replace(nativeSocketAccessLink.name(), null, new SocketOverWebSocketEncodeHandler(webSocketBackhaulLink));
-                    webSocketBackhaulLink.pipeline().replace(webSocketBackhaulLink.name(), null, new SocketOverWebSocketDecodeHandler(nativeSocketAccessLink));
+                    accessLink.pipeline().replace(accessLink.name(), null, new SocketOverWebSocketEncodeHandler(backhaulLink));
+                    backhaulLink.pipeline().replace(backhaulLink.name(), null, new SocketOverWebSocketDecodeHandler(accessLink));
 
-                    nativeSocketAccessLink.channel().config().setAutoRead(true);
-                    webSocketBackhaulLink.channel().config().setAutoRead(true);
+                    accessLink.channel().config().setAutoRead(true);
+                    backhaulLink.channel().config().setAutoRead(true);
 
                     if (log.isDebugEnabled()) {
-                        log.debug("{} Native tunnel open success: {}", nativeSocketAccessLink.channel(), webSocketBackhaulLink.channel());
+                        log.debug("{} Native tunnel open success: {}", accessLink.channel(), backhaulLink.channel());
                     }
                 } else {
                     final Throwable cause = backhaulFuture.cause();
                     if (log.isDebugEnabled()) {
-                        log.debug("{} Native tunnel open failure: {}", nativeSocketAccessLink.channel(), cause.getMessage());
+                        log.debug("{} Native tunnel open failure: {}", accessLink.channel(), cause.getMessage());
                     }
-                    nativeSocketAccessLink.close();
+                    if (accessLink.channel().isActive()) {
+                        accessLink.close();
+                    }
                 }
             }
         });
-        nativeSocketAccessLink.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
+        return backhaulLinkPromise;
+    }
+
+    Promise<ChannelHandlerContext> tunnelRequested(final String id, final ChannelHandlerContext accessLink, final String agentKey, final String target) {
+        final Agent agent = this.lookupAgent(agentKey);
+        if (null == agent) {
+            throw new IllegalStateException("TUNNEL_NOT_FOUND:" + agentKey);
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("{} tunnel request: {}", accessLink.channel(), id);
+        }
+
+        final Promise<ChannelHandlerContext> webSocketBackhaulLinkPromise = GlobalEventExecutor.INSTANCE.newPromise();
+        final Tunnel tunnel = new Tunnel(id, agentKey, accessLink, webSocketBackhaulLinkPromise);
+        if (null != tunnelMap.putIfAbsent(id, tunnel)) {
+            throw new IllegalStateException(String.format("%s request id '%s' is already used", accessLink.channel(), id));
+        }
+
+        accessLink.channel().config().setAutoRead(false);
+        accessLink.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
             @Override
             public void operationComplete(final Future<? super Void> future) throws Exception {
                 if (log.isDebugEnabled()) {
-                    log.debug("{} Tunnel closed", nativeSocketAccessLink.channel());
+                    log.debug("{} Tunnel closed", accessLink.channel());
                 }
                 if (null != tunnel.backhaulLinkPromise.getNow()) {
                     tunnel.backhaulLinkPromise.getNow().close();
                 }
-                tunnelMap.remove(accessRequestId, tunnel);
+                tunnelMap.remove(id, tunnel);
             }
         });
 
+        // XXX find agent and send connection request.
+        final String backhaulRequest = id + "->" + target;
+        if (log.isDebugEnabled()) {
+            log.debug("{} Try open tunnel: {}", accessLink, backhaulRequest);
+        }
+        agent.bus.writeAndFlush(new TextWebSocketFrame(backhaulRequest));
         return webSocketBackhaulLinkPromise;
     }
 
@@ -712,14 +694,9 @@ public class WebSocketBackhaullProxyServer {
 //                    public void channelActive(final ChannelHandlerContext accessLink) throws Exception {
                         nativeSocketChannel.config().setAutoRead(false);
                         final String backhaulId = "tcp:" + id(nativeSocketChannel);
-                        final Promise<ChannelHandlerContext> backhaulLinkPromise = nativeTunnelRequested(nodeKey, backhaulId, accessLink);
+//                        final Promise<ChannelHandlerContext> backhaulLinkPromise = nativeTunnelRequested(backhaulId, accessLink, nodeKey, target);
+                        final Promise<ChannelHandlerContext> backhaulLinkPromise = tcpTunnelRequest(backhaulId, accessLink, nodeKey, target);
 
-                        // XXX find agent and send connection request.
-                        final String backhaulRequest = backhaulId + "->" + target;
-                        if (log.isDebugEnabled()) {
-                            log.debug("{} Try open native tunnel: {}", nativeSocketChannel, backhaulRequest);
-                        }
-                        agent.bus.writeAndFlush(new TextWebSocketFrame(backhaulRequest));
                         waitBackhaulLinkUntilTimeout(backhaulLinkPromise);
                     }
                 });
@@ -945,25 +922,6 @@ public class WebSocketBackhaullProxyServer {
                 description += " ><  ?]";
             }
             return description;
-        }
-    }
-
-    /**
-     * 隧道映射.
-     */
-    public class PortForwarding {
-        private final Channel serverChannel;
-        private final Agent node;
-        private final String target;
-
-        private PortForwarding(final Channel serverChannel, final Agent node, final String target) {
-            this.serverChannel = serverChannel;
-            this.node = node;
-            this.target = target;
-        }
-
-        public Agent getNode() {
-            return node;
         }
     }
 

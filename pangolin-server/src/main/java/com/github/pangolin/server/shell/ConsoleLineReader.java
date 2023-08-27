@@ -1,6 +1,6 @@
 package com.github.pangolin.server.shell;
 
-import com.github.pangolin.server.WebSocketBackhaullProxyServer;
+import com.github.pangolin.server.WebSocketBackhaulProxyServer;
 import jline.Terminal;
 import jline.console.ConsoleReader;
 import jline.console.completer.AggregateCompleter;
@@ -19,13 +19,13 @@ public class ConsoleLineReader implements LineReader {
     protected final OutputStream out;
     private final ConsoleReader console;
 
-    public ConsoleLineReader(final WebSocketBackhaullProxyServer server, final InputStream in, final OutputStream out, final Terminal terminal) throws IOException {
+    public ConsoleLineReader(final WebSocketBackhaulProxyServer server, final InputStream in, final OutputStream out, final Terminal terminal) throws IOException {
         this.in = in;
         this.out = out;
         this.console = create(server, in, out, terminal);
     }
 
-    protected ConsoleReader create(final WebSocketBackhaullProxyServer server, final InputStream in, final OutputStream out, final Terminal terminal) throws IOException {
+    protected ConsoleReader create(final WebSocketBackhaulProxyServer server, final InputStream in, final OutputStream out, final Terminal terminal) throws IOException {
         final ConsoleReader console = new ConsoleReader(in, out, terminal);
         final CompletionHandler completionHandler = console.getCompletionHandler();
         if (completionHandler instanceof CandidateListCompletionHandler) {

@@ -5,6 +5,9 @@ import com.github.pangolin.server.shell.GenericLineReader;
 import com.github.pangolin.server.shell.LineReader;
 import com.github.pangolin.server.shell.WebSocketBackhaulProxyServerShell;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
 import jline.Terminal;
 import jline.TerminalFactory;
 import org.springframework.boot.SpringApplication;
@@ -46,12 +49,23 @@ public class WebSocketBackhaulProxyServerSpringApplication {
         }
 
         /*
-        WebSocketBackhaullProxyServer webSocketTunnelServer = new WebSocketBackhaullProxyServer(2345, "/tunnel", false);
+        WebSocketBackhaulProxyServer webSocketTunnelServer = new WebSocketBackhaulProxyServer(2345, "/tunnel", false);
         final Channel channel = webSocketTunnelServer.start();
         channel.closeFuture().await();
         */
-        final WebSocketBackhaullProxyServer server = new WebSocketBackhaullProxyServer(2345, "/tunnel", false);
+        final WebSocketBackhaulProxyServer server = new WebSocketBackhaulProxyServer(2345, "/tunnel", false);
         final Channel channel = server.start();
+
+        new NettyServer(1080).start(true, new ChannelInitializer<SocketChannel>() {
+            @Override
+            protected void initChannel(final SocketChannel ch) throws Exception {
+                ch.pipeline().addLast(new Socks5WebSocketBackhaulProxyAgentProxyServerHandler(
+                        new NioEventLoopGroup(), server, "default"
+                ));
+            }
+        });
+
+
         channel.eventLoop().scheduleWithFixedDelay(new Runnable() {
             @Override
             public void run() {

@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.server;
+package com.github.pangolin.server;
 
 import com.github.pangolin.util.Channels;
 import io.netty.channel.Channel;

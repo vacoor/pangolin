@@ -53,8 +53,8 @@ public class SocketOverWebSocketEncodeHandler extends ChannelInboundHandlerAdapt
     @Override
     public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) throws Exception {
         log.error("[tun@tcp/ws {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
-        Channels.closeOnFlush(inCtx.channel());
         WebSocketUtils.internalErrorClose(outCtx, cause.getMessage());
+        Channels.closeOnFlush(inCtx.channel());
     }
 
     private String stringify(final ChannelHandlerContext ctx) {

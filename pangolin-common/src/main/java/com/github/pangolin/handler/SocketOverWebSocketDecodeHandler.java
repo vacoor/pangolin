@@ -41,8 +41,8 @@ public class SocketOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapt
                 log.info("[tun@ws/tcp {}(!) => {}] Connection closed by {}/{}", stringify(inCtx), stringify(outCtx), c.statusCode(), c.reasonText());
 
                 ReferenceCountUtil.release(msg);
-                Channels.closeOnFlush(inCtx.channel());
                 Channels.closeOnFlush(outCtx.channel());
+                Channels.closeOnFlush(inCtx.channel());
             } else if (msg instanceof PingWebSocketFrame) {
                 log.debug("[tun@ws/tcp {} => {}] Ping <==", stringify(inCtx), stringify(outCtx));
 
@@ -60,8 +60,8 @@ public class SocketOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapt
 
                 // XXX
                 log.error("Unexpect websocket message: {}, will be closed", msg);
-                WebSocketUtils.unsupportedDataClose(inCtx, "Unexpect websocket message");
                 Channels.closeOnFlush(outCtx.channel());
+                WebSocketUtils.unsupportedDataClose(inCtx, "Unexpect websocket message");
             }
         } else {
             ReferenceCountUtil.release(msg);
@@ -74,8 +74,8 @@ public class SocketOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapt
     public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) {
         log.error("[tun@ws/tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
 
-        WebSocketUtils.internalErrorClose(inCtx, cause.getMessage());
         Channels.closeOnFlush(outCtx.channel());
+        WebSocketUtils.internalErrorClose(inCtx, cause.getMessage());
     }
 
     private String stringify(final ChannelHandlerContext ctx) {
