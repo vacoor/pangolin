@@ -59,7 +59,7 @@ public class WebSocketBackhaulProxyServerSpringApplication {
         new NettyServer(1080).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new Socks5WebSocketBackhaulProxyAgentProxyServerHandler(
+                ch.pipeline().addLast(new WebSocketBackhaulAgentSock5ProxyServerHandler(
                         new NioEventLoopGroup(), server, "default"
                 ));
             }

@@ -2,6 +2,7 @@ package com.github.pangolin.handler;
 
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.WebSocketUtils;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
@@ -46,6 +47,7 @@ public class SocketOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapt
             } else if (msg instanceof PingWebSocketFrame) {
                 log.debug("[tun@ws/tcp {} => {}] Ping <==", stringify(inCtx), stringify(outCtx));
 
+                outCtx.writeAndFlush(Unpooled.EMPTY_BUFFER);
                 inCtx.writeAndFlush(new PongWebSocketFrame(((WebSocketFrame) msg).content()));
             } else if (msg instanceof PongWebSocketFrame) {
                 ReferenceCountUtil.release(msg);

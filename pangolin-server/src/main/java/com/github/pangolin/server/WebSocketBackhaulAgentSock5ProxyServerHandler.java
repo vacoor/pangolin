@@ -11,11 +11,11 @@ import io.netty.util.concurrent.FutureListener;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-class Socks5WebSocketBackhaulProxyAgentProxyServerHandler extends Socks5ProxyServerHandler {
+class WebSocketBackhaulAgentSock5ProxyServerHandler extends Socks5ProxyServerHandler {
     private WebSocketBackhaulProxyServer server;
     private String agentKey;
 
-    public Socks5WebSocketBackhaulProxyAgentProxyServerHandler(final EventLoopGroup proxyGroup, final WebSocketBackhaulProxyServer server, final String agent) {
+    public WebSocketBackhaulAgentSock5ProxyServerHandler(final EventLoopGroup proxyGroup, final WebSocketBackhaulProxyServer server, final String agent) {
         super(proxyGroup);
         this.server = server;
         this.agentKey = agent;

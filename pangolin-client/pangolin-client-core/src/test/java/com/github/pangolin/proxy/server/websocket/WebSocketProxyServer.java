@@ -16,16 +16,16 @@ import java.net.InetSocketAddress;
 import java.security.cert.CertificateException;
 
 @Slf4j
-public class SocketOverWebSocketProxyServer extends NettyServer {
+public class WebSocketProxyServer extends NettyServer {
     private static final int MAX_HTTP_CONTENT_LENGTH = 1024 * 1024 * 8;
 
     private final boolean isSecure;
 
-    public SocketOverWebSocketProxyServer(final int listenPort, final boolean isSecure) {
+    public WebSocketProxyServer(final int listenPort, final boolean isSecure) {
         this(null, listenPort, isSecure);
     }
 
-    public SocketOverWebSocketProxyServer(final String listenHost, final int listenPort, final boolean isSecure) {
+    public WebSocketProxyServer(final String listenHost, final int listenPort, final boolean isSecure) {
         super(listenHost, listenPort, new NioEventLoopGroup(2), new NioEventLoopGroup(100));
         this.isSecure = isSecure;
     }
@@ -39,16 +39,16 @@ public class SocketOverWebSocketProxyServer extends NettyServer {
                     cp.addLast(createServerSslContext().newHandler(ch.alloc()));
                 }
                 cp.addLast(new HttpServerCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
-                cp.addLast(new SocketOverWebSocketProxyServerHandler(
-                        workerGroup, "/ws", "*",
-                        false, 65536, true, true
+                cp.addLast(new WebSocketProxyServerHandler(
+                        workerGroup,
+                        true, 65536, true
                 ));
             }
         });
     }
 
     public static void main(String[] args) throws Exception {
-        new SocketOverWebSocketProxyServer(1443, false).start().addListener(new ChannelFutureListener() {
+        new WebSocketProxyServer(1443, false).start().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
