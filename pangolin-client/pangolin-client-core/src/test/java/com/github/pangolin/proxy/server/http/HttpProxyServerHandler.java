@@ -3,23 +3,14 @@ package com.github.pangolin.proxy.server.http;
 import com.github.pangolin.handler.SocketInboundRedirectHandler;
 import com.github.pangolin.proxy.server.NettyServer;
 import com.github.pangolin.util.Channels;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoopGroup;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.http.DefaultFullHttpResponse;
-import io.netty.handler.codec.http.HttpClientCodec;
-import io.netty.handler.codec.http.HttpHeaders;
-import io.netty.handler.codec.http.HttpMethod;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpRequest;
-import io.netty.handler.codec.http.HttpResponseStatus;
-import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.base64.Base64;
+import io.netty.handler.codec.http.*;
+import io.netty.util.CharsetUtil;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -28,12 +19,28 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
 
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
+
 @Slf4j
 public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
     private static final int MAX_HTTP_CONTENT_LENGTH = 1024 * 1024 * 8;
+
+    private final String username;
+    private final String password;
+    private final String authorization;
     private final EventLoopGroup proxyGroup;
 
     public HttpProxyServerHandler(final EventLoopGroup proxyGroup) {
+        this.username = null;
+        this.password = null;
+        this.authorization = null;
+        this.proxyGroup = proxyGroup;
+    }
+
+    public HttpProxyServerHandler(final String username, final String password, final EventLoopGroup proxyGroup) {
+        this.username = username;
+        this.password = password;
+        this.authorization = encode(username, password);
         this.proxyGroup = proxyGroup;
     }
 
@@ -46,6 +53,15 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         if (null == cp.get(HttpObjectAggregator.class)) {
             cp.addBefore(ctx.name(), null, new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
         }
+    }
+
+    private String encode(final String username, final String password) {
+        final ByteBuf buf = Unpooled.copiedBuffer(username + ':' + password, CharsetUtil.UTF_8);
+        final ByteBuf encoded = Base64.encode(buf, false);
+        final String encodedStr = "Basic " + encoded.toString(CharsetUtil.US_ASCII);
+        buf.release();
+        encoded.release();
+        return encodedStr;
     }
 
     @Override
@@ -63,6 +79,11 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final HttpRequest httpRequest = (HttpRequest) msg;
                 final HttpMethod method = httpRequest.method();
                 final HttpHeaders headers = httpRequest.headers();
+                if (null != authorization && !authorization.equals(headers.get(HttpHeaderNames.PROXY_AUTHORIZATION))) {
+                    ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.UNAUTHORIZED));
+                    return;
+                }
+
                 if (HttpMethod.CONNECT.equals(method)) {
                     /*-
                      * HTTPS tunnel.
@@ -75,17 +96,16 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                      * content-length: 0
                      * </pre>
                      */
-                    final String proxyAuthorization = headers.getAsString("Proxy-Authorization");
                     connect(ctx, httpRequest, proxyGroup);
                 } else {
                     // GET http://www.baidu.com/ HTTP/1.1
                     // Host: www.baidu.com
                     // User-Agent: curl/7.64.1
                     // Proxy-Connection: Keep-Alive
-                    final String connection = headers.getAsString("Proxy-Connection");
+                    final String connection = headers.getAsString(HttpHeaderNames.PROXY_CONNECTION);
                     if (null != connection) {
-                        headers.add("Connection", connection);
-                        headers.remove("Proxy-Connection");
+                        headers.add(HttpHeaderNames.CONNECTION, connection);
+                        headers.remove(HttpHeaderNames.PROXY_CONNECTION);
                     }
                     InetSocketAddress targetAddress = getTargetAddress(httpRequest);
                     final Object msgToSend = ReferenceCountUtil.retain(msg);
@@ -156,7 +176,6 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         }).addListener(future -> {
             if (future.isSuccess()) {
                 log.info("Connection to {}:{}: established", address, port);
-//                ctx.writeAndFlush(new DefaultFullHttpResponse(
                 ctx.writeAndFlush(new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK)).addListener(g -> {
                     ctx.pipeline().remove(HttpServerCodec.class);
                 });

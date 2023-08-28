@@ -64,52 +64,6 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
          *   |- exception caught
          * UdfHandler.
          */
-        final ChannelPipeline cp = ctx.pipeline();
-        /*
-        ctx.pipeline().addAfter(ctx.name(), "DECODER", new MessageToMessageDecoder<WebSocketFrame>() {
-
-            @Override
-            protected void decode(final ChannelHandlerContext ctx, final WebSocketFrame frame, final List<Object> out) throws Exception {
-
-                if (frame instanceof CloseWebSocketFrame) {
-                    WebSocketServerHandshaker handshaker = getHandshaker(ctx.channel());
-                    if (handshaker != null) {
-                        frame.retain();
-                        handshaker.close(ctx.channel(), (CloseWebSocketFrame) frame);
-                    } else {
-                        ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                    }
-                    return;
-                }
-                if (frame instanceof PingWebSocketFrame) {
-                    frame.content().retain();
-                    ctx.channel().writeAndFlush(new PongWebSocketFrame(frame.content()));
-                    return;
-                }
-                if (frame instanceof PongWebSocketFrame) {
-                    // Pong frames need to get ignored
-                    return;
-                }
-
-                out.add(frame.retain());
-            }
-
-            @Override
-            public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                if (cause instanceof WebSocketHandshakeException) {
-                    FullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.BAD_REQUEST, Unpooled.wrappedBuffer(cause.getMessage().getBytes()));
-                    ctx.channel().writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
-                } else {
-                    ctx.fireExceptionCaught(cause);
-                    ctx.close();
-                }
-            }
-        });
-        if (cp.get(Utf8FrameValidator.class) == null) {
-            // Add the UFT8 checking after this one.
-            ctx.pipeline().addAfter(ctx.name(), Utf8FrameValidator.class.getName(), new Utf8FrameValidator());
-        }
-        */
     }
 
     @Override
@@ -176,6 +130,14 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
 
 
     protected ChannelPromise handshake(final ChannelHandlerContext ctx, final FullHttpRequest req, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {
+        /*
+         *         ws[s]://host:port/path   ws <--> ws
+         *         tcp://host:port          ws <--> tcp
+         *
+         * CONNECT ws[s]://host:port/path   tcp <--> ws
+         * CONNECT tcp://host:port          tcp <--> tcp
+         */
+
         // final String s = handshaker.selectedSubprotocol();
         String s = req.headers().get(HttpHeaderNames.SEC_WEBSOCKET_PROTOCOL);
         if (CONNECT.name().equalsIgnoreCase(s)) {
@@ -242,8 +204,11 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
     protected void handshake0(final ChannelHandlerContext ctx, final FullHttpRequest req, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {
         ctx.channel().config().setAutoRead(false);
         final HttpHeaders headers = req.headers();
-        final String hostname = headers.getAsString("X-TARGET-ADDRESS");
-        final int port = headers.getInt("X-TARGET-PORT", 0);
+//        String hostname = headers.getAsString("X-TARGET-ADDRESS");
+//        int port = headers.getInt("X-TARGET-PORT", 0);
+        final String hostname = "127.0.0.1";
+        final int port = 8888;
+
 
         /*-
          * PROTOCOL: through / connect
