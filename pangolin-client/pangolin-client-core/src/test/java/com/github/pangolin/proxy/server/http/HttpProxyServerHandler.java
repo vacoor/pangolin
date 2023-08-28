@@ -11,9 +11,12 @@ import io.netty.handler.codec.http.*;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.ReferenceCountUtil;
+import jdk.nashorn.internal.runtime.linker.Bootstrap;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
+import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.cert.CertificateException;
 
@@ -51,14 +54,10 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final HttpRequest httpRequest = (HttpRequest) msg;
                 final HttpMethod method = httpRequest.method();
                 final HttpHeaders headers = httpRequest.headers();
-                if (HttpMethod.GET.equals(method)) {
-                    // GET http://www.baidu.com/ HTTP/1.1
-                    // Host: www.baidu.com
-                    // User-Agent: curl/7.64.1
-                    // Accept: */*
-                    // Proxy-Connection: Keep-Alive
-                    String asString = headers.getAsString("Proxy-Connection");
-                } else if (HttpMethod.CONNECT.equals(method)) {
+                if (HttpMethod.CONNECT.equals(method)) {
+                    /*-
+                     * HTTPS tunnel.
+                     */
                     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/CONNECT
                     // CONNECT www.baidu.com:443 HTTP/1.1
                     // Host: www.baidu.com:443
@@ -67,9 +66,41 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                     // content-length: 0
                     final String proxyAuthorization = headers.getAsString("Proxy-Authorization");
                     connect(ctx, httpRequest, proxyGroup);
-                    return;
+                } else if (HttpMethod.GET.equals(method)) {
+                    // GET http://www.baidu.com/ HTTP/1.1
+                    // Host: www.baidu.com
+                    // User-Agent: curl/7.64.1
+                    // Accept: */*
+                    // Proxy-Connection: Keep-Alive
+                    final String connection = headers.getAsString("Proxy-Connection");
+                    if (null != connection) {
+                        headers.add("Connection", connection);
+                        headers.remove("Proxy-Connection");
+                    }
+                    InetSocketAddress targetAddress = getTargetAddress(httpRequest);
+                    final Object msgToSend = ReferenceCountUtil.retain(msg);
+                    Channels.open(targetAddress, true, proxyGroup, new ChannelInitializer<SocketChannel>() {
+                        @Override
+                        protected void initChannel(final SocketChannel ch) throws Exception {
+                            ch.pipeline().addLast(new HttpClientCodec());
+                            ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
+                                @Override
+                                public void channelRead(final ChannelHandlerContext proxyCtx, final Object msg) throws Exception {
+                                    ctx.writeAndFlush(msg);
+                                }
+                            });
+                        }
+                    }).addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(final ChannelFuture future) throws Exception {
+                            if (future.isSuccess()) {
+                                future.channel().writeAndFlush(msgToSend);
+                            }
+                        }
+                    });
+                } else {
+                    Channels.closeOnFlush(ctx.channel());
                 }
-                ctx.writeAndFlush(new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
             } else {
                 Channels.closeOnFlush(ctx.channel());
                 log.error("Connection closed by Malformed Packet: {}", msg);
@@ -79,15 +110,31 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
-    protected void connect(final ChannelHandlerContext ctx, final HttpRequest httpRequest, final EventLoopGroup proxyGroup) throws Exception {
+    private InetSocketAddress getTargetAddress(final HttpRequest httpRequest) {
         final HttpHeaders headers = httpRequest.headers();
         final String host = headers.getAsString("Host");
-        final String[] split = host.split(":");
-        final String address = split[0];
-        final int port = Integer.parseInt(split[1]);
+        if (null != host && !host.isEmpty()) {
+            final String[] segments = host.split(":");
+            final int port = segments.length > 1 ? Integer.parseInt(segments[1]) : determinePort(0, httpRequest.uri());
+            return new InetSocketAddress(segments[0], port);
+        } else {
+            final URI uri = URI.create(httpRequest.uri());
+            final int port = determinePort(uri.getPort(), httpRequest.uri());
+            return new InetSocketAddress(uri.getHost(), port);
+        }
+    }
+
+    private int determinePort(final int port, final String uri) {
+        return port > 0 ? port : uri.toLowerCase().startsWith("https://") ? 443 : 80;
+    }
+
+    protected void connect(final ChannelHandlerContext ctx, final HttpRequest httpRequest, final EventLoopGroup proxyGroup) throws Exception {
+        final InetSocketAddress targetAddress = getTargetAddress(httpRequest);
+        final String address = targetAddress.getHostString();
+        final int port = targetAddress.getPort();
 
         ctx.channel().config().setAutoRead(false);
-        Channels.open(address, port, false, proxyGroup, new ChannelInboundHandlerAdapter() {
+        Channels.open(targetAddress, false, proxyGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
                 delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(ctx));
@@ -124,8 +171,8 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                 /*
                  curl --proxy-insecure -x https://127.0.0.1:8080 "https://www.baidu.com"
                  */
-                final SslContext ssl = Channels.createServerSslContext();
-                ch.pipeline().addLast(ssl.newHandler(ch.alloc()));
+//                final SslContext ssl = Channels.createServerSslContext();
+//                ch.pipeline().addLast(ssl.newHandler(ch.alloc()));
                 ch.pipeline().addLast(new HttpProxyServerHandler(new NioEventLoopGroup()));
             }
         }).sync().channel().closeFuture().sync();
