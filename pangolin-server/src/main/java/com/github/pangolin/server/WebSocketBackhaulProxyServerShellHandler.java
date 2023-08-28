@@ -3,7 +3,7 @@ package com.github.pangolin.server;
 import com.github.pangolin.server.shell.ConsoleLineReader;
 import com.github.pangolin.server.shell.LineReader;
 import com.github.pangolin.server.shell.WebSocketBackhaulProxyServerShell;
-import com.github.pangolin.server.shell.WebSocketTerminal;
+import com.github.pangolin.server.shell.ShellTerm;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -44,7 +44,7 @@ public class WebSocketBackhaulProxyServerShellHandler extends SimpleChannelInbou
             final PipedOutputStream out = new PipedOutputStream();
             final PipedInputStream innerIn = new PipedInputStream(out);
             final OutputStream innerOut = new WebSocketBinaryOutputStream(webSocketTunnelContext);
-            final WebSocketTerminal terminal = new WebSocketTerminal();
+            final ShellTerm terminal = new ShellTerm();
             final LineReader reader = new ConsoleLineReader(server, innerIn, innerOut, terminal);
             new WebSocketBackhaulProxyServerShell(server, reader, new PrintStream(innerOut), null).start();
 

@@ -13,20 +13,22 @@ import jline.console.completer.StringsCompleter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Collection;
+import java.util.function.Supplier;
 
 public class ConsoleLineReader implements LineReader {
     protected final InputStream in;
     protected final OutputStream out;
     private final ConsoleReader console;
 
-    public ConsoleLineReader(final WebSocketBackhaulProxyServer server, final InputStream in, final OutputStream out, final Terminal terminal) throws IOException {
-        this.in = in;
-        this.out = out;
-        this.console = create(server, in, out, terminal);
+    public ConsoleLineReader(final InputStream consoleIn, final OutputStream consoleOut, final Terminal terminal, final Supplier<Collection<String>> agentSupplier) throws IOException {
+        this.in = consoleIn;
+        this.out = consoleOut;
+        this.console = create(consoleIn, consoleOut, terminal, agentSupplier);
     }
 
-    protected ConsoleReader create(final WebSocketBackhaulProxyServer server, final InputStream in, final OutputStream out, final Terminal terminal) throws IOException {
-        final ConsoleReader console = new ConsoleReader(in, out, terminal);
+    private ConsoleReader create(final InputStream consoleIn, final OutputStream consoleOut, final Terminal terminal, final Supplier<Collection<String>> agentNamesSupplier) throws IOException {
+        final ConsoleReader console = new ConsoleReader(consoleIn, consoleOut, terminal);
         final CompletionHandler completionHandler = console.getCompletionHandler();
         if (completionHandler instanceof CandidateListCompletionHandler) {
             final CandidateListCompletionHandler candidateListCompletionHandler = (CandidateListCompletionHandler) completionHandler;
@@ -35,17 +37,13 @@ public class ConsoleLineReader implements LineReader {
         }
         console.setExpandEvents(false);
 
-        final WebSocketBackhaulAgentCompleter webSocketBackhaulAgentCompleter = new WebSocketBackhaulAgentCompleter(server);
-        /*-
-         * forward
-         */
-
         final AggregateCompleter completer = new AggregateCompleter();
+        final LazyStringsCompleter agentCompleter = new LazyStringsCompleter(agentNamesSupplier);
         completer.getCompleters().add(new StringsCompleter("exit"));
         completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("broker"), new StringsCompleter("list"), NullCompleter.INSTANCE));
-        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("broker"), new StringsCompleter("remove"), webSocketBackhaulAgentCompleter, NullCompleter.INSTANCE));
+        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("broker"), new StringsCompleter("remove"), agentCompleter, NullCompleter.INSTANCE));
         completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("list"), NullCompleter.INSTANCE));
-        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("add"), NullCompleter.INSTANCE, webSocketBackhaulAgentCompleter, NullCompleter.INSTANCE));
+        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("add"), NullCompleter.INSTANCE, agentCompleter, NullCompleter.INSTANCE));
         completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("remove"), NullCompleter.INSTANCE));
         completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("kill"), NullCompleter.INSTANCE));
         console.addCompleter(completer);

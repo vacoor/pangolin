@@ -5,7 +5,7 @@ import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
 import com.github.pangolin.server.shell.ConsoleLineReader;
 import com.github.pangolin.server.shell.LineReader;
 import com.github.pangolin.server.shell.WebSocketBackhaulProxyServerShell;
-import com.github.pangolin.server.shell.WebSocketTerminal;
+import com.github.pangolin.server.shell.ShellTerm;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
 import com.github.pangolin.util.WebSocketUtils;
@@ -65,6 +65,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /**
  * WebSocket 隧道服务.
@@ -628,8 +629,13 @@ public class WebSocketBackhaulProxyServer {
         final PipedOutputStream out = new PipedOutputStream();
         final PipedInputStream innerIn = new PipedInputStream(out);
         final OutputStream innerOut = new WebSocketBinaryOutputStream(webSocketTunnelContext);
-        final WebSocketTerminal terminal = new WebSocketTerminal();
-        final LineReader reader = new ConsoleLineReader(this, innerIn, innerOut, terminal);
+        final ShellTerm terminal = new ShellTerm();
+        final LineReader reader = new ConsoleLineReader(innerIn, innerOut, terminal, new Supplier<Collection<String>>() {
+            @Override
+            public Collection<String> get() {
+                return registeredAgents.keySet();
+            }
+        });
         new WebSocketBackhaulProxyServerShell(this, reader, new PrintStream(innerOut), null).start();
 
         webSocketTunnelContext.pipeline().addLast(new SimpleChannelInboundHandler<WebSocketFrame>() {
