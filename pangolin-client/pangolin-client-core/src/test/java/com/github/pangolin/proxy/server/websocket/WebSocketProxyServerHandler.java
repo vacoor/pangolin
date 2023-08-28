@@ -1,5 +1,6 @@
 package com.github.pangolin.proxy.server.websocket;
 
+import com.github.pangolin.handler.SocketInboundRedirectHandler;
 import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
 import com.github.pangolin.util.Channels;
@@ -175,9 +176,10 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
 
 
     protected ChannelPromise handshake(final ChannelHandlerContext ctx, final FullHttpRequest req, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {
-        final String s = handshaker.selectedSubprotocol();
+        // final String s = handshaker.selectedSubprotocol();
+        String s = req.headers().get(HttpHeaderNames.SEC_WEBSOCKET_PROTOCOL);
         if (CONNECT.name().equalsIgnoreCase(s)) {
-            promise.tryFailure(new UnsupportedOperationException());
+            handshake1(ctx, req, handshaker, promise);
             return promise;
         } else {
             promise.addListener(new ChannelFutureListener() {
@@ -192,6 +194,49 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
             handshake0(ctx, req, handshaker, promise);
             return promise;
         }
+    }
+
+    protected void handshake1(final ChannelHandlerContext ctx, final FullHttpRequest req, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {
+        ctx.channel().config().setAutoRead(false);
+        final HttpHeaders headers = req.headers();
+        final String hostname = headers.getAsString("X-TARGET-ADDRESS");
+        final int port = headers.getInt("X-TARGET-PORT", 0);
+
+        /*-
+         * PROTOCOL: through / connect
+         */
+        Channels.open(hostname, port, false, proxyGroup, new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
+                ctx.pipeline().addBefore(ctx.name(), "Socket->Socket", new SocketInboundRedirectHandler(targetCtx));
+                targetCtx.pipeline().replace(targetCtx.name(), "Socket->Socket", new SocketInboundRedirectHandler(ctx));
+
+                ctx.channel().config().setAutoRead(true);
+                targetCtx.channel().config().setAutoRead(true);
+            }
+
+        }).addListener(f -> {
+            if (f.isSuccess()) {
+                log.warn("连接到目标地址({}/{}:{})", hostname, port, f.cause());
+                handshaker.handshake(ctx.channel(), req, null, promise).addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(final ChannelFuture future) throws Exception {
+                        if (future.isSuccess()) {
+                            ctx.pipeline().remove("wsencoder");
+                            ctx.pipeline().remove("wsdecoder");
+                        }
+                    }
+                });
+                // FIXME 握手失败关闭连接.
+            } else {
+                log.warn("连接到目标地址({}/{}:{})失败: {}", hostname, port, f.cause());
+            }
+        }).channel().closeFuture().addListener(f -> {
+            if (ctx.channel().isActive()) {
+                log.info("目标地址({}/{}:{})断开连接", hostname, port, f.cause());
+                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            }
+        });
     }
 
     protected void handshake0(final ChannelHandlerContext ctx, final FullHttpRequest req, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {

@@ -1,5 +1,6 @@
 package com.github.pangolin.proxy.server.socks.v5;
 
+import com.github.pangolin.handler.SocketInboundRedirectHandler;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
@@ -9,7 +10,9 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
@@ -64,8 +67,19 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
                         if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
                             delegateCtx.channel().config().setAutoRead(false);
 
-                            requestCtx.pipeline().replace(requestCtx.handler(), null, new SocketOverWebSocketEncodeHandler(delegateCtx));
-                            delegateCtx.pipeline().replace(this, null, new SocketOverWebSocketDecodeHandler(requestCtx));
+                            if (HttpMethod.CONNECT.name().equalsIgnoreCase(webSocketProtocol)) {
+                                requestCtx.pipeline().replace(requestCtx.handler(), null, new SocketInboundRedirectHandler(delegateCtx));
+                                delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(requestCtx));
+//                                delegateCtx.pipeline().remove(HttpClientCodec.class);
+                                delegateCtx.pipeline().remove("ws-decoder");
+                                delegateCtx.pipeline().remove("ws-encoder");
+                                // delegateCtx.pipeline().remove(WebSocketClientPro);
+                                delegateCtx.pipeline().remove(Utf8FrameValidator.class);
+                                delegateCtx.pipeline().remove(WebSocketClientProtocolHandler.class);
+                            } else {
+                                requestCtx.pipeline().replace(requestCtx.handler(), null, new SocketOverWebSocketEncodeHandler(delegateCtx));
+                                delegateCtx.pipeline().replace(this, null, new SocketOverWebSocketDecodeHandler(requestCtx));
+                            }
 
                             requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(g -> requestCtx.pipeline().remove(Socks5ServerEncoder.DEFAULT));
 
