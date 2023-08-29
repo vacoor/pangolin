@@ -79,7 +79,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         try {
             if (!(msg instanceof FullHttpRequest) || !((FullHttpRequest) msg).decoderResult().isSuccess()) {
                 log.error("Connection closed by UNKNOWN message: {}", msg.getClass());
-                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 return;
             }
 
@@ -210,7 +210,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (ctx.channel().isActive()) {
                     log.info("Connection to {} closed", future.channel().remoteAddress());
-                    ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             }
         });

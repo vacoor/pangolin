@@ -4,6 +4,7 @@ import com.github.pangolin.handler.SocketInboundRedirectHandler;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
@@ -48,6 +49,8 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
         final SslContext context = isSecure ? Channels.createClientSslContext() : null;
         final HttpHeaders handshakeHeaders = newHandshakeHeaders(request, requestCtx);
+        final String query = "?target=tcp://" + address + ":" + port;
+        final URI webSocketEndpointToHandshake = URI.create(webSocketEndpoint.toString() + query);
         Channels.open(webSocketEndpoint.getHost(), webSocketEndpoint.getPort(), true, proxyGroup, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
@@ -59,7 +62,7 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
                 cp.addLast(new HttpObjectAggregator(1024 * 1024 * 8));
                 // cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
                 cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
-                        webSocketEndpoint, WebSocketVersion.V13, webSocketProtocol, true, handshakeHeaders, 65536, true, true
+                        webSocketEndpointToHandshake, WebSocketVersion.V13, webSocketProtocol, true, handshakeHeaders, 65536, true, true
                 ), false));
                 cp.addLast(new ChannelInboundHandlerAdapter() {
                     @Override
@@ -99,7 +102,7 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
         }).channel().closeFuture().addListener(f -> {
             if (requestCtx.channel().isActive()) {
                 log.info("Connection to {}:{} closed", address, port);
-                Channels.closeOnFlush(requestCtx.channel());
+                requestCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         });
     }

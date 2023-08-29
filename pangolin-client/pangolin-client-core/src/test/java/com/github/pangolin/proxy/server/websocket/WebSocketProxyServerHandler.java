@@ -22,9 +22,8 @@ import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketHandshakeException;
@@ -33,7 +32,11 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.AttributeKey;
 import io.netty.util.ReferenceCountUtil;
+import io.netty.util.internal.StringUtil;
 import lombok.extern.slf4j.Slf4j;
+
+import java.net.URI;
+import java.util.List;
 
 import static io.netty.handler.codec.http.HttpMethod.CONNECT;
 import static io.netty.handler.codec.http.HttpMethod.GET;
@@ -72,6 +75,8 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
          *   |- exception caught
          * UdfHandler.
          */
+        ctx.pipeline().addAfter(ctx.name(), null, new Utf8FrameValidator());
+        ctx.pipeline().addAfter(ctx.name(), null, new WebSocketCtrlFrameHandler());
     }
 
     @Override
@@ -126,7 +131,6 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
-
     private static void sendHttpResponse(ChannelHandlerContext ctx, HttpRequest req, HttpResponse res) {
         ChannelFuture f = ctx.channel().writeAndFlush(res);
         if (!isKeepAlive(req) || res.status().code() != 200) {
@@ -134,7 +138,7 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
-    private WebSocketServerHandshaker newHandshaker(final ChannelHandlerContext ctx, final FullHttpRequest httpRequest) {
+    protected WebSocketServerHandshaker newHandshaker(final ChannelHandlerContext ctx, final FullHttpRequest httpRequest) {
         final WebSocketServerHandshakerFactory factory = new WebSocketServerHandshakerFactory(
                 getWebSocketLocation(ctx.pipeline(), httpRequest, ""),
                 ",CONNECT", allowExtensions, maxFramePayloadSize, allowMaskMismatch
@@ -142,7 +146,7 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
         return factory.newHandshaker(httpRequest);
     }
 
-    protected ChannelPromise handshake(final ChannelHandlerContext ctx, final FullHttpRequest req, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {
+    protected ChannelPromise handshake(final ChannelHandlerContext ctx, final FullHttpRequest httpRequest, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {
         /*
          *         ws[s]://host:port/path   ws <--> ws
          *         tcp://host:port          ws <--> tcp
@@ -151,39 +155,34 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
          * CONNECT tcp://host:port          tcp <--> tcp
          */
 
-        // final String s = handshaker.selectedSubprotocol();
-        String s = req.headers().get(HttpHeaderNames.SEC_WEBSOCKET_PROTOCOL);
-        if (CONNECT.name().equalsIgnoreCase(s)) {
-            handshake1(ctx, req, handshaker, promise);
+        final String protocol = httpRequest.headers().get(HttpHeaderNames.SEC_WEBSOCKET_PROTOCOL);
+        if (CONNECT.name().equalsIgnoreCase(protocol)) {
+            tcpTunnelHandshake(ctx, httpRequest, handshaker, promise);
             return promise;
         } else {
-            promise.addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(final ChannelFuture future) throws Exception {
-                    if (future.isSuccess()) {
-                        ctx.pipeline().addBefore(ctx.name(), null, new Utf8FrameValidator());
-                        ctx.pipeline().addBefore(ctx.name(), null, new WebSocketCtrlFrameHandler());
-                    }
-                }
-            });
-            handshake0(ctx, req, handshaker, promise);
+            wsTunnelHandshake(ctx, httpRequest, handshaker, promise);
             return promise;
         }
     }
 
-    protected void handshake1(final ChannelHandlerContext ctx, final FullHttpRequest req, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {
-        ctx.channel().config().setAutoRead(false);
-        final HttpHeaders headers = req.headers();
-        final String hostname = headers.getAsString("X-TARGET-ADDRESS");
-        final int port = headers.getInt("X-TARGET-PORT", 0);
+    private URI getTargetUri(final FullHttpRequest httpRequest) {
+        final List<String> target = new QueryStringDecoder(httpRequest.uri()).parameters().get("target");
+        return null != target && target.size() > 0 ? URI.create(target.get(target.size() - 1)) : null;
+    }
+
+    protected void tcpTunnelHandshake(final ChannelHandlerContext ctx, final FullHttpRequest req, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {
+        final URI targetUri = getTargetUri(req);
+        final String hostname = targetUri.getHost();
+        final int port = targetUri.getPort();
 
         /*-
          * PROTOCOL: through / connect
          */
+        ctx.channel().config().setAutoRead(false);
         Channels.open(hostname, port, false, proxyGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
-                ctx.pipeline().addBefore(ctx.name(), "Socket->Socket", new SocketInboundRedirectHandler(targetCtx));
+                ctx.pipeline().addLast("Socket->Socket", new SocketInboundRedirectHandler(targetCtx));
                 targetCtx.pipeline().replace(targetCtx.name(), "Socket->Socket", new SocketInboundRedirectHandler(ctx));
 
                 ctx.channel().config().setAutoRead(true);
@@ -197,8 +196,11 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
                         if (future.isSuccess()) {
+                            ctx.pipeline().remove(WebSocketCtrlFrameHandler.class);
+                            ctx.pipeline().remove(Utf8FrameValidator.class);
                             ctx.pipeline().remove("wsencoder");
                             ctx.pipeline().remove("wsdecoder");
+                            ctx.pipeline().remove(ctx.name());
                         }
                     }
                 });
@@ -209,19 +211,17 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
         }).channel().closeFuture().addListener(f -> {
             if (ctx.channel().isActive()) {
                 log.info("目标地址({}/{}:{})断开连接", hostname, port, f.cause());
-                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         });
     }
 
-    protected void handshake0(final ChannelHandlerContext ctx, final FullHttpRequest req, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {
-        ctx.channel().config().setAutoRead(false);
-        final HttpHeaders headers = req.headers();
-//        String hostname = headers.getAsString("X-TARGET-ADDRESS");
-//        int port = headers.getInt("X-TARGET-PORT", 0);
-        final String hostname = "127.0.0.1";
-        final int port = 8888;
+    protected void wsTunnelHandshake(final ChannelHandlerContext ctx, final FullHttpRequest req, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {
+        final URI targetUri = getTargetUri(req);
+        final String hostname = targetUri.getHost();
+        final int port = targetUri.getPort();
 
+        ctx.channel().config().setAutoRead(false);
 
         /*-
          * PROTOCOL: through / connect
@@ -253,7 +253,7 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
         }).channel().closeFuture().addListener(f -> {
             if (ctx.channel().isActive()) {
                 log.info("目标地址({}/{}:{})断开连接", hostname, port, f.cause());
-                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         });
     }
@@ -293,7 +293,7 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
                 if (null != handshaker) {
                     handshaker.close(ctx.channel(), ((CloseWebSocketFrame) frame).retain());
                 } else {
-                    ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             } else {
                 ctx.fireChannelRead(ReferenceCountUtil.retain(frame));

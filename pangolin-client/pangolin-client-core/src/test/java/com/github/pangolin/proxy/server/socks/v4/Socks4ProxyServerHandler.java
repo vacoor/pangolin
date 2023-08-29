@@ -64,7 +64,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
         try {
             if (!(msg instanceof Socks4Message) || !((Socks4Message) msg).decoderResult().isSuccess()) {
                 log.error("Connection closed by UNKNOWN message: {}", msg.getClass().getName());
-                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 return;
             }
 
@@ -82,7 +82,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 }
             } else {
                 log.error("Connection closed by UNKNOWN message: {}", msg.getClass().getName());
-                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         } finally {
             ReferenceCountUtil.release(msg);
@@ -92,7 +92,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
         log.error("Software caused connection abort: {}", cause.getMessage(), cause);
-        ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 
     protected void connect(final ChannelHandlerContext ctx, final Socks4CommandRequest request, final EventLoopGroup proxyGroup) throws Exception {
@@ -124,7 +124,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 log.info("Connection to {} closed", future.channel().remoteAddress());
-                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         });
     }

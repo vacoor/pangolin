@@ -20,6 +20,9 @@ import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.io.PrintStream;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.function.Supplier;
 
 /**
  * TODO DOC ME!.
@@ -45,7 +48,13 @@ public class WebSocketBackhaulProxyServerShellHandler extends SimpleChannelInbou
             final PipedInputStream innerIn = new PipedInputStream(out);
             final OutputStream innerOut = new WebSocketBinaryOutputStream(webSocketTunnelContext);
             final ShellTerm terminal = new ShellTerm();
-            final LineReader reader = new ConsoleLineReader(server, innerIn, innerOut, terminal);
+            final LineReader reader = new ConsoleLineReader(innerIn, innerOut, terminal, new Supplier<Collection<String>>() {
+                @Override
+                public Collection<String> get() {
+                    // FIXME
+                    return Collections.emptyList();
+                }
+            });
             new WebSocketBackhaulProxyServerShell(server, reader, new PrintStream(innerOut), null).start();
 
             webSocketTunnelContext.pipeline().addLast(new SimpleChannelInboundHandler<WebSocketFrame>() {
@@ -113,7 +122,7 @@ public class WebSocketBackhaulProxyServerShellHandler extends SimpleChannelInbou
         @Override
         public void flush() throws IOException {
             try {
-                webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).sync();
+                webSocketContext.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).sync();
             } catch (final InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException(e.getMessage());

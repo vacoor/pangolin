@@ -92,7 +92,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         try {
             if (!(msg instanceof Socks5Message) || !((Socks5Message) msg).decoderResult().isSuccess()) {
                 log.error("Connection closed by UNKNOWN message: {}", msg.getClass().getName());
-                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 return;
             }
             if (msg instanceof Socks5InitialRequest) {
@@ -119,7 +119,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 }
             } else {
                 log.error("Connection closed by UNKNOWN message: {}", msg.getClass().getName());
-                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         } finally {
             ReferenceCountUtil.release(msg);
@@ -129,7 +129,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
         log.error("Software caused connection abort: {}", cause.getMessage(), cause);
-        ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 
     protected void connect(final ChannelHandlerContext requestCtx, final Socks5CommandRequest request, final EventLoopGroup proxyGroup) throws Exception {
@@ -163,7 +163,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (requestCtx.channel().isActive()) {
                     log.info("Connection to {} closed", future.channel().remoteAddress());
-                    requestCtx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    requestCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             }
         });

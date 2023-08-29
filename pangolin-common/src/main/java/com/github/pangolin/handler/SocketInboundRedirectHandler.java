@@ -2,6 +2,8 @@ package com.github.pangolin.handler;
 
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.ReferenceCountUtil;
@@ -24,7 +26,7 @@ public class SocketInboundRedirectHandler extends ChannelInboundHandlerAdapter {
     public void channelInactive(final ChannelHandlerContext inCtx) throws Exception {
         if (outCtx.channel().isActive()) {
             log.info("[tun@tcp {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
-            Channels.closeOnFlush(outCtx.channel());
+            outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }
 
@@ -39,15 +41,15 @@ public class SocketInboundRedirectHandler extends ChannelInboundHandlerAdapter {
         } else {
             ReferenceCountUtil.release(msg);
             log.error("[tun@tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
-            Channels.closeOnFlush(outCtx.channel());
+            outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }
 
     @Override
     public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) throws Exception {
         log.error("[tun@tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
-        Channels.closeOnFlush(inCtx.channel());
-        Channels.closeOnFlush(outCtx.channel());
+        inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 
     private String stringify(final ChannelHandlerContext ctx) {

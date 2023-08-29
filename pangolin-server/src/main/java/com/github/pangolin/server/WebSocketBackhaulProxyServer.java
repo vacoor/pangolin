@@ -378,45 +378,45 @@ public class WebSocketBackhaulProxyServer {
     /**
      * 节点注册.
      *
-     * @param webSocketContext 节点注册上下文
+     * @param webSocketCtx 节点注册上下文
      * @param handshake        节点注册握手信息
      */
-    private void agentRegistered(final ChannelHandlerContext webSocketContext, final HandshakeComplete handshake) {
+    private void agentRegistered(final ChannelHandlerContext webSocketCtx, final HandshakeComplete handshake) {
         final HttpHeaders headers = handshake.requestHeaders();
         final String nodeName = headers.getAsString("X-Node-Name");
         final String nodeVersion = headers.getAsString("X-Node-Version");
         final String nodeIntranet = headers.getAsString("X-Node-Intranet");
 
-        final SocketAddress address = webSocketContext.channel().remoteAddress();
+        final SocketAddress address = webSocketCtx.channel().remoteAddress();
         String nodeExtranet = address.toString();
         if (address instanceof InetSocketAddress) {
             nodeExtranet = ((InetSocketAddress) address).getAddress().getHostAddress();
         }
 
         if (null == nodeName || nodeName.isEmpty()) {
-            log.warn("{} Node register failure, node name missing, headers: {}", webSocketContext.channel(), headers);
-            WebSocketUtils.policyViolationClose(webSocketContext, "ILLEGAL_NODE_REGISTER");
+            log.warn("{} Node register failure, node name missing, headers: {}", webSocketCtx.channel(), headers);
+            WebSocketUtils.policyViolationClose(webSocketCtx, "ILLEGAL_AGENT_REGISTER");
             return;
         }
 
         // XXX encode as name
         final String nodeId = String.format("%s@%s/%s", nodeName, nodeIntranet, nodeExtranet);
-        final Agent node = new Agent(nodeId, nodeName, nodeVersion, nodeExtranet, nodeIntranet, webSocketContext);
+        final Agent node = new Agent(nodeId, nodeName, nodeVersion, nodeExtranet, nodeIntranet, webSocketCtx);
         // TODO register by nodeId
         if (null == registeredAgents.putIfAbsent(nodeName, node)) {
-            webSocketContext.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
+            webSocketCtx.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
                 @Override
                 public void operationComplete(final Future<? super Void> future) {
                     if (log.isDebugEnabled()) {
-                        log.debug("{} Node '{}' connection loosed", webSocketContext.channel(), nodeName);
+                        log.debug("{} Node '{}' connection loosed", webSocketCtx.channel(), nodeName);
                     }
                     agentUnregistered(nodeName, node);
                 }
             });
-            log.info("{} Node '{}' registered, version: {}, address: {}/{}", webSocketContext.channel(), nodeName, nodeVersion, nodeExtranet, nodeIntranet);
+            log.info("{} Node '{}' registered, version: {}, address: {}/{}", webSocketCtx.channel(), nodeName, nodeVersion, nodeExtranet, nodeIntranet);
         } else {
-            log.warn("{} Node register conflict, '{}' already registered, rejected", webSocketContext.channel(), nodeName);
-            WebSocketUtils.policyViolationClose(webSocketContext, "NODE_CONFLICT");
+            log.warn("{} Node register conflict, '{}' already registered, rejected", webSocketCtx.channel(), nodeName);
+            WebSocketUtils.policyViolationClose(webSocketCtx, "AGENT_CONFLICT");
         }
     }
 
@@ -989,7 +989,7 @@ public class WebSocketBackhaulProxyServer {
         @Override
         public void flush() throws IOException {
             try {
-                webSocketContext.writeAndFlush(Unpooled.EMPTY_BUFFER).sync();
+                webSocketContext.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).sync();
             } catch (final InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException(e.getMessage());

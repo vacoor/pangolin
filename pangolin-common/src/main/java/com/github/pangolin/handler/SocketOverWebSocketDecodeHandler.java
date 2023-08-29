@@ -3,6 +3,7 @@ package com.github.pangolin.handler;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.WebSocketUtils;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
@@ -29,7 +30,7 @@ public class SocketOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapt
     public void channelInactive(final ChannelHandlerContext inCtx) {
         if (outCtx.channel().isActive()) {
             log.error("[tun@ws/tcp {}(!) => {} Connection lost: The input closed the connection, the output will be closed", stringify(inCtx), stringify(outCtx));
-            Channels.closeOnFlush(outCtx.channel());
+            outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }
 
@@ -42,13 +43,13 @@ public class SocketOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapt
                 log.info("[tun@ws/tcp {}(!) => {}] Connection closed by {}/{}", stringify(inCtx), stringify(outCtx), c.statusCode(), c.reasonText());
 
                 ReferenceCountUtil.release(msg);
-                Channels.closeOnFlush(outCtx.channel());
-                Channels.closeOnFlush(inCtx.channel());
+                outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             } else if (msg instanceof PingWebSocketFrame) {
                 log.debug("[tun@ws/tcp {} => {}] Ping <==", stringify(inCtx), stringify(outCtx));
 
-                outCtx.writeAndFlush(Unpooled.EMPTY_BUFFER);
-                inCtx.writeAndFlush(new PongWebSocketFrame(((WebSocketFrame) msg).content()));
+                outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER);
+                inCtx.channel().writeAndFlush(new PongWebSocketFrame(((WebSocketFrame) msg).content()));
             } else if (msg instanceof PongWebSocketFrame) {
                 ReferenceCountUtil.release(msg);
             } else if (msg instanceof WebSocketFrame) {
@@ -62,7 +63,7 @@ public class SocketOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapt
 
                 // XXX
                 log.error("Unexpect websocket message: {}, will be closed", msg);
-                Channels.closeOnFlush(outCtx.channel());
+                outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 WebSocketUtils.unsupportedDataClose(inCtx, "Unexpect websocket message");
             }
         } else {
@@ -76,7 +77,7 @@ public class SocketOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapt
     public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) {
         log.error("[tun@ws/tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
 
-        Channels.closeOnFlush(outCtx.channel());
+        outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         WebSocketUtils.internalErrorClose(inCtx, cause.getMessage());
     }
 
