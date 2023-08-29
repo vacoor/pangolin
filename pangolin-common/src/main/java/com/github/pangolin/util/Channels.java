@@ -91,12 +91,6 @@ public class Channels {
         return SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
     }
 
-    public static void closeOnFlush(final Channel channel) {
-        if (null != channel && channel.isActive()) {
-            channel.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-        }
-    }
-
     public static void shutdownGroupOnClose(final Channel channel, final EventLoopGroup eventLoopGroup) {
         channel.closeFuture().addListener(new ChannelFutureListener() {
             @Override

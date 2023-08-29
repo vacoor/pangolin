@@ -8,6 +8,7 @@ import com.github.pangolin.server.shell.WebSocketBackhaulProxyServerShell;
 import com.github.pangolin.server.shell.ShellTerm;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
+import com.github.pangolin.util.Util;
 import com.github.pangolin.util.WebSocketUtils;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
@@ -26,6 +27,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
@@ -333,31 +335,6 @@ public class WebSocketBackhaulProxyServer {
         };
     }
 
-    private Map<String, String> determineQueryParameters(final String uri) {
-        final String rawQuery = URI.create(uri).getQuery();
-        return null != rawQuery ? splitQuery(rawQuery) : Collections.<String, String>emptyMap();
-    }
-
-    /**
-     * Splits query string to map.
-     *
-     * @param query the query string
-     * @return the name-value pairs
-     */
-    private static Map<String, String> splitQuery(final String query) {
-        final Map<String, String> result = new HashMap<String, String>(15);
-        final String[] pairs = query.split("&");
-        if (pairs.length > 0) {
-            for (final String pair : pairs) {
-                final String[] param = pair.split("=", 2);
-                if (param.length == 2) {
-                    result.put(param[0], param[1]);
-                }
-            }
-        }
-        return result;
-    }
-
     /*- *******************************
      *
      *
@@ -467,9 +444,10 @@ public class WebSocketBackhaulProxyServer {
     /* ***************** ]] 节点注册 **************** */
 
     private void webSocketTunnelRequested(final ChannelHandlerContext accessCtx, final HandshakeComplete handshake) throws InterruptedException {
-        final Map<String, String> parameters = determineQueryParameters(handshake.requestUri());
-        final String tunnel = parameters.get("tunnel");
-        final String target = parameters.get("target");
+        final QueryStringDecoder decoder = new QueryStringDecoder(handshake.requestUri());
+        final Map<String, List<String>> parameters = decoder.parameters();
+        final String tunnel = Util.last(parameters, "tunnel");
+        final String target = Util.last(parameters, "target");
 
         final Agent agent = lookupAgent(tunnel);
         if (null != agent) {
@@ -573,7 +551,7 @@ public class WebSocketBackhaulProxyServer {
             log.debug("{} tunnel request: {}", accessLink.channel(), id);
         }
 
-        final Promise<ChannelHandlerContext> webSocketBackhaulLinkPromise = GlobalEventExecutor.INSTANCE.newPromise();
+        final Promise<ChannelHandlerContext> webSocketBackhaulLinkPromise = accessLink.executor().newPromise();
         final Tunnel tunnel = new Tunnel(id, agentKey, accessLink, webSocketBackhaulLinkPromise);
         if (null != tunnelMap.putIfAbsent(id, tunnel)) {
             throw new IllegalStateException(String.format("%s request id '%s' is already used", accessLink.channel(), id));
@@ -612,7 +590,8 @@ public class WebSocketBackhaulProxyServer {
         backhaulCtx.channel().config().setAutoRead(false);
 
         // XXX 考虑是否验证来源.
-        final String accessRequestId = determineQueryParameters(handshake.requestUri()).get("id");
+        final QueryStringDecoder decoder = new QueryStringDecoder(handshake.requestUri());
+        final String accessRequestId = Util.last(decoder.parameters(), "id");
         final Tunnel tunnel = tunnelMap.get(accessRequestId);
         if (null != tunnel && !tunnel.backhaulLinkPromise.isDone()) {
             tunnel.backhaulLinkPromise.setSuccess(backhaulCtx);
