@@ -21,9 +21,13 @@ import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpResponse;
+import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketHandshakeException;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory;
 import io.netty.handler.ssl.SslHandler;
@@ -74,8 +78,8 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
     public void channelRead(final ChannelHandlerContext ctx, Object msg) throws Exception {
         try {
             if (!(msg instanceof FullHttpRequest) || !((FullHttpRequest) msg).decoderResult().isSuccess()) {
-                log.warn("Connection closed by Malformed Packet: {}", msg);
-                ctx.channel().close();
+                log.warn("Connection closed by UNKNOWN message: {}", msg.getClass().getName());
+                ctx.close();
                 return;
             }
 
@@ -110,6 +114,18 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
             ReferenceCountUtil.release(msg);
         }
     }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        if (cause instanceof WebSocketHandshakeException) {
+            final FullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.BAD_REQUEST, Unpooled.wrappedBuffer(cause.getMessage().getBytes()));
+            ctx.channel().writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+        } else {
+            ctx.fireExceptionCaught(cause);
+            ctx.close();
+        }
+    }
+
 
     private static void sendHttpResponse(ChannelHandlerContext ctx, HttpRequest req, HttpResponse res) {
         ChannelFuture f = ctx.channel().writeAndFlush(res);
@@ -269,16 +285,19 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
 
         @Override
         protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame frame) throws Exception {
-            if (frame instanceof CloseWebSocketFrame) {
+            /*
+            if (frame instanceof PingWebSocketFrame) {
+            } else if (frame instanceof PongWebSocketFrame) {
+            } else */ if (frame instanceof CloseWebSocketFrame) {
                 final WebSocketServerHandshaker handshaker = ctx.channel().attr(HANDSHAKER_ATTR_KEY).get();
                 if (null != handshaker) {
                     handshaker.close(ctx.channel(), ((CloseWebSocketFrame) frame).retain());
                 } else {
                     ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
+            } else {
+                ctx.fireChannelRead(ReferenceCountUtil.retain(frame));
             }
-            // final WebSocketServerHandshaker handshaker = ctx.channel().attr(HANDSHAKER_ATTR_KEY).get();
-            ctx.fireChannelRead(frame);
         }
 
     }

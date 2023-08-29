@@ -45,18 +45,10 @@ public class WebSocketBackhaulProxyAgent {
     }
 
     public Channel start() throws IOException, InterruptedException {
-        return channel = connect();
-    }
-
-    public boolean isRunning() {
-        return channel.isActive();
-    }
-
-    public void shutdownGracefully() {
-        if (null != channel) {
-            channel.close();
+        if (started.compareAndSet(false, true)) {
+            return channel = connect();
         }
-        workerGroup.shutdownGracefully();
+        return channel;
     }
 
     private Channel connect() throws IOException, InterruptedException {
@@ -69,6 +61,17 @@ public class WebSocketBackhaulProxyAgent {
                 new IdleStateHandler(600, 600, 600),
                 new WebSocketBackhaulProxyAgentHandler(name, handshaker, customHttpHeaders, workerGroup)
         ).sync().channel();
+    }
+
+    public boolean isRunning() {
+        return channel.isActive();
+    }
+
+    public void shutdownGracefully() {
+        if (null != channel) {
+            channel.close();
+        }
+        workerGroup.shutdownGracefully();
     }
 
     public static void main(String[] args) throws Exception {

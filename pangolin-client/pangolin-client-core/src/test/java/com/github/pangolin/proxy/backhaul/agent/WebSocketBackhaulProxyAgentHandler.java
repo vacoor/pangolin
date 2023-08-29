@@ -6,7 +6,12 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.HttpHeaders;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.timeout.IdleStateEvent;
 import lombok.extern.slf4j.Slf4j;
 
@@ -17,6 +22,8 @@ import java.util.regex.Pattern;
 
 @Slf4j
 public class WebSocketBackhaulProxyAgentHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
+    private static final String BACKHAUL_PROTOCOL = "TUNNEL_RESPONSE";
+
     private enum State {SUSPENDED, INITIALIZING, INITIALIZED}
 
     private final String name;
@@ -93,7 +100,7 @@ public class WebSocketBackhaulProxyAgentHandler extends SimpleChannelInboundHand
         final URI uri = handshaker.uri();
         final String endpoint = uri.getScheme() + "://" + uri.getHost() + ":" + uri.getPort() + uri.getPath();
         final URI backhaulWebSocketUri = URI.create(endpoint + "?id=" + id);
-        return newHandshaker(backhaulWebSocketUri, "TUNNEL_RESPONSE");
+        return newHandshaker(backhaulWebSocketUri, BACKHAUL_PROTOCOL);
     }
 
     private WebSocketClientHandshaker newHandshaker(final URI webSocketEndpoint, final String subprotocol) {
@@ -105,7 +112,7 @@ public class WebSocketBackhaulProxyAgentHandler extends SimpleChannelInboundHand
 
     @Override
     public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) throws Exception {
-        log.warn("{} Software caused connection abort: {}", webSocketContext.channel(), cause.getMessage(), cause);
+        log.warn("Software caused connection abort: {}", cause.getMessage(), cause);
         WebSocketUtils.internalErrorClose(webSocketContext, cause.getMessage());
     }
 }
