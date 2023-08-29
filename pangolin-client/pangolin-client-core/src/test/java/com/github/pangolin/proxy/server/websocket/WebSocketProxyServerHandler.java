@@ -21,6 +21,7 @@ import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpResponse;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker;
@@ -34,6 +35,7 @@ import static io.netty.handler.codec.http.HttpMethod.CONNECT;
 import static io.netty.handler.codec.http.HttpMethod.GET;
 import static io.netty.handler.codec.http.HttpResponseStatus.FORBIDDEN;
 import static io.netty.handler.codec.http.HttpUtil.isKeepAlive;
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 /**
  * @see io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler
@@ -57,6 +59,8 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         /*-
+         * http server codec
+         * wsencoder, wsdecoder
          * WebSocketServerProtocolHandshakeHandler --> 403
          * Utf8FrameValidator
          * WebSocketServerProtocolHandler
@@ -69,65 +73,58 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(final ChannelHandlerContext ctx, Object msg) throws Exception {
         try {
-            if (msg instanceof FullHttpRequest && ((FullHttpRequest) msg).decoderResult().isSuccess()) {
-                final FullHttpRequest httpRequest = (FullHttpRequest) msg;
-                if (GET.equals(httpRequest.method())) {
-                    final WebSocketServerHandshakerFactory factory = new WebSocketServerHandshakerFactory(
-                            getWebSocketLocation(ctx.pipeline(), httpRequest, ""),
-                            ",CONNECT", allowExtensions, maxFramePayloadSize, allowMaskMismatch
-                    );
-                    final WebSocketServerHandshaker handshaker = factory.newHandshaker(httpRequest);
-                    if (null != handshaker) {
-                        final ChannelFuture handshakeFuture = handshake(ctx, httpRequest, handshaker, ctx.newPromise());
-                        handshakeFuture.addListener(new ChannelFutureListener() {
-                            @Override
-                            public void operationComplete(final ChannelFuture future) throws Exception {
-                                if (!future.isSuccess()) {
-                                    ctx.fireExceptionCaught(future.cause());
-                                }
-                            }
-                        });
-                        ctx.channel().attr(HANDSHAKER_ATTR_KEY).set(handshaker);
-//                        ctx.pipeline().replace(this, "WS403Responder", new HttpRequestForbiddenResponder());
-                    } else {
-                        WebSocketServerHandshakerFactory.sendUnsupportedVersionResponse(ctx.channel());
-                    }
-                } else {
-                    ctx.writeAndFlush(newForbiddenResponse(httpRequest));
-                }
-            } else {
-                Channels.closeOnFlush(ctx.channel());
+            if (!(msg instanceof FullHttpRequest) || !((FullHttpRequest) msg).decoderResult().isSuccess()) {
+                log.warn("Connection closed by Malformed Packet: {}", msg);
+                ctx.channel().close();
+                return;
             }
+
+            final FullHttpRequest httpRequest = (FullHttpRequest) msg;
+            if (!GET.equals(httpRequest.method())) {
+                sendHttpResponse(ctx, httpRequest, new DefaultFullHttpResponse(HTTP_1_1, FORBIDDEN));
+                return;
+            }
+
+            final WebSocketServerHandshaker handshaker = newHandshaker(ctx, httpRequest);
+            if (null == handshaker) {
+                WebSocketServerHandshakerFactory.sendUnsupportedVersionResponse(ctx.channel());
+                return;
+            }
+
+            final ChannelFuture handshakeFuture = handshake(ctx, httpRequest, handshaker, ctx.newPromise());
+            handshakeFuture.addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(final ChannelFuture future) throws Exception {
+                    if (!future.isSuccess()) {
+                        ctx.fireExceptionCaught(future.cause());
+                    } else {
+                        // Kept for compatibility
+//                        ctx.fireUserEventTriggered(WebSocketServerProtocolHandler.ServerHandshakeStateEvent.HANDSHAKE_COMPLETE);
+//                        ctx.fireUserEventTriggered(new WebSocketServerProtocolHandler.HandshakeComplete(httpRequest.uri(), httpRequest.headers(), handshaker.selectedSubprotocol()));
+                    }
+                }
+            });
+            ctx.channel().attr(HANDSHAKER_ATTR_KEY).set(handshaker);
+//                        ctx.pipeline().replace(this, "WS403Responder", new HttpRequestForbiddenResponder());
         } finally {
             ReferenceCountUtil.release(msg);
         }
     }
 
-    private class WebSocketCtrlFrameHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
-
-        @Override
-        protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame msg) throws Exception {
-            // final WebSocketServerHandshaker handshaker = ctx.channel().attr(HANDSHAKER_ATTR_KEY).get();
-            ctx.fireChannelRead(msg);
+    private static void sendHttpResponse(ChannelHandlerContext ctx, HttpRequest req, HttpResponse res) {
+        ChannelFuture f = ctx.channel().writeAndFlush(res);
+        if (!isKeepAlive(req) || res.status().code() != 200) {
+            f.addListener(ChannelFutureListener.CLOSE);
         }
     }
 
-    private class HttpRequestForbiddenResponder extends ChannelInboundHandlerAdapter {
-        @Override
-        public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-            if (msg instanceof HttpRequest) {
-                ReferenceCountUtil.release(msg);
-                ctx.channel().writeAndFlush(newForbiddenResponse((HttpRequest) msg));
-            } else {
-                ctx.fireChannelRead(msg);
-            }
-        }
+    private WebSocketServerHandshaker newHandshaker(final ChannelHandlerContext ctx, final FullHttpRequest httpRequest) {
+        final WebSocketServerHandshakerFactory factory = new WebSocketServerHandshakerFactory(
+                getWebSocketLocation(ctx.pipeline(), httpRequest, ""),
+                ",CONNECT", allowExtensions, maxFramePayloadSize, allowMaskMismatch
+        );
+        return factory.newHandshaker(httpRequest);
     }
-
-    private FullHttpResponse newForbiddenResponse(final HttpRequest httpRequest) {
-        return new DefaultFullHttpResponse(httpRequest.protocolVersion(), FORBIDDEN);
-    }
-
 
     protected ChannelPromise handshake(final ChannelHandlerContext ctx, final FullHttpRequest req, final WebSocketServerHandshaker handshaker, final ChannelPromise promise) throws Exception {
         /*
@@ -245,11 +242,9 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
         });
     }
 
-    private static void sendHttpResponse(ChannelHandlerContext ctx, HttpRequest req, HttpResponse res) {
-        ChannelFuture f = ctx.channel().writeAndFlush(res);
-        if (!isKeepAlive(req) || res.status().code() != 200) {
-            f.addListener(ChannelFutureListener.CLOSE);
-        }
+
+    private FullHttpResponse newForbiddenResponse(final HttpRequest httpRequest) {
+        return new DefaultFullHttpResponse(httpRequest.protocolVersion(), FORBIDDEN);
     }
 
     private static String getWebSocketLocation(ChannelPipeline cp, HttpRequest req, String path) {
@@ -268,5 +263,35 @@ public class WebSocketProxyServerHandler extends ChannelInboundHandlerAdapter {
 
     static void setHandshaker(Channel channel, WebSocketServerHandshaker handshaker) {
         channel.attr(HANDSHAKER_ATTR_KEY).set(handshaker);
+    }
+
+    private class WebSocketCtrlFrameHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
+
+        @Override
+        protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame frame) throws Exception {
+            if (frame instanceof CloseWebSocketFrame) {
+                final WebSocketServerHandshaker handshaker = ctx.channel().attr(HANDSHAKER_ATTR_KEY).get();
+                if (null != handshaker) {
+                    handshaker.close(ctx.channel(), ((CloseWebSocketFrame) frame).retain());
+                } else {
+                    ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                }
+            }
+            // final WebSocketServerHandshaker handshaker = ctx.channel().attr(HANDSHAKER_ATTR_KEY).get();
+            ctx.fireChannelRead(frame);
+        }
+
+    }
+
+    private class HttpRequestForbiddenResponder extends ChannelInboundHandlerAdapter {
+        @Override
+        public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+            if (msg instanceof HttpRequest) {
+                ReferenceCountUtil.release(msg);
+                ctx.channel().writeAndFlush(newForbiddenResponse((HttpRequest) msg));
+            } else {
+                ctx.fireChannelRead(msg);
+            }
+        }
     }
 }

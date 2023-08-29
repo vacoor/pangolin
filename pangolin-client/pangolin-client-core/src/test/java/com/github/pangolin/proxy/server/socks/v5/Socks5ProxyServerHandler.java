@@ -2,9 +2,28 @@ package com.github.pangolin.proxy.server.socks.v5;
 
 import com.github.pangolin.handler.SocketInboundRedirectHandler;
 import com.github.pangolin.util.Channels;
-import io.netty.channel.*;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
 import io.netty.handler.codec.ByteToMessageDecoder;
-import io.netty.handler.codec.socksx.v5.*;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5CommandResponse;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5InitialResponse;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5PasswordAuthResponse;
+import io.netty.handler.codec.socksx.v5.Socks5AddressType;
+import io.netty.handler.codec.socksx.v5.Socks5AuthMethod;
+import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
+import io.netty.handler.codec.socksx.v5.Socks5CommandRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5CommandStatus;
+import io.netty.handler.codec.socksx.v5.Socks5CommandType;
+import io.netty.handler.codec.socksx.v5.Socks5InitialRequest;
+import io.netty.handler.codec.socksx.v5.Socks5InitialRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5Message;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequest;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthStatus;
+import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -69,32 +88,32 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
         try {
-            if (msg instanceof Socks5Message && ((Socks5Message) msg).decoderResult().isSuccess()) {
-                if (msg instanceof Socks5InitialRequest) {
-                    final boolean needAuth = isHasAuthorization();
-                    final ByteToMessageDecoder newDecoder = needAuth ? new Socks5PasswordAuthRequestDecoder() : new Socks5CommandRequestDecoder();
-                    ctx.pipeline().replace(decoderName, decoderName, newDecoder);
-                    ctx.writeAndFlush(new DefaultSocks5InitialResponse(isHasAuthorization() ? Socks5AuthMethod.PASSWORD : Socks5AuthMethod.NO_AUTH));
-                } else if (msg instanceof Socks5PasswordAuthRequest) {
-                    final Socks5PasswordAuthRequest request = (Socks5PasswordAuthRequest) msg;
-                    if (nullSafeEquals(username, request.username()) && nullSafeEquals(password, request.password())) {
-                        ctx.pipeline().replace(decoderName, decoderName, new Socks5CommandRequestDecoder());
-                        ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.SUCCESS));
-                    } else {
-                        ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.FAILURE));
-                    }
-                } else if (msg instanceof Socks5CommandRequest) {
-                    final Socks5CommandRequest request = (Socks5CommandRequest) msg;
-                    final Socks5CommandType type = request.type();
-                    final Socks5AddressType addressType = request.dstAddrType();
-                    if (!Socks5CommandType.CONNECT.equals(type)) {
-                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
-                    } else {
-                        connect(ctx, request, proxyGroup);
-                    }
+            if (!(msg instanceof Socks5Message) || !((Socks5Message) msg).decoderResult().isSuccess()) {
+                log.error("Connection closed by Malformed Packet: {}", msg);
+                Channels.closeOnFlush(ctx.channel());
+                return;
+            }
+            if (msg instanceof Socks5InitialRequest) {
+                final boolean needAuth = isHasAuthorization();
+                final ByteToMessageDecoder newDecoder = needAuth ? new Socks5PasswordAuthRequestDecoder() : new Socks5CommandRequestDecoder();
+                ctx.pipeline().replace(decoderName, decoderName, newDecoder);
+                ctx.writeAndFlush(new DefaultSocks5InitialResponse(isHasAuthorization() ? Socks5AuthMethod.PASSWORD : Socks5AuthMethod.NO_AUTH));
+            } else if (msg instanceof Socks5PasswordAuthRequest) {
+                final Socks5PasswordAuthRequest request = (Socks5PasswordAuthRequest) msg;
+                if (nullSafeEquals(username, request.username()) && nullSafeEquals(password, request.password())) {
+                    ctx.pipeline().replace(decoderName, decoderName, new Socks5CommandRequestDecoder());
+                    ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.SUCCESS));
                 } else {
-                    Channels.closeOnFlush(ctx.channel());
-                    log.error("Connection closed by Malformed Packet: {}", msg);
+                    ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.FAILURE));
+                }
+            } else if (msg instanceof Socks5CommandRequest) {
+                final Socks5CommandRequest request = (Socks5CommandRequest) msg;
+                final Socks5CommandType type = request.type();
+                final Socks5AddressType addressType = request.dstAddrType();
+                if (!Socks5CommandType.CONNECT.equals(type)) {
+                    ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
+                } else {
+                    connect(ctx, request, proxyGroup);
                 }
             } else {
                 Channels.closeOnFlush(ctx.channel());
