@@ -2,6 +2,8 @@ package com.github.pangolin.proxy.server.socks.v5;
 
 import com.github.pangolin.handler.SocketInboundRedirectHandler;
 import com.github.pangolin.util.Channels;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -89,8 +91,8 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
         try {
             if (!(msg instanceof Socks5Message) || !((Socks5Message) msg).decoderResult().isSuccess()) {
-                log.error("Connection closed by Malformed Packet: {}", msg);
-                Channels.closeOnFlush(ctx.channel());
+                log.error("Connection closed by UNKNOWN message: {}", msg.getClass().getName());
+                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 return;
             }
             if (msg instanceof Socks5InitialRequest) {
@@ -116,12 +118,18 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                     connect(ctx, request, proxyGroup);
                 }
             } else {
-                Channels.closeOnFlush(ctx.channel());
-                log.error("Connection closed by Malformed Packet: {}", msg);
+                log.error("Connection closed by UNKNOWN message: {}", msg.getClass().getName());
+                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         } finally {
             ReferenceCountUtil.release(msg);
         }
+    }
+
+    @Override
+    public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
+        log.error("Software caused connection abort: {}", cause.getMessage(), cause);
+        ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 
     protected void connect(final ChannelHandlerContext requestCtx, final Socks5CommandRequest request, final EventLoopGroup proxyGroup) throws Exception {
@@ -139,18 +147,24 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 delegateCtx.channel().config().setAutoRead(true);
                 requestCtx.channel().config().setAutoRead(true);
             }
-        }).addListener(future -> {
-            if (future.isSuccess()) {
-                log.info("Connection to {}:{}: established", address, port);
-                requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(g -> requestCtx.pipeline().remove(Socks5ServerEncoder.DEFAULT));
-            } else {
-                log.warn("Failed to Connect to {}:{}: {}", address, port, future.cause());
-                requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)).addListener(ChannelFutureListener.CLOSE);
+        }).addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (future.isSuccess()) {
+                    log.info("Connection established: {}", future.channel().remoteAddress());
+                    requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(g -> requestCtx.pipeline().remove(Socks5ServerEncoder.DEFAULT));
+                } else {
+                    log.warn("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
+                    requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)).addListener(ChannelFutureListener.CLOSE);
+                }
             }
-        }).channel().closeFuture().addListener(f -> {
-            if (requestCtx.channel().isActive()) {
-                log.info("Connection to {}:{} closed", address, port);
-                Channels.closeOnFlush(requestCtx.channel());
+        }).channel().closeFuture().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (requestCtx.channel().isActive()) {
+                    log.info("Connection to {} closed", future.channel().remoteAddress());
+                    requestCtx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                }
             }
         });
     }

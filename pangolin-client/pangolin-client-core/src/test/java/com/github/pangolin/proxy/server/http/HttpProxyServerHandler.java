@@ -78,7 +78,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
         try {
             if (!(msg instanceof FullHttpRequest) || !((FullHttpRequest) msg).decoderResult().isSuccess()) {
-                log.error("Connection closed by Malformed Packet: {}", msg);
+                log.error("Connection closed by UNKNOWN message: {}", msg.getClass());
                 ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 return;
             }
@@ -112,7 +112,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
     }
 
     private boolean authenticate(final FullHttpRequest httpRequest) {
-        return null != authorization && !authorization.equals(httpRequest.headers().get(HttpHeaderNames.PROXY_AUTHORIZATION));
+        return null == authorization || authorization.equals(httpRequest.headers().get(HttpHeaderNames.PROXY_AUTHORIZATION));
     }
 
     private String encode(final String username, final String password) {
@@ -159,7 +159,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRead(final ChannelHandlerContext proxyCtx, final Object msg) throws Exception {
-                        ctx.writeAndFlush(httpRequest.retain());
+                        ctx.writeAndFlush(msg);
                     }
                 });
             }
@@ -192,20 +192,26 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                 ctx.channel().config().setAutoRead(true);
                 delegateCtx.channel().config().setAutoRead(true);
             }
-        }).addListener(future -> {
-            if (future.isSuccess()) {
-                log.info("Connection to {}:{}: established", address, port);
-                ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.OK)).addListener(g -> {
-                    ctx.pipeline().remove(HttpServerCodec.class);
-                });
-            } else {
-                log.warn("Failed to Connect to {}:{}: {}", address, port, future.cause());
-                ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
+        }).addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (future.isSuccess()) {
+                    log.info("Connection established: {}", future.channel().remoteAddress());
+                    ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.OK)).addListener(g -> {
+                        ctx.pipeline().remove(HttpServerCodec.class);
+                    });
+                } else {
+                    log.warn("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
+                    ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
+                }
             }
-        }).channel().closeFuture().addListener(future -> {
-            if (ctx.channel().isActive()) {
-                log.info("Connection to {}:{} closed", address, port);
-                Channels.closeOnFlush(ctx.channel());
+        }).channel().closeFuture().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (ctx.channel().isActive()) {
+                    log.info("Connection to {} closed", future.channel().remoteAddress());
+                    ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                }
             }
         });
     }
