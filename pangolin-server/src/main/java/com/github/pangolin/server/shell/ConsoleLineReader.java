@@ -40,8 +40,8 @@ public class ConsoleLineReader implements LineReader {
         final AggregateCompleter completer = new AggregateCompleter();
         final LazyStringsCompleter agentCompleter = new LazyStringsCompleter(agentNamesSupplier);
         completer.getCompleters().add(new StringsCompleter("exit"));
-        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("broker"), new StringsCompleter("list"), NullCompleter.INSTANCE));
-        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("broker"), new StringsCompleter("remove"), agentCompleter, NullCompleter.INSTANCE));
+        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("agent"), new StringsCompleter("list"), NullCompleter.INSTANCE));
+        completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("agent"), new StringsCompleter("remove"), agentCompleter, NullCompleter.INSTANCE));
         completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("list"), NullCompleter.INSTANCE));
         completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("add"), NullCompleter.INSTANCE, agentCompleter, NullCompleter.INSTANCE));
         completer.getCompleters().add(new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("remove"), NullCompleter.INSTANCE));

@@ -102,7 +102,7 @@ public class Forwarder {
     }
 
     @AllArgsConstructor
-    private class Forwarding {
+    public class Forwarding {
         private final SocketAddress localAddr;
         private final String agentKey;
         private final SocketAddress remoteAddr;

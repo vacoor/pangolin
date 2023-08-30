@@ -8,18 +8,21 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ConnectTimeoutException;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.QueryStringDecoder;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.concurrent.Promise;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -62,6 +65,9 @@ public class Discover {
     private void agentUnregistered(final Agent agent) {
         if (registeredAgents.remove(agent.id, agent)) {
             log.info("Agent unregistered: {}", stringify(agent));
+            if (agent.bus.channel().isActive()) {
+                agent.bus.writeAndFlush(new CloseWebSocketFrame()).addListener(ChannelFutureListener.CLOSE);
+            }
         } else {
 
         }
@@ -151,7 +157,8 @@ public class Discover {
         final String intranet = headers.getAsString(AGENT_INTRANET);
         final String extranet = stringify(ctx.channel().remoteAddress());
 
-        final String id = String.format("%s@%s/%s", name, intranet, extranet);
+        final String id = ctx.channel().id().toString();
+        // final String id = String.format("%s@%s/%s", name, intranet, extranet);
         return new Agent(id, name, version, intranet, extranet, ctx);
     }
 
@@ -169,8 +176,25 @@ public class Discover {
         return null;
     }
 
+    public Collection<Agent> getAgents() {
+        return registeredAgents.values();
+    }
+
+    public Collection<Tunnel> getTunnels() {
+        return tunnelMap.values();
+    }
+
+    public boolean kill(final String tunnelId) throws InterruptedException {
+        final Tunnel tunnel = tunnelMap.get(tunnelId);
+        if (null != tunnel) {
+            tunnel.accessCtx.close().sync();
+        }
+        return null != tunnel;
+    }
+
+    @Getter
     @AllArgsConstructor
-    private class Agent {
+    public static class Agent {
         private final String id;
         private final String name;
         private final String version;
@@ -180,11 +204,20 @@ public class Discover {
     }
 
     @AllArgsConstructor
-    private class Tunnel {
+    public class Tunnel {
         private final String id;
         private final Agent agent;
         private final URI target;
         private final ChannelHandlerContext accessCtx;
         private final Promise<ChannelHandlerContext> backhaulCtxPromise;
+    }
+
+    public static Discover mock() {
+        Discover discover = new Discover();
+        Agent agent = new Agent("id", "MOCK", "v1.0", "127.0.0.1", "127.0.0.1", null);
+        Agent agent2 = new Agent("id2", "MOCK2", "v1.0", "127.0.0.1", "127.0.0.1", null);
+        discover.registeredAgents.put(agent.id, agent);
+        discover.registeredAgents.put(agent2.id, agent2);
+        return discover;
     }
 }
