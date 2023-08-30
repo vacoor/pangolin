@@ -74,8 +74,8 @@ public class WebSocketBackhaulProxyServerSpringApplication {
         }, 60, 60, TimeUnit.SECONDS);
 
         final Terminal terminal = TerminalFactory.create();
-        final LineReader lineReader = !terminal.isEchoEnabled() && !terminal.isAnsiSupported() ? new GenericLineReader(System.in, System.out) : new ConsoleLineReader(server, System.in, System.out, terminal);
-        new WebSocketBackhaulProxyServerShell(server, lineReader, System.out, (Map) props).run();
+        // final LineReader lineReader = !terminal.isEchoEnabled() && !terminal.isAnsiSupported() ? new GenericLineReader(System.in, System.out) : new ConsoleLineReader(System.in, System.out, terminal);
+        // new WebSocketBackhaulProxyServerShell(server, lineReader, System.out, (Map) props).run();
         // new WebSocketBackhaulProxyServerShell(server, new GenericLineReader(System.in, System.out), System.out).run();
     }
 

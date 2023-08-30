@@ -1,6 +1,5 @@
 package com.github.pangolin.handler;
 
-import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.WebSocketUtils;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;

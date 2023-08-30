@@ -187,6 +187,8 @@ public class WebSocketBackhaulProxyServer {
 
     private Channel primaryServerChannel;
 
+    private Discover discover;
+
     /**
      * 创建隧道服务实例.
      *
@@ -211,6 +213,7 @@ public class WebSocketBackhaulProxyServer {
         this.listenPort = listenPort;
         this.endpointPath = endpointPath;
         this.useSsl = useSsl;
+        this.discover = new Discover();
     }
 
     /**
