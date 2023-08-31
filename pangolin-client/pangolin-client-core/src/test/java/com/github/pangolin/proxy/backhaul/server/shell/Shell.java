@@ -3,24 +3,30 @@ package com.github.pangolin.proxy.backhaul.server.shell;
 import com.github.pangolin.proxy.backhaul.server.Discover;
 import com.github.pangolin.proxy.backhaul.server.Forwarder;
 import com.google.common.collect.Lists;
+import io.netty.channel.nio.NioEventLoopGroup;
+import jline.UnsupportedTerminal;
 import jline.console.ConsoleReader;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.FileDescriptor;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.net.InetSocketAddress;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Slf4j
 public class Shell {
     private static final Pattern ARGS_PATTERN = Pattern.compile("\\s*([^\"\']\\S*|\"[^\"]*\"|'[^']*')\\s*");
     private static final Pattern QUOTED_PATTERN = Pattern.compile("^([\'\"])(.*)(\\1)$");
+    private static final String CRLF = "\n\r";
 
     private final boolean breakOnNull;
     private final ConsoleReader console;
@@ -141,7 +147,7 @@ public class Shell {
         out.println();
     }
 
-    private void doExecuteForwardCommand(final List<String> args, final PrintWriter out) {
+    private void doExecuteForwardCommand(final List<String> args, final PrintWriter out) throws InterruptedException {
         if ("list".equals(safeGet(args, 0))) {
             final Collection<Forwarder.Forwarding> forwardings = getForwardings();
             final String[][] table = new String[forwardings.size() + 1][];
@@ -160,7 +166,7 @@ public class Shell {
             final String destination = safeGet(args, 3);
             if (null != localPortStr && null != agentKey && null != destination) {
                 final int localPort = Integer.parseInt(localPortStr);
-                addForwarding(localPort, destination);
+                addForwarding(localPort, agentKey, destination);
                 out.println("OK");
                 return;
             }
@@ -194,14 +200,23 @@ public class Shell {
     }
 
     private Collection<Forwarder.Forwarding> getForwardings() {
-        return Collections.emptyList();
+        return forwarder.getForwardings();
     }
 
-    private void addForwarding(final int port, final String destination) {
+    private void addForwarding(final int port, final String agentKey, final String destination) throws InterruptedException {
+        final String[] segments = destination.split(":");
+        if (2 == segments.length) {
+            final int rport = Integer.parseInt(segments[1]);
+            forwarder.addForwarding(port, agentKey, InetSocketAddress.createUnresolved(segments[0], rport));
+            return;
+        }
+        throw new IllegalArgumentException(String.format("Bad local forwarding specification: '%s'", destination));
     }
 
     private void removeForwarding(final int port) {
+        forwarder.removeForwarding(port);
     }
+
 
     private String safeGet(final List<String> args, final int index) {
         return -1 < index && index < args.size() ? args.get(index) : null;
@@ -261,4 +276,16 @@ public class Shell {
         return new Shell(console, breakOnNull, discover, forwarder);
     }
 
+    public static void main(String[] args) throws IOException {
+        final Discover discover = new Discover();
+        final NioEventLoopGroup bossGroup = new NioEventLoopGroup(2);
+        final NioEventLoopGroup workerGroup = new NioEventLoopGroup();
+        final Forwarder forwarder = new Forwarder(discover, bossGroup, workerGroup);
+        final ConsoleReader console = ConsoleReaderFactory.newConsoleReader(
+                new FileInputStream(FileDescriptor.in), System.out,
+                new UnsupportedTerminal(false, false),
+                () -> discover.getAgents().stream().map(Discover.Agent::getName).collect(Collectors.toSet())
+        );
+        Shell.create(console, true, discover, forwarder).start();
+    }
 }

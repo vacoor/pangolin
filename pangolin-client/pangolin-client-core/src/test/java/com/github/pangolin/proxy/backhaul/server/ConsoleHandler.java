@@ -2,14 +2,18 @@ package com.github.pangolin.proxy.backhaul.server;
 
 import com.github.pangolin.proxy.backhaul.server.shell.ConsoleReaderFactory;
 import com.github.pangolin.proxy.backhaul.server.shell.Shell;
+import com.github.pangolin.util.Channels;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
 import jline.TerminalSupport;
 import jline.console.ConsoleReader;
@@ -54,7 +58,7 @@ public class ConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> 
 
             this.terminal = terminal;
             this.toConsoleIn = toConsoleIn;
-            Shell.create(console, true, discover, null).start();
+            Shell.create(console, true, discover, forwarder).start();
         }
     }
 
@@ -99,7 +103,10 @@ public class ConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> 
                 /*-
                  * await: 不等待多线程写入时会丢失数据或多次发送相同数据.
                  */
-                delegateCtx.write(new BinaryWebSocketFrame(Unpooled.wrappedBuffer(b, off, len))).sync();
+                if (delegateCtx.channel().isActive()) {
+                    // delegateCtx.write(new BinaryWebSocketFrame(Unpooled.wrappedBuffer(b, off, len))).sync();
+                    delegateCtx.writeAndFlush(new BinaryWebSocketFrame(Unpooled.wrappedBuffer(b, off, len))).sync();
+                }
             } catch (final InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException(e.getMessage());
@@ -114,7 +121,9 @@ public class ConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> 
         @Override
         public void flush() throws IOException {
             try {
-                delegateCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).sync();
+                if (delegateCtx.channel().isActive()) {
+                    delegateCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).sync();
+                }
             } catch (final InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException(e.getMessage());
@@ -123,7 +132,9 @@ public class ConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> 
 
         @Override
         public void close() {
-            delegateCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            if (delegateCtx.channel().isActive()) {
+                delegateCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            }
         }
 
     }
@@ -137,17 +148,11 @@ public class ConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> 
         }
 
         HeadlessTerminal(boolean ansiSupported, boolean echoEnabled, final int cols, final int rows) {
-            super(false);
+            super(true);
             setAnsiSupported(ansiSupported);
             setEchoEnabled(echoEnabled);
             this.cols = cols;
             this.rows = rows;
-        }
-
-        @Override
-        public void init() {
-            setEchoEnabled(false);
-            setAnsiSupported(true);
         }
 
         @Override
@@ -171,4 +176,31 @@ public class ConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> 
         }
     }
 
+    public static void main(String[] args) throws InterruptedException {
+
+        final Discover discover = new Discover();
+        final NioEventLoopGroup bossGroup = new NioEventLoopGroup(2);
+        final NioEventLoopGroup workerGroup = new NioEventLoopGroup();
+        final Forwarder forwarder = new Forwarder(discover, bossGroup, workerGroup);
+        Channels.listen(null, 10443, new NioEventLoopGroup(), new NioEventLoopGroup(), new ChannelInitializer<SocketChannel>() {
+            @Override
+            protected void initChannel(final SocketChannel ch) throws Exception {
+                final ChannelPipeline pipeline = ch.pipeline();
+//                if (null != sslContext) {
+//                    pipeline.addLast(sslContext.newHandler(ch.alloc()));
+//                }
+                pipeline.addLast(
+                        new HttpServerCodec(),
+                        new HttpObjectAggregator(8 * 1024 * 1024),
+                        /*- 浏览器似乎处理压缩有问题(permessage-deflate).
+                        new WebSocketServerCompressionHandler(),
+                        new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
+                        */
+                        new WebSocketServerProtocolHandler("", "*", true, 65536, true, true),
+                        // new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
+                        new ConsoleHandler(discover, forwarder)
+                );
+            }
+        }).sync().channel().closeFuture().sync();
+    }
 }
