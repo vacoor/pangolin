@@ -39,7 +39,6 @@ import io.netty.util.concurrent.DefaultThreadFactory;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
 import io.netty.util.concurrent.GenericFutureListener;
-import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.concurrent.Promise;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -53,11 +52,8 @@ import java.io.PipedOutputStream;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.net.URI;
 import java.security.cert.CertificateException;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -187,7 +183,7 @@ public class WebSocketBackhaulProxyServer {
 
     private Channel primaryServerChannel;
 
-    private Discover discover;
+//    private Discover discover;
 
     /**
      * 创建隧道服务实例.
@@ -213,7 +209,7 @@ public class WebSocketBackhaulProxyServer {
         this.listenPort = listenPort;
         this.endpointPath = endpointPath;
         this.useSsl = useSsl;
-        this.discover = new Discover();
+//        this.discover = new Discover();
     }
 
     /**

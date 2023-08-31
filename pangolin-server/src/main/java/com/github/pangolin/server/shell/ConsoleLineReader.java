@@ -1,11 +1,11 @@
 package com.github.pangolin.server.shell;
 
-import com.github.pangolin.server.WebSocketBackhaulProxyServer;
 import jline.Terminal;
 import jline.console.ConsoleReader;
 import jline.console.completer.AggregateCompleter;
 import jline.console.completer.ArgumentCompleter;
 import jline.console.completer.CandidateListCompletionHandler;
+import jline.console.completer.Completer;
 import jline.console.completer.CompletionHandler;
 import jline.console.completer.NullCompleter;
 import jline.console.completer.StringsCompleter;
@@ -14,7 +14,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Collection;
+import java.util.List;
+import java.util.TreeSet;
 import java.util.function.Supplier;
+
+import static jline.internal.Preconditions.checkNotNull;
 
 public class ConsoleLineReader implements LineReader {
     protected final InputStream in;
@@ -51,6 +55,7 @@ public class ConsoleLineReader implements LineReader {
         return console;
     }
 
+
     protected String getPrompt() {
         return "# ";
     }
@@ -63,5 +68,31 @@ public class ConsoleLineReader implements LineReader {
     @Override
     public void close() throws IOException {
         console.close();
+    }
+
+
+    private class LazyStringsCompleter implements Completer {
+        private final Supplier<Collection<String>> supplier;
+
+        LazyStringsCompleter(final Supplier<Collection<String>> supplier) {
+            this.supplier = supplier;
+        }
+
+        @Override
+        public int complete(final String buffer, final int cursor, final List<CharSequence> candidates) {
+            checkNotNull(candidates);
+
+            if (null == buffer) {
+                candidates.addAll(supplier.get());
+            } else {
+                final TreeSet<String> strings = new TreeSet<>(supplier.get());
+                for (String match : strings) {
+                    if (match.startsWith(buffer)) {
+                        candidates.add(match);
+                    }
+                }
+            }
+            return candidates.isEmpty() ? -1 : 0;
+        }
     }
 }

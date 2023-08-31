@@ -1,4 +1,4 @@
-package com.github.pangolin.server;
+package com.github.pangolin.proxy.backhaul.server;
 
 import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
@@ -15,6 +15,7 @@ import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
 import io.netty.util.concurrent.Promise;
 import lombok.AllArgsConstructor;
+import lombok.Getter;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -101,6 +102,7 @@ public class Forwarder {
         return this;
     }
 
+    @Getter
     @AllArgsConstructor
     public class Forwarding {
         private final SocketAddress localAddr;

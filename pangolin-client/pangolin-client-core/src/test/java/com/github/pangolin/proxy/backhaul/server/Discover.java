@@ -1,4 +1,4 @@
-package com.github.pangolin.server;
+package com.github.pangolin.proxy.backhaul.server;
 
 import com.google.common.base.Preconditions;
 import io.netty.buffer.Unpooled;

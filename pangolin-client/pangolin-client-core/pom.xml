@@ -13,6 +13,10 @@
 
     <dependencies>
         <dependency>
+            <groupId>jline</groupId>
+            <artifactId>jline</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.github.nomou.pangolin</groupId>
             <artifactId>pangolin-common</artifactId>
             <optional>true</optional>

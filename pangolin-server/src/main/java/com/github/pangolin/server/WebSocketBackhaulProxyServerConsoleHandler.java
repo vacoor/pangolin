@@ -31,10 +31,10 @@ import java.util.function.Supplier;
  * @since 20230828
  */
 @Slf4j
-public class WebSocketBackhaulProxyServerShellHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
+public class WebSocketBackhaulProxyServerConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
     private final WebSocketBackhaulProxyServer server;
 
-    public WebSocketBackhaulProxyServerShellHandler(final WebSocketBackhaulProxyServer server) {
+    public WebSocketBackhaulProxyServerConsoleHandler(final WebSocketBackhaulProxyServer server) {
         this.server = server;
     }
 

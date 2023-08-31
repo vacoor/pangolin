@@ -1,15 +1,9 @@
-package com.github.pangolin.server;
+package com.github.pangolin.proxy.backhaul.server;
 
-import com.github.pangolin.server.shell.ConsoleLineReader;
-import com.github.pangolin.server.shell.LineReader;
-import com.github.pangolin.server.shell.ShellTerm;
-import com.github.pangolin.server.shell.WebSocketBackhaulProxyServerShell;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
 import com.github.pangolin.util.Util;
 import com.github.pangolin.util.WebSocketUtils;
-import io.netty.buffer.ByteBufUtil;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
@@ -23,8 +17,6 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.QueryStringDecoder;
-import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
@@ -37,21 +29,14 @@ import io.netty.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
-import java.io.PrintStream;
-import java.net.InetSocketAddress;
 import java.net.URI;
 import java.security.cert.CertificateException;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Supplier;
 
 /**
  * WebSocket 隧道服务.
@@ -60,7 +45,7 @@ import java.util.function.Supplier;
  * @since 20210825
  */
 @Slf4j
-public class WebSocketBackhaulProxyServer2 {
+public class Server {
     /**
      * 空字符串.
      */
@@ -157,7 +142,6 @@ public class WebSocketBackhaulProxyServer2 {
     private Channel primaryServerChannel;
 
     private Discover discover;
-    private Forwarder forwarder;
 
     /**
      * 创建隧道服务实例.
@@ -166,7 +150,7 @@ public class WebSocketBackhaulProxyServer2 {
      * @param endpointPath 接入点路径
      * @param useSsl       是否使用 SSL
      */
-    public WebSocketBackhaulProxyServer2(final int listenPort, final String endpointPath, final boolean useSsl) {
+    public Server(final int listenPort, final String endpointPath, final boolean useSsl) {
         this(null, listenPort, endpointPath, useSsl);
     }
 
@@ -178,13 +162,12 @@ public class WebSocketBackhaulProxyServer2 {
      * @param endpointPath 接入点路径
      * @param useSsl       是否使用 SSL
      */
-    public WebSocketBackhaulProxyServer2(final String listenHost, final int listenPort, final String endpointPath, final boolean useSsl) {
+    public Server(final String listenHost, final int listenPort, final String endpointPath, final boolean useSsl) {
         this.listenHost = listenHost;
         this.listenPort = listenPort;
         this.endpointPath = endpointPath;
         this.useSsl = useSsl;
         this.discover = new Discover();
-        this.forwarder = new Forwarder(discover, bossGroup, workerGroup);
     }
 
     /**
@@ -266,7 +249,6 @@ public class WebSocketBackhaulProxyServer2 {
                      * 中继节点注册.
                      */
                     discover.agentRegistered(handshake, webSocketContext);
-                    // agentRegistered(webSocketContext, handshake);
                 } else if (PROTOCOL_TUNNEL_REQUEST.equalsIgnoreCase(subprotocol)) {
                     /*-
                      * 隧道打开请求.
@@ -276,10 +258,9 @@ public class WebSocketBackhaulProxyServer2 {
                     /*-
                      * 隧道回传打开响应.
                      */
-                    // tunnelResponded(webSocketContext, handshake);
                     discover.tunnelResponded(handshake, webSocketContext);
                 } else if (PROTOCOL_TUNNEL_MANAGEMENT.equalsIgnoreCase(subprotocol)) {
-                    tunnelManagement(webSocketContext, handshake);
+//                    tunnelManagement(webSocketContext, handshake);
                 } else {
                     WebSocketUtils.protocolErrorClose(webSocketContext, "PROTOCOL_NOT_SUPPORTED");
                 }
@@ -307,21 +288,25 @@ public class WebSocketBackhaulProxyServer2 {
      *
      * ********************************/
 
+    /* ***************** 节点注册 [[ **************** */
+
+    /* ***************** ]] 节点注册 **************** */
+
     private void webSocketTunnelRequested(final ChannelHandlerContext accessCtx, final HandshakeComplete handshake) throws InterruptedException {
         final QueryStringDecoder decoder = new QueryStringDecoder(handshake.requestUri());
         final Map<String, List<String>> parameters = decoder.parameters();
         final String tunnel = Util.last(parameters, "tunnel");
         final String target = Util.last(parameters, "target");
 
-            final String id = "ws:" + id(accessCtx.channel());
+        final String id = "ws:" + id(accessCtx.channel());
 
-            if (log.isDebugEnabled()) {
-                log.debug("{} Try open websocket tunnel: {}", accessCtx.channel(), target);
-            }
+        if (log.isDebugEnabled()) {
+            log.debug("{} Try open websocket tunnel: {}", accessCtx.channel(), target);
+        }
 
-            final Promise<ChannelHandlerContext> backhaulPromise = webSocketTunnelRequested(id, accessCtx, tunnel, URI.create(target));
+        final Promise<ChannelHandlerContext> backhaulPromise = webSocketTunnelRequested(id, accessCtx, tunnel, URI.create(target));
 
-            waitBackhaulLinkUntilTimeout(backhaulPromise);
+        waitBackhaulLinkUntilTimeout(backhaulPromise);
     }
 
     /**
@@ -366,52 +351,6 @@ public class WebSocketBackhaulProxyServer2 {
         }
     }
 
-    private void tunnelManagement(final ChannelHandlerContext webSocketTunnelContext, final HandshakeComplete handshake) throws IOException {
-        webSocketTunnelContext.channel().config().setAutoRead(false);
-        webSocketTunnelContext.pipeline().remove(webSocketTunnelContext.handler());
-
-        final PipedOutputStream out = new PipedOutputStream();
-        final PipedInputStream innerIn = new PipedInputStream(out);
-        final OutputStream innerOut = new WebSocketBinaryOutputStream(webSocketTunnelContext);
-        final ShellTerm terminal = new ShellTerm();
-        final LineReader reader = new ConsoleLineReader(innerIn, innerOut, terminal, new Supplier<Collection<String>>() {
-            @Override
-            public Collection<String> get() {
-                return Collections.emptyList();
-            }
-        });
-//        new WebSocketBackhaulProxyServerShell(this, reader, new PrintStream(innerOut), null).start();
-
-        webSocketTunnelContext.pipeline().addLast(new SimpleChannelInboundHandler<WebSocketFrame>() {
-            @Override
-            protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame msg) throws Exception {
-                if (msg instanceof BinaryWebSocketFrame) {
-                    out.write(ByteBufUtil.getBytes(msg.content()));
-                    out.flush();
-                } else if (msg instanceof TextWebSocketFrame) {
-                    final String message = ((TextWebSocketFrame) msg).text();
-                    final int index = message.indexOf(' ');
-                    final String command = -1 < index ? message.substring(0, index) : message;
-                    final String commandArgs = -1 < index ? message.substring(index + 1) : "";
-                    if ("\u0009\u0011".equals(command)) {
-                        final String[] dimension = commandArgs.split("x", 2);
-                        try {
-                            final int cols = Integer.parseInt(dimension[0]);
-                            final int rows = Integer.parseInt(dimension[1]);
-                            terminal.setCols(cols);
-                            terminal.setRows(rows);
-                        } catch (final NumberFormatException ignore) {
-                            log.error("Execute command '{}' error", message, ignore);
-                        }
-                        return;
-                    }
-                }
-            }
-        });
-
-        webSocketTunnelContext.channel().config().setAutoRead(true);
-    }
-
     private String id(final Channel channel) {
         return "0x" + channel.id().asShortText();
     }
@@ -442,69 +381,4 @@ public class WebSocketBackhaulProxyServer2 {
      *
      * ************************ */
 
-    public void forward(final int listenPort, final String nodeKey, final String toHost, final int toPort) throws InterruptedException {
-        forwarder.addForwarding(listenPort, nodeKey, new InetSocketAddress(toHost, toPort));
-    }
-
-    public boolean unforward(final int port) {
-        return forwarder.removeForwarding(port);
-    }
-
-    /*- ****************************
-     *
-     *
-     *
-     * *************************** */
-
-    /**
-     * 获取所有转发规则.
-     *
-     * @return 转发规则清单
-     */
-    public Collection<Forwarder.Forwarding> getAccessRules() {
-        return forwarder.getForwardings();
-    }
-
-    /* ********************************** */
-
-    class WebSocketBinaryOutputStream extends OutputStream {
-        private final ChannelHandlerContext webSocketContext;
-
-        WebSocketBinaryOutputStream(final ChannelHandlerContext webSocketContext) {
-            this.webSocketContext = webSocketContext;
-        }
-
-        @Override
-        public void write(final byte[] b, final int off, final int len) throws IOException {
-            try {
-                /*-
-                 * await: 不等待多线程写入时会丢失数据或多次发送相同数据.
-                 */
-                webSocketContext.writeAndFlush(new BinaryWebSocketFrame(Unpooled.wrappedBuffer(b, off, len))).await();
-            } catch (final InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException(e.getMessage());
-            }
-        }
-
-        @Override
-        public void write(final int b) throws IOException {
-            this.write(new byte[]{(byte) b});
-        }
-
-        @Override
-        public void flush() throws IOException {
-            try {
-                webSocketContext.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).sync();
-            } catch (final InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException(e.getMessage());
-            }
-        }
-
-        @Override
-        public void close() {
-            webSocketContext.close();
-        }
-    }
 }
