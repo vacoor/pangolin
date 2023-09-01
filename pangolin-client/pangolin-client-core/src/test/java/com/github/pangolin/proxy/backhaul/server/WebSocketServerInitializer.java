@@ -4,6 +4,7 @@ import com.github.pangolin.handler.SocketInboundRedirectHandler;
 import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
 import com.github.pangolin.util.Util;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
@@ -19,6 +20,7 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
 import java.util.List;
@@ -30,6 +32,7 @@ import java.util.Map;
  * @author changhe.yang
  * @since 20230901
  */
+@Slf4j
 public class WebSocketServerInitializer extends ChannelInboundHandlerAdapter {
     private static final String PROTOCOL_AGENT_REGISTER = "AGENT-REGISTER";
     private static final String PROTOCOL_WS_TUNNEL_REQUEST = "";
@@ -60,9 +63,17 @@ public class WebSocketServerInitializer extends ChannelInboundHandlerAdapter {
                 tcpTunnelRequested(handshake, ctx);
             } else if (PROTOCOL_MGR_CONSOLE.equals(subprotocol)) {
                 ctx.pipeline().replace(ctx.name(), null, new ConsoleHandler(discover, forwarder));
+            } else {
+                ctx.writeAndFlush(new CloseWebSocketFrame(1002, "PROTOCOL_ERROR")).addListener(ChannelFutureListener.CLOSE);
             }
         }
         ctx.fireUserEventTriggered(evt);
+    }
+
+    @Override
+    public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
+        log.error("Connection abort: {}", cause.getMessage(), cause);
+        ctx.writeAndFlush(new CloseWebSocketFrame(1011, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
     }
 
     /**
