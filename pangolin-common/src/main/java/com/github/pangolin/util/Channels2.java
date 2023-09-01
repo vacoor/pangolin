@@ -3,14 +3,7 @@ package com.github.pangolin.util;
 import com.github.pangolin.handler.SocketInboundRedirectHandler;
 import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpObjectAggregator;
@@ -25,10 +18,7 @@ import java.net.SocketAddress;
 import java.net.URI;
 
 /**
- * TODO DOC ME!.
  *
- * @author changhe.yang
- * @since 20230825
  */
 public class Channels2 {
 
@@ -158,7 +148,7 @@ public class Channels2 {
     }
 
     public static ChannelFuture openWs(final WebSocketClientHandshaker handshaker,
-                                        final EventLoopGroup group, final ChannelHandler... wsHandlers) throws InterruptedException, SSLException {
+                                       final EventLoopGroup group, final ChannelHandler... wsHandlers) throws InterruptedException, SSLException {
         final URI webSocketEndpoint = handshaker.uri();
         final InetSocketAddress remoteAddress = new InetSocketAddress(webSocketEndpoint.getHost(), webSocketEndpoint.getPort());
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());

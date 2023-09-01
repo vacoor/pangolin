@@ -56,16 +56,6 @@ public class WebSocketBackhaulProxyServerSpringApplication {
         final WebSocketBackhaulProxyServer server = new WebSocketBackhaulProxyServer(2345, "/tunnel", false);
         final Channel channel = server.start();
 
-        new NettyServer(1080).start(true, new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new WebSocketBackhaulAgentSock5ProxyServerHandler(
-                        new NioEventLoopGroup(), server, "default"
-                ));
-            }
-        });
-
-
         channel.eventLoop().scheduleWithFixedDelay(new Runnable() {
             @Override
             public void run() {

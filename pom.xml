@@ -15,8 +15,10 @@
 
     <modules>
         <module>pangolin-common</module>
-        <module>pangolin-client</module>
         <module>pangolin-server</module>
+        <module>pangolin-agent</module>
+        <module>pangolin-client-spring-boot-starter</module>
+        <module>pangolin-server-support</module>
     </modules>
 
     <licenses>
@@ -76,7 +78,7 @@
         <project.build.resourceEncoding>UTF-8</project.build.resourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
-        <tube.version>0.0.3-SNAPSHOT</tube.version>
+        <pangolin.version>0.0.3-SNAPSHOT</pangolin.version>
         <nougat.version>1.0.12</nougat.version>
         <lombok.version>1.18.20</lombok.version>
         <slf4j.version>1.7.6</slf4j.version>
@@ -119,17 +121,22 @@
             <dependency>
                 <groupId>com.github.nomou.pangolin</groupId>
                 <artifactId>pangolin-common</artifactId>
-                <version>${tube.version}</version>
+                <version>${pangolin.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.github.nomou.pangolin</groupId>
-                <artifactId>pangolin-client-core</artifactId>
-                <version>${tube.version}</version>
+                <artifactId>pangolin-agent</artifactId>
+                <version>${pangolin.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.nomou.pangolin</groupId>
+                <artifactId>pangolin-server-support</artifactId>
+                <version>${pangolin.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.github.nomou.pangolin</groupId>
                 <artifactId>pangolin-client-spring-boot-starter</artifactId>
-                <version>${tube.version}</version>
+                <version>${pangolin.version}</version>
             </dependency>
 
             <dependency>
