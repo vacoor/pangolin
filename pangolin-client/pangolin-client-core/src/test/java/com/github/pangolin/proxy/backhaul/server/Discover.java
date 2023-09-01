@@ -74,6 +74,10 @@ public class Discover {
     }
 
     Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agentKey, final URI target, final ChannelHandlerContext accessCtx) {
+        return tunnelRequested(id, agentKey, target, accessCtx, TimeUnit.SECONDS.toMillis(10));
+    }
+
+    Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agentKey, final URI target, final ChannelHandlerContext accessCtx, final long waitTimeoutMs) {
         final Agent agent = registeredAgents.get(agentKey);
         Preconditions.checkState(null != agent, "Connection unavailable");
 
@@ -100,13 +104,12 @@ public class Discover {
             }
         });
 
-        final long waitTimeoutMs = 10 * 1000;
         final ScheduledFuture<?> timeoutFuture = accessCtx.executor().schedule(new Runnable() {
             @Override
             public void run() {
                 if (!backhaulPromise.isDone()) {
                     log.info("Tunnel [{}(!) = {}/{} => {}] Connection timeout", stringify(accessCtx.channel().remoteAddress()), agent.extranet, agent.intranet, target);
-                    backhaulPromise.tryFailure(new ConnectTimeoutException());
+                    backhaulPromise.tryFailure(new ConnectTimeoutException("backhual wait timeout"));
                 }
             }
         }, waitTimeoutMs, TimeUnit.MILLISECONDS);
@@ -157,8 +160,9 @@ public class Discover {
         final String intranet = headers.getAsString(AGENT_INTRANET);
         final String extranet = stringify(ctx.channel().remoteAddress());
 
-        final String id = ctx.channel().id().toString();
+        // final String id = ctx.channel().id().toString();
         // final String id = String.format("%s@%s/%s", name, intranet, extranet);
+        final String id = name;
         return new Agent(id, name, version, intranet, extranet, ctx);
     }
 

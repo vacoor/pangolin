@@ -16,6 +16,7 @@ import io.netty.util.concurrent.FutureListener;
 import io.netty.util.concurrent.Promise;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -24,6 +25,7 @@ import java.util.Collection;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+@Slf4j
 public class Forwarder {
     private final Discover discover;
     private final EventLoopGroup bossGroup;
@@ -47,6 +49,7 @@ public class Forwarder {
     public boolean removeForwarding(final SocketAddress localAddr) {
         final Forwarding forwarding = forwardingMap.remove(localAddr);
         if (null != forwarding) {
+            log.info("Local forwarding '{}' removed", localAddr);
             forwarding.boundChannel.close();
         }
         return null != forwarding;
@@ -63,10 +66,9 @@ public class Forwarder {
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelActive(final ChannelHandlerContext accessCtx) throws Exception {
-                        final String id = "fw:" + accessCtx.channel().id().toString();
+                        final String id = "forward:" + accessCtx.channel().id().toString();
                         final URI target = URI.create("tcp://" + remoteAddr.getHostString() + ":" + remoteAddr.getPort());
                         final Promise<ChannelHandlerContext> promise = discover.tunnelRequested(id, agentKey, target, accessCtx);
-                        accessCtx.channel().config().setAutoRead(false);
                         promise.addListener(new FutureListener<ChannelHandlerContext>() {
                             @Override
                             public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {
@@ -74,6 +76,7 @@ public class Forwarder {
                                     final ChannelHandlerContext backhaulCtx = future.getNow();
                                     backhaulCtx.channel().config().setAutoRead(false);
 
+                                    // tcp over websocket.
                                     accessCtx.pipeline().replace(accessCtx.name(), null, new SocketOverWebSocketEncodeHandler(backhaulCtx));
                                     backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new SocketOverWebSocketDecodeHandler(accessCtx));
 
@@ -84,11 +87,13 @@ public class Forwarder {
                                 }
                             }
                         });
-                        super.channelActive(accessCtx);
+                        accessCtx.fireChannelActive();
                     }
                 });
             }
         });
+
+        log.info("Local forwarding {} = {} => {} added", localAddr, agentKey, remoteAddr);
 
         forwardingMap.put(localAddr, new Forwarding(localAddr, agentKey, remoteAddr, boundChannelFuture.channel()));
         boundChannelFuture.channel().closeFuture().addListener(new ChannelFutureListener() {

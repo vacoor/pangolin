@@ -184,9 +184,9 @@ public class Shell {
 
         out.println("Usage: forward COMMAND [OPTION]");
         out.println("  list                                  List information about forward rule");
-        out.println("  add L_PORT AGENT R_HOST:R_PORT        Add the forward rule, mapping local L_PORT to remote host R_HOST and port R_PORT by AGENT");
-        out.println("  remove [L_PORT]                       Remove the forward rule");
-        out.println("  kill [LINK_ID]                        Kill the forward link");
+        out.println("  add    L_PORT AGENT R_HOST:R_PORT     Add the forward rule, mapping local L_PORT to remote host R_HOST and port R_PORT by AGENT");
+        out.println("  remove L_PORT                         Remove the forward rule");
+        out.println("  kill   LINK_ID                        Kill the forward link");
         out.println("  alias                                 List alias for forward target hostname");
         out.println();
     }

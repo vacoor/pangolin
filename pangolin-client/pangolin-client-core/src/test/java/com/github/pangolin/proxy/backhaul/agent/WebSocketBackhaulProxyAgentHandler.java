@@ -77,8 +77,14 @@ public class WebSocketBackhaulProxyAgentHandler extends SimpleChannelInboundHand
     protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame frame) throws Exception {
         if (frame instanceof TextWebSocketFrame) {
             /*-
+             * v1.0:
              * tcp:8080->tcp://172.16.0.12:7788
              * id->target_protocol://target_host:target_port
+             * v1.1:
+             * id->ws:tcp://172.16.0.12:7788
+             * id->ws:ws://172.16.0.12:7788
+             * id->tcp:tcp://172.16.0.12:7788 --> since v1.1
+             * id->tcp:ws://172.16.0.12:7788  --> since v1.1
              */
             final String text = ((TextWebSocketFrame) frame).text();
             final String[] segments = text.split(Pattern.quote("->"));

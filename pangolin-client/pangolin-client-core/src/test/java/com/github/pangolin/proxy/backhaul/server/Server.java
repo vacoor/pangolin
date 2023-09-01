@@ -10,7 +10,6 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ConnectTimeoutException;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
@@ -33,9 +32,6 @@ import java.net.URI;
 import java.security.cert.CertificateException;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -116,7 +112,7 @@ public class Server {
     /**
      * 回程链路超时时间.
      */
-    private final long backhaulLinkTimeoutMs = DEFAULT_BACKHAUL_LINK_TIMEOUT_MS;
+    private final long backhaulTimeoutMs = DEFAULT_BACKHAUL_LINK_TIMEOUT_MS;
 
     /**
      * 监听端口.
@@ -139,7 +135,7 @@ public class Server {
     private final String endpointPath;
 
 
-    private Channel primaryServerChannel;
+    private Channel boundChannel;
 
     private Discover discover;
 
@@ -177,11 +173,11 @@ public class Server {
      */
     public Channel start() throws InterruptedException, CertificateException, SSLException {
         if (!startup.compareAndSet(false, true)) {
-            return primaryServerChannel;
+            return boundChannel;
         }
 
         final SslContext sslContext = useSsl ? createSslContext() : null;
-        return primaryServerChannel = listenTcp(listenHost, listenPort, bossGroup, workerGroup, new ChannelInitializer<SocketChannel>() {
+        return boundChannel = Channels.listen(listenHost, listenPort, bossGroup, workerGroup, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline pipeline = ch.pipeline();
@@ -200,20 +196,7 @@ public class Server {
                         createWebSocketTunnelServerHandler()
                 );
             }
-        });
-    }
-
-
-    private Channel listenTcp(final String listenHost, final int listenPort,
-                              final NioEventLoopGroup bossGroup, final NioEventLoopGroup workerGroup,
-                              final ChannelHandler initializer) throws InterruptedException {
-        final ChannelFuture serverChannelFuture = Channels.listen(listenHost, listenPort, bossGroup, workerGroup, initializer);
-
-        if (null == listenHost) {
-            return serverChannelFuture.sync().channel();
-        } else {
-            return serverChannelFuture.sync().channel();
-        }
+        }).sync().channel();
     }
 
     /**
@@ -304,21 +287,8 @@ public class Server {
             log.debug("{} Try open websocket tunnel: {}", accessCtx.channel(), target);
         }
 
-        final Promise<ChannelHandlerContext> backhaulPromise = webSocketTunnelRequested(id, accessCtx, tunnel, URI.create(target));
-
-        waitBackhaulLinkUntilTimeout(backhaulPromise);
-    }
-
-    /**
-     * 请求接入 WebSocket 隧道.
-     *
-     * @param accessRequestId 接入请求ID
-     * @param accessCtx       接入链路
-     * @return 用于设置回传链接的 promise
-     */
-    private Promise<ChannelHandlerContext> webSocketTunnelRequested(final String accessRequestId, final ChannelHandlerContext accessCtx, final String nodeKey, final URI target) {
         accessCtx.channel().config().setAutoRead(false);
-        Promise<ChannelHandlerContext> backhaulPromise = discover.tunnelRequested(accessRequestId, nodeKey, target, accessCtx);
+        Promise<ChannelHandlerContext> backhaulPromise = discover.tunnelRequested(id, tunnel, URI.create(target), accessCtx);
         backhaulPromise.addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) {
@@ -342,13 +312,6 @@ public class Server {
                 }
             }
         });
-        return backhaulPromise;
-    }
-
-    private void waitBackhaulLinkUntilTimeout(final Promise<ChannelHandlerContext> backhaulPromise) throws InterruptedException {
-        if (!backhaulPromise.await(backhaulLinkTimeoutMs, TimeUnit.MILLISECONDS)) {
-            backhaulPromise.tryFailure(new ConnectTimeoutException("backhual link wait timeout"));
-        }
     }
 
     private String id(final Channel channel) {
@@ -369,16 +332,11 @@ public class Server {
      * 关闭服务器.
      */
     public void shutdownGracefully() {
-        if (null != primaryServerChannel) {
-            primaryServerChannel.close();
+        if (null != boundChannel) {
+            boundChannel.close();
         }
         bossGroup.shutdownGracefully();
         workerGroup.shutdownGracefully();
     }
-
-    /*- *************************
-     *
-     *
-     * ************************ */
 
 }

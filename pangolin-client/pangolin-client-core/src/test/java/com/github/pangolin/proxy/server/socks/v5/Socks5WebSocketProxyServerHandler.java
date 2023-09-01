@@ -49,7 +49,7 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
         final SslContext context = isSecure ? Channels.createClientSslContext() : null;
         final HttpHeaders handshakeHeaders = newHandshakeHeaders(request, requestCtx);
-        final String query = "?target=tcp://" + address + ":" + port;
+        final String query = "/?target=tcp://" + address + ":" + port;
         final URI webSocketEndpointToHandshake = URI.create(webSocketEndpoint.toString() + query);
         Channels.open(webSocketEndpoint.getHost(), webSocketEndpoint.getPort(), true, proxyGroup, new ChannelInitializer<SocketChannel>() {
             @Override
