@@ -19,20 +19,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 public class WebSocketBackhaulTunnelAgent {
-    /**
-     * 节点注册协议.
-     */
     private static final String AGENT_REGISTER_PROTOCOL = "AGENT-REGISTER";
-
-
-    private final EventLoopGroup workerGroup = new NioEventLoopGroup();
 
     private final String name;
     private final URI webSocketServerEndpoint;
+    private final EventLoopGroup workerGroup = new NioEventLoopGroup();
+    private final AtomicBoolean started = new AtomicBoolean(false);
 
     private volatile Channel channel;
-
-    private final AtomicBoolean started = new AtomicBoolean(false);
 
     public WebSocketBackhaulTunnelAgent(final String name, final URI endpoint) {
         this.name = name;

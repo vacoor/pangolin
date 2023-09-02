@@ -26,14 +26,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 @Slf4j
-public class Forwarder {
-    private final Discover discover;
+public class WebSocketBackhaulTunnelForwarder {
+    private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
     private final EventLoopGroup bossGroup;
     private final EventLoopGroup workerGroup;
     private final ConcurrentMap<SocketAddress, Forwarding> forwardingMap = new ConcurrentHashMap<>();
 
-    public Forwarder(final Discover discover, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
-        this.discover = discover;
+    public WebSocketBackhaulTunnelForwarder(final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
+        this.webSocketBackhaulTunnelEngine = webSocketBackhaulTunnelEngine;
         this.bossGroup = bossGroup;
         this.workerGroup = workerGroup;
     }
@@ -55,11 +55,11 @@ public class Forwarder {
         return null != forwarding;
     }
 
-    public Forwarder addForwarding(final int localPort, final String agentKey, final InetSocketAddress remoteAddr) throws InterruptedException {
+    public WebSocketBackhaulTunnelForwarder addForwarding(final int localPort, final String agentKey, final InetSocketAddress remoteAddr) throws InterruptedException {
         return addForwarding(new InetSocketAddress(localPort), agentKey, remoteAddr);
     }
 
-    public Forwarder addForwarding(final SocketAddress localAddr, final String agentKey, final InetSocketAddress remoteAddr) throws InterruptedException {
+    public WebSocketBackhaulTunnelForwarder addForwarding(final SocketAddress localAddr, final String agentKey, final InetSocketAddress remoteAddr) throws InterruptedException {
         final ChannelFuture boundChannelFuture = Channels.listen(localAddr, false, bossGroup, workerGroup, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(SocketChannel ch) throws Exception {
@@ -68,7 +68,7 @@ public class Forwarder {
                     public void channelActive(final ChannelHandlerContext accessCtx) throws Exception {
                         final String id = "F:" + accessCtx.channel().id().toString();
                         final URI target = URI.create("tcp://" + remoteAddr.getHostString() + ":" + remoteAddr.getPort());
-                        final Promise<ChannelHandlerContext> promise = discover.tunnelRequested(id, agentKey, target, accessCtx);
+                        final Promise<ChannelHandlerContext> promise = webSocketBackhaulTunnelEngine.tunnelRequested(id, agentKey, target, accessCtx);
                         promise.addListener(new FutureListener<ChannelHandlerContext>() {
                             @Override
                             public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {

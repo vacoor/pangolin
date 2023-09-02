@@ -6,7 +6,6 @@ import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.*;
 import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
@@ -24,11 +23,11 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
     private final URI webSocketEndpoint;
     private final String webSocketProtocol;
 
-    public Socks5WebSocketProxyServerHandler(final URI webSocketEndpoint, final String webSocketProtocol, final NioEventLoopGroup proxyWorkersGroup) {
+    public Socks5WebSocketProxyServerHandler(final URI webSocketEndpoint, final String webSocketProtocol, final EventLoopGroup proxyWorkersGroup) {
         this(null, null, webSocketEndpoint, webSocketProtocol, proxyWorkersGroup);
     }
 
-    public Socks5WebSocketProxyServerHandler(final String username, final String password, final URI webSocketEndpoint, final String webSocketProtocol, final NioEventLoopGroup proxyWorkersGroup) {
+    public Socks5WebSocketProxyServerHandler(final String username, final String password, final URI webSocketEndpoint, final String webSocketProtocol, final EventLoopGroup proxyWorkersGroup) {
         super(username, password, proxyWorkersGroup);
         this.webSocketEndpoint = webSocketEndpoint;
         this.webSocketProtocol = webSocketProtocol;

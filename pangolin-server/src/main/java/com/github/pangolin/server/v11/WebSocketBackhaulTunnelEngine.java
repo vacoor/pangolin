@@ -34,7 +34,7 @@ import static io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHand
  *
  */
 @Slf4j
-public class Discover {
+public class WebSocketBackhaulTunnelEngine {
     private static final String AGENT_NAME = "X-Node-Name";
     private static final String AGENT_VERSION = "X-Node-Version";
     private static final String AGENT_INTRANET = "X-Node-Intranet";
@@ -216,12 +216,4 @@ public class Discover {
         private final Promise<ChannelHandlerContext> backhaulCtxPromise;
     }
 
-    public static Discover mock() {
-        Discover discover = new Discover();
-        Agent agent = new Agent("id", "MOCK", "v1.0", "127.0.0.1", "127.0.0.1", null);
-        Agent agent2 = new Agent("id2", "MOCK2", "v1.0", "127.0.0.1", "127.0.0.1", null);
-        discover.registeredAgents.put(agent.id, agent);
-        discover.registeredAgents.put(agent2.id, agent2);
-        return discover;
-    }
 }

@@ -1,7 +1,7 @@
 package com.github.pangolin.server.v11.shell;
 
-import com.github.pangolin.server.v11.Discover;
-import com.github.pangolin.server.v11.Forwarder;
+import com.github.pangolin.server.v11.WebSocketBackhaulTunnelEngine;
+import com.github.pangolin.server.v11.WebSocketBackhaulTunnelForwarder;
 import com.google.common.collect.Lists;
 import io.netty.channel.nio.NioEventLoopGroup;
 import jline.UnsupportedTerminal;
@@ -30,15 +30,15 @@ public class Shell {
 
     private final boolean breakOnNull;
     private final ConsoleReader console;
-    private final Discover discover;
-    private final Forwarder forwarder;
+    private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
+    private final WebSocketBackhaulTunnelForwarder forwarder;
 
     private final AtomicBoolean started = new AtomicBoolean(false);
 
-    private Shell(final ConsoleReader console, final boolean breakOnNull, final Discover discover, final Forwarder forwarder) {
+    private Shell(final ConsoleReader console, final boolean breakOnNull, final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final WebSocketBackhaulTunnelForwarder forwarder) {
         this.console = console;
         this.breakOnNull = breakOnNull;
-        this.discover = discover;
+        this.webSocketBackhaulTunnelEngine = webSocketBackhaulTunnelEngine;
         this.forwarder = forwarder;
     }
 
@@ -53,6 +53,7 @@ public class Shell {
                 }
             }
         });
+        t.setDaemon(true);
         t.start();
     }
 
@@ -115,11 +116,11 @@ public class Shell {
 
     private void doExecuteAgentCommand(final List<String> args, final PrintWriter out) {
         if ("list".equals(safeGet(args, 0))) {
-            final Collection<Discover.Agent> agents = getAgents();
+            final Collection<WebSocketBackhaulTunnelEngine.Agent> agents = getAgents();
             final String[][] table = new String[agents.size() + 1][];
             int i = 0;
             table[i++] = new String[]{"ID", "NAME", "VERSION", "ADDRESS"};
-            for (final Discover.Agent agent : agents) {
+            for (final WebSocketBackhaulTunnelEngine.Agent agent : agents) {
                 table[i++] = new String[]{agent.getId(), agent.getName(), agent.getVersion(), agent.getExtranet() + '/' + agent.getIntranet()};
             }
             printTable(table, out);
@@ -149,11 +150,11 @@ public class Shell {
 
     private void doExecuteForwardCommand(final List<String> args, final PrintWriter out) throws InterruptedException {
         if ("list".equals(safeGet(args, 0))) {
-            final Collection<Forwarder.Forwarding> forwardings = getForwardings();
+            final Collection<WebSocketBackhaulTunnelForwarder.Forwarding> forwardings = getForwardings();
             final String[][] table = new String[forwardings.size() + 1][];
             int i = 0;
             table[i++] = new String[]{"SOURCE", "AGENT", "DESTINATION"};
-            for (final Forwarder.Forwarding forwarding : forwardings) {
+            for (final WebSocketBackhaulTunnelForwarder.Forwarding forwarding : forwardings) {
                 table[i++] = new String[]{forwarding.getLocalAddr().toString(), forwarding.getAgentKey(), forwarding.getRemoteAddr().toString()};
             }
             printTable(table, out);
@@ -192,14 +193,14 @@ public class Shell {
     }
 
 
-    private Collection<Discover.Agent> getAgents() {
-        return discover.getAgents();
+    private Collection<WebSocketBackhaulTunnelEngine.Agent> getAgents() {
+        return webSocketBackhaulTunnelEngine.getAgents();
     }
 
     private void removeAgent(final String agentKey) {
     }
 
-    private Collection<Forwarder.Forwarding> getForwardings() {
+    private Collection<WebSocketBackhaulTunnelForwarder.Forwarding> getForwardings() {
         return forwarder.getForwardings();
     }
 
@@ -272,20 +273,20 @@ public class Shell {
         return args.toArray(new String[args.size()]);
     }
 
-    public static Shell create(final ConsoleReader console, final boolean breakOnNull, final Discover discover, final Forwarder forwarder) {
-        return new Shell(console, breakOnNull, discover, forwarder);
+    public static Shell create(final ConsoleReader console, final boolean breakOnNull, final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final WebSocketBackhaulTunnelForwarder forwarder) {
+        return new Shell(console, breakOnNull, webSocketBackhaulTunnelEngine, forwarder);
     }
 
     public static void main(String[] args) throws IOException {
-        final Discover discover = new Discover();
+        final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine = new WebSocketBackhaulTunnelEngine();
         final NioEventLoopGroup bossGroup = new NioEventLoopGroup(2);
         final NioEventLoopGroup workerGroup = new NioEventLoopGroup();
-        final Forwarder forwarder = new Forwarder(discover, bossGroup, workerGroup);
+        final WebSocketBackhaulTunnelForwarder forwarder = new WebSocketBackhaulTunnelForwarder(webSocketBackhaulTunnelEngine, bossGroup, workerGroup);
         final ConsoleReader console = ConsoleReaderFactory.newConsoleReader(
                 new FileInputStream(FileDescriptor.in), System.out,
                 new UnsupportedTerminal(false, false),
-                () -> discover.getAgents().stream().map(Discover.Agent::getName).collect(Collectors.toSet())
+                () -> webSocketBackhaulTunnelEngine.getAgents().stream().map(WebSocketBackhaulTunnelEngine.Agent::getName).collect(Collectors.toSet())
         );
-        Shell.create(console, true, discover, forwarder).start();
+        Shell.create(console, true, webSocketBackhaulTunnelEngine, forwarder).start();
     }
 }

@@ -70,8 +70,10 @@ import java.util.function.Supplier;
  *
  * @author changhe.yang
  * @since 20210825
+ * @deprecated {@link com.github.pangolin.server.v11.WebSocketBackhaulTunnelServer}
  */
 @Slf4j
+@Deprecated
 public class WebSocketBackhaulProxyServer {
     /**
      * 空字符串.
@@ -183,7 +185,7 @@ public class WebSocketBackhaulProxyServer {
 
     private Channel primaryServerChannel;
 
-//    private Discover discover;
+//    private WebSocketBackhaulTunnelEngine discover;
 
     /**
      * 创建隧道服务实例.
@@ -209,7 +211,7 @@ public class WebSocketBackhaulProxyServer {
         this.listenPort = listenPort;
         this.endpointPath = endpointPath;
         this.useSsl = useSsl;
-//        this.discover = new Discover();
+//        this.discover = new WebSocketBackhaulTunnelEngine();
     }
 
     /**

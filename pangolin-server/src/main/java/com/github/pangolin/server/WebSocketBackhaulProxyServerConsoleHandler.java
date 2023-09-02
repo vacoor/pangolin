@@ -29,8 +29,10 @@ import java.util.function.Supplier;
  *
  * @author changhe.yang
  * @since 20230828
+ * @deprecated {@link com.github.pangolin.server.v11.WebSocketBackhaulTunnelServer}
  */
 @Slf4j
+@Deprecated
 public class WebSocketBackhaulProxyServerConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
     private final WebSocketBackhaulProxyServer server;
 

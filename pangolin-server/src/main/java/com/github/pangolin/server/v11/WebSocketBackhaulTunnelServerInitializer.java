@@ -1,14 +1,11 @@
 package com.github.pangolin.server.v11;
 
 import com.github.pangolin.handler.SocketInboundRedirectHandler;
-import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Redirects;
 import com.github.pangolin.util.Util;
-import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
@@ -23,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
+ *
  */
 @Slf4j
 public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHandlerAdapter {
@@ -32,11 +30,11 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
     private static final String PROTOCOL_TUNNEL_BACKHAUL = "TUNNEL_RESPONSE";
     private static final String PROTOCOL_MGR_CONSOLE = "CONSOLE";
 
-    private final Discover discover;
-    private final Forwarder forwarder;
+    private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
+    private final WebSocketBackhaulTunnelForwarder forwarder;
 
-    public WebSocketBackhaulTunnelServerInitializer(final Discover discover, final Forwarder forwarder) {
-        this.discover = discover;
+    public WebSocketBackhaulTunnelServerInitializer(final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final WebSocketBackhaulTunnelForwarder forwarder) {
+        this.webSocketBackhaulTunnelEngine = webSocketBackhaulTunnelEngine;
         this.forwarder = forwarder;
     }
 
@@ -44,17 +42,21 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
     public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
         if (evt instanceof HandshakeComplete) {
             final HandshakeComplete handshake = (HandshakeComplete) evt;
-            final String subprotocol = handshake.selectedSubprotocol();
+            String subprotocol = handshake.selectedSubprotocol();
+            subprotocol = null != subprotocol ? subprotocol : PROTOCOL_WS_TUNNEL_REQUEST;
+
             if (PROTOCOL_AGENT_REGISTER.equals(subprotocol)) {
-                discover.agentRegistered(handshake, ctx);
+                webSocketBackhaulTunnelEngine.agentRegistered(handshake, ctx);
             } else if (PROTOCOL_TUNNEL_BACKHAUL.equals(subprotocol)) {
-                discover.tunnelResponded(handshake, ctx);
-            } else if (PROTOCOL_WS_TUNNEL_REQUEST.equals(subprotocol) || null == subprotocol) {
+                webSocketBackhaulTunnelEngine.tunnelResponded(handshake, ctx);
+            } else if (PROTOCOL_WS_TUNNEL_REQUEST.equals(subprotocol)) {
                 wsTunnelRequested(handshake, ctx);
+                /*
             } else if (PROTOCOL_TCP_TUNNEL_REQUEST.equals(subprotocol)) {
                 tcpTunnelRequested(handshake, ctx);
+                */
             } else if (PROTOCOL_MGR_CONSOLE.equals(subprotocol)) {
-                ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelConsoleHandler(discover, forwarder));
+                ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelConsoleHandler(webSocketBackhaulTunnelEngine, forwarder));
             } else {
                 ctx.writeAndFlush(new CloseWebSocketFrame(1002, "PROTOCOL_ERROR")).addListener(ChannelFutureListener.CLOSE);
             }
@@ -87,7 +89,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
         final String targetToUse = target.contains("://") ? target : "tcp://" + target;
         final URI uri = URI.create(targetToUse);
         final String id = accessCtx.channel().id().toString();
-        discover.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
+        webSocketBackhaulTunnelEngine.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
@@ -120,7 +122,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
          */
         final URI uri = URI.create(target);
         final String id = accessCtx.channel().id().toString();
-        discover.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
+        webSocketBackhaulTunnelEngine.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
@@ -154,31 +156,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
     }
 
     private String getAgentKey(final Map<String, List<String>> params) {
-        return Util.last(params, "tunnel");
+        return Util.last(params, "agent");
     }
 
-    public static void main(String[] args) throws InterruptedException {
-        final Discover discover = new Discover();
-        final Forwarder forwarder = new Forwarder(discover, new NioEventLoopGroup(), new NioEventLoopGroup());
-        Channels.listen(null, 2345, new NioEventLoopGroup(), new NioEventLoopGroup(), new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel ch) throws Exception {
-                final ChannelPipeline pipeline = ch.pipeline();
-//                if (null != sslContext) {
-//                    pipeline.addLast(sslContext.newHandler(ch.alloc()));
-//                }
-                pipeline.addLast(
-                        new HttpServerCodec(),
-                        new HttpObjectAggregator(8 * 1024 * 1024),
-                        /*- 浏览器似乎处理压缩有问题(permessage-deflate).
-                        new WebSocketServerCompressionHandler(),
-                        new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
-                        */
-                        new WebSocketServerProtocolHandler("/tunnel", "*", false, 65536, true, true),
-                        // new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
-                        new WebSocketBackhaulTunnelServerInitializer(discover, forwarder)
-                );
-            }
-        }).sync().channel().closeFuture().sync();
-    }
 }

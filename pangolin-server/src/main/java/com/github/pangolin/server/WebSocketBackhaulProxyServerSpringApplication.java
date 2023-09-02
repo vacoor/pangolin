@@ -4,6 +4,7 @@ import com.github.pangolin.server.shell.ConsoleLineReader;
 import com.github.pangolin.server.shell.GenericLineReader;
 import com.github.pangolin.server.shell.LineReader;
 import com.github.pangolin.server.shell.WebSocketBackhaulProxyServerShell;
+import com.github.pangolin.server.v11.WebSocketBackhaulTunnelServer;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -21,6 +22,10 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * @deprecated {@link com.github.pangolin.server.v11.WebSocketBackhaulTunnelServer}
+ */
+@Deprecated
 @SpringBootApplication
 public class WebSocketBackhaulProxyServerSpringApplication {
 
@@ -34,6 +39,9 @@ public class WebSocketBackhaulProxyServerSpringApplication {
 //        application.addListeners(new ApplicationPidFileWriter());
         application.run(args);
 
+        WebSocketBackhaulTunnelServer.main(args);
+
+        System.exit(0);
         final Properties props = new Properties();
         final String forwardHostnameAliasConfig = System.getProperty("forward.hostname.alias.config");
         if (StringUtils.hasText(forwardHostnameAliasConfig)) {

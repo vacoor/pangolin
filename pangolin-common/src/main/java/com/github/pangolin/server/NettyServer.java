@@ -4,6 +4,7 @@ import com.github.pangolin.util.Channels;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.ssl.SslContext;
 import io.netty.util.concurrent.DefaultThreadFactory;
@@ -21,12 +22,12 @@ public class NettyServer {
     /**
      * 服务 event loop group.
      */
-    protected final NioEventLoopGroup bossGroup;
+    protected final EventLoopGroup bossGroup;
 
     /**
      * 处理 event loop group.
      */
-    protected final NioEventLoopGroup workerGroup;
+    protected final EventLoopGroup workerGroup;
 
     /**
      *
@@ -72,7 +73,7 @@ public class NettyServer {
     }
 
     public NettyServer(final String listenHost, final int listenPort,
-                       final NioEventLoopGroup bossGroup, final NioEventLoopGroup workerGroup) {
+                       final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
         this.listenHost = listenHost;
         this.listenPort = listenPort;
         this.bossGroup = bossGroup;

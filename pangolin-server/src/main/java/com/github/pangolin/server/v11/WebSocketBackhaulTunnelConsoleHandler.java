@@ -29,14 +29,14 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 public class WebSocketBackhaulTunnelConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
-    private final Discover discover;
-    private final Forwarder forwarder;
+    private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
+    private final WebSocketBackhaulTunnelForwarder forwarder;
 
     private HeadlessTerminal terminal;
     private OutputStream toConsoleIn;
 
-    public WebSocketBackhaulTunnelConsoleHandler(final Discover discover, final Forwarder forwarder) {
-        this.discover = discover;
+    public WebSocketBackhaulTunnelConsoleHandler(final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final WebSocketBackhaulTunnelForwarder forwarder) {
+        this.webSocketBackhaulTunnelEngine = webSocketBackhaulTunnelEngine;
         this.forwarder = forwarder;
     }
 
@@ -49,12 +49,12 @@ public class WebSocketBackhaulTunnelConsoleHandler extends SimpleChannelInboundH
                     new PipedInputStream(toConsoleIn),
                     new WebSocketBinaryOutput(ctx),
                     terminal,
-                    () -> discover.getAgents().stream().map(Discover.Agent::getId).collect(Collectors.toList())
+                    () -> webSocketBackhaulTunnelEngine.getAgents().stream().map(WebSocketBackhaulTunnelEngine.Agent::getId).collect(Collectors.toList())
             );
 
             this.terminal = terminal;
             this.toConsoleIn = toConsoleIn;
-            Shell.create(console, true, discover, forwarder).start();
+            Shell.create(console, true, webSocketBackhaulTunnelEngine, forwarder).start();
         }
     }
 
@@ -174,10 +174,10 @@ public class WebSocketBackhaulTunnelConsoleHandler extends SimpleChannelInboundH
 
     public static void main(String[] args) throws InterruptedException {
 
-        final Discover discover = new Discover();
+        final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine = new WebSocketBackhaulTunnelEngine();
         final NioEventLoopGroup bossGroup = new NioEventLoopGroup(2);
         final NioEventLoopGroup workerGroup = new NioEventLoopGroup();
-        final Forwarder forwarder = new Forwarder(discover, bossGroup, workerGroup);
+        final WebSocketBackhaulTunnelForwarder forwarder = new WebSocketBackhaulTunnelForwarder(webSocketBackhaulTunnelEngine, bossGroup, workerGroup);
         Channels.listen(null, 10443, new NioEventLoopGroup(), new NioEventLoopGroup(), new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
@@ -194,7 +194,7 @@ public class WebSocketBackhaulTunnelConsoleHandler extends SimpleChannelInboundH
                         */
                         new WebSocketServerProtocolHandler("", "*", true, 65536, true, true),
                         // new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
-                        new WebSocketBackhaulTunnelConsoleHandler(discover, forwarder)
+                        new WebSocketBackhaulTunnelConsoleHandler(webSocketBackhaulTunnelEngine, forwarder)
                 );
             }
         }).sync().channel().closeFuture().sync();

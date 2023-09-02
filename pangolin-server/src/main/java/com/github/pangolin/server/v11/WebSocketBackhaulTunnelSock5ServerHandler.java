@@ -14,13 +14,13 @@ import lombok.extern.slf4j.Slf4j;
 import java.net.URI;
 
 @Slf4j
-class WebSocketBackhaulAgentSock5ProxyServerHandler extends Socks5ProxyServerHandler {
-    private Discover discover;
+class WebSocketBackhaulTunnelSock5ServerHandler extends Socks5ProxyServerHandler {
+    private WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
     private String agentKey;
 
-    public WebSocketBackhaulAgentSock5ProxyServerHandler(final EventLoopGroup proxyGroup, final Discover discover, final String agent) {
+    public WebSocketBackhaulTunnelSock5ServerHandler(final EventLoopGroup proxyGroup, final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final String agent) {
         super(proxyGroup);
-        this.discover = discover;
+        this.webSocketBackhaulTunnelEngine = webSocketBackhaulTunnelEngine;
         this.agentKey = agent;
     }
 
@@ -34,7 +34,7 @@ class WebSocketBackhaulAgentSock5ProxyServerHandler extends Socks5ProxyServerHan
         accessCtx.channel().config().setAutoRead(false);
 
         final String id = accessCtx.channel().id().toString();
-        discover.tunnelRequested(id, agentKey, URI.create(target), accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
+        webSocketBackhaulTunnelEngine.tunnelRequested(id, agentKey, URI.create(target), accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
 
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
