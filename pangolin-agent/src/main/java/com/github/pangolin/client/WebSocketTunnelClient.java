@@ -35,7 +35,7 @@ public class WebSocketTunnelClient {
     /**
      * 节点注册协议.
      */
-    private static final String AGENT_REGISTER_PROTOCOL = "AGENT-REGISTER";
+    private static final String AGENT_REGISTER_PROTOCOL = "PASSIVE-REG";
 
     private enum ConnectionState {
         CONNECTED,
@@ -155,11 +155,11 @@ public class WebSocketTunnelClient {
             final String endpoint = serverEndpoint.getScheme() + "://" + serverEndpoint.getHost() + ":" + serverEndpoint.getPort() + serverEndpoint.getPath();
             if ("tcp".equalsIgnoreCase(target.getScheme())) {
                 final URI backhaulWebSocketUri = URI.create(endpoint + "?id=" + id);
-                final WebSocketClientHandshaker backhaulHandshaker = newHandshaker(backhaulWebSocketUri, "TUNNEL_RESPONSE", null);
+                final WebSocketClientHandshaker backhaulHandshaker = newHandshaker(backhaulWebSocketUri, "PASSIVE", null);
                 Channels2.pipe(new InetSocketAddress(target.getHost(), target.getPort()), backhaulHandshaker, workerGroup);
             } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
                 final URI backhaulWebSocketUri = URI.create(endpoint + "?id=" + id);
-                final WebSocketClientHandshaker backhaulHandshaker = newHandshaker(backhaulWebSocketUri, "TUNNEL_RESPONSE", null);
+                final WebSocketClientHandshaker backhaulHandshaker = newHandshaker(backhaulWebSocketUri, "PASSIVE", null);
                 final WebSocketClientHandshaker upstreamHandshaker = newHandshaker(target, null, null);
                 Channels2.pipe(upstreamHandshaker, backhaulHandshaker, workerGroup);
             }

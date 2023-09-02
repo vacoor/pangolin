@@ -93,7 +93,7 @@ public class WebSocketBackhaulProxyServer {
     /**
      * 通道Agent注册.
      */
-    private static final String PROTOCOL_AGENT_REGISTER = "AGENT-REGISTER";
+    private static final String PROTOCOL_AGENT_REGISTER = "PASSIVE-REG";
 
     /**
      * 通道请求.
@@ -103,7 +103,7 @@ public class WebSocketBackhaulProxyServer {
     /**
      * 通道打开.
      */
-    private static final String PROTOCOL_TUNNEL_RESPONSE = "TUNNEL_RESPONSE";
+    private static final String PROTOCOL_PASSIVE = "PASSIVE";
 
     /**
      * 服务管理.
@@ -113,7 +113,7 @@ public class WebSocketBackhaulProxyServer {
     /**
      * 支持的协议.
      */
-    private static final String ALL_PROTOCOLS = PROTOCOL_TUNNEL_REQUEST + "," + PROTOCOL_AGENT_REGISTER + "," + PROTOCOL_TUNNEL_RESPONSE + "," + PROTOCOL_TUNNEL_MANAGEMENT;
+    private static final String ALL_PROTOCOLS = PROTOCOL_TUNNEL_REQUEST + "," + PROTOCOL_AGENT_REGISTER + "," + PROTOCOL_PASSIVE + "," + PROTOCOL_TUNNEL_MANAGEMENT;
 
     /**
      * 已注册的broker节点(id:agent).
@@ -307,7 +307,7 @@ public class WebSocketBackhaulProxyServer {
                      * 隧道打开请求.
                      */
                     webSocketTunnelRequested(webSocketContext, handshake);
-                } else if (PROTOCOL_TUNNEL_RESPONSE.equalsIgnoreCase(subprotocol)) {
+                } else if (PROTOCOL_PASSIVE.equalsIgnoreCase(subprotocol)) {
                     /*-
                      * 隧道回传打开响应.
                      */

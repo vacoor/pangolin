@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 public class WebSocketBackhaulTunnelAgent {
-    private static final String AGENT_REGISTER_PROTOCOL = "AGENT-REGISTER";
+    private static final String AGENT_REGISTER_PROTOCOL = "PASSIVE-REG";
 
     private final String name;
     private final URI webSocketServerEndpoint;

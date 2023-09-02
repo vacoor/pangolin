@@ -18,6 +18,7 @@ import jline.console.ConsoleReader;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
+import java.net.InetSocketAddress;
 import java.security.cert.CertificateException;
 import java.util.stream.Collectors;
 
@@ -117,9 +118,16 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
         final Channel channel = server.start();
         System.out.println("Start on " + channel.localAddress());
 
+        server.webSocketBackhaulTunnelForwarder.addForwarding(
+                3389, "BZ",
+                InetSocketAddress.createUnresolved("127.0.0.1", 3389)
+        );
+
+        /*
         final Terminal terminal = TerminalFactory.create();
         final ConsoleReader console = ConsoleReaderFactory.newConsoleReader(System.in, System.out, terminal, () -> server.webSocketBackhaulTunnelEngine.getAgents().stream().map(WebSocketBackhaulTunnelEngine.Agent::getId).collect(Collectors.toSet()));
         Shell.create(console, true, server.webSocketBackhaulTunnelEngine, server.webSocketBackhaulTunnelForwarder).start();
+        */
 
         channel.closeFuture().sync();
     }

@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
 
 @Slf4j
 public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
-    private static final String BACKHAUL_PROTOCOL = "TUNNEL_RESPONSE";
+    private static final String BACKHAUL_PROTOCOL = "PASSIVE";
 
     private enum State {SUSPENDED, INITIALIZING, INITIALIZED}
 

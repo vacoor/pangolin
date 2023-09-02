@@ -24,10 +24,10 @@ import java.util.Map;
  */
 @Slf4j
 public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHandlerAdapter {
-    private static final String PROTOCOL_AGENT_REGISTER = "AGENT-REGISTER";
+    private static final String PROTOCOL_AGENT_REGISTER = "PASSIVE-REG";
     private static final String PROTOCOL_WS_TUNNEL_REQUEST = "";
     private static final String PROTOCOL_TCP_TUNNEL_REQUEST = "CONNECT";
-    private static final String PROTOCOL_TUNNEL_BACKHAUL = "TUNNEL_RESPONSE";
+    private static final String PROTOCOL_TUNNEL_BACKHAUL = "PASSIVE";
     private static final String PROTOCOL_MGR_CONSOLE = "CONSOLE";
 
     private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
