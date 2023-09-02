@@ -69,7 +69,9 @@ public class WebSocketBackhaulTunnelAgent {
     }
 
     public static void main(String[] args) throws Exception {
-        final WebSocketBackhaulTunnelAgent client = new WebSocketBackhaulTunnelAgent("default", URI.create("ws://127.0.0.1:2345/tunnel"));
+        final String name = "gateway001";
+        final URI uri = URI.create("ws://127.0.0.1:2345/tunnel");
+        final WebSocketBackhaulTunnelAgent client = new WebSocketBackhaulTunnelAgent(name, uri);
         client.start().closeFuture().await();
         System.out.println("Over");
     }
