@@ -68,5 +68,9 @@
             <artifactId>netty-codec-http</artifactId>
             <optional>true</optional>
         </dependency>
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-codec-dns</artifactId>
+        </dependency>
     </dependencies>
 </project>
