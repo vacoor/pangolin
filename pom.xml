@@ -86,7 +86,8 @@
         <!--
         <netty.version>4.1.59.Final</netty.version>
         -->
-        <netty.version>4.1.25.Final</netty.version>
+        <netty.version>4.1.42.Final</netty.version>
+        <!--<netty.version>4.1.25.Final</netty.version>-->
         <spring-boot.version>2.0.0.RELEASE</spring-boot.version>
 
         <!-- distributionManagement [[ -->
@@ -192,6 +193,11 @@
             <dependency>
                 <groupId>io.netty</groupId>
                 <artifactId>netty-codec-socks</artifactId>
+                <version>${netty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-codec-dns</artifactId>
                 <version>${netty.version}</version>
             </dependency>
             <dependency>
