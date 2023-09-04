@@ -24,20 +24,17 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
     private final String username;
     private final String password;
     private final String authorization;
-    private final EventLoopGroup proxyGroup;
 
-    public HttpProxyServerHandler(final EventLoopGroup proxyGroup) {
+    public HttpProxyServerHandler() {
         this.username = null;
         this.password = null;
         this.authorization = null;
-        this.proxyGroup = proxyGroup;
     }
 
-    public HttpProxyServerHandler(final String username, final String password, final EventLoopGroup proxyGroup) {
+    public HttpProxyServerHandler(final String username, final String password) {
         this.username = username;
         this.password = password;
         this.authorization = encode(username, password);
-        this.proxyGroup = proxyGroup;
     }
 
     @Override
@@ -82,14 +79,14 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                 // User-Agent: curl/7.64.1
                 // Proxy-Connection: Keep-Alive
                 // content-length: 0
-                connect(ctx, httpRequest, proxyGroup);
+                connect(ctx, httpRequest);
             } else {
                 /*- HTTP proxy */
                 // GET http://www.baidu.com/ HTTP/1.1
                 // Host: www.baidu.com
                 // User-Agent: curl/7.64.1
                 // Proxy-Connection: Keep-Alive
-                forward(ctx, httpRequest, proxyGroup);
+                forward(ctx, httpRequest);
             }
         } finally {
             ReferenceCountUtil.release(msg);
@@ -127,7 +124,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         return port > 0 ? port : uri.toLowerCase().startsWith("https://") ? 443 : 80;
     }
 
-    protected void forward(final ChannelHandlerContext ctx, final FullHttpRequest httpRequest, final EventLoopGroup proxyGroup) throws Exception {
+    protected void forward(final ChannelHandlerContext ctx, final FullHttpRequest httpRequest) throws Exception {
         final HttpHeaders headers = httpRequest.headers();
         final String connection = headers.getAsString(HttpHeaderNames.PROXY_CONNECTION);
         if (null != connection) {
@@ -137,7 +134,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
 
         final InetSocketAddress targetAddress = getHttpRequestAddress(httpRequest);
         final FullHttpRequest httpRequestToSend = httpRequest.retain();
-        Channels.open(targetAddress, true, proxyGroup, new ChannelInitializer<SocketChannel>() {
+        Channels.open(targetAddress, true, ctx.channel().eventLoop(), new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(new HttpClientCodec());
@@ -161,13 +158,13 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         });
     }
 
-    protected void connect(final ChannelHandlerContext ctx, final HttpRequest httpRequest, final EventLoopGroup proxyGroup) throws Exception {
+    protected void connect(final ChannelHandlerContext ctx, final HttpRequest httpRequest) throws Exception {
         final InetSocketAddress targetAddress = getHttpRequestAddress(httpRequest);
         final String address = targetAddress.getHostString();
         final int port = targetAddress.getPort();
 
         ctx.channel().config().setAutoRead(false);
-        Channels.open(targetAddress, false, proxyGroup, new ChannelInboundHandlerAdapter() {
+        Channels.open(targetAddress, false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
                 delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(ctx));

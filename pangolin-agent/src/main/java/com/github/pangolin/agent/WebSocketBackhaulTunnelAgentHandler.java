@@ -3,10 +3,15 @@ package com.github.pangolin.agent;
 import com.github.pangolin.util.Channels2;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.EventLoopGroup;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.HttpHeaders;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.timeout.IdleStateEvent;
 import lombok.extern.slf4j.Slf4j;
 
@@ -24,16 +29,12 @@ public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHan
     private final String name;
     private final WebSocketClientHandshaker handshaker;
     private final HttpHeaders customHttpHeaders;
-    private final EventLoopGroup backhualGroup;
     private final AtomicReference<State> state = new AtomicReference<>(State.INITIALIZING);
 
-    public WebSocketBackhaulTunnelAgentHandler(final String name,
-                                               final WebSocketClientHandshaker handshaker,
-                                               final HttpHeaders customHttpHeaders, final EventLoopGroup backhaulGroup) {
+    public WebSocketBackhaulTunnelAgentHandler(final String name, final WebSocketClientHandshaker handshaker, final HttpHeaders customHttpHeaders) {
         this.name = name;
         this.handshaker = handshaker;
         this.customHttpHeaders = customHttpHeaders;
-        this.backhualGroup = backhaulGroup;
     }
 
     @Override
@@ -89,10 +90,10 @@ public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHan
             final WebSocketClientHandshaker backhaulHandshaker = newBackhaulHandshaker(id);
             if ("tcp".equalsIgnoreCase(target.getScheme())) {
                 final InetSocketAddress socketAddress = new InetSocketAddress(target.getHost(), target.getPort());
-                Channels2.pipe(socketAddress, backhaulHandshaker, backhualGroup);
+                Channels2.pipe(socketAddress, backhaulHandshaker, ctx.channel().eventLoop());
             } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
                 final WebSocketClientHandshaker upstreamHandshaker = newHandshaker(target, null);
-                Channels2.pipe(upstreamHandshaker, backhaulHandshaker, backhualGroup);
+                Channels2.pipe(upstreamHandshaker, backhaulHandshaker, ctx.channel().eventLoop());
             }
         }
     }

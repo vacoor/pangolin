@@ -26,11 +26,9 @@ import static io.netty.handler.codec.http.HttpMethod.CONNECT;
 public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotiationHandler {
     private static final String WEB_SOCKET_PATH = "";
     private static final String PROTOCOLS = "CONNECT,";
-    private final EventLoopGroup proxyGroup;
 
-    public WebSocketProxyServerHandler(EventLoopGroup proxyGroup, boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch) {
+    public WebSocketProxyServerHandler(boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch) {
         super(WEB_SOCKET_PATH, PROTOCOLS, allowExtensions, maxFrameSize, allowMaskMismatch, true);
-        this.proxyGroup = proxyGroup;
     }
 
     @Override
@@ -65,7 +63,7 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
          * PROTOCOL: through / connect
          */
         ctx.channel().config().setAutoRead(false);
-        Channels.open(hostname, port, false, proxyGroup, new ChannelInboundHandlerAdapter() {
+        Channels.open(hostname, port, false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
                 ctx.pipeline().addLast("Socket->Socket", new SocketInboundRedirectHandler(targetCtx));
@@ -113,7 +111,7 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
         /*-
          * PROTOCOL: through / connect
          */
-        Channels.open(hostname, port, false, proxyGroup, new ChannelInboundHandlerAdapter() {
+        Channels.open(hostname, port, false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
                 ctx.pipeline().addLast("WebSocket->Socket", new SocketOverWebSocketDecodeHandler(targetCtx));

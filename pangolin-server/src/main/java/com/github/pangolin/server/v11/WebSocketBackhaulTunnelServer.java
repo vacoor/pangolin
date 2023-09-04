@@ -118,10 +118,12 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
         final Channel channel = server.start();
         System.out.println("Start on " + channel.localAddress());
 
+        /*
         server.webSocketBackhaulTunnelForwarder.addForwarding(
                 3389, "BZ",
                 InetSocketAddress.createUnresolved("127.0.0.1", 3389)
         );
+        */
 
         /*
         final Terminal terminal = TerminalFactory.create();

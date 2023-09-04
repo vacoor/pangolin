@@ -33,7 +33,7 @@ public class Socks5WebSocketProxyServer extends NettyServer {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
 //                ch.pipeline().addLast(new FlowControlHandler());
-                ch.pipeline().addLast(new Socks5WebSocketProxyServerHandler(webSocketProxyServerEndpoint, webSocketProxyServerProtocol, workerGroup));
+                ch.pipeline().addLast(new Socks5WebSocketProxyServerHandler(webSocketProxyServerEndpoint, webSocketProxyServerProtocol));
             }
         });
     }

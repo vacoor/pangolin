@@ -37,10 +37,10 @@ public class SocksProxyServer extends NettyServer {
                     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                         final ChannelPipeline cp = ctx.pipeline();
                         if (msg instanceof Socks4Message) {
-                            cp.replace(this, null, new Socks4ProxyServerHandler(workerGroup));
+                            cp.replace(this, null, new Socks4ProxyServerHandler());
                             ctx.fireChannelRead(msg);
                         } else if (msg instanceof Socks5Message) {
-                            cp.replace(this, null, new Socks5ProxyServerHandler(workerGroup));
+                            cp.replace(this, null, new Socks5ProxyServerHandler());
                             ctx.fireChannelRead(msg);
                         } else {
                             ReferenceCountUtil.release(msg);

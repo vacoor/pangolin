@@ -40,7 +40,6 @@ public class WebSocketProxyServer extends NettyServer {
                 }
                 cp.addLast(new HttpServerCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
                 cp.addLast(new WebSocketProxyServerHandler(
-                        workerGroup,
                         true, 65536, true
                 ));
             }

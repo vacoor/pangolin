@@ -23,18 +23,18 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
     private final URI webSocketEndpoint;
     private final String webSocketProtocol;
 
-    public Socks5WebSocketProxyServerHandler(final URI webSocketEndpoint, final String webSocketProtocol, final EventLoopGroup proxyWorkersGroup) {
-        this(null, null, webSocketEndpoint, webSocketProtocol, proxyWorkersGroup);
+    public Socks5WebSocketProxyServerHandler(final URI webSocketEndpoint, final String webSocketProtocol) {
+        this(null, null, webSocketEndpoint, webSocketProtocol);
     }
 
-    public Socks5WebSocketProxyServerHandler(final String username, final String password, final URI webSocketEndpoint, final String webSocketProtocol, final EventLoopGroup proxyWorkersGroup) {
-        super(username, password, proxyWorkersGroup);
+    public Socks5WebSocketProxyServerHandler(final String username, final String password, final URI webSocketEndpoint, final String webSocketProtocol) {
+        super(username, password);
         this.webSocketEndpoint = webSocketEndpoint;
         this.webSocketProtocol = webSocketProtocol;
     }
 
     @Override
-    protected void connect(final ChannelHandlerContext requestCtx, final Socks5CommandRequest request, final EventLoopGroup proxyGroup) throws Exception {
+    protected void connect(final ChannelHandlerContext requestCtx, final Socks5CommandRequest request) throws Exception {
         final int port = request.dstPort();
         final String address = request.dstAddr();
         final Socks5AddressType addressType = request.dstAddrType();
@@ -46,7 +46,7 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
         final HttpHeaders handshakeHeaders = newHandshakeHeaders(request, requestCtx);
         final String query = "/?target=tcp://" + address + ":" + port;
         final URI webSocketEndpointToHandshake = URI.create(webSocketEndpoint.toString() + query);
-        Channels.open(webSocketEndpoint.getHost(), webSocketEndpoint.getPort(), true, proxyGroup, new ChannelInitializer<SocketChannel>() {
+        Channels.open(webSocketEndpoint.getHost(), webSocketEndpoint.getPort(), true, requestCtx.channel().eventLoop(), new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final ChannelPipeline cp = ch.pipeline();

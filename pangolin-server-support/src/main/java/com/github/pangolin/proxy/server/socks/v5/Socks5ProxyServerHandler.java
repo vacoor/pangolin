@@ -3,9 +3,28 @@ package com.github.pangolin.proxy.server.socks.v5;
 import com.github.pangolin.handler.SocketInboundRedirectHandler;
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.ByteToMessageDecoder;
-import io.netty.handler.codec.socksx.v5.*;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5CommandResponse;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5InitialResponse;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5PasswordAuthResponse;
+import io.netty.handler.codec.socksx.v5.Socks5AddressType;
+import io.netty.handler.codec.socksx.v5.Socks5AuthMethod;
+import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
+import io.netty.handler.codec.socksx.v5.Socks5CommandRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5CommandStatus;
+import io.netty.handler.codec.socksx.v5.Socks5CommandType;
+import io.netty.handler.codec.socksx.v5.Socks5InitialRequest;
+import io.netty.handler.codec.socksx.v5.Socks5InitialRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5Message;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequest;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthStatus;
+import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -14,18 +33,16 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     private static final String DEFAULT_DECODER_NAME = "Socks5ServerDecoder";
 
     private String decoderName = DEFAULT_DECODER_NAME;
-    private final EventLoopGroup proxyGroup;
     private final String username;
     private final String password;
 
-    public Socks5ProxyServerHandler(final EventLoopGroup proxyGroup) {
-        this(null, null, proxyGroup);
+    public Socks5ProxyServerHandler() {
+        this(null, null);
     }
 
-    public Socks5ProxyServerHandler(final String username, final String password, final EventLoopGroup proxyGroup) {
+    public Socks5ProxyServerHandler(final String username, final String password) {
         this.username = username;
         this.password = password;
-        this.proxyGroup = proxyGroup;
     }
 
     @Override
@@ -95,7 +112,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 if (!Socks5CommandType.CONNECT.equals(type)) {
                     ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
                 } else {
-                    connect(ctx, request, proxyGroup);
+                    connect(ctx, request);
                 }
             } else {
                 log.error("Connection closed by UNKNOWN message: {}", msg.getClass().getName());
@@ -112,13 +129,13 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 
-    protected void connect(final ChannelHandlerContext requestCtx, final Socks5CommandRequest request, final EventLoopGroup proxyGroup) throws Exception {
+    protected void connect(final ChannelHandlerContext requestCtx, final Socks5CommandRequest request) throws Exception {
         final int port = request.dstPort();
         final String address = request.dstAddr();
         final Socks5AddressType addressType = request.dstAddrType();
 
         requestCtx.channel().config().setAutoRead(false);
-        Channels.open(address, port, false, proxyGroup, new ChannelInboundHandlerAdapter() {
+        Channels.open(address, port, false, requestCtx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
                 delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(requestCtx));

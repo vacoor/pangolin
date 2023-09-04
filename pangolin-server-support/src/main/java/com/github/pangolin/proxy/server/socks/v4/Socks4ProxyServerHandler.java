@@ -3,8 +3,18 @@ package com.github.pangolin.proxy.server.socks.v4;
 import com.github.pangolin.handler.SocketInboundRedirectHandler;
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
-import io.netty.handler.codec.socksx.v4.*;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelPipeline;
+import io.netty.handler.codec.socksx.v4.DefaultSocks4CommandResponse;
+import io.netty.handler.codec.socksx.v4.Socks4CommandRequest;
+import io.netty.handler.codec.socksx.v4.Socks4CommandStatus;
+import io.netty.handler.codec.socksx.v4.Socks4CommandType;
+import io.netty.handler.codec.socksx.v4.Socks4Message;
+import io.netty.handler.codec.socksx.v4.Socks4ServerDecoder;
+import io.netty.handler.codec.socksx.v4.Socks4ServerEncoder;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -13,15 +23,13 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
     private static final String NONE = "";
 
     private final String username;
-    private final EventLoopGroup proxyGroup;
 
-    public Socks4ProxyServerHandler(final EventLoopGroup proxyGroup) {
-        this(NONE, proxyGroup);
+    public Socks4ProxyServerHandler() {
+        this(NONE);
     }
 
-    public Socks4ProxyServerHandler(final String username, final EventLoopGroup proxyGroup) {
+    public Socks4ProxyServerHandler(final String username) {
         this.username = null != username ? username : NONE;
-        this.proxyGroup = proxyGroup;
     }
 
     @Override
@@ -67,7 +75,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 } else if (!Socks4CommandType.CONNECT.equals(type)) {
                     ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.REJECTED_OR_FAILED)).addListener(ChannelFutureListener.CLOSE);
                 } else {
-                    connect(ctx, request, proxyGroup);
+                    connect(ctx, request);
                 }
             } else {
                 log.error("Connection closed by UNKNOWN message: {}", msg.getClass().getName());
@@ -84,12 +92,12 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
         ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 
-    protected void connect(final ChannelHandlerContext ctx, final Socks4CommandRequest request, final EventLoopGroup proxyGroup) throws Exception {
+    protected void connect(final ChannelHandlerContext ctx, final Socks4CommandRequest request) throws Exception {
         final int port = request.dstPort();
         final String address = request.dstAddr();
 
         ctx.channel().config().setAutoRead(false);
-        Channels.open(address, port, false, proxyGroup, new ChannelInboundHandlerAdapter() {
+        Channels.open(address, port, false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
                 delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(ctx));

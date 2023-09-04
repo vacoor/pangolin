@@ -53,7 +53,7 @@ public class WebSocketBackhaulTunnelAgent {
         return Channels2.openWs(
                 handshaker, workerGroup,
                 new IdleStateHandler(600, 600, 600),
-                new WebSocketBackhaulTunnelAgentHandler(name, handshaker, customHttpHeaders, workerGroup)
+                new WebSocketBackhaulTunnelAgentHandler(name, handshaker, customHttpHeaders)
         ).sync().channel();
     }
 

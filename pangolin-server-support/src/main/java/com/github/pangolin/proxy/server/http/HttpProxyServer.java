@@ -21,7 +21,7 @@ public class HttpProxyServer {
                  */
 //                final SslContext ssl = Channels.createServerSslContext();
 //                ch.pipeline().addLast(ssl.newHandler(ch.alloc()));
-                ch.pipeline().addLast(new HttpProxyServerHandler(new NioEventLoopGroup()));
+                ch.pipeline().addLast(new HttpProxyServerHandler());
             }
         }).sync().channel().closeFuture().sync();
     }

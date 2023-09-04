@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy;
+package com.github.pangolin.proxy.routing;
 
 import io.netty.channel.ChannelHandler;
 

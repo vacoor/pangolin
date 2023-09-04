@@ -93,6 +93,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
+                    log.info("Connection established: {}:{}", uri.getHost(), uri.getPort());
                     final ChannelHandlerContext backhaulCtx = backhaulFuture.getNow();
                     backhaulCtx.channel().config().setAutoRead(false);
 

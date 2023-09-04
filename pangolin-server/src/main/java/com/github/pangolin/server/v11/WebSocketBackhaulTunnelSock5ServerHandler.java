@@ -18,14 +18,13 @@ class WebSocketBackhaulTunnelSock5ServerHandler extends Socks5ProxyServerHandler
     private WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
     private String agentKey;
 
-    public WebSocketBackhaulTunnelSock5ServerHandler(final EventLoopGroup proxyGroup, final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final String agent) {
-        super(proxyGroup);
+    public WebSocketBackhaulTunnelSock5ServerHandler(final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final String agent) {
         this.webSocketBackhaulTunnelEngine = webSocketBackhaulTunnelEngine;
         this.agentKey = agent;
     }
 
     @Override
-    protected void connect(final ChannelHandlerContext accessCtx, final Socks5CommandRequest request, final EventLoopGroup proxyGroup) throws Exception {
+    protected void connect(final ChannelHandlerContext accessCtx, final Socks5CommandRequest request) throws Exception {
         final int port = request.dstPort();
         final String address = request.dstAddr();
         final Socks5AddressType addressType = request.dstAddrType();

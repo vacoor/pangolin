@@ -3,21 +3,34 @@ package com.github.pangolin.proxy.server.dns;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
-import io.netty.handler.codec.dns.*;
+import io.netty.handler.codec.dns.DatagramDnsQuery;
+import io.netty.handler.codec.dns.DatagramDnsQueryDecoder;
+import io.netty.handler.codec.dns.DatagramDnsQueryEncoder;
+import io.netty.handler.codec.dns.DatagramDnsResponse;
+import io.netty.handler.codec.dns.DatagramDnsResponseDecoder;
+import io.netty.handler.codec.dns.DatagramDnsResponseEncoder;
+import io.netty.handler.codec.dns.DefaultDnsQuestion;
+import io.netty.handler.codec.dns.DefaultDnsRawRecord;
+import io.netty.handler.codec.dns.DnsQuestion;
+import io.netty.handler.codec.dns.DnsRawRecord;
+import io.netty.handler.codec.dns.DnsRecordType;
+import io.netty.handler.codec.dns.DnsSection;
 import io.netty.util.NetUtil;
 
 import java.net.InetSocketAddress;
 
 public class DnsQueryServerHandler extends SimpleChannelInboundHandler<DatagramDnsQuery> {
-    private final EventLoopGroup group;
-
-    public DnsQueryServerHandler(final EventLoopGroup group) {
-        this.group = group;
-    }
 
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
@@ -47,7 +60,7 @@ public class DnsQueryServerHandler extends SimpleChannelInboundHandler<DatagramD
             return;
         }
         Bootstrap b = new Bootstrap();
-        b.group(group).channel(NioDatagramChannel.class).handler(new SimpleChannelInboundHandler<DatagramDnsResponse>() {
+        b.group(ctx.channel().eventLoop()).channel(NioDatagramChannel.class).handler(new SimpleChannelInboundHandler<DatagramDnsResponse>() {
 
             @Override
             public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
@@ -99,7 +112,7 @@ public class DnsQueryServerHandler extends SimpleChannelInboundHandler<DatagramD
                 .handler(new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
-                        ch.pipeline().addLast(new DnsQueryServerHandler(new NioEventLoopGroup()));
+                        ch.pipeline().addLast(new DnsQueryServerHandler());
                     }
                 }).option(ChannelOption.SO_BROADCAST, true).bind(53).sync();
     }
