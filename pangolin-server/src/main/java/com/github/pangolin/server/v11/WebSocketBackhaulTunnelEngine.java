@@ -74,14 +74,13 @@ public class WebSocketBackhaulTunnelEngine {
     }
 
     Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agentKey, final URI target, final ChannelHandlerContext accessCtx) {
-        return tunnelRequested(id, agentKey, target, accessCtx, TimeUnit.SECONDS.toMillis(10));
+        return tunnelRequested(id, agentKey, target, accessCtx, TimeUnit.SECONDS.toMillis(10), accessCtx.executor().newPromise());
     }
 
-    Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agentKey, final URI target, final ChannelHandlerContext accessCtx, final long waitTimeoutMs) {
+    Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agentKey, final URI target, final ChannelHandlerContext accessCtx, final long waitTimeoutMs, Promise<ChannelHandlerContext> backhaulPromise) {
         final Agent agent = registeredAgents.get(agentKey);
         Preconditions.checkState(null != agent, "Connection unavailable");
 
-        final Promise<ChannelHandlerContext> backhaulPromise = accessCtx.executor().newPromise();
         final Tunnel tunnel = new Tunnel(id, agent, target, accessCtx, backhaulPromise);
         Preconditions.checkState(null == tunnelMap.putIfAbsent(id, tunnel), "The channel id '%s' is already used", id);
 

@@ -97,7 +97,7 @@ public abstract class Redirects {
             private void closeGracefully(final CloseWebSocketFrame c, final ChannelHandlerContext inCtx, final ChannelHandlerContext outCtx) {
                 log.info("[tun@ws {}(!) => {}] Connection closed by {}/{}", stringify(inCtx), stringify(outCtx), c.statusCode(), c.reasonText());
                 if (outCtx.channel().isActive()) {
-                    outCtx.writeAndFlush(c).addListener(ChannelFutureListener.CLOSE);
+                    outCtx.writeAndFlush(c.retain()).addListener(ChannelFutureListener.CLOSE);
                 } else {
                     c.release();
                 }

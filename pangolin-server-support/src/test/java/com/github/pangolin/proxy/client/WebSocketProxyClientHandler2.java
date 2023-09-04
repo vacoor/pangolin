@@ -89,8 +89,9 @@ public class WebSocketProxyClientHandler2 extends ProxyClientHandler {
         customHandshakeHttpHeadersToUse.set("X-TARGET-ADDRESS", address.getHostString());
         customHandshakeHttpHeadersToUse.setInt("X-TARGET-PORT", address.getPort());
 
+        final URI uri = URI.create(webSocketProxyServerEndpoint.toString() + "?target=tcp://" + address.getHostString() + ":" + address.getPort());
         final WebSocketClientHandshaker handshaker = WebSocketClientHandshakerFactory.newHandshaker(
-                webSocketProxyServerEndpoint, webSocketVersion, webSocketProxyServerProtocol,
+                uri, webSocketVersion, webSocketProxyServerProtocol,
                 allowExtensions, customHandshakeHttpHeadersToUse, maxFramePayloadLength, performMasking, allowMaskMismatch
         );
 

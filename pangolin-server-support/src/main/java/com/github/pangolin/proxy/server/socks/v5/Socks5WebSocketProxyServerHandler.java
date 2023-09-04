@@ -44,7 +44,8 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
         final SslContext context = isSecure ? Channels.createClientSslContext() : null;
         final HttpHeaders handshakeHeaders = newHandshakeHeaders(request, requestCtx);
-        final String query = "/?target=tcp://" + address + ":" + port;
+        // final String query = "/?agent=BZ&target=tcp://" + address + ":" + port;
+        final String query = "/?agent=BZ&target=ws://127.0.0.1:8899/ws/echo";
         final URI webSocketEndpointToHandshake = URI.create(webSocketEndpoint.toString() + query);
         Channels.open(webSocketEndpoint.getHost(), webSocketEndpoint.getPort(), true, requestCtx.channel().eventLoop(), new ChannelInitializer<SocketChannel>() {
             @Override
@@ -55,6 +56,7 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
                 }
                 cp.addLast(new HttpClientCodec());
                 cp.addLast(new HttpObjectAggregator(1024 * 1024 * 8));
+                // AddFlowController
                 // cp.addLast(WebSocketClientCompressionHandler.INSTANCE);
                 cp.addLast(new WebSocketClientProtocolHandler(WebSocketClientHandshakerFactory.newHandshaker(
                         webSocketEndpointToHandshake, WebSocketVersion.V13, webSocketProtocol, true, handshakeHeaders, 65536, true, true

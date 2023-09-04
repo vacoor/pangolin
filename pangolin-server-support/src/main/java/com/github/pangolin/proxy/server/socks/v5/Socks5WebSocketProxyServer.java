@@ -39,8 +39,9 @@ public class Socks5WebSocketProxyServer extends NettyServer {
     }
 
     public static void main(String[] args) throws InterruptedException, SSLException, CertificateException, ExecutionException {
-        final URI webSocketProxyServerEndpoint = URI.create("ws://127.0.0.1:1444");
-        final String protocol = "CONNECT";
+        final URI webSocketProxyServerEndpoint = URI.create("ws://127.0.0.1:2345/tunnel");
+        // final String protocol = "CONNECT";
+        final String protocol = "";
         new Socks5WebSocketProxyServer(1080, webSocketProxyServerEndpoint, protocol).start().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {

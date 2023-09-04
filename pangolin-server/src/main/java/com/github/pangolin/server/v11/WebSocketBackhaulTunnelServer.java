@@ -106,8 +106,11 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
                         new WebSocketServerCompressionHandler(),
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
                         */
+                        /*
                         new WebSocketServerProtocolHandler(endpointPath, "*", false, 65536, true, true),
-                        new WebSocketBackhaulTunnelServerInitializer(webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder)
+                         new WebSocketBackhaulTunnelServerInitializer(webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder)
+                        */
+                        new WebSocketBackhaulTunnelServerInitializer2(endpointPath, "*", webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder)
                 );
             }
         }).sync().channel();

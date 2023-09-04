@@ -13,6 +13,7 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
+import io.netty.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
@@ -31,11 +32,11 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
     private static final String PROTOCOL_MGR_CONSOLE = "CONSOLE";
 
     private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
-    private final WebSocketBackhaulTunnelForwarder forwarder;
+    private final WebSocketBackhaulTunnelForwarder webSocketBackhaulTunnelForwarder;
 
-    public WebSocketBackhaulTunnelServerInitializer(final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final WebSocketBackhaulTunnelForwarder forwarder) {
+    public WebSocketBackhaulTunnelServerInitializer(final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final WebSocketBackhaulTunnelForwarder webSocketBackhaulTunnelForwarder) {
         this.webSocketBackhaulTunnelEngine = webSocketBackhaulTunnelEngine;
-        this.forwarder = forwarder;
+        this.webSocketBackhaulTunnelForwarder = webSocketBackhaulTunnelForwarder;
     }
 
     @Override
@@ -56,7 +57,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
                 tcpTunnelRequested(handshake, ctx);
                 */
             } else if (PROTOCOL_MGR_CONSOLE.equals(subprotocol)) {
-                ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelConsoleHandler(webSocketBackhaulTunnelEngine, forwarder));
+                ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelConsoleHandler(webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder));
             } else {
                 ctx.writeAndFlush(new CloseWebSocketFrame(1002, "PROTOCOL_ERROR")).addListener(ChannelFutureListener.CLOSE);
             }
@@ -73,7 +74,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
     /**
      * tcp over websocket or websocket frame through.
      */
-    private void wsTunnelRequested(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
+    private Promise<ChannelHandlerContext> wsTunnelRequested(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
         final Map<String, List<String>> params = parseParams(handshake.requestUri());
         final String target = getTarget(params);
         final String agentKey = getAgentKey(params);
@@ -89,7 +90,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
         final String targetToUse = target.contains("://") ? target : "tcp://" + target;
         final URI uri = URI.create(targetToUse);
         final String id = accessCtx.channel().id().toString();
-        webSocketBackhaulTunnelEngine.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
+        return webSocketBackhaulTunnelEngine.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
@@ -112,7 +113,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
     /**
      * tcp through or websocket frame data by tcp.
      */
-    private void tcpTunnelRequested(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
+    private Promise<ChannelHandlerContext> tcpTunnelRequested(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
         final Map<String, List<String>> params = parseParams(handshake.requestUri());
         final String target = getTarget(params);
         final String agentKey = getAgentKey(params);
@@ -123,7 +124,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
          */
         final URI uri = URI.create(target);
         final String id = accessCtx.channel().id().toString();
-        webSocketBackhaulTunnelEngine.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
+        return webSocketBackhaulTunnelEngine.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
