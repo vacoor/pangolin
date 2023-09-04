@@ -1,8 +1,8 @@
 package com.github.pangolin.proxy.server.socks.v5;
 
-import com.github.pangolin.handler.SocketInboundRedirectHandler;
-import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
-import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
+import com.github.pangolin.handler.TcpInboundRedirectHandler;
+import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
+import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
@@ -44,8 +44,8 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
         final boolean isSecure = "wss".equalsIgnoreCase(webSocketEndpoint.getScheme());
         final SslContext context = isSecure ? Channels.createClientSslContext() : null;
         final HttpHeaders handshakeHeaders = newHandshakeHeaders(request, requestCtx);
-        // final String query = "/?agent=BZ&target=tcp://" + address + ":" + port;
-        final String query = "/?agent=BZ&target=ws://127.0.0.1:8899/ws/echo";
+         final String query = "/?agent=BZ&target=tcp://" + address + ":" + port;
+//        final String query = "/?agent=BZ&target=ws://127.0.0.1:8899/ws/echo";
         final URI webSocketEndpointToHandshake = URI.create(webSocketEndpoint.toString() + query);
         Channels.open(webSocketEndpoint.getHost(), webSocketEndpoint.getPort(), true, requestCtx.channel().eventLoop(), new ChannelInitializer<SocketChannel>() {
             @Override
@@ -68,8 +68,8 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
                             delegateCtx.channel().config().setAutoRead(false);
 
                             if (HttpMethod.CONNECT.name().equalsIgnoreCase(webSocketProtocol)) {
-                                requestCtx.pipeline().replace(requestCtx.handler(), null, new SocketInboundRedirectHandler(delegateCtx));
-                                delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(requestCtx));
+                                requestCtx.pipeline().replace(requestCtx.handler(), null, new TcpInboundRedirectHandler(delegateCtx));
+                                delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(requestCtx));
 //                                delegateCtx.pipeline().remove(HttpClientCodec.class);
                                 delegateCtx.pipeline().remove("ws-decoder");
                                 delegateCtx.pipeline().remove("ws-encoder");
@@ -77,8 +77,8 @@ public class Socks5WebSocketProxyServerHandler extends Socks5ProxyServerHandler 
                                 delegateCtx.pipeline().remove(Utf8FrameValidator.class);
                                 delegateCtx.pipeline().remove(WebSocketClientProtocolHandler.class);
                             } else {
-                                requestCtx.pipeline().replace(requestCtx.handler(), null, new SocketOverWebSocketEncodeHandler(delegateCtx));
-                                delegateCtx.pipeline().replace(this, null, new SocketOverWebSocketDecodeHandler(requestCtx));
+                                requestCtx.pipeline().replace(requestCtx.handler(), null, new TcpOverWebSocketEncodeHandler(delegateCtx));
+                                delegateCtx.pipeline().replace(this, null, new TcpOverWebSocketDecodeHandler(requestCtx));
                             }
 
                             requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(g -> requestCtx.pipeline().remove(Socks5ServerEncoder.DEFAULT));

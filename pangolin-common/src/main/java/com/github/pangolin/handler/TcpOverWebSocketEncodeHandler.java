@@ -16,10 +16,10 @@ import java.nio.charset.StandardCharsets;
  * socket over websocket.
  */
 @Slf4j
-public class SocketOverWebSocketEncodeHandler extends ChannelInboundHandlerAdapter {
+public class TcpOverWebSocketEncodeHandler extends ChannelInboundHandlerAdapter {
     private final ChannelHandlerContext outCtx;
 
-    public SocketOverWebSocketEncodeHandler(final ChannelHandlerContext wsCtx) {
+    public TcpOverWebSocketEncodeHandler(final ChannelHandlerContext wsCtx) {
         this.outCtx = wsCtx;
     }
 

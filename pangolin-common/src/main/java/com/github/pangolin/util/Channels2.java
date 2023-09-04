@@ -1,8 +1,9 @@
 package com.github.pangolin.util;
 
-import com.github.pangolin.handler.SocketInboundRedirectHandler;
-import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
-import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
+import com.github.pangolin.handler.TcpInboundRedirectHandler;
+import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
+import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
+import com.github.pangolin.handler.WebSocketInboundRedirectHandler;
 import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpClientCodec;
@@ -33,8 +34,8 @@ public class Channels2 {
                 Channels.open(downstream, false, brGroup, new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelActive(final ChannelHandlerContext downstreamCtx) throws Exception {
-                        upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", new SocketInboundRedirectHandler(downstreamCtx));
-                        downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", new SocketInboundRedirectHandler(upstreamCtx));
+                        upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", new TcpInboundRedirectHandler(downstreamCtx));
+                        downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", new TcpInboundRedirectHandler(upstreamCtx));
 
                         upstreamCtx.channel().config().setAutoRead(true);
                         downstreamCtx.channel().config().setAutoRead(true);
@@ -75,8 +76,8 @@ public class Channels2 {
                         if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
                             downstreamCtx.channel().config().setAutoRead(false);
 
-                            upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", new SocketOverWebSocketEncodeHandler(downstreamCtx));
-                            downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", new SocketOverWebSocketDecodeHandler(upstreamCtx));
+                            upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", new TcpOverWebSocketEncodeHandler(downstreamCtx));
+                            downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", new TcpOverWebSocketDecodeHandler(upstreamCtx));
 
                             upstreamCtx.channel().config().setAutoRead(true);
                             downstreamCtx.channel().config().setAutoRead(true);
@@ -126,8 +127,8 @@ public class Channels2 {
                             if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
                                 downstreamCtx.channel().config().setAutoRead(false);
 
-                                upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", Redirects.webSocketRedirectToWebSocket(downstreamCtx));
-                                downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", Redirects.webSocketRedirectToWebSocket(upstreamCtx));
+                                upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", new WebSocketInboundRedirectHandler(downstreamCtx));
+                                downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", new WebSocketInboundRedirectHandler(upstreamCtx));
 
                                 upstreamCtx.channel().config().setAutoRead(true);
                                 downstreamCtx.channel().config().setAutoRead(true);

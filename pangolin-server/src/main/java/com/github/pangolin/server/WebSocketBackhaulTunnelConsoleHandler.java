@@ -1,7 +1,7 @@
-package com.github.pangolin.server.v11;
+package com.github.pangolin.server;
 
-import com.github.pangolin.server.v11.shell.ConsoleReaderFactory;
-import com.github.pangolin.server.v11.shell.Shell;
+import com.github.pangolin.server.shell.ConsoleReaderFactory;
+import com.github.pangolin.server.shell.Shell;
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;

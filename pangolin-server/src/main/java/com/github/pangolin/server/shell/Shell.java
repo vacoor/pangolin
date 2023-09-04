@@ -1,7 +1,7 @@
-package com.github.pangolin.server.v11.shell;
+package com.github.pangolin.server.shell;
 
-import com.github.pangolin.server.v11.WebSocketBackhaulTunnelEngine;
-import com.github.pangolin.server.v11.WebSocketBackhaulTunnelForwarder;
+import com.github.pangolin.server.WebSocketBackhaulTunnelEngine;
+import com.github.pangolin.server.WebSocketBackhaulTunnelForwarder;
 import com.google.common.collect.Lists;
 import io.netty.channel.nio.NioEventLoopGroup;
 import jline.UnsupportedTerminal;

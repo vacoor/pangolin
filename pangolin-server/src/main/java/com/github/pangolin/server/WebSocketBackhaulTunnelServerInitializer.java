@@ -1,7 +1,8 @@
-package com.github.pangolin.server.v11;
+package com.github.pangolin.server;
 
-import com.github.pangolin.handler.SocketInboundRedirectHandler;
-import com.github.pangolin.util.Redirects;
+import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
+import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
+import com.github.pangolin.handler.WebSocketInboundRedirectHandler;
 import com.github.pangolin.util.Util;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -52,10 +53,8 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
                 webSocketBackhaulTunnelEngine.tunnelResponded(handshake, ctx);
             } else if (PROTOCOL_WS_TUNNEL_REQUEST.equals(subprotocol)) {
                 wsTunnelRequested(handshake, ctx);
-                /*
             } else if (PROTOCOL_TCP_TUNNEL_REQUEST.equals(subprotocol)) {
                 tcpTunnelRequested(handshake, ctx);
-                */
             } else if (PROTOCOL_MGR_CONSOLE.equals(subprotocol)) {
                 ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelConsoleHandler(webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder));
             } else {
@@ -80,12 +79,8 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
         final String agentKey = getAgentKey(params);
 
         /*-
-         * v1.0
          * tcp://hostname:port:      ws-client --ws--> server --tcp over ws--> agent --> tcp target
          * ws://hostname:port/path:  ws-client --ws--> server -------ws------> agent --> ws target
-         * v1.1
-         * ws:tcp://hostname:port:      ws-client --ws--> server --tcp over ws--> agent --> tcp target
-         * ws:ws://hostname:port/path:  ws-client --ws--> server -------ws------> agent --> ws target
          */
         final String targetToUse = target.contains("://") ? target : "tcp://" + target;
         final URI uri = URI.create(targetToUse);
@@ -98,8 +93,8 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
                     final ChannelHandlerContext backhaulCtx = backhaulFuture.getNow();
                     backhaulCtx.channel().config().setAutoRead(false);
 
-                    accessCtx.pipeline().replace(accessCtx.name(), null, Redirects.webSocketRedirectToWebSocket(backhaulCtx));
-                    backhaulCtx.pipeline().replace(backhaulCtx.name(), null, Redirects.webSocketRedirectToWebSocket(accessCtx));
+                    accessCtx.pipeline().replace(accessCtx.name(), null, new WebSocketInboundRedirectHandler(backhaulCtx));
+                    backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new WebSocketInboundRedirectHandler(accessCtx));
 
                     accessCtx.channel().config().setAutoRead(true);
                     backhaulCtx.channel().config().setAutoRead(true);
@@ -119,7 +114,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
         final String agentKey = getAgentKey(params);
 
         /*-
-         * tcp:tcp://hostname:port:      client --tcp--> server ------------tcp---------> agent --> tcp target
+         * tcp:tcp://hostname:port:      client --tcp--> server -----tcp over ws--------> agent --> tcp target
          * tcp:ws://hostname:port/path:  client --tcp--> server --websocket data frame--> agent --> ws target
          */
         final URI uri = URI.create(target);
@@ -131,8 +126,8 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
                     final ChannelHandlerContext backhaulCtx = backhaulFuture.getNow();
                     backhaulCtx.channel().config().setAutoRead(false);
 
-                    accessCtx.pipeline().replace(accessCtx.name(), null, new SocketInboundRedirectHandler(backhaulCtx));
-                    backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new SocketInboundRedirectHandler(accessCtx));
+                    accessCtx.pipeline().replace(accessCtx.name(), null, new TcpOverWebSocketEncodeHandler(backhaulCtx));
+                    backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new TcpOverWebSocketDecodeHandler(accessCtx));
 
                     // remove websocket codec.
                     accessCtx.pipeline().remove("wsencoder");

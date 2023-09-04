@@ -68,12 +68,4 @@ public class WebSocketBackhaulTunnelAgent {
         workerGroup.shutdownGracefully();
     }
 
-    public static void main(String[] args) throws Exception {
-        final String name = "BZ";
-        // final URI uri = URI.create("ws://114.95.199.96:2345/tunnel");
-        final URI uri = URI.create("ws://127.0.0.1:2345/tunnel");
-        final WebSocketBackhaulTunnelAgent client = new WebSocketBackhaulTunnelAgent(name, uri);
-        client.start().closeFuture().await();
-        System.out.println("Over");
-    }
 }

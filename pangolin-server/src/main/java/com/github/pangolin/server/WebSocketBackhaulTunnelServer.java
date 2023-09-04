@@ -1,8 +1,5 @@
-package com.github.pangolin.server.v11;
+package com.github.pangolin.server;
 
-import com.github.pangolin.server.NettyServer;
-import com.github.pangolin.server.v11.shell.ConsoleReaderFactory;
-import com.github.pangolin.server.v11.shell.Shell;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
@@ -12,15 +9,10 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.ssl.SslContext;
-import jline.Terminal;
-import jline.TerminalFactory;
-import jline.console.ConsoleReader;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
-import java.net.InetSocketAddress;
 import java.security.cert.CertificateException;
-import java.util.stream.Collectors;
 
 /**
  *
@@ -106,11 +98,9 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
                         new WebSocketServerCompressionHandler(),
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
                         */
-                        /*
                         new WebSocketServerProtocolHandler(endpointPath, "*", false, 65536, true, true),
-                         new WebSocketBackhaulTunnelServerInitializer(webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder)
-                        */
-                        new WebSocketBackhaulTunnelServerInitializer2(endpointPath, "*", webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder)
+                        new WebSocketBackhaulTunnelServerInitializer(webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder)
+//                        new WebSocketBackhaulTunnelServerInitializer2(endpointPath, "*", webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder)
                 );
             }
         }).sync().channel();

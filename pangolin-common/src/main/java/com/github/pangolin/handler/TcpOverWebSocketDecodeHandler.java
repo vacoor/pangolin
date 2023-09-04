@@ -18,10 +18,10 @@ import java.nio.charset.StandardCharsets;
  * socket over websocket.
  */
 @Slf4j
-public class SocketOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter {
+public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter {
     private final ChannelHandlerContext outCtx;
 
-    public SocketOverWebSocketDecodeHandler(final ChannelHandlerContext socketCtx) {
+    public TcpOverWebSocketDecodeHandler(final ChannelHandlerContext socketCtx) {
         this.outCtx = socketCtx;
     }
 

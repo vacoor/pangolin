@@ -14,10 +14,10 @@ import java.nio.charset.StandardCharsets;
  * socket to socket.
  */
 @Slf4j
-public class SocketInboundRedirectHandler extends ChannelInboundHandlerAdapter {
+public class TcpInboundRedirectHandler extends ChannelInboundHandlerAdapter {
     private final ChannelHandlerContext outCtx;
 
-    public SocketInboundRedirectHandler(final ChannelHandlerContext outCtx) {
+    public TcpInboundRedirectHandler(final ChannelHandlerContext outCtx) {
         this.outCtx = outCtx;
     }
 

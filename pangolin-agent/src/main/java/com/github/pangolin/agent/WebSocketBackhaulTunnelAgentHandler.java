@@ -5,13 +5,7 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.HttpHeaders;
-import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
-import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
-import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.*;
 import io.netty.handler.timeout.IdleStateEvent;
 import lombok.extern.slf4j.Slf4j;
 
@@ -76,11 +70,6 @@ public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHan
              * v1.0:
              * tcp:8080->tcp://172.16.0.12:7788
              * id->target_protocol://target_host:target_port
-             * v1.1:
-             * id->ws:tcp://172.16.0.12:7788
-             * id->ws:ws://172.16.0.12:7788
-             * id->tcp:tcp://172.16.0.12:7788 --> since v1.1
-             * id->tcp:ws://172.16.0.12:7788  --> since v1.1
              */
             final String text = ((TextWebSocketFrame) frame).text();
             final String[] segments = text.split(Pattern.quote("->"));

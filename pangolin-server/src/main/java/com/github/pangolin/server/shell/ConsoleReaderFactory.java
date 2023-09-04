@@ -1,4 +1,4 @@
-package com.github.pangolin.server.v11.shell;
+package com.github.pangolin.server.shell;
 
 import jline.Terminal;
 import jline.console.ConsoleReader;

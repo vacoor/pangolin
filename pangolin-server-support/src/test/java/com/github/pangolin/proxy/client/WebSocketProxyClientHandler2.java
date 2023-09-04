@@ -81,8 +81,6 @@ public class WebSocketProxyClientHandler2 extends ProxyClientHandler {
 
     @Override
     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
-        ctx.fireChannelActive();
-
         final InetSocketAddress address = getDelegateAddress();
         final DefaultHttpHeaders customHandshakeHttpHeadersToUse = new DefaultHttpHeaders();
         customHandshakeHttpHeadersToUse.add(customHandshakeHttpHeaders);
@@ -104,6 +102,7 @@ public class WebSocketProxyClientHandler2 extends ProxyClientHandler {
             }
         });
         ctx.channel().attr(HANDSHAKER_ATTR_KEY).set(handshaker);
+        ctx.fireChannelActive();
     }
 
     protected boolean channelRead0(final ChannelHandlerContext ctx, final Object msg) throws Exception {

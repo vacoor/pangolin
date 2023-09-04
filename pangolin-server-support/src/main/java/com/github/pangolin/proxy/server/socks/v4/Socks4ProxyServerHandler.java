@@ -1,6 +1,6 @@
 package com.github.pangolin.proxy.server.socks.v4;
 
-import com.github.pangolin.handler.SocketInboundRedirectHandler;
+import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -100,8 +100,8 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
         Channels.open(address, port, false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
-                delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(ctx));
-                ctx.pipeline().replace(ctx.handler(), null, new SocketInboundRedirectHandler(delegateCtx));
+                delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(ctx));
+                ctx.pipeline().replace(ctx.handler(), null, new TcpInboundRedirectHandler(delegateCtx));
 
                 delegateCtx.channel().config().setAutoRead(true);
                 ctx.channel().config().setAutoRead(true);

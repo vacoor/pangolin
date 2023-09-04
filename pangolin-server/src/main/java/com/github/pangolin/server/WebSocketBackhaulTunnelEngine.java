@@ -1,4 +1,4 @@
-package com.github.pangolin.server.v11;
+package com.github.pangolin.server;
 
 import com.google.common.base.Preconditions;
 import io.netty.buffer.Unpooled;
@@ -19,6 +19,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
@@ -79,7 +80,11 @@ public class WebSocketBackhaulTunnelEngine {
 
     Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agentKey, final URI target, final ChannelHandlerContext accessCtx, final long waitTimeoutMs, Promise<ChannelHandlerContext> backhaulPromise) {
         final Agent agent = registeredAgents.get(agentKey);
-        Preconditions.checkState(null != agent, "Connection unavailable");
+//        Preconditions.checkState(null != agent, "Connection unavailable");
+        if (null == agent) {
+            backhaulPromise.tryFailure(new ConnectException("Connection unavailable: agent '" + agentKey + "' not found"));
+            return backhaulPromise;
+        }
 
         final Tunnel tunnel = new Tunnel(id, agent, target, accessCtx, backhaulPromise);
         Preconditions.checkState(null == tunnelMap.putIfAbsent(id, tunnel), "The channel id '%s' is already used", id);
@@ -131,6 +136,10 @@ public class WebSocketBackhaulTunnelEngine {
         final QueryStringDecoder decoder = new QueryStringDecoder(handshake.requestUri());
         final List<String> ids = decoder.parameters().get(BACKHAUL_ID);
         final String id = null != ids && !ids.isEmpty() ? ids.get(ids.size() - 1) : null;
+        tunnelResponded(id, backhaulCtx);
+    }
+
+    void tunnelResponded(final String id, final ChannelHandlerContext backhaulCtx) {
         if (null == id) {
             backhaulCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             return;

@@ -1,8 +1,8 @@
 package com.github.pangolin.proxy.server.websocket;
 
-import com.github.pangolin.handler.SocketInboundRedirectHandler;
-import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
-import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
+import com.github.pangolin.handler.TcpInboundRedirectHandler;
+import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
+import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.handler.WebSocketServerHandshakeNegotiationHandler;
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.Unpooled;
@@ -66,8 +66,8 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
         Channels.open(hostname, port, false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
-                ctx.pipeline().addLast("Socket->Socket", new SocketInboundRedirectHandler(targetCtx));
-                targetCtx.pipeline().replace(targetCtx.name(), "Socket->Socket", new SocketInboundRedirectHandler(ctx));
+                ctx.pipeline().addLast("Socket->Socket", new TcpInboundRedirectHandler(targetCtx));
+                targetCtx.pipeline().replace(targetCtx.name(), "Socket->Socket", new TcpInboundRedirectHandler(ctx));
 
                 ctx.channel().config().setAutoRead(true);
                 targetCtx.channel().config().setAutoRead(true);
@@ -114,8 +114,8 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
         Channels.open(hostname, port, false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
-                ctx.pipeline().addLast("WebSocket->Socket", new SocketOverWebSocketDecodeHandler(targetCtx));
-                targetCtx.pipeline().replace(targetCtx.name(), "Socket->WebSocket", new SocketOverWebSocketEncodeHandler(ctx));
+                ctx.pipeline().addLast("WebSocket->Socket", new TcpOverWebSocketDecodeHandler(targetCtx));
+                targetCtx.pipeline().replace(targetCtx.name(), "Socket->WebSocket", new TcpOverWebSocketEncodeHandler(ctx));
 
                 ctx.channel().config().setAutoRead(true);
                 targetCtx.channel().config().setAutoRead(true);

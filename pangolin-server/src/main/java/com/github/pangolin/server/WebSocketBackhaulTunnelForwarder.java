@@ -1,7 +1,7 @@
-package com.github.pangolin.server.v11;
+package com.github.pangolin.server;
 
-import com.github.pangolin.handler.SocketOverWebSocketDecodeHandler;
-import com.github.pangolin.handler.SocketOverWebSocketEncodeHandler;
+import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
+import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.util.Channels;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -77,8 +77,8 @@ public class WebSocketBackhaulTunnelForwarder {
                                     backhaulCtx.channel().config().setAutoRead(false);
 
                                     // tcp over websocket.
-                                    accessCtx.pipeline().replace(accessCtx.name(), null, new SocketOverWebSocketEncodeHandler(backhaulCtx));
-                                    backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new SocketOverWebSocketDecodeHandler(accessCtx));
+                                    accessCtx.pipeline().replace(accessCtx.name(), null, new TcpOverWebSocketEncodeHandler(backhaulCtx));
+                                    backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new TcpOverWebSocketDecodeHandler(accessCtx));
 
                                     accessCtx.channel().config().setAutoRead(true);
                                     backhaulCtx.channel().config().setAutoRead(true);

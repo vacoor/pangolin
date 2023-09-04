@@ -1,6 +1,6 @@
 package com.github.pangolin.proxy.server.http;
 
-import com.github.pangolin.handler.SocketInboundRedirectHandler;
+import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -167,8 +167,8 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         Channels.open(targetAddress, false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
-                delegateCtx.pipeline().replace(this, null, new SocketInboundRedirectHandler(ctx));
-                ctx.pipeline().addAfter(ctx.name(), null, new SocketInboundRedirectHandler(delegateCtx));
+                delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(ctx));
+                ctx.pipeline().addAfter(ctx.name(), null, new TcpInboundRedirectHandler(delegateCtx));
 
                 ctx.pipeline().remove(ctx.name());
                 ctx.channel().config().setAutoRead(true);
