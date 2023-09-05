@@ -12,6 +12,7 @@ import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.util.concurrent.Future;
@@ -127,7 +128,7 @@ class WebSocketBackhaulTunnelServerInitializer2 extends WebSocketServerHandshake
                     accessCtx.channel().config().setAutoRead(true);
                     backhaulCtx.channel().config().setAutoRead(true);
                 } else {
-                    accessCtx.writeAndFlush(new CloseWebSocketFrame(1001, backhaulFuture.cause().getMessage()));
+                    accessCtx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, backhaulFuture.cause().getMessage()));
                 }
             }
         });

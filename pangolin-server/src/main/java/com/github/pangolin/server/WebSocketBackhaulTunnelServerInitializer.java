@@ -10,6 +10,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
+import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
 import io.netty.util.concurrent.Future;
@@ -58,7 +59,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
             } else if (PROTOCOL_MGR_CONSOLE.equals(subprotocol)) {
                 ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelConsoleHandler(webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder));
             } else {
-                ctx.writeAndFlush(new CloseWebSocketFrame(1002, "PROTOCOL_ERROR")).addListener(ChannelFutureListener.CLOSE);
+                ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.PROTOCOL_ERROR)).addListener(ChannelFutureListener.CLOSE);
             }
         }
         ctx.fireUserEventTriggered(evt);
@@ -67,7 +68,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
     @Override
     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
         log.error("Connection abort: {}", cause.getMessage(), cause);
-        ctx.writeAndFlush(new CloseWebSocketFrame(1011, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
+        ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
     }
 
     /**
@@ -99,7 +100,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
                     accessCtx.channel().config().setAutoRead(true);
                     backhaulCtx.channel().config().setAutoRead(true);
                 } else {
-                    accessCtx.writeAndFlush(new CloseWebSocketFrame(1001, backhaulFuture.cause().getMessage()));
+                    accessCtx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, backhaulFuture.cause().getMessage()));
                 }
             }
         });
@@ -138,7 +139,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
                     accessCtx.channel().config().setAutoRead(true);
                     backhaulCtx.channel().config().setAutoRead(true);
                 } else {
-                    accessCtx.writeAndFlush(new CloseWebSocketFrame(1001, backhaulFuture.cause().getMessage()));
+                    accessCtx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, backhaulFuture.cause().getMessage()));
                 }
             }
         });

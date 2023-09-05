@@ -104,6 +104,6 @@ public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHan
     @Override
     public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) throws Exception {
         log.warn("Software caused connection abort: {}", cause.getMessage(), cause);
-        webSocketContext.writeAndFlush(new CloseWebSocketFrame(1011, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
+        webSocketContext.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
     }
 }

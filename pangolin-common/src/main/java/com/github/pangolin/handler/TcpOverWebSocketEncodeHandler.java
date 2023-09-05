@@ -1,12 +1,13 @@
 package com.github.pangolin.handler;
 
-import com.github.pangolin.util.WebSocketUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -27,7 +28,7 @@ public class TcpOverWebSocketEncodeHandler extends ChannelInboundHandlerAdapter 
     public void channelInactive(final ChannelHandlerContext inCtx) {
         if (outCtx.channel().isActive()) {
             log.info("[tun@tcp/ws {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
-            WebSocketUtils.normalClose(outCtx, "Connection closed");
+            outCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.NORMAL_CLOSURE)).addListener(ChannelFutureListener.CLOSE);
         }
     }
 
@@ -54,7 +55,7 @@ public class TcpOverWebSocketEncodeHandler extends ChannelInboundHandlerAdapter 
     @Override
     public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) throws Exception {
         log.error("[tun@tcp/ws {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
-        WebSocketUtils.internalErrorClose(outCtx, cause.getMessage());
+        outCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
         inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 

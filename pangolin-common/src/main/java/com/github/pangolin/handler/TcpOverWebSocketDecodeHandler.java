@@ -1,6 +1,5 @@
 package com.github.pangolin.handler;
 
-import com.github.pangolin.util.WebSocketUtils;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -8,6 +7,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -63,12 +63,12 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
                 // XXX
                 log.error("Unexpect websocket message: {}, will be closed", msg);
                 outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                WebSocketUtils.unsupportedDataClose(inCtx, "Unexpect websocket message");
+                inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INVALID_PAYLOAD_DATA)).addListener(ChannelFutureListener.CLOSE);
             }
         } else {
             ReferenceCountUtil.release(msg);
             log.error("[tun@ws/tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
-            WebSocketUtils.goingAwayClose(inCtx, "Connection lost");
+            inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, "Connection lost")).addListener(ChannelFutureListener.CLOSE);
         }
     }
 
@@ -77,7 +77,7 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
         log.error("[tun@ws/tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
 
         outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-        WebSocketUtils.internalErrorClose(inCtx, cause.getMessage());
+        inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
     }
 
     private String stringify(final ChannelHandlerContext ctx) {
