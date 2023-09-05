@@ -56,7 +56,7 @@ public abstract class ProxyClientHandler extends ChannelDuplexHandler {
                     channelProxied(ctx);
                     ctx.pipeline().remove(this);
                     suppressChannelReadComplete = false;
-                    ctx.channel().config().setAutoRead(false);
+                    // ctx.channel().config().setAutoRead(false);
                 }
             } catch (final Throwable t) {
                 cause = t;

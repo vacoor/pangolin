@@ -1,12 +1,13 @@
 package com.github.pangolin.proxy.routing;
 
+import io.netty.channel.ChannelHandler;
+
 import java.net.SocketAddress;
-import java.net.URI;
 
 public interface RoutingRule {
 
-    boolean matches(final SocketAddress address);
+    boolean matches(final SocketAddress sourceAddress, final SocketAddress destinationAddress);
 
-    URI nextHop(final SocketAddress address);
+    ChannelHandler newProxyHandler();
 
 }

@@ -3,10 +3,34 @@ package com.github.pangolin.proxy.client;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelConfig;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelId;
+import io.netty.channel.ChannelMetadata;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ChannelProgressivePromise;
+import io.netty.channel.ChannelPromise;
+import io.netty.channel.EventLoop;
 import io.netty.handler.codec.MessageToMessageCodec;
-import io.netty.handler.codec.http.*;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.DefaultHttpHeaders;
+import io.netty.handler.codec.http.EmptyHttpHeaders;
+import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpResponseDecoder;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
 import io.netty.util.ReferenceCountUtil;
@@ -32,6 +56,10 @@ public class WebSocketProxyClientHandler2 extends ProxyClientHandler {
     private final int maxFramePayloadLength;
     private final boolean performMasking;
     private final boolean allowMaskMismatch;
+
+    public WebSocketProxyClientHandler2(final URI webSocketProxyServerEndpoint, final String webSocketProxyServerProtocol) {
+        this(webSocketProxyServerEndpoint, WebSocketVersion.V13, webSocketProxyServerProtocol, true, 65536, true, true);
+    }
 
     public WebSocketProxyClientHandler2(final URI webSocketProxyServerEndpoint,
                                         final WebSocketVersion webSocketVersion,
@@ -64,11 +92,13 @@ public class WebSocketProxyClientHandler2 extends ProxyClientHandler {
         final ChannelPipeline cp = ctx.pipeline();
         if (null == cp.get(HttpResponseDecoder.class)) {
             if (null == cp.get(HttpClientCodec.class)) {
-                throw new IllegalStateException("ChannelPipeline does not contain " + "a HttpResponseDecoder or HttpClientCodec");
+                cp.addBefore(ctx.name(), null, new HttpClientCodec());
+                // throw new IllegalStateException("ChannelPipeline does not contain " + "a HttpResponseDecoder or HttpClientCodec");
             }
         }
         if (null == cp.get(HttpObjectAggregator.class)) {
-            throw new IllegalStateException("ChannelPipeline does not contain " + "a HttpObjectAggregator");
+//            throw new IllegalStateException("ChannelPipeline does not contain " + "a HttpObjectAggregator");
+            cp.addBefore(ctx.name(), null, new HttpObjectAggregator(8 * 1024 * 1024));
         }
 
         if (null == cp.get(WebSocketProxyCodec.class)) {
@@ -87,7 +117,10 @@ public class WebSocketProxyClientHandler2 extends ProxyClientHandler {
         customHandshakeHttpHeadersToUse.set("X-TARGET-ADDRESS", address.getHostString());
         customHandshakeHttpHeadersToUse.setInt("X-TARGET-PORT", address.getPort());
 
-        final URI uri = URI.create(webSocketProxyServerEndpoint.toString() + "?target=tcp://" + address.getHostString() + ":" + address.getPort());
+        final String target = "target=tcp://" + address.getHostString() + ":" + address.getPort();
+        String s = webSocketProxyServerEndpoint.toString();
+
+        final URI uri = URI.create(s + (s.contains("?") ? "&" + target : "?" + target));
         final WebSocketClientHandshaker handshaker = WebSocketClientHandshakerFactory.newHandshaker(
                 uri, webSocketVersion, webSocketProxyServerProtocol,
                 allowExtensions, customHandshakeHttpHeadersToUse, maxFramePayloadLength, performMasking, allowMaskMismatch

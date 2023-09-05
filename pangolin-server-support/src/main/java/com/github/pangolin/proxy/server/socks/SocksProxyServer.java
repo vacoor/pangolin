@@ -54,7 +54,7 @@ public class SocksProxyServer extends NettyServer {
     }
 
     public static void main(String[] args) throws InterruptedException, SSLException, CertificateException, ExecutionException {
-        new SocksProxyServer(1080).start().addListener(new ChannelFutureListener() {
+        new SocksProxyServer(1081).start().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {

@@ -31,8 +31,8 @@ public class Socks5ProxyClientHandler extends ProxyClientHandler {
 
     @Override
     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
-        ctx.fireChannelActive();
         ctx.writeAndFlush(createInitialRequest());
+        ctx.fireChannelActive();
     }
 
     @Override
