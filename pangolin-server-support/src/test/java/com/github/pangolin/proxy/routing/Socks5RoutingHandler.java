@@ -32,7 +32,8 @@ public class Socks5RoutingHandler extends Socks5ProxyServerHandler {
     @Override
     protected void connect(final ChannelHandlerContext requestCtx, final Socks5CommandRequest request) throws Exception {
         final InetSocketAddress sourceAddress = (InetSocketAddress) requestCtx.channel().remoteAddress();
-        final InetSocketAddress destinationAddress = InetSocketAddress.createUnresolved(request.dstAddr(), request.dstPort());
+        // final InetSocketAddress destinationAddress = InetSocketAddress.createUnresolved(request.dstAddr(), request.dstPort());
+        final InetSocketAddress destinationAddress = new InetSocketAddress(request.dstAddr(), request.dstPort());
         final ChannelHandler routingHandler = newRoutingHandler(sourceAddress, destinationAddress);
         final Socks5AddressType addressType = request.dstAddrType();
 
@@ -76,12 +77,18 @@ public class Socks5RoutingHandler extends Socks5ProxyServerHandler {
 
     private ChannelHandler newRoutingHandler(final InetSocketAddress sourceAddress, final InetSocketAddress destinationAddress) {
         final Socks5Proxy socks5Proxy = new Socks5Proxy("127.0.0.1", 1080);
-        final WebSocketProxy wsProxy = new WebSocketProxy("ws://127.0.0.1:2345/tunnel?agent=BZ", null);
+        final WebSocketProxy wsProxy = new WebSocketProxy("ws://192.168.1.201:2345/tunnel?agent=BZ", null);
         final InetSubnetCondition network = new InetSubnetCondition("10.188.71.0", 23);
-        if (network.matches(destinationAddress)) {
+        if (destinationAddress.isUnresolved()) {
+            final String hostString = destinationAddress.getHostString();
+            if (hostString.endsWith("foo.com") || hostString.endsWith("bar.cn")) {
+                return wsProxy.newProxyHandler();
+            }
+        } else if (network.matches(destinationAddress)) {
             System.out.println("$proxyAddress => " + destinationAddress);
+            return wsProxy.newProxyHandler();
         }
-        return wsProxy.newProxyHandler();
+        return new ChannelInboundHandlerAdapter();
     }
 
     public static void main(String[] args) throws Exception {

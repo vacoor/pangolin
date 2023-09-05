@@ -65,7 +65,7 @@ public class Channels {
     }
 
     private static SocketAddress createSocketAddress(final String hostname, final int port) {
-        return null == hostname ? new InetSocketAddress(port) : InetSocketAddress.createUnresolved(hostname, port);
+        return null == hostname ? new InetSocketAddress(port) : new InetSocketAddress(hostname, port);
     }
 
     /**
