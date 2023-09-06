@@ -1,15 +1,12 @@
 package com.github.pangolin.proxy.routing.factory;
 
-import com.github.pangolin.proxy.client.WebSocketProxyClientHandler2;
+import com.github.pangolin.proxy.client.WebSocketProxyHandler2;
 import io.netty.channel.ChannelHandler;
 
 import java.net.URI;
 
 /**
- * TODO DOC ME!.
  *
- * @author changhe.yang
- * @since 20230905
  */
 public class WebSocketProxy implements Proxy {
     private final URI endpoint;
@@ -27,6 +24,7 @@ public class WebSocketProxy implements Proxy {
 
     @Override
     public ChannelHandler newProxyHandler() {
-        return new WebSocketProxyClientHandler2(endpoint, protocol);
+        return new WebSocketProxyHandler2(endpoint, protocol);
+        // return new WebSocketProxyClientHandler2(endpoint, protocol);
     }
 }
