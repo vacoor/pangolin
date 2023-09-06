@@ -5,6 +5,7 @@ import com.github.pangolin.util.Channels;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
@@ -54,12 +55,14 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         } else {
             decoderName = cp.context(decoder).name();
         }
-        /*
+        /*-
+        <pre>
         if (isHasAuthorization()) {
             cp.addBefore(ctx.name(), null, new Socks5PasswordAuthRequestDecoder());
         } else {
             cp.addBefore(ctx.name(), null, new Socks5CommandRequestDecoder());
         }
+        </pre>
         */
         if (null == cp.get(Socks5ServerEncoder.class)) {
             cp.addBefore(ctx.name(), null, Socks5ServerEncoder.DEFAULT);
@@ -112,7 +115,26 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 if (!Socks5CommandType.CONNECT.equals(type)) {
                     ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
                 } else {
-                    connect(ctx, request);
+                    connect(ctx, request).addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(final ChannelFuture future) throws Exception {
+                            if (future.isSuccess()) {
+                                log.info("Connection established: {}", future.channel().remoteAddress());
+                                ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(removeOnComplete(ctx, Socks5ServerEncoder.DEFAULT));
+                            } else {
+                                log.warn("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
+                                ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)).addListener(ChannelFutureListener.CLOSE);
+                            }
+                        }
+                    }).channel().closeFuture().addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(final ChannelFuture future) throws Exception {
+                            if (ctx.channel().isActive()) {
+                                log.info("Connection to {} closed", future.channel().remoteAddress());
+                                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                            }
+                        }
+                    });
                 }
             } else {
                 log.error("Connection closed by UNKNOWN message: {}", msg.getClass().getName());
@@ -123,45 +145,35 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
+    private ChannelFutureListener removeOnComplete(final ChannelHandlerContext ctx, final ChannelHandler h) {
+        return new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture channelFuture) throws Exception {
+                ctx.pipeline().remove(h);
+            }
+        };
+    }
+
     @Override
     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
         log.error("Software caused connection abort: {}", cause.getMessage(), cause);
         ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 
-    protected void connect(final ChannelHandlerContext requestCtx, final Socks5CommandRequest request) throws Exception {
+    protected ChannelFuture connect(final ChannelHandlerContext ctx, final Socks5CommandRequest request) throws Exception {
         final int port = request.dstPort();
         final String address = request.dstAddr();
         final Socks5AddressType addressType = request.dstAddrType();
 
-        requestCtx.channel().config().setAutoRead(false);
-        Channels.open(address, port, false, requestCtx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
+        ctx.channel().config().setAutoRead(false);
+        return Channels.open(address, port, false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
-                delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(requestCtx));
-                requestCtx.pipeline().replace(requestCtx.handler(), null, new TcpInboundRedirectHandler(delegateCtx));
+                delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(ctx));
+                ctx.pipeline().replace(ctx.handler(), null, new TcpInboundRedirectHandler(delegateCtx));
 
                 delegateCtx.channel().config().setAutoRead(true);
-                requestCtx.channel().config().setAutoRead(true);
-            }
-        }).addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture future) throws Exception {
-                if (future.isSuccess()) {
-                    log.info("Connection established: {}", future.channel().remoteAddress());
-                    requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(g -> requestCtx.pipeline().remove(Socks5ServerEncoder.DEFAULT));
-                } else {
-                    log.warn("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
-                    requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)).addListener(ChannelFutureListener.CLOSE);
-                }
-            }
-        }).channel().closeFuture().addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture future) throws Exception {
-                if (requestCtx.channel().isActive()) {
-                    log.info("Connection to {} closed", future.channel().remoteAddress());
-                    requestCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                }
+                ctx.channel().config().setAutoRead(true);
             }
         });
     }

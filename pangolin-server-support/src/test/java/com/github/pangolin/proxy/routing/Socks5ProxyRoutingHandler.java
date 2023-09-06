@@ -27,29 +27,28 @@ import java.net.InetSocketAddress;
 /**
  */
 @Slf4j
-public class Socks5RoutingHandler extends Socks5ProxyServerHandler {
+public class Socks5ProxyRoutingHandler extends Socks5ProxyServerHandler {
 
     @Override
-    protected void connect(final ChannelHandlerContext requestCtx, final Socks5CommandRequest request) throws Exception {
-        final InetSocketAddress sourceAddress = (InetSocketAddress) requestCtx.channel().remoteAddress();
-        // final InetSocketAddress destinationAddress = InetSocketAddress.createUnresolved(request.dstAddr(), request.dstPort());
+    protected ChannelFuture connect(final ChannelHandlerContext ctx, final Socks5CommandRequest request) throws Exception {
+        final InetSocketAddress sourceAddress = (InetSocketAddress) ctx.channel().remoteAddress();
         final InetSocketAddress destinationAddress = new InetSocketAddress(request.dstAddr(), request.dstPort());
         final ChannelHandler routingHandler = newRoutingHandler(sourceAddress, destinationAddress);
         final Socks5AddressType addressType = request.dstAddrType();
 
-        requestCtx.channel().config().setAutoRead(false);
-        Channels.open(destinationAddress, NoopAddressResolverGroup.INSTANCE, false, requestCtx.channel().eventLoop(), new ChannelInitializer<SocketChannel>() {
+        ctx.channel().config().setAutoRead(false);
+        Channels.open(destinationAddress, NoopAddressResolverGroup.INSTANCE, false, ctx.channel().eventLoop(), new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addFirst(routingHandler);
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
-                        delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(requestCtx));
-                        requestCtx.pipeline().replace(requestCtx.handler(), null, new TcpInboundRedirectHandler(delegateCtx));
+                        delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(ctx));
+                        ctx.pipeline().replace(ctx.handler(), null, new TcpInboundRedirectHandler(delegateCtx));
 
                         delegateCtx.channel().config().setAutoRead(true);
-                        requestCtx.channel().config().setAutoRead(true);
+                        ctx.channel().config().setAutoRead(true);
                     }
                 });
             }
@@ -58,21 +57,22 @@ public class Socks5RoutingHandler extends Socks5ProxyServerHandler {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     log.info("Connection established: {}", future.channel().remoteAddress());
-                    requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(g -> requestCtx.pipeline().remove(Socks5ServerEncoder.DEFAULT));
+                    ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(g -> ctx.pipeline().remove(Socks5ServerEncoder.DEFAULT));
                 } else {
                     log.warn("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
-                    requestCtx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)).addListener(ChannelFutureListener.CLOSE);
+                    ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)).addListener(ChannelFutureListener.CLOSE);
                 }
             }
         }).channel().closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
-                if (requestCtx.channel().isActive()) {
+                if (ctx.channel().isActive()) {
                     log.info("Connection to {} closed", future.channel().remoteAddress());
-                    requestCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 }
             }
         });
+        return null;
     }
 
     private ChannelHandler newRoutingHandler(final InetSocketAddress sourceAddress, final InetSocketAddress destinationAddress) {
@@ -96,7 +96,7 @@ public class Socks5RoutingHandler extends Socks5ProxyServerHandler {
         new NettyServer(1080).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel channel) throws Exception {
-                channel.pipeline().addLast(new Socks5RoutingHandler());
+                channel.pipeline().addLast(new Socks5ProxyRoutingHandler());
             }
         }).sync().channel().closeFuture().sync();
     }
