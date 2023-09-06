@@ -1,11 +1,6 @@
 package com.github.pangolin.proxy.client;
 
-import io.netty.channel.ChannelDuplexHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelPromise;
-import io.netty.channel.PendingWriteQueue;
-import io.netty.handler.codec.http.websocketx.WebSocketHandshakeException;
-import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
+import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
@@ -18,7 +13,6 @@ import java.util.concurrent.TimeUnit;
 public abstract class WsProxyHandler extends ChannelDuplexHandler {
     private final SocketAddress proxyAddress;
     private volatile SocketAddress destinationAddress;
-
     private PendingWriteQueue pendingWrites;
     private boolean finished;
     private boolean suppressChannelReadComplete;
@@ -41,15 +35,20 @@ public abstract class WsProxyHandler extends ChannelDuplexHandler {
 
     @Override
     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
-        handshakePromise = ctx.newPromise();
-        handshake(ctx);
+        handshakePromise = handshake(ctx, ctx.newPromise());
+        handshakePromise.addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture f) throws Exception {
+                if (!f.isSuccess()) {
+                    handshakeAbort(ctx, f.cause());
+                }
+            }
+        });
         applyHandshakeTimeout(ctx, handshakePromise, ctx.channel().config().getConnectTimeoutMillis());
         ctx.fireChannelActive();
     }
 
-    protected void handshake(final ChannelHandlerContext ctx) throws Exception {
-
-    }
+    protected abstract ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise promise) throws Exception;
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
@@ -95,12 +94,11 @@ public abstract class WsProxyHandler extends ChannelDuplexHandler {
 
     protected void handshakeSuccess(final ChannelHandlerContext ctx) throws Exception {
         finished = true;
-        if (!handshakePromise.isDone()) {
+        if (handshakePromise.trySuccess()) {
             writePendingWrites();
             if (flushedPrematurely) {
                 ctx.flush();
             }
-            handshakePromise.trySuccess();
         }
     }
 
@@ -176,24 +174,22 @@ public abstract class WsProxyHandler extends ChannelDuplexHandler {
         }
     }
 
-    protected void applyHandshakeTimeout(final ChannelHandlerContext ctx, final ChannelPromise handshakePromise, final long handshakeTimeoutMillis) {
+    protected ChannelPromise applyHandshakeTimeout(final ChannelHandlerContext ctx, final ChannelPromise handshakePromise, final long handshakeTimeoutMillis) {
         if (handshakeTimeoutMillis <= 0 || handshakePromise.isDone()) {
-            return;
+            return handshakePromise;
         }
 
         final Future<?> timeoutFuture = ctx.executor().schedule(new Runnable() {
             @Override
             public void run() {
-                if (!handshakePromise.isDone() && handshakePromise.tryFailure(new WebSocketHandshakeException("handshake timed out"))) {
-                    ctx.flush()
-                            .fireUserEventTriggered(WebSocketServerProtocolHandler.ServerHandshakeStateEvent.HANDSHAKE_TIMEOUT)
-                            .close();
+                if (!handshakePromise.isDone() && handshakePromise.tryFailure(new ConnectTimeoutException("handshake timed out"))) {
+                    ctx.flush().close();
                 }
             }
         }, handshakeTimeoutMillis, TimeUnit.MILLISECONDS);
 
         // Cancel the handshake timeout when handshake is finished.
-        handshakePromise.addListener(new FutureListener<Void>() {
+        return handshakePromise.addListener(new FutureListener<Void>() {
             @Override
             public void operationComplete(Future<Void> f) throws Exception {
                 timeoutFuture.cancel(false);
