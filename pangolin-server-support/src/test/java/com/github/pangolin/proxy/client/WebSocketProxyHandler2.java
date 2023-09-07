@@ -21,6 +21,7 @@ import io.netty.handler.codec.http.EmptyHttpHeaders;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpClientCodec;
 import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpResponseDecoder;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
@@ -102,25 +103,14 @@ public class WebSocketProxyHandler2 extends Handler {
 //            throw new IllegalStateException("ChannelPipeline does not contain " + "a HttpObjectAggregator");
             cp.addBefore(ctx.name(), null, new HttpObjectAggregator(8 * 1024 * 1024));
         }
+        if (!HttpMethod.CONNECT.name().equals(webSocketProxyServerProtocol)) {
+            if (null == cp.get(Utf8FrameValidator.class)) {
+                cp.addBefore(ctx.name(), Utf8FrameValidator.class.getName(), new Utf8FrameValidator());
+            }
 
-        if (null == cp.get(TcpOverWebSocketProxyCodec.class) && !"CONNECT".equals(webSocketProxyServerProtocol)) {
-            cp.addAfter(ctx.name(), TcpOverWebSocketProxyCodec.class.getName(), new TcpOverWebSocketProxyCodec());
-        }
-
-        /*
-        if ("CONNECT".equals(webSocketProxyServerProtocol)) {
-            // pending write to tcp.
-            cp.addAfter(ctx.name(), null, new MessageToByteEncoder<WebSocketFrame>() {
-                @Override
-                protected void encode(final ChannelHandlerContext ctx, final WebSocketFrame msg, final ByteBuf out) throws Exception {
-                    out.writeBytes(msg.content().retain());
-                }
-            });
-        }
-        */
-
-        if (null == cp.get(Utf8FrameValidator.class)) {
-            cp.addAfter(ctx.name(), Utf8FrameValidator.class.getName(), new Utf8FrameValidator());
+            if (null == cp.get(TcpOverWebSocketProxyCodec.class)) {
+                cp.addAfter(ctx.name(), TcpOverWebSocketProxyCodec.class.getName(), new TcpOverWebSocketProxyCodec());
+            }
         }
     }
 
@@ -171,7 +161,7 @@ public class WebSocketProxyHandler2 extends Handler {
         if ("CONNECT".equals(webSocketProxyServerProtocol)) {
                 ctx.pipeline().remove("ws-encoder");
                 ctx.pipeline().remove("ws-decoder");
-                ctx.pipeline().remove(Utf8FrameValidator.class);
+//                ctx.pipeline().remove(Utf8FrameValidator.class);
                 // ctx.pipeline().remove(TcpOverWebSocketProxyCodec.class);
                 /*
                 ctx.pipeline().addLast(new MessageToByteEncoder<WebSocketFrame>() {
