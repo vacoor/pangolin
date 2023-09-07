@@ -1,14 +1,37 @@
 package com.github.pangolin.proxy.client;
 
-import com.github.pangolin.proxy.routing.factory.WebSocketProxy;
-import com.github.pangolin.util.Channels;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelConfig;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelId;
+import io.netty.channel.ChannelMetadata;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ChannelProgressivePromise;
+import io.netty.channel.ChannelPromise;
+import io.netty.channel.EventLoop;
+import io.netty.handler.codec.MessageToByteEncoder;
 import io.netty.handler.codec.MessageToMessageCodec;
-import io.netty.handler.codec.http.*;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.DefaultHttpHeaders;
+import io.netty.handler.codec.http.EmptyHttpHeaders;
+import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpResponseDecoder;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
 import io.netty.util.ReferenceCountUtil;
@@ -23,7 +46,7 @@ import java.util.List;
  * @see io.netty.resolver.NoopAddressResolverGroup#INSTANCE
  */
 @Slf4j
-public class WebSocketProxyHandler2 extends WsProxyHandler {
+public class WebSocketProxyHandler2 extends Handler {
     private static final AttributeKey<WebSocketClientHandshaker> HANDSHAKER_ATTR_KEY = AttributeKey.valueOf(WebSocketClientHandshaker.class, "HANDSHAKER");
 
     private final URI webSocketProxyServerEndpoint;
@@ -67,6 +90,7 @@ public class WebSocketProxyHandler2 extends WsProxyHandler {
 
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
+        ctx.channel().config().setAutoRead(false);
         final ChannelPipeline cp = ctx.pipeline();
         if (null == cp.get(HttpResponseDecoder.class)) {
             if (null == cp.get(HttpClientCodec.class)) {
@@ -79,12 +103,30 @@ public class WebSocketProxyHandler2 extends WsProxyHandler {
             cp.addBefore(ctx.name(), null, new HttpObjectAggregator(8 * 1024 * 1024));
         }
 
-        if (null == cp.get(WebSocketProxyCodec.class)) {
-            cp.addAfter(ctx.name(), WebSocketProxyCodec.class.getName(), new WebSocketProxyCodec());
+        if (null == cp.get(TcpOverWebSocketProxyCodec.class) && !"CONNECT".equals(webSocketProxyServerProtocol)) {
+            cp.addAfter(ctx.name(), TcpOverWebSocketProxyCodec.class.getName(), new TcpOverWebSocketProxyCodec());
         }
+
+        /*
+        if ("CONNECT".equals(webSocketProxyServerProtocol)) {
+            // pending write to tcp.
+            cp.addAfter(ctx.name(), null, new MessageToByteEncoder<WebSocketFrame>() {
+                @Override
+                protected void encode(final ChannelHandlerContext ctx, final WebSocketFrame msg, final ByteBuf out) throws Exception {
+                    out.writeBytes(msg.content().retain());
+                }
+            });
+        }
+        */
+
         if (null == cp.get(Utf8FrameValidator.class)) {
             cp.addAfter(ctx.name(), Utf8FrameValidator.class.getName(), new Utf8FrameValidator());
         }
+    }
+
+    @Override
+    public void channelActive(final ChannelHandlerContext ctx) throws Exception {
+        super.channelActive(ctx);
     }
 
     @Override
@@ -126,7 +168,21 @@ public class WebSocketProxyHandler2 extends WsProxyHandler {
             throw new IllegalStateException();
         }
         handshaker.finishHandshake(ctx.channel(), httpResponse);
-        ctx.fireUserEventTriggered("XX");
+        if ("CONNECT".equals(webSocketProxyServerProtocol)) {
+                ctx.pipeline().remove("ws-encoder");
+                ctx.pipeline().remove("ws-decoder");
+                ctx.pipeline().remove(Utf8FrameValidator.class);
+                // ctx.pipeline().remove(TcpOverWebSocketProxyCodec.class);
+                /*
+                ctx.pipeline().addLast(new MessageToByteEncoder<WebSocketFrame>() {
+
+                    @Override
+                    protected void encode(final ChannelHandlerContext ctx, final WebSocketFrame msg, final ByteBuf out) throws Exception {
+                        out.writeBytes(msg.content().retain());
+                    }
+                });
+                */
+        }
         return true;
     }
 
@@ -135,7 +191,7 @@ public class WebSocketProxyHandler2 extends WsProxyHandler {
         super.exceptionCaught(ctx, cause);
     }
 
-    private class WebSocketProxyCodec extends MessageToMessageCodec<WebSocketFrame, ByteBuf> {
+    private class TcpOverWebSocketProxyCodec extends MessageToMessageCodec<WebSocketFrame, ByteBuf> {
 
         @Override
         protected void encode(final ChannelHandlerContext ctx, final ByteBuf msg, final List<Object> out) throws Exception {

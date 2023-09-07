@@ -76,7 +76,7 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
         }).addListener(f -> {
             if (f.isSuccess()) {
                 log.warn("连接到目标地址({}/{}:{})", hostname, port, f.cause());
-                handshaker.handshake(ctx.channel(), req, null, promise).addListener(new ChannelFutureListener() {
+                promise.addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
                         if (future.isSuccess()) {
@@ -84,10 +84,11 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
                             ctx.pipeline().remove(Utf8FrameValidator.class);
                             ctx.pipeline().remove("wsencoder");
                             ctx.pipeline().remove("wsdecoder");
-                            ctx.pipeline().remove(ctx.name());
+//                            ctx.pipeline().remove(ctx.name());
                         }
                     }
                 });
+                handshaker.handshake(ctx.channel(), req, null, promise);
                 // FIXME 握手失败关闭连接.
             } else {
                 log.warn("连接到目标地址({}/{}:{})失败: {}", hostname, port, f.cause());

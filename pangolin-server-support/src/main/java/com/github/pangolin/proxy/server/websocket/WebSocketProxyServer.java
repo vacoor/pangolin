@@ -47,7 +47,7 @@ public class WebSocketProxyServer extends NettyServer {
     }
 
     public static void main(String[] args) throws Exception {
-        new WebSocketProxyServer(1444, false).start().addListener(new ChannelFutureListener() {
+        new WebSocketProxyServer(2345, false).start().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {

@@ -1,5 +1,6 @@
 package com.github.pangolin.proxy.routing.factory;
 
+import com.github.pangolin.proxy.client.WebSocketProxyClientHandler2;
 import com.github.pangolin.proxy.client.WebSocketProxyHandler2;
 import io.netty.channel.ChannelHandler;
 
@@ -25,6 +26,6 @@ public class WebSocketProxy implements Proxy {
     @Override
     public ChannelHandler newProxyHandler() {
         return new WebSocketProxyHandler2(endpoint, protocol);
-        // return new WebSocketProxyClientHandler2(endpoint, protocol);
+//         return new WebSocketProxyClientHandler2(endpoint, protocol);
     }
 }

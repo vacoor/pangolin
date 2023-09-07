@@ -53,7 +53,10 @@ public class Socks5ProxyRoutingHandler extends Socks5ProxyServerHandler {
     private ChannelHandler newRoutingHandler(final InetSocketAddress sourceAddress, final InetSocketAddress destinationAddress) {
         final Socks5Proxy socks5Proxy = new Socks5Proxy("127.0.0.1", 1080);
 //        final WebSocketProxy wsProxy = new WebSocketProxy("ws://192.168.1.201:2345/tunnel?agent=BZ", null);
-        final WebSocketProxy wsProxy = new WebSocketProxy("ws://192.168.1.201:2345/tunnel?agent=BZ", "CONNECT");
+        final WebSocketProxy wsProxy = new WebSocketProxy("ws://127.0.0.1:2345/tunnel?agent=BZ", "CONNECT");
+        if (true) {
+            return wsProxy.newProxyHandler();
+        }
         final InetSubnetCondition network = new InetSubnetCondition("10.188.71.0", 23);
         if (destinationAddress.isUnresolved()) {
             final String hostString = destinationAddress.getHostString();
