@@ -1,12 +1,6 @@
 package com.github.pangolin.proxy.client;
 
-import io.netty.channel.ChannelDuplexHandler;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelPromise;
-import io.netty.channel.ConnectTimeoutException;
-import io.netty.channel.PendingWriteQueue;
+import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
@@ -17,7 +11,7 @@ import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ConnectionPendingException;
 import java.util.concurrent.TimeUnit;
 
-public abstract class Handler extends ChannelDuplexHandler {
+public abstract class ProxyHandler extends ChannelDuplexHandler {
     private final SocketAddress proxyAddress;
     private volatile SocketAddress destinationAddress;
     private PendingWriteQueue pendingWrites;
@@ -25,7 +19,7 @@ public abstract class Handler extends ChannelDuplexHandler {
     private boolean flushedBeforeHandshake;
     private ChannelPromise handshakePromise;
 
-    public Handler(final SocketAddress proxyAddress) {
+    public ProxyHandler(final SocketAddress proxyAddress) {
         this.proxyAddress = ObjectUtil.checkNotNull(proxyAddress, "proxyAddress");
     }
 
@@ -90,7 +84,7 @@ public abstract class Handler extends ChannelDuplexHandler {
     }
 
     private void startHandshakeProcessing(final ChannelHandlerContext ctx) throws Exception {
-        handshakePromise = handshake(ctx, handshakePromise);
+        handshake(ctx, handshakePromise);
         handshakePromise.addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture f) throws Exception {
@@ -217,7 +211,7 @@ public abstract class Handler extends ChannelDuplexHandler {
     }
 
     @SuppressWarnings("unchecked")
-    public <T extends SocketAddress> T destinationAddress() {
+    protected <T extends SocketAddress> T destinationAddress() {
         return (T) destinationAddress;
     }
 
