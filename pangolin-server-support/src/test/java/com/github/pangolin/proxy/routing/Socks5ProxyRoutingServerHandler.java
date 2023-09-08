@@ -18,6 +18,7 @@ import io.netty.resolver.NoopAddressResolverGroup;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
@@ -39,10 +40,13 @@ public class Socks5ProxyRoutingServerHandler extends Socks5ProxyServerHandler {
         ctx.channel().config().setAutoRead(false);
 
         final InetSocketAddress destinationAddress = new InetSocketAddress(request.dstAddr(), request.dstPort());
+        final ChannelHandler handler = select(destinationAddress);
         return Channels.open(destinationAddress, NoopAddressResolverGroup.INSTANCE, false, ctx.channel().eventLoop(), new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addFirst(new ProxyRoutingHandler(routings));
+                if (null != handler) {
+                    ch.pipeline().addFirst(handler);
+                }
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
@@ -57,4 +61,16 @@ public class Socks5ProxyRoutingServerHandler extends Socks5ProxyServerHandler {
         });
     }
 
+    private ChannelHandler select(final SocketAddress destinationAddress) {
+        if (null == routings || !(destinationAddress instanceof InetSocketAddress)) {
+            return null;
+        }
+        final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
+        for (final RoutingRule routing : routings) {
+            if (routing.matches(sa)) {
+                return routing.newProxyHandler();
+            }
+        }
+        return null;
+    }
 }

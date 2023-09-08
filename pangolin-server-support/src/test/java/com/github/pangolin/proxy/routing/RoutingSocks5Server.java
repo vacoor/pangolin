@@ -1,5 +1,6 @@
 package com.github.pangolin.proxy.routing;
 
+import com.github.pangolin.proxy.routing.config.RoutingRuleProvider;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
