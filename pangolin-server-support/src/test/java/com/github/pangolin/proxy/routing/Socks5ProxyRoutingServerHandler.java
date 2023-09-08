@@ -27,13 +27,12 @@ import java.util.function.Supplier;
  *
  */
 @Slf4j
-public class Socks5ProxyRoutingHandler extends Socks5ProxyServerHandler {
+public class Socks5ProxyRoutingServerHandler extends Socks5ProxyServerHandler {
     private final List<RoutingRule> routings;
 
-    public Socks5ProxyRoutingHandler(final List<RoutingRule> routings) {
+    public Socks5ProxyRoutingServerHandler(final List<RoutingRule> routings) {
         this.routings = routings;
     }
-
 
     @Override
     protected ChannelFuture connect(final ChannelHandlerContext ctx, final Socks5CommandRequest request) throws Exception {
@@ -58,23 +57,4 @@ public class Socks5ProxyRoutingHandler extends Socks5ProxyServerHandler {
         });
     }
 
-    public static void main(String[] args) throws Exception {
-        final Supplier<ChannelHandler> factory = () -> new WebSocketProxyHandler(
-                URI.create("ws://127.0.0.1:2345/tunnel?agent=BZ"), "CONNECT"
-        );
-
-        final List<RoutingRule> routings = Arrays.asList(
-                new DefaultRoutingRule(new DomainPattern("**.baidu.cn"), factory),
-                new DefaultRoutingRule(new DomainPattern("**.baidu.com"), factory),
-                new DefaultRoutingRule(new InetSubnetCondition("10.188.71.0", 23), factory)
-        );
-
-
-        new NettyServer(1080).start(true, new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel channel) throws Exception {
-                channel.pipeline().addLast(new Socks5ProxyRoutingHandler(routings));
-            }
-        }).sync().channel().closeFuture().sync();
-    }
 }

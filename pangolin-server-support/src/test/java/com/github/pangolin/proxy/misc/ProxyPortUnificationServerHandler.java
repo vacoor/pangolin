@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy;
+package com.github.pangolin.proxy.misc;
 
 import com.github.pangolin.proxy.server.http.HttpProxyServerHandler;
 import io.netty.buffer.ByteBuf;

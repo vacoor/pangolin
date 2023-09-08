@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy;
+package com.github.pangolin.proxy.misc;
 
 import com.github.pangolin.proxy.server.http.HttpProxyServerHandler;
 import com.github.pangolin.proxy.server.socks.v4.Socks4ProxyServerHandler;
@@ -12,7 +12,6 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpMessage;
-import io.netty.handler.codec.socksx.SocksPortUnificationServerHandler;
 import io.netty.handler.codec.socksx.v4.Socks4Message;
 import io.netty.handler.codec.socksx.v5.Socks5Message;
 import io.netty.util.ReferenceCountUtil;

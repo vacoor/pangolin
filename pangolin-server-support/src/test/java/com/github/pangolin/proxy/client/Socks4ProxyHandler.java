@@ -3,7 +3,12 @@ package com.github.pangolin.proxy.client;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.ChannelPromise;
-import io.netty.handler.codec.socksx.v4.*;
+import io.netty.handler.codec.socksx.v4.DefaultSocks4CommandRequest;
+import io.netty.handler.codec.socksx.v4.Socks4ClientDecoder;
+import io.netty.handler.codec.socksx.v4.Socks4ClientEncoder;
+import io.netty.handler.codec.socksx.v4.Socks4CommandResponse;
+import io.netty.handler.codec.socksx.v4.Socks4CommandStatus;
+import io.netty.handler.codec.socksx.v4.Socks4CommandType;
 
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
@@ -13,6 +18,10 @@ public class Socks4ProxyHandler extends ProxyHandler {
     private static final String NONE = "";
 
     private String username;
+
+    public Socks4ProxyHandler(final SocketAddress proxyAddress) {
+        this(proxyAddress, null);
+    }
 
     public Socks4ProxyHandler(final SocketAddress proxyAddress, final String username) {
         super(proxyAddress);

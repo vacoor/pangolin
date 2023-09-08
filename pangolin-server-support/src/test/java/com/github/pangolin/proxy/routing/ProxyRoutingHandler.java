@@ -4,6 +4,7 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -12,6 +13,7 @@ import java.util.List;
 /**
  *
  */
+@Slf4j
 public class ProxyRoutingHandler extends ChannelOutboundHandlerAdapter {
     private final List<RoutingRule> routings;
 
@@ -23,6 +25,7 @@ public class ProxyRoutingHandler extends ChannelOutboundHandlerAdapter {
     public void connect(final ChannelHandlerContext ctx, final SocketAddress remoteAddress, final SocketAddress localAddress, final ChannelPromise promise) throws Exception {
         final ChannelHandler handlerToUse = select(remoteAddress);
         if (null != handlerToUse) {
+            log.debug("Routing -> {}", handlerToUse);
             ctx.pipeline().addBefore(ctx.name(), null, handlerToUse);
             ctx.connect(remoteAddress, localAddress, promise);
             ctx.pipeline().remove(this);
