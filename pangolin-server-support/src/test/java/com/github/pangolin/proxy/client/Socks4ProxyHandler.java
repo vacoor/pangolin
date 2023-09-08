@@ -28,6 +28,7 @@ public class Socks4ProxyHandler extends ProxyHandler {
         if (null == cp.get(Socks4ClientEncoder.class)) {
             cp.addBefore(ctx.name(), null, Socks4ClientEncoder.INSTANCE);
         }
+        super.handlerAdded(ctx);
     }
 
     @Override

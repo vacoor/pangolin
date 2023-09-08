@@ -1,4 +1,4 @@
-package com.github.pangolin.proxy.routing;
+package com.github.pangolin.proxy.routing.pattern;
 
 /**
  */

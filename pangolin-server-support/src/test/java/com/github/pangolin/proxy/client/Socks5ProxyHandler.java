@@ -39,6 +39,7 @@ public class Socks5ProxyHandler extends ProxyHandler {
         final ChannelPipeline cp = ctx.pipeline();
         cp.addBefore(ctx.name(), SOCKS5_DECODER_NAME, new Socks5InitialResponseDecoder());
         cp.addBefore(ctx.name(), null, Socks5ClientEncoder.DEFAULT);
+        super.handlerAdded(ctx);
     }
 
     @Override

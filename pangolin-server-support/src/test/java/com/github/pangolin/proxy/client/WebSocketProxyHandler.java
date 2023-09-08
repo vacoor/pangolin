@@ -85,6 +85,7 @@ public class WebSocketProxyHandler extends ProxyHandler {
                 cp.addAfter(ctx.name(), TcpOverWebSocketProxyCodec.class.getName(), new TcpOverWebSocketProxyCodec());
             }
         }
+        super.handlerAdded(ctx);
     }
 
     @Override

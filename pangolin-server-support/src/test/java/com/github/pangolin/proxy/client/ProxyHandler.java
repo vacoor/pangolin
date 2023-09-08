@@ -24,6 +24,13 @@ public abstract class ProxyHandler extends ChannelDuplexHandler {
     }
 
     @Override
+    public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
+        if (ctx.channel().isActive()) {
+            startHandshakeProcessing(ctx);
+        }
+    }
+
+    @Override
     public void connect(final ChannelHandlerContext ctx, final SocketAddress remoteAddress, final SocketAddress localAddress, ChannelPromise promise) throws Exception {
         if (null != destinationAddress) {
             promise.setFailure(new ConnectionPendingException());
