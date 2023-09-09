@@ -23,7 +23,7 @@ public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHan
     private final String name;
     private final WebSocketClientHandshaker handshaker;
     private final HttpHeaders customHttpHeaders;
-    private final AtomicReference<State> state = new AtomicReference<>(State.INITIALIZING);
+    private final AtomicReference<State> state = new AtomicReference<>(State.SUSPENDED);
 
     public WebSocketBackhaulTunnelAgentHandler(final String name, final WebSocketClientHandshaker handshaker, final HttpHeaders customHttpHeaders) {
         this.name = name;
@@ -72,7 +72,7 @@ public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHan
              * id->target_protocol://target_host:target_port
              */
             final String text = ((TextWebSocketFrame) frame).text();
-            final String[] segments = text.split(Pattern.quote("->"));
+            final String[] segments = text.split(Pattern.quote("->"), 2);
             final String id = segments[0];
             final URI target = URI.create(segments[1]);
 

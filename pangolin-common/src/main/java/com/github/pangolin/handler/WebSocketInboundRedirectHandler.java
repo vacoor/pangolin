@@ -101,7 +101,11 @@ public class WebSocketInboundRedirectHandler extends ChannelInboundHandlerAdapte
 
     @Override
     public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) {
-        log.error("[tun@ws {}(!) =>{}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+        if (log.isDebugEnabled()) {
+            log.debug("[tun@ws {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+        }
+        log.warn("[tun@ws {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx));
+
         inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
         outCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
     }

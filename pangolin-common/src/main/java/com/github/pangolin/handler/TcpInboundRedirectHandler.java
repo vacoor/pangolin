@@ -8,6 +8,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -46,12 +47,17 @@ public class TcpInboundRedirectHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) throws Exception {
-        log.error("[tun@tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+        if (log.isDebugEnabled()) {
+            log.debug("[tun@tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+        }
+        log.warn("[tun@tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage());
+
         inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 
     private String stringify(final ChannelHandlerContext ctx) {
-        return ctx.channel().remoteAddress().toString();
+        final SocketAddress ra = ctx.channel().remoteAddress();
+        return null != ra ? ra.toString() : "?";
     }
 }

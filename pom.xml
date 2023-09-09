@@ -18,7 +18,7 @@
         <module>pangolin-server</module>
         <module>pangolin-agent</module>
         <module>pangolin-client-spring-boot-starter</module>
-        <module>pangolin-server-support</module>
+        <module>pangolin-routing</module>
     </modules>
 
     <licenses>
@@ -131,7 +131,7 @@
             </dependency>
             <dependency>
                 <groupId>com.github.nomou.pangolin</groupId>
-                <artifactId>pangolin-server-support</artifactId>
+                <artifactId>pangolin-routing</artifactId>
                 <version>${pangolin.version}</version>
             </dependency>
             <dependency>

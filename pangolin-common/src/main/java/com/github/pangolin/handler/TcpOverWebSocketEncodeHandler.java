@@ -11,6 +11,7 @@ import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -54,12 +55,17 @@ public class TcpOverWebSocketEncodeHandler extends ChannelInboundHandlerAdapter 
 
     @Override
     public void exceptionCaught(final ChannelHandlerContext inCtx, final Throwable cause) throws Exception {
-        log.error("[tun@tcp/ws {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+        if (log.isDebugEnabled()) {
+            log.debug("[tun@tcp/ws {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
+        }
+        log.warn("[tun@tcp/ws {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx));
+
         outCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
         inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 
     private String stringify(final ChannelHandlerContext ctx) {
-        return ctx.channel().remoteAddress().toString();
+        final SocketAddress ra = ctx.channel().remoteAddress();
+        return null != ra ? ra.toString() : "?";
     }
 }
