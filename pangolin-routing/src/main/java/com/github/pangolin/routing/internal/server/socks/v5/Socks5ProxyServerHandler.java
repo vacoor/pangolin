@@ -29,6 +29,11 @@ import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+
 @Slf4j
 public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     private static final String DEFAULT_DECODER_NAME = "Socks5ServerDecoder";
@@ -113,6 +118,26 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final Socks5CommandType type = request.type();
                 final Socks5AddressType addressType = request.dstAddrType();
                 if (!Socks5CommandType.CONNECT.equals(type)) {
+                    /*
+                    if (Socks5CommandType.UDP_ASSOCIATE.equals(type)) {
+                        InetSocketAddress sa = (InetSocketAddress) ctx.channel().localAddress();
+                        if (sa.isUnresolved()) {
+                            ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.DOMAIN, sa.getHostString(), 1080));
+                            return;
+                        }
+                        InetAddress address = sa.getAddress();
+                        if (address instanceof Inet4Address) {
+                            Inet4Address a = (Inet4Address) address;
+                            ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv4, a.getHostAddress(), 1080));
+                            return;
+                        }
+                        if (address instanceof Inet6Address) {
+                            Inet6Address a = (Inet6Address) address;
+                            ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv6, a.getHostAddress(), 1080));
+                            return;
+                        }
+                    }
+                    */
                     ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
                 } else {
                     connect(ctx, request).addListener(new ChannelFutureListener() {

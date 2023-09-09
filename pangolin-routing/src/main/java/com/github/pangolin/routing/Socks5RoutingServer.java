@@ -54,6 +54,10 @@ public class Socks5RoutingServer extends NettyServer {
                 }
             }
         }).sync().channel().closeFuture().sync();
+        /*-
+        Connect through local to http://bing.com/ failed.
+        Error: Connection refused
+         */
     }
 
 }
