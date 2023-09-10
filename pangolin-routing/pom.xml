@@ -76,6 +76,11 @@
             <groupId>io.netty</groupId>
             <artifactId>netty-codec-dns</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.github.nomou</groupId>
+            <artifactId>nougat-lang</artifactId>
+            <version>1.0.14</version>
+        </dependency>
     </dependencies>
 
     <build>
