@@ -5,7 +5,7 @@ import java.net.InetSocketAddress;
 /**
  *
  */
-public class DomainPattern implements Pattern<InetSocketAddress> {
+public class DomainPattern implements DestinationPattern {
     private static final AntPathMatcher MATCHER = new AntPathMatcher(".");
 
     private final String pattern;
@@ -15,11 +15,11 @@ public class DomainPattern implements Pattern<InetSocketAddress> {
     }
 
     @Override
-    public boolean matches(final InetSocketAddress sa) {
-        if (sa.isUnresolved()) {
-            return MATCHER.matches(pattern, sa.getHostString());
+    public boolean matches(final InetSocketAddress destination) {
+        if (destination.isUnresolved()) {
+            return MATCHER.matches(pattern, destination.getHostString());
         } else {
-            final String hostname = sa.getAddress().getHostName();
+            final String hostname = destination.getAddress().getHostName();
             return MATCHER.matches(pattern, hostname);
         }
     }

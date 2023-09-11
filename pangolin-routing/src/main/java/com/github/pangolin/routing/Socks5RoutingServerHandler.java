@@ -3,7 +3,11 @@ package com.github.pangolin.routing;
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.internal.server.socks.v5.Socks5ProxyServerHandler;
 import com.github.pangolin.util.Channels;
-import io.netty.channel.*;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
 import io.netty.resolver.NoopAddressResolverGroup;
@@ -18,10 +22,10 @@ import java.util.List;
  */
 @Slf4j
 public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
-    private final List<RoutingRule> routings;
+    private final List<RoutingRule> routingRules;
 
-    public Socks5RoutingServerHandler(final List<RoutingRule> routings) {
-        this.routings = routings;
+    public Socks5RoutingServerHandler(final List<RoutingRule> routingRules) {
+        this.routingRules = routingRules;
     }
 
     @Override
@@ -52,11 +56,11 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
     }
 
     private ChannelHandler select(final SocketAddress destinationAddress) {
-        if (null == routings || !(destinationAddress instanceof InetSocketAddress)) {
+        if (null == routingRules || !(destinationAddress instanceof InetSocketAddress)) {
             return null;
         }
         final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
-        for (final RoutingRule routing : routings) {
+        for (final RoutingRule routing : routingRules) {
             if (routing.matches(sa)) {
                 return routing.newProxyHandler();
             }

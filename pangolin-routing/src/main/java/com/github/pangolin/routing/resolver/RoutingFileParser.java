@@ -1,13 +1,12 @@
 package com.github.pangolin.routing.resolver;
 
-import com.github.pangolin.routing.DefaultRoutingRule;
 import com.github.pangolin.routing.RoutingRule;
 import com.github.pangolin.routing.internal.client.Socks4ProxyHandler;
 import com.github.pangolin.routing.internal.client.Socks5ProxyHandler;
 import com.github.pangolin.routing.internal.client.WebSocketProxyHandler;
+import com.github.pangolin.routing.pattern.DestinationPattern;
 import com.github.pangolin.routing.pattern.DomainPattern;
 import com.github.pangolin.routing.pattern.InetSubnetPattern;
-import com.github.pangolin.routing.pattern.Pattern;
 import io.netty.channel.ChannelHandler;
 import io.netty.util.NetUtil;
 import io.netty.util.internal.ObjectUtil;
@@ -66,12 +65,12 @@ public class RoutingFileParser {
             if (segments.length < 2) {
                 continue;
             }
-            routings.add(new DefaultRoutingRule(parseDestination(segments[0]), parseNextHop(segments[1])));
+            routings.add(new RoutingRule(parseDestination(segments[0]), parseNextHop(segments[1])));
         }
         return routings;
     }
 
-    private static Pattern<InetSocketAddress> parseDestination(final String destination) {
+    private static DestinationPattern<InetSocketAddress> parseDestination(final String destination) {
         final String[] segments = destination.split("/", 2);
         if (segments.length == 2 && isDigit(segments[1]) && (NetUtil.isValidIpV4Address(segments[0]) || NetUtil.isValidIpV6Address(segments[0]))) {
             final int cidrPrefix = Integer.parseInt(segments[1]);
