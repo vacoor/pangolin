@@ -70,7 +70,7 @@ public class RoutingFileParser {
         return routings;
     }
 
-    private static DestinationPattern<InetSocketAddress> parseDestination(final String destination) {
+    private static DestinationPattern parseDestination(final String destination) {
         final String[] segments = destination.split("/", 2);
         if (segments.length == 2 && isDigit(segments[1]) && (NetUtil.isValidIpV4Address(segments[0]) || NetUtil.isValidIpV6Address(segments[0]))) {
             final int cidrPrefix = Integer.parseInt(segments[1]);
