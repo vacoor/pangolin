@@ -7,9 +7,11 @@ import org.junit.Test;
 
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
-import javax.crypto.spec.ChaCha20ParameterSpec;
+//import javax.crypto.spec.ChaCha20ParameterSpec;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.Provider;
 import java.security.SecureRandom;
@@ -18,6 +20,40 @@ import java.security.spec.AlgorithmParameterSpec;
 import java.util.Arrays;
 
 public class BounCyTest {
+    @Test
+    public void aesGcm() throws Exception{
+        final String AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding";
+        final int GCM_IV_SIZE = 12;
+        final int GCM_TAG_SIZE = 16;
+
+        final SecureRandom random = new SecureRandom();
+        final byte[] plain = Bytes.toBytes("Hello");
+        final byte[] ivBytes = new byte[GCM_IV_SIZE];
+        random.nextBytes(ivBytes);
+
+        final SecretKey secretKey = ShadowsocksKeyFactory.generateKey("AES", 128 / 8, "123456");
+        final AlgorithmParameterSpec algorithmParameterSpec = new GCMParameterSpec(GCM_TAG_SIZE * Byte.SIZE, ivBytes);
+        final Cipher cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION);
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey, algorithmParameterSpec);
+        final byte[] encrypted = cipher.doFinal(plain);
+        final byte[] bytes = Arrays.copyOf(ivBytes, ivBytes.length + encrypted.length);
+        System.arraycopy(encrypted, 0, bytes, ivBytes.length, encrypted.length);
+        System.out.println(Base64.encodeToString(bytes));
+
+        // decrypt
+        byte[] cipherBytes = Base64.decode("XSdDRve9YTe7BfYLlJZ/6ojNwhuicsnJTR9NAmW1aQFCbQCkehkCDtYtOUHFPYISh6JdFHg6dA==");
+        cipherBytes = Arrays.copyOfRange(cipherBytes, 16, cipherBytes.length);
+        final byte[] nonceBytes = new byte[GCM_IV_SIZE];
+        int len = 2 + GCM_TAG_SIZE;
+
+        final AlgorithmParameterSpec algorithmParameterSpec2 = new GCMParameterSpec(GCM_TAG_SIZE * Byte.SIZE, nonceBytes);
+        final Cipher cipher2 = Cipher.getInstance(AES_GCM_TRANSFORMATION, new BouncyCastleProvider());
+        cipher2.init(Cipher.DECRYPT_MODE, secretKey, algorithmParameterSpec2);
+        cipherBytes = Arrays.copyOf(cipherBytes, len);
+        final byte[] decrypted = cipher2.doFinal(cipherBytes);
+        System.out.println(ByteBuffer.wrap(decrypted, 0, 2));
+    }
+
     @Test
     public void camellia() throws Exception {
         Provider p = new BouncyCastleProvider();
