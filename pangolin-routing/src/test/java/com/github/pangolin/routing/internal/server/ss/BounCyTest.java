@@ -1,7 +1,11 @@
 package com.github.pangolin.routing.internal.server.ss;
 
+import com.github.pangolin.routing.internal.server.ss.crypto.Stateful;
 import freework.codec.Base64;
 import freework.util.Bytes;
+import org.bouncycastle.crypto.digests.SHA1Digest;
+import org.bouncycastle.crypto.generators.HKDFBytesGenerator;
+import org.bouncycastle.crypto.params.HKDFParameters;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.junit.Test;
 
@@ -26,12 +30,13 @@ public class BounCyTest {
         final int GCM_IV_SIZE = 12;
         final int GCM_TAG_SIZE = 16;
 
+        SecretKey secretKey = ShadowsocksKeyFactory.generateKey("AES", 128 / 8, "123456");
+        /*
         final SecureRandom random = new SecureRandom();
         final byte[] plain = Bytes.toBytes("Hello");
         final byte[] ivBytes = new byte[GCM_IV_SIZE];
         random.nextBytes(ivBytes);
 
-        final SecretKey secretKey = ShadowsocksKeyFactory.generateKey("AES", 128 / 8, "123456");
         final AlgorithmParameterSpec algorithmParameterSpec = new GCMParameterSpec(GCM_TAG_SIZE * Byte.SIZE, ivBytes);
         final Cipher cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION);
         cipher.init(Cipher.ENCRYPT_MODE, secretKey, algorithmParameterSpec);
@@ -39,19 +44,49 @@ public class BounCyTest {
         final byte[] bytes = Arrays.copyOf(ivBytes, ivBytes.length + encrypted.length);
         System.arraycopy(encrypted, 0, bytes, ivBytes.length, encrypted.length);
         System.out.println(Base64.encodeToString(bytes));
+        */
+
 
         // decrypt
         byte[] cipherBytes = Base64.decode("XSdDRve9YTe7BfYLlJZ/6ojNwhuicsnJTR9NAmW1aQFCbQCkehkCDtYtOUHFPYISh6JdFHg6dA==");
-        cipherBytes = Arrays.copyOfRange(cipherBytes, 16, cipherBytes.length);
+
+        Stateful.Decoder decoder = new Stateful.Decoder(secretKey.getEncoded());
+        System.out.println(Bytes.toString(decoder.decrypt(cipherBytes)));
+
+        secretKey = new SecretKeySpec(genSubkey(secretKey.getEncoded(), 128 / 8, Arrays.copyOf(cipherBytes, 16)), "AES");
+//        cipherBytes = Arrays.copyOfRange(cipherBytes, 16, cipherBytes.length);
         final byte[] nonceBytes = new byte[GCM_IV_SIZE];
-        int len = 2 + GCM_TAG_SIZE;
 
         final AlgorithmParameterSpec algorithmParameterSpec2 = new GCMParameterSpec(GCM_TAG_SIZE * Byte.SIZE, nonceBytes);
         final Cipher cipher2 = Cipher.getInstance(AES_GCM_TRANSFORMATION, new BouncyCastleProvider());
         cipher2.init(Cipher.DECRYPT_MODE, secretKey, algorithmParameterSpec2);
-        cipherBytes = Arrays.copyOf(cipherBytes, len);
-        final byte[] decrypted = cipher2.doFinal(cipherBytes);
-        System.out.println(ByteBuffer.wrap(decrypted, 0, 2));
+        final byte[] decrypted = cipher2.doFinal(cipherBytes, 16, 2 + GCM_TAG_SIZE);
+        int l = (decrypted[0] & 0xff) << 8 | (decrypted[1] & 0xff);
+
+        increment(nonceBytes);
+        final AlgorithmParameterSpec algorithmParameterSpec3 = new GCMParameterSpec(GCM_TAG_SIZE * Byte.SIZE, nonceBytes);
+        final Cipher cipher3 = Cipher.getInstance(AES_GCM_TRANSFORMATION, new BouncyCastleProvider());
+        cipher3.init(Cipher.DECRYPT_MODE, secretKey, algorithmParameterSpec3);
+        final byte[] decrypted2 = cipher3.doFinal(cipherBytes, 16 + 2 + GCM_TAG_SIZE, l + GCM_TAG_SIZE);
+
+        System.out.println(Bytes.toString(decrypted2));
+    }
+
+    protected static void increment(byte[] nonce) {
+        for (int i = 0; i < nonce.length; i++) {
+            ++nonce[i];
+            if (nonce[i] != 0) {
+                break;
+            }
+        }
+    }
+
+    private byte[] genSubkey(final byte[] encoded, final int keySize, byte[] salt) {
+        HKDFBytesGenerator hkdf = new HKDFBytesGenerator(new SHA1Digest());
+        hkdf.init(new HKDFParameters(encoded, salt, Bytes.toBytes("ss-subkey")));
+        byte[] okm = new byte[keySize];
+        hkdf.generateBytes(okm, 0, keySize);
+        return okm;
     }
 
     @Test
