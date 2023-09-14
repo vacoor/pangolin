@@ -46,8 +46,8 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
                     final String algorithm = getAlgorithm(al.transformation);
 
                     final SecretKey key = ShadowsocksKeyFactory.generateKey(algorithm, al.keySize, "000000");
-                    ch.pipeline().addFirst(new ShadowsocksCodec(al, key, null));
                     ch.pipeline().addFirst(networkHandler);
+                    ch.pipeline().addFirst(new ShadowsocksCodec(al, key, null));
                 }
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override

@@ -48,7 +48,7 @@ public class Socks5RoutingServer extends NettyServer {
         // final List<RoutingRule> routingRules = RoutingFileParser.parse();
 
         final List<RoutingRule> routingRules = Arrays.asList(new RoutingRule(new DomainPattern("**"), () ->
-                new Socks5ProxyHandler(new InetSocketAddress("127.0.0.1", 8388))
+                new ShadowsocksProxyHandler(new InetSocketAddress("127.0.0.1", 8388))
         ));
 
         new Socks5RoutingServer(1080).start(routingRules).addListener(new ChannelFutureListener() {
