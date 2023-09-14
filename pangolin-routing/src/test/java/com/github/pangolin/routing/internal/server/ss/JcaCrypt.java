@@ -34,28 +34,30 @@ public class JcaCrypt {
     private final String transformation;
     private final SecretKey secretKey;
     private final int ivSize;
-    private final Provider jceProvider;
+    private final Provider jcaProvider;
 
     public JcaCrypt(final String transformation, final SecretKey secretKey, final int ivSize) {
         this(transformation, secretKey, ivSize, null);
     }
 
-    public JcaCrypt(final String transformation, final SecretKey secretKey, final int ivSize, final Provider jceProvider) {
+    public JcaCrypt(final String transformation, final SecretKey secretKey, final int ivSize, final Provider jcaProvider) {
         this.transformation = transformation;
         this.secretKey = secretKey;
         this.ivSize = ivSize;
-        this.jceProvider = jceProvider;
+        this.jcaProvider = jcaProvider;
     }
 
     public byte[] encrypt(final byte[] bytes, final int offset, final int length) throws BadPaddingException, IllegalBlockSizeException {
-        final byte[] ivBytes = new byte[ivSize];
-        random.nextBytes(ivBytes);
-        final IvParameterSpec ivParameterSpec = new IvParameterSpec(ivBytes);
-        final Cipher cipher = instantiateCipher(ivParameterSpec, Cipher.ENCRYPT_MODE);
-        final byte[] encrypted = cipher.doFinal(bytes, offset, length);
-        final byte[] r = Arrays.copyOf(ivBytes, ivBytes.length + encrypted.length);
-        System.arraycopy(encrypted, 0, r, ivBytes.length, encrypted.length);
-        return r;
+        /*-
+         +--------+-------------------------------------+
+         |  xB iv |  variable length encrypted payload  |
+         +--------+-------------------------------------+
+         */
+        final byte[] ivBytes = nextBytes(random, new byte[ivSize]);
+        final byte[] payloadBytes = getCrypt(new IvParameterSpec(ivBytes)).encrypt(bytes, offset, length);
+        final byte[] encryptedBytes = Arrays.copyOf(ivBytes, ivBytes.length + payloadBytes.length);
+        System.arraycopy(payloadBytes, 0, encryptedBytes, ivBytes.length, payloadBytes.length);
+        return encryptedBytes;
     }
 
     public byte[] decrypt(final byte[] bytes) throws BadPaddingException, IllegalBlockSizeException {
@@ -63,14 +65,27 @@ public class JcaCrypt {
     }
 
     public byte[] decrypt(final byte[] bytes, final int offset, final int length) throws BadPaddingException, IllegalBlockSizeException {
+        /*-
+         +--------+-------------------------------------+
+         |  xB iv |  variable length encrypted payload  |
+         +--------+-------------------------------------+
+         */
         final IvParameterSpec ivParameterSpec = new IvParameterSpec(bytes, offset, ivSize);
-        final Cipher cipher = instantiateCipher(ivParameterSpec, Cipher.DECRYPT_MODE);
-        return cipher.doFinal(bytes, offset + ivSize, length - ivSize);
+        return getCrypt(ivParameterSpec).decrypt(bytes, offset + ivSize, length - ivSize);
+    }
+
+    protected Crypt getCrypt(final AlgorithmParameterSpec algorithmParameterSpec) {
+        return Crypt.getSymmetric(transformation, secretKey, algorithmParameterSpec, random, jcaProvider);
+    }
+
+    private byte[] nextBytes(final SecureRandom random, byte[] bytes) {
+        random.nextBytes(bytes);
+        return bytes;
     }
 
     protected Cipher instantiateCipher(final AlgorithmParameterSpec params, final int opmode) {
         try {
-            return instantiateCipher(transformation, opmode, secretKey, params, null, jceProvider);
+            return instantiateCipher(transformation, opmode, secretKey, params, null, jcaProvider);
         } catch (final NoSuchPaddingException e) {
             throw new IllegalStateException(e);
         } catch (final NoSuchAlgorithmException e) {
@@ -101,6 +116,30 @@ public class JcaCrypt {
             }
         }
         return cipher;
+    }
+
+    enum Algorithm {
+        AES_128_CFB("AES/CFB/NoPadding", 128 / 8, 16),
+        AES_192_CFB("AES/CFB/NoPadding", 192 / 8, 16),
+        AES_256_CFB("AES/CFB/NoPadding", 256 / 8, 16),
+        AES_128_OFB("AES/OFB/NoPadding", 128 / 8, 16),
+        AES_192_OFB("AES/OFB/NoPadding", 192 / 8, 16),
+        AES_256_OFB("AES/OFB/NoPadding", 256 / 8, 16),
+        BLOWFISH_CFB("Blowfish/CFB/NoPadding", 128 / 8, 8),
+        SEED_CFB("Seed/CFB/NoPadding", 128 / 8, 16),
+        CAMELLIA_CFB("Camellia/CFB/NoPadding", 128 / 8, 16),
+        CHA_CHA_20("ChaCha20", 256 / 8, 12),
+        ;
+
+        private final String transformation;
+        private final int keySize;
+        private final int ivSize;
+
+        Algorithm(final String transformation, final int keySize, final int ivSize) {
+            this.transformation = transformation;
+            this.keySize = keySize;
+            this.ivSize = ivSize;
+        }
     }
 
     public static void main(String[] args) throws Exception {

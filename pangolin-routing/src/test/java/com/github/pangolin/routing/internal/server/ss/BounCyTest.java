@@ -24,6 +24,18 @@ import java.security.spec.AlgorithmParameterSpec;
 import java.util.Arrays;
 
 public class BounCyTest {
+
+    @Test
+    public void asesGcmSs() throws Exception {
+        SecretKey secretKey = ShadowsocksKeyFactory.generateKey("AES", 128 / 8, "123456");
+        Stateful.Encoder encoder = new Stateful.Encoder(secretKey.getEncoded());
+        final byte[] hellos = encoder.encrypt(Bytes.toBytes("Hello"));
+
+        Stateful.Decoder decoder = new Stateful.Decoder(secretKey.getEncoded());
+        byte[] decrypt = decoder.decrypt(hellos);
+        System.out.println(Bytes.toString(decrypt));
+    }
+
     @Test
     public void aesGcm() throws Exception{
         final String AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding";
