@@ -148,10 +148,24 @@ public class ShadowsocksCodec extends ByteToMessageCodec<ByteBuf> {
     }
 
     public static void main(String[] args) throws Exception {
-        byte[] _ivBytes = Base64.decode("MJkA/t6L91WqWl4nYtrVSg==");
-        byte[] d = Base64.decode("CaxS0FjGMjyhmUuAHIjCj158P3I7HqM0Ku82T2ZsazCsrbuLmime8S5wdhNEYKJfAGKoG1smaxI98ebA2sorj5KPswKSfxmZAMbcK7Q=");
+        /*-
+        raw-b64: Ae+/vWUy77+9AFA=
+        buf: AbRlMrwAUA==
+        iv: nXTFYXLy3bA2wJDoxGejtw==
+        crypted:nXTFYXLy3bA2wJDoxGejt82SB+ARfwc=
+        raw-b64: R0VUIC8gSFRUUC8xLjENCkhvc3Q6IHd3dy5iYWlkdS5jb20NClVzZXItQWdlbnQ6IGN1cmwvNy42NC4xDQpBY2NlcHQ6ICovKg0KDQo=
+        buf: R0VUIC8gSFRUUC8xLjENCkhvc3Q6IHd3dy5iYWlkdS5jb20NClVzZXItQWdlbnQ6IGN1cmwvNy42NC4xDQpBY2NlcHQ6ICovKg0KDQo=
+        crypted:ezb5s1pgy30JpytIwCx1EKjmRYsn2EKHBBFCwTCvHCRc1Drv1vuRN+OuyTsNru/L63z3y1PNWRpNOmq/gsVvFJDZMcDBf+UD/3w3xaI=
+         */
+        byte[] _ivBytes = Base64.decode("nXTFYXLy3bA2wJDoxGejtw==");
+        byte[] d = Base64.decode("ezb5s1pgy30JpytIwCx1EKjmRYsn2EKHBBFCwTCvHCRc1Drv1vuRN+OuyTsNru/L63z3y1PNWRpNOmq/gsVvFJDZMcDBf+UD/3w3xaI=");
         final SecretKey _key = ShadowsocksKeyFactory.generateKey(getAlgorithm(Algorithm.AES_128_CFB.transformation), 128 / 8, "000000");
-        byte[] decrypt = Crypt.getSymmetric(Algorithm.AES_128_CFB.transformation, _key, new IvParameterSpec(_ivBytes)).decrypt(d);
+
+
+        byte[] encrypt = Crypt.getSymmetric(Algorithm.AES_128_CFB.transformation, _key, new IvParameterSpec(_ivBytes) ).encrypt(d);
+        System.out.println(Base64.encodeToString(encrypt));
+
+        byte[] decrypt = Crypt.getSymmetric(Algorithm.AES_128_CFB.transformation, _key, new IvParameterSpec(_ivBytes) ).decrypt(d);
         System.out.println(Base64.encodeToString(decrypt));
         System.exit(0);
 
