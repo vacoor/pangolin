@@ -148,6 +148,14 @@ public class ShadowsocksCodec extends ByteToMessageCodec<ByteBuf> {
     }
 
     public static void main(String[] args) throws Exception {
+        byte[] _ivBytes = Base64.decode("MJkA/t6L91WqWl4nYtrVSg==");
+        byte[] d = Base64.decode("CaxS0FjGMjyhmUuAHIjCj158P3I7HqM0Ku82T2ZsazCsrbuLmime8S5wdhNEYKJfAGKoG1smaxI98ebA2sorj5KPswKSfxmZAMbcK7Q=");
+        final SecretKey _key = ShadowsocksKeyFactory.generateKey(getAlgorithm(Algorithm.AES_128_CFB.transformation), 128 / 8, "000000");
+        byte[] decrypt = Crypt.getSymmetric(Algorithm.AES_128_CFB.transformation, _key, new IvParameterSpec(_ivBytes)).decrypt(d);
+        System.out.println(Base64.encodeToString(decrypt));
+        System.exit(0);
+
+
         final BouncyCastleProvider provider = new BouncyCastleProvider();
         final Map<Algorithm, String> algorithmMap = new LinkedHashMap<Algorithm, String>();
         algorithmMap.put(Algorithm.AES_128_OFB, "HfA9Rx4S9SFgjskIW6d0cmYZA6z4");
