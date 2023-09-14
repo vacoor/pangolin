@@ -60,6 +60,7 @@ public class ShadowsocksProxyHandler extends ChannelDuplexHandler {
         ctx.fireChannelActive();
     }
 
+    /*
     @Override
     public void write(final ChannelHandlerContext ctx, final Object msg, final ChannelPromise promise) throws Exception {
         if (msg instanceof ByteBuf) {
@@ -87,4 +88,5 @@ public class ShadowsocksProxyHandler extends ChannelDuplexHandler {
             ctx.write(msg, promise);
         }
     }
+    */
 }

@@ -34,6 +34,7 @@ public class Channels {
     public static ChannelFuture listen(final SocketAddress listenAddr, final boolean autoRead, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup, final ChannelHandler initializer) throws InterruptedException {
         final ServerBootstrap serverBootstrap = new ServerBootstrap();
         serverBootstrap.option(ChannelOption.SO_REUSEADDR, true);
+        serverBootstrap.option(ChannelOption.SO_RCVBUF, 32 * 1024);// 读缓冲区为32k
         serverBootstrap.childOption(ChannelOption.TCP_NODELAY, true);
         serverBootstrap.childOption(ChannelOption.SO_KEEPALIVE, true);
         serverBootstrap.childOption(ChannelOption.AUTO_READ, autoRead);
@@ -60,6 +61,7 @@ public class Channels {
         b.option(ChannelOption.TCP_NODELAY, true);
         b.option(ChannelOption.SO_KEEPALIVE, true);
         b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10000);
+        b.option(ChannelOption.SO_RCVBUF, 32 * 1024);// 读缓冲区为32k
         b.resolver(resolver).group(group).channel(NioSocketChannel.class).handler(initializer);
         return b.connect(remoteAddress);
     }

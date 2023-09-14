@@ -66,6 +66,8 @@ public class ShadowsocksCodec extends ByteToMessageCodec<ByteBuf> {
     private final int ivSize;
     private final SecureRandom random;
     private final Provider provider;
+    private final byte[] ivBytes;
+    private volatile boolean handshaked;
 
     public ShadowsocksCodec(Algorithm algorithm, final SecretKey secretKey, final Provider provider) {
         this(algorithm.transformation, secretKey, algorithm.ivSize, new SecureRandom(), provider);
@@ -77,13 +79,20 @@ public class ShadowsocksCodec extends ByteToMessageCodec<ByteBuf> {
         this.ivSize = ivSize;
         this.random = random;
         this.provider = provider;
+        this.ivBytes = nextBytes(random, new byte[ivSize]);
     }
 
     @Override
     protected void encode(final ChannelHandlerContext ctx, ByteBuf in, ByteBuf out) throws Exception {
+        // FIXME 32K 缓冲区必须
         final byte[] bytes = new byte[in.readableBytes()];
         in.readBytes(bytes);
-        out.writeBytes(encrypt(bytes, 0, bytes.length));
+        if (!handshaked) {
+            out.writeBytes(encrypt(bytes, 0, bytes.length, !handshaked));
+            handshaked = true;
+        } else {
+            out.writeBytes(encrypt(bytes, 0, bytes.length, !handshaked));
+        }
     }
 
     @Override
@@ -93,25 +102,23 @@ public class ShadowsocksCodec extends ByteToMessageCodec<ByteBuf> {
         out.add(Unpooled.wrappedBuffer(decrypt(bytes, 0, bytes.length)));
     }
 
-    private byte[] encrypt(final byte[] bytes) {
-        return encrypt(bytes, 0, bytes.length);
-    }
-
     private byte[] decrypt(final byte[] bytes) {
         return decrypt(bytes, 0, bytes.length);
     }
 
-    private byte[] encrypt(final byte[] bytes, final int offset, final int length) {
+    private byte[] encrypt(final byte[] bytes, final int offset, final int length, boolean iv) {
         /*-
          +--------+-------------------------------------+
          |  xB iv |  variable length encrypted payload  |
          +--------+-------------------------------------+
          */
-        final byte[] ivBytes = nextBytes(random, new byte[ivSize]);
         final byte[] payloadBytes = getCrypt(new IvParameterSpec(ivBytes)).encrypt(bytes, offset, length);
-        final byte[] encryptedBytes = Arrays.copyOf(ivBytes, ivBytes.length + payloadBytes.length);
-        System.arraycopy(payloadBytes, 0, encryptedBytes, ivBytes.length, payloadBytes.length);
-        return encryptedBytes;
+        if (iv) {
+            final byte[] encryptedBytes = Arrays.copyOf(ivBytes, ivBytes.length + payloadBytes.length);
+            System.arraycopy(payloadBytes, 0, encryptedBytes, ivBytes.length, payloadBytes.length);
+            return encryptedBytes;
+        }
+        return payloadBytes;
     }
 
 
