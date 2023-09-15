@@ -14,10 +14,12 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
 import io.netty.resolver.NoopAddressResolverGroup;
 import lombok.extern.slf4j.Slf4j;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import javax.crypto.SecretKey;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.security.SecureRandom;
 import java.util.List;
 
 /**
@@ -42,11 +44,8 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 if (null != networkHandler) {
-                    final ShadowsocksCodec.Algorithm al = ShadowsocksCodec.Algorithm.AES_128_CFB;
-                    final String algorithm = getAlgorithm(al.transformation);
-
-                    final SecretKey key = ShadowsocksKeyFactory.generateKey(algorithm, al.keySize, "000000");
-                    ch.pipeline().addLast(new ShadowsocksCodec(al, key, null));
+                    final SecretKey key = ShadowsocksKeyFactory.generateKey("AES", 16, "000000");
+                    ch.pipeline().addLast(new ShadowsocksCodec2(key, 16, new SecureRandom()));
                     ch.pipeline().addLast(networkHandler);
                 }
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
@@ -71,6 +70,9 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
     private ChannelHandler select(final SocketAddress destinationAddress) {
         if (null == routingRules || !(destinationAddress instanceof InetSocketAddress)) {
             return null;
+        }
+        if (true) {
+            return routingRules.iterator().next().newProxyHandler();
         }
         final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
         for (final RoutingRule routing : routingRules) {
