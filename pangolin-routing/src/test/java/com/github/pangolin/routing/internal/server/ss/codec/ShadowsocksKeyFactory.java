@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.internal.server.ss;
+package com.github.pangolin.routing.internal.server.ss.codec;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;

@@ -3,7 +3,7 @@ package com.github.pangolin.routing.internal.server.ss.codec;
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.RoutingRule;
 import com.github.pangolin.routing.internal.server.socks.v5.Socks5ProxyServerHandler;
-import com.github.pangolin.routing.internal.server.ss.ShadowsocksKeyFactory;
+import com.github.pangolin.routing.internal.server.ss.codec.stream.ShadowsocksStreamCipherCodec;
 import com.github.pangolin.util.Channels;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
@@ -43,9 +43,19 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 if (null != networkHandler) {
-                    final SecretKey key = ShadowsocksKeyFactory.generateKey("AES", 16, "000000");
-                    ch.pipeline().addLast(new ShadowsocksAeadEncoder(key.getEncoded()));
-                    ch.pipeline().addLast(new ShadowsocksAeadDecoder(key.getEncoded()));
+                    final SecretKey key = ShadowsocksKeyFactory.generateKey("AES", 32, "000000");
+                    final byte[] masterKey = key.getEncoded();
+                    final int saltSize = 16;
+                    final int nonceSize = 12;
+                    final int tagSize = 16;
+//                    ch.pipeline().addLast(new ShadowsocksAeadEncoder(masterKey, saltSize, nonceSize, tagSize, new SecureRandom()));
+//                    ShadowsocksAeadCryptFactory factory = new AesGcmCryptFactory.Aes256Gcm();
+//                    ch.pipeline().addLast(new ShadowsocksAeadCipherCodec(masterKey, factory, new SecureRandom()));
+//                    ch.pipeline().addLast(new ShadowsocksAeadCipherCodec.ShadowsocksAeadDecoder(masterKey, factory));
+
+                    final SecretKey skey = ShadowsocksKeyFactory.generateKey("AES", 16, "000000");
+                    ch.pipeline().addLast(new ShadowsocksStreamCipherCodec(skey.getEncoded(), 16, new SecureRandom()));
+//                    ch.pipeline().addLast(new ShadowsocksStreamCipherCodec(skey, 16, new SecureRandom()));
                     ch.pipeline().addLast(networkHandler);
                 }
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {

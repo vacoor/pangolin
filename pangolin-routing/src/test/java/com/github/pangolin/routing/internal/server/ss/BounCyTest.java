@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.internal.server.ss;
 
+import com.github.pangolin.routing.internal.server.ss.codec.ShadowsocksKeyFactory;
 import com.github.pangolin.routing.internal.server.ss.crypto.Stateful;
 import freework.codec.Base64;
 import freework.util.Bytes;
@@ -15,11 +16,9 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.Provider;
 import java.security.SecureRandom;
-import java.security.Security;
 import java.security.spec.AlgorithmParameterSpec;
 import java.util.Arrays;
 
