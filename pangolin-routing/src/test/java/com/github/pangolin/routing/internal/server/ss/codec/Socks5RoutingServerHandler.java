@@ -14,7 +14,6 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
 import io.netty.resolver.NoopAddressResolverGroup;
 import lombok.extern.slf4j.Slf4j;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import javax.crypto.SecretKey;
 import java.net.InetSocketAddress;
@@ -45,7 +44,8 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
             protected void initChannel(final SocketChannel ch) throws Exception {
                 if (null != networkHandler) {
                     final SecretKey key = ShadowsocksKeyFactory.generateKey("AES", 16, "000000");
-                    ch.pipeline().addLast(new ShadowsocksCodec2(key, 16, new SecureRandom()));
+                    ch.pipeline().addLast(new ShadowsocksAeadEncoder(key.getEncoded()));
+                    ch.pipeline().addLast(new ShadowsocksAeadDecoder(key.getEncoded()));
                     ch.pipeline().addLast(networkHandler);
                 }
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {

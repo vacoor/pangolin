@@ -27,9 +27,11 @@ public class BounCyTest {
 
     @Test
     public void asesGcmSs() throws Exception {
-        SecretKey secretKey = ShadowsocksKeyFactory.generateKey("AES", 128 / 8, "123456");
+        SecretKey secretKey = ShadowsocksKeyFactory.generateKey("AES", 128 / 8, "000000");
         Stateful.Encoder encoder = new Stateful.Encoder(secretKey.getEncoded());
-        final byte[] hellos = encoder.encrypt(Bytes.toBytes("Hello"));
+        // final byte[] bytes = Bytes.toBytes("Hello");
+        final byte[] bytes = new byte[]{0, 7};
+        final byte[] hellos = encoder.encrypt(bytes);
 
         Stateful.Decoder decoder = new Stateful.Decoder(secretKey.getEncoded());
         byte[] decrypt = decoder.decrypt(hellos);
