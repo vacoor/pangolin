@@ -1,38 +1,15 @@
 package com.github.pangolin.routing.internal.server.ss.crypto.impl.stream;
 
-import com.github.pangolin.routing.internal.server.ss.crypto.ShadowsocksStreamCrypt;
 import org.bouncycastle.crypto.StreamCipher;
 import org.bouncycastle.crypto.engines.AESEngine;
 import org.bouncycastle.crypto.modes.CFBBlockCipher;
 import org.bouncycastle.crypto.modes.SICBlockCipher;
-import org.bouncycastle.crypto.params.KeyParameter;
-import org.bouncycastle.crypto.params.ParametersWithIV;
 
-public abstract class AesCrypt implements ShadowsocksStreamCrypt {
-    private final int keySize;
+public abstract class AesCrypt extends AbstractStreamCrypt {
 
     public AesCrypt(final int keySize) {
-        this.keySize = keySize;
+        super(keySize, 16);
     }
-
-    @Override
-    public int getKeySize() {
-        return keySize;
-    }
-
-    @Override
-    public int getIvSize() {
-        return 16;
-    }
-
-    @Override
-    public StreamCipher getCipher(final boolean encrypt, final byte[] key, final byte[] iv) {
-        final StreamCipher cipher = createCipher();
-        cipher.init(encrypt, new ParametersWithIV(new KeyParameter(key), iv));
-        return cipher;
-    }
-
-    protected abstract StreamCipher createCipher();
 
     public static class AesCtr extends AesCrypt {
 

@@ -3,30 +3,15 @@ package com.github.pangolin.routing.internal.server.ss;
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.RoutingRule;
 import com.github.pangolin.routing.internal.server.socks.v5.Socks5ProxyServerHandler;
-import com.github.pangolin.routing.internal.server.ss.codec.ShadowsocksAeadCipherCodec;
-import com.github.pangolin.routing.internal.server.ss.codec.ShadowsocksStreamCipherCodec;
-import com.github.pangolin.routing.internal.server.ss.crypto.ShadowsocksAeadCrypt;
-import com.github.pangolin.routing.internal.server.ss.crypto.ShadowsocksKeyFactory;
-import com.github.pangolin.routing.internal.server.ss.crypto.ShadowsocksStreamCrypt;
-import com.github.pangolin.routing.internal.server.ss.crypto.impl.aead.AesGcmCrypt;
-import com.github.pangolin.routing.internal.server.ss.crypto.impl.aead.ChaCha20Poly1305Crypt;
-import com.github.pangolin.routing.internal.server.ss.crypto.impl.stream.AesCrypt;
-import com.github.pangolin.routing.internal.server.ss.crypto.impl.stream.CamelliaCfbCrypt;
 import com.github.pangolin.util.Channels;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
+import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
 import io.netty.resolver.NoopAddressResolverGroup;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.crypto.SecretKey;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.security.SecureRandom;
 import java.util.List;
 
 /**
@@ -51,16 +36,6 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 if (null != networkHandler) {
-//                    final ShadowsocksAeadCrypt crypt = new AesGcmCrypt.Aes256Gcm();
-//                    final ShadowsocksAeadCrypt crypt = new ChaCha20Poly1305Crypt();
-                    final ShadowsocksStreamCrypt crypt = new AesCrypt.Aes256Ctr();
-//                    final ShadowsocksStreamCrypt crypt = new CamelliaCfbCrypt.Camellia256Cfb();
-
-                    final SecretKey key = ShadowsocksKeyFactory.generateKey("AES", crypt.getKeySize(), "000000");
-                    final byte[] masterKey = key.getEncoded();
-
-//                    ch.pipeline().addLast(new ShadowsocksAeadCipherCodec(masterKey, crypt, new SecureRandom()));
-                    ch.pipeline().addLast(new ShadowsocksStreamCipherCodec(key.getEncoded(), crypt, new SecureRandom()));
                     ch.pipeline().addLast(networkHandler);
                 }
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {

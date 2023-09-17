@@ -1,29 +1,17 @@
 package com.github.pangolin.routing.internal.server.ss.crypto.impl.stream;
 
-import com.github.pangolin.routing.internal.server.ss.crypto.ShadowsocksStreamCrypt;
 import org.bouncycastle.crypto.StreamCipher;
 import org.bouncycastle.crypto.engines.CamelliaEngine;
 import org.bouncycastle.crypto.modes.CFBBlockCipher;
 
-public class CamelliaCfbCrypt implements ShadowsocksStreamCrypt {
-    private final int keySize;
+public abstract class CamelliaCfbCrypt extends AbstractStreamCrypt {
 
     public CamelliaCfbCrypt(final int keySize) {
-        this.keySize = keySize;
+        super(keySize, 16);
     }
 
     @Override
-    public int getKeySize() {
-        return keySize;
-    }
-
-    @Override
-    public int getIvSize() {
-        return 16;
-    }
-
-    @Override
-    public StreamCipher getCipher(final boolean encrypt, final byte[] key, final byte[] iv) {
+    protected StreamCipher createCipher() {
         return new CFBBlockCipher(new CamelliaEngine(), getIvSize() * Byte.SIZE);
     }
 

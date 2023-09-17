@@ -12,6 +12,9 @@ import javax.crypto.spec.SecretKeySpec;
 import java.security.Key;
 import java.security.spec.AlgorithmParameterSpec;
 
+/**
+ * chacha20-ietf-poly1305.
+ */
 public class ChaCha20Poly1305Crypt implements ShadowsocksAeadCrypt {
 
     @Override
