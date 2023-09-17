@@ -11,6 +11,7 @@ import com.github.pangolin.routing.internal.server.ss.crypto.ShadowsocksStreamCr
 import com.github.pangolin.routing.internal.server.ss.crypto.impl.aead.AesGcmCrypt;
 import com.github.pangolin.routing.internal.server.ss.crypto.impl.aead.ChaCha20Poly1305Crypt;
 import com.github.pangolin.routing.internal.server.ss.crypto.impl.stream.AesCrypt;
+import com.github.pangolin.routing.internal.server.ss.crypto.impl.stream.CamelliaCfbCrypt;
 import com.github.pangolin.util.Channels;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
@@ -50,15 +51,16 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 if (null != networkHandler) {
-                    final ShadowsocksAeadCrypt crypt = new AesGcmCrypt.Aes256Gcm();
+//                    final ShadowsocksAeadCrypt crypt = new AesGcmCrypt.Aes256Gcm();
 //                    final ShadowsocksAeadCrypt crypt = new ChaCha20Poly1305Crypt();
-//                    final ShadowsocksStreamCrypt crypt = new AesCrypt.Aes256Cfb();
+                    final ShadowsocksStreamCrypt crypt = new AesCrypt.Aes256Ctr();
+//                    final ShadowsocksStreamCrypt crypt = new CamelliaCfbCrypt.Camellia256Cfb();
 
                     final SecretKey key = ShadowsocksKeyFactory.generateKey("AES", crypt.getKeySize(), "000000");
                     final byte[] masterKey = key.getEncoded();
 
-                    ch.pipeline().addLast(new ShadowsocksAeadCipherCodec(masterKey, crypt, new SecureRandom()));
-//                    ch.pipeline().addLast(new ShadowsocksStreamCipherCodec(key.getEncoded(), crypt, new SecureRandom()));
+//                    ch.pipeline().addLast(new ShadowsocksAeadCipherCodec(masterKey, crypt, new SecureRandom()));
+                    ch.pipeline().addLast(new ShadowsocksStreamCipherCodec(key.getEncoded(), crypt, new SecureRandom()));
                     ch.pipeline().addLast(networkHandler);
                 }
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {

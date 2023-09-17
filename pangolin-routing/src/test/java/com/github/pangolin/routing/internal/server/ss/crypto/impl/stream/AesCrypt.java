@@ -4,7 +4,7 @@ import com.github.pangolin.routing.internal.server.ss.crypto.ShadowsocksStreamCr
 import org.bouncycastle.crypto.StreamCipher;
 import org.bouncycastle.crypto.engines.AESEngine;
 import org.bouncycastle.crypto.modes.CFBBlockCipher;
-import org.bouncycastle.crypto.modes.OFBBlockCipher;
+import org.bouncycastle.crypto.modes.SICBlockCipher;
 import org.bouncycastle.crypto.params.KeyParameter;
 import org.bouncycastle.crypto.params.ParametersWithIV;
 
@@ -42,8 +42,32 @@ public abstract class AesCrypt implements ShadowsocksStreamCrypt {
 
         @Override
         protected StreamCipher createCipher() {
-            return new OFBBlockCipher(new AESEngine(), getIvSize() * Byte.SIZE);
+            return new SICBlockCipher(new AESEngine());
         }
+    }
+
+    public static class Aes128Ctr extends AesCtr {
+
+        public Aes128Ctr() {
+            super(128 / 8);
+        }
+
+    }
+
+    public static class Aes192Ctr extends AesCtr {
+
+        public Aes192Ctr() {
+            super(192 / 8);
+        }
+
+    }
+
+    public static class Aes256Ctr extends AesCtr {
+
+        public Aes256Ctr() {
+            super(256 / 8);
+        }
+
     }
 
 
@@ -82,4 +106,5 @@ public abstract class AesCrypt implements ShadowsocksStreamCrypt {
         }
 
     }
+
 }

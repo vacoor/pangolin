@@ -45,8 +45,8 @@ public class Socks5RoutingServer extends NettyServer {
 
 
     public static void main(String[] args) throws Exception {
-//        final BouncyCastleProvider bc = new BouncyCastleProvider();
-//        Cipher instance = Cipher.getInstance("AES/CTR/NoPadding", bc);
+        final BouncyCastleProvider bc = new BouncyCastleProvider();
+        Cipher instance = Cipher.getInstance("AES/CTR/NoPadding", bc);
 
         // final List<RoutingRule> routingRules = RoutingFileParser.parse();
 
