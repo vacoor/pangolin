@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.internal.server.ss.codec;
+package com.github.pangolin.routing.internal.server.ss.crypto;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -8,8 +8,8 @@ import java.security.MessageDigest;
 public class ShadowsocksKeyFactory {
     private static final int KEY_LENGTH = 32;
 
-    public static SecretKey generateKey(final String a, final int keySize, final String password) {
-        return new SecretKeySpec(init(password, keySize), a);
+    public static SecretKey generateKey(final String algorithm, final int keySize, final String password) {
+        return new SecretKeySpec(init(password, keySize), algorithm);
     }
 
     private static byte[] init(String password, final int _length) {

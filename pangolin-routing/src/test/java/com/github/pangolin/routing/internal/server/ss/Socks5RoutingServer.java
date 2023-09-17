@@ -1,16 +1,16 @@
-package com.github.pangolin.routing.internal.server.ss.codec;
+package com.github.pangolin.routing.internal.server.ss;
 
 import com.github.pangolin.routing.RoutingRule;
-import com.github.pangolin.routing.internal.client.Socks5ProxyHandler;
 import com.github.pangolin.routing.pattern.DomainPattern;
-import com.github.pangolin.routing.resolver.RoutingFileParser;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
+import javax.crypto.Cipher;
 import javax.net.ssl.SSLException;
 import java.net.InetSocketAddress;
 import java.security.cert.CertificateException;
@@ -45,6 +45,9 @@ public class Socks5RoutingServer extends NettyServer {
 
 
     public static void main(String[] args) throws Exception {
+//        final BouncyCastleProvider bc = new BouncyCastleProvider();
+//        Cipher instance = Cipher.getInstance("AES/CTR/NoPadding", bc);
+
         // final List<RoutingRule> routingRules = RoutingFileParser.parse();
 
         final List<RoutingRule> routingRules = Arrays.asList(new RoutingRule(new DomainPattern("**"), () ->

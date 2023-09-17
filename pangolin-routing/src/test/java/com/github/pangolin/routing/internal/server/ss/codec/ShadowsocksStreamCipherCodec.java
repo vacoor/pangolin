@@ -1,5 +1,6 @@
-package com.github.pangolin.routing.internal.server.ss.codec.stream;
+package com.github.pangolin.routing.internal.server.ss.codec;
 
+import com.github.pangolin.routing.internal.server.ss.crypto.ShadowsocksStreamCrypt;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -7,10 +8,6 @@ import io.netty.channel.CombinedChannelDuplexHandler;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.MessageToByteEncoder;
 import org.bouncycastle.crypto.StreamCipher;
-import org.bouncycastle.crypto.engines.AESEngine;
-import org.bouncycastle.crypto.modes.CFBBlockCipher;
-import org.bouncycastle.crypto.params.KeyParameter;
-import org.bouncycastle.crypto.params.ParametersWithIV;
 
 import java.security.SecureRandom;
 import java.util.List;
@@ -22,10 +19,13 @@ import java.util.List;
 public class ShadowsocksStreamCipherCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {
     private static final int MAX_BUF_SIZE = 1024;
 
-    public ShadowsocksStreamCipherCodec(final byte[] masterKey, final int ivSize, final SecureRandom random) {
+    private final ShadowsocksStreamCrypt crypt;
+
+    public ShadowsocksStreamCipherCodec(final byte[] masterKey, final ShadowsocksStreamCrypt crypt, final SecureRandom random) {
+        this.crypt = crypt;
         this.init(
-                new ShadowsocksStreamDecoder(masterKey, ivSize),
-                new ShadowsocksAeadEncoder(masterKey, ivSize, random)
+                new ShadowsocksStreamDecoder(masterKey, crypt.getIvSize()),
+                new ShadowsocksStreamEncoder(masterKey, crypt.getIvSize(), random)
         );
     }
 
@@ -35,9 +35,7 @@ public class ShadowsocksStreamCipherCodec extends CombinedChannelDuplexHandler<B
      * you’d have to wait until the client typed enough characters to fill a block
      */
     private StreamCipher createStreamCipher(final byte[] masterKey, final byte[] iv, final boolean encrypt) {
-        CFBBlockCipher cipher = new CFBBlockCipher(new AESEngine(), 16 * 8);
-        cipher.init(encrypt, new ParametersWithIV(new KeyParameter(masterKey), iv));
-        return cipher;
+        return crypt.getCipher(encrypt, masterKey, iv);
     }
 
     private byte[] nextBytes(final SecureRandom random, final byte[] bytes) {
@@ -54,7 +52,8 @@ public class ShadowsocksStreamCipherCodec extends CombinedChannelDuplexHandler<B
     /**
      * Shadowsocks stream encoder.
      */
-    private class ShadowsocksAeadEncoder extends MessageToByteEncoder<ByteBuf> {
+    @SuppressWarnings("unused")
+    private class ShadowsocksStreamEncoder extends MessageToByteEncoder<ByteBuf> {
         private final byte[] masterKey;
         private final int ivSize;
         private final byte[] ivBytes;
@@ -63,7 +62,7 @@ public class ShadowsocksStreamCipherCodec extends CombinedChannelDuplexHandler<B
         private boolean ivWrote;
 
 
-        public ShadowsocksAeadEncoder(final byte[] masterKey, final int ivSize, final SecureRandom random) {
+        public ShadowsocksStreamEncoder(final byte[] masterKey, final int ivSize, final SecureRandom random) {
             this.masterKey = masterKey;
             this.ivSize = ivSize;
             this.ivBytes = nextBytes(random, new byte[ivSize]);
@@ -108,6 +107,7 @@ public class ShadowsocksStreamCipherCodec extends CombinedChannelDuplexHandler<B
     /**
      * Shadowsocks stream decoder.
      */
+    @SuppressWarnings("unused")
     private class ShadowsocksStreamDecoder extends ByteToMessageDecoder {
         private final byte[] masterKey;
         private final int ivSize;

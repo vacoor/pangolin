@@ -1,6 +1,6 @@
-package com.github.pangolin.routing.internal.server.ss.codec.aead;
+package com.github.pangolin.routing.internal.server.ss.codec;
 
-import com.github.pangolin.routing.internal.server.ss.codec.ShadowsocksCrypt;
+import com.github.pangolin.routing.internal.server.ss.crypto.ShadowsocksAeadCrypt;
 import freework.util.Bytes;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -23,16 +23,16 @@ public class ShadowsocksAeadCipherCodec extends CombinedChannelDuplexHandler<Byt
     private static final int LENGTH_SIZE = 2;
     private static final int CHUNK_SIZE_MASK = 0x3FFF;
 
-    private final ShadowsocksAeadCryptFactory factory;
+    private final ShadowsocksAeadCrypt crypt;
 
-    public ShadowsocksAeadCipherCodec(final byte[] masterKey, final ShadowsocksAeadCryptFactory factory, final SecureRandom random) {
-        if (masterKey.length != factory.getKeySize()) {
-            throw new IllegalArgumentException("master key size != factory.getKeySize()");
+    public ShadowsocksAeadCipherCodec(final byte[] masterKey, final ShadowsocksAeadCrypt crypt, final SecureRandom random) {
+        if (masterKey.length != crypt.getKeySize()) {
+            throw new IllegalArgumentException("master key size != crypt.getKeySize()");
         }
-        this.factory = factory;
+        this.crypt = crypt;
         this.init(
-                new ShadowsocksAeadDecoder(masterKey, factory.getSaltSize(), factory.getNonceSize(), factory.getTagSize()),
-                new ShadowsocksAeadEncoder(masterKey, factory.getSaltSize(), factory.getNonceSize(), factory.getTagSize(), random)
+                new ShadowsocksAeadDecoder(masterKey, crypt.getSaltSize(), crypt.getNonceSize(), crypt.getTagSize()),
+                new ShadowsocksAeadEncoder(masterKey, crypt.getSaltSize(), crypt.getNonceSize(), crypt.getTagSize(), random)
         );
     }
 
@@ -52,58 +52,29 @@ public class ShadowsocksAeadCipherCodec extends CombinedChannelDuplexHandler<Byt
         return okm;
     }
 
-    /**
-     * Encrypt/Decrypt.
-     */
-    private int crypt(final boolean encrypt,
-                      final byte[] subKey, final byte[] nonce,
-                      final byte[] inBytes, int inOffset, int inLength,
-                      final byte[] outBytes, final int outOffset) throws Exception {
-        final int len = doCrypt(factory, encrypt, subKey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
-        afterCrypt(nonce);
-        return len;
-    }
-
-    private int doCrypt(final ShadowsocksAeadCryptFactory factory, final boolean encrypt,
-                        final byte[] subKey, final byte[] nonce,
+    private int encrypt(final byte[] subkey, final byte[] nonce,
                         final byte[] inBytes, int inOffset, int inLength,
                         final byte[] outBytes, final int outOffset) throws Exception {
-        final ShadowsocksCrypt crypt = factory.getInstance(subKey, nonce);
-        return encrypt ? crypt.encrypt(inBytes, inOffset, inLength, outBytes, outOffset) : crypt.decrypt(inBytes, inOffset, inLength, outBytes, outOffset);
+        return afterCrypt(nonce, encrypt0(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset));
     }
 
-    /*
-    private int doBcCrypt(final boolean encrypt,
-                          final byte[] subKey, final byte[] nonce,
-                          final byte[] inBytes, final int inOffset, final int inLength,
-                          final byte[] outBytes, final int outOffset) throws Exception {
-        final GCMBlockCipher cipher = new GCMBlockCipher(new AESEngine());
-        final CipherParameters cipherParameters = new AEADParameters(new KeyParameter(subKey), tagSize * Byte.SIZE, nonce);
-        cipher.init(encrypt, cipherParameters);
-
-        final int len = cipher.processBytes(inBytes, inOffset, inLength, outBytes, outOffset);
-        return len + cipher.doFinal(outBytes, outOffset + len);
-    }
-    protected int jdkCrypt(final int opmode, final byte[] secretKey, final byte[] nonce,
-                           final byte[] bytes, int offset, int length,
-                           final byte[] outBytes, final int outOffset) throws Exception {
-        Cipher cipher = cipher(opmode, secretKey, nonce);
-        return cipher.doFinal(bytes, offset, length, outBytes, outOffset);
+    private int decrypt(final byte[] subkey, final byte[] nonce,
+                        final byte[] inBytes, int inOffset, int inLength,
+                        final byte[] outBytes, final int outOffset) throws Exception {
+        return afterCrypt(nonce, decrypt0(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset));
     }
 
-
-    static final String AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding";
-    static final Provider BC = new BouncyCastleProvider();
-
-    Cipher cipher(final int opmode, final byte[] secretKey, final byte[] nonce) throws Exception {
-        final AlgorithmParameterSpec algorithmParameterSpec2 = new GCMParameterSpec(tagSize * Byte.SIZE, nonce);
-        final Cipher cipher2 = Cipher.getInstance(AES_GCM_TRANSFORMATION, BC);
-        //        final Cipher cipher2 = Cipher.getInstance(AES_GCM_TRANSFORMATION);
-        cipher2.init(opmode, new SecretKeySpec(secretKey, "AES"), algorithmParameterSpec2);
-        return cipher2;
+    private int encrypt0(final byte[] subkey, final byte[] nonce,
+                         final byte[] inBytes, int inOffset, int inLength,
+                         final byte[] outBytes, final int outOffset) throws Exception {
+        return crypt.encrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
     }
-    */
 
+    private int decrypt0(final byte[] subkey, final byte[] nonce,
+                         final byte[] inBytes, int inOffset, int inLength,
+                         final byte[] outBytes, final int outOffset) throws Exception {
+        return crypt.decrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
+    }
 
     /**
      * After each encrypt/decrypt operation, the nonce is
@@ -115,13 +86,14 @@ public class ShadowsocksAeadCipherCodec extends CombinedChannelDuplexHandler<Byt
      *
      * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers#tcp">TCP</a>
      */
-    private void afterCrypt(final byte[] nonce) {
+    private <T> T afterCrypt(final byte[] nonce, T through) {
         for (int i = 0; i < nonce.length; i++) {
             nonce[i]++;
             if (nonce[i] != 0) {
                 break;
             }
         }
+        return through;
     }
 
     private byte[] nextBytes(final SecureRandom random, final byte[] bytes) {
@@ -138,6 +110,7 @@ public class ShadowsocksAeadCipherCodec extends CombinedChannelDuplexHandler<Byt
     /**
      * Shadowsocks AEAD stream encoder.
      */
+    @SuppressWarnings("unused")
     private class ShadowsocksAeadEncoder extends MessageToByteEncoder<ByteBuf> {
         private final byte[] masterKey;
         private final int saltSize;
@@ -197,13 +170,14 @@ public class ShadowsocksAeadCipherCodec extends CombinedChannelDuplexHandler<Byt
         }
 
         private int encrypt(final byte[] inBytes, int inOffset, int inLength, final byte[] outBytes, final int outOffset) throws Exception {
-            return crypt(true, subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
+            return ShadowsocksAeadCipherCodec.this.encrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
         }
     }
 
     /**
      * Shadowsocks AEAD stream decoder.
      */
+    @SuppressWarnings("unused")
     private class ShadowsocksAeadDecoder extends ReplayingDecoder<DecoderState> {
         private final byte[] masterKey;
         private final int saltSize;
@@ -260,7 +234,7 @@ public class ShadowsocksAeadCipherCodec extends CombinedChannelDuplexHandler<Byt
         }
 
         private int decrypt(final byte[] inBytes, int inOffset, int inLength, final byte[] outBytes, final int outOffset) throws Exception {
-            return crypt(false, subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
+            return ShadowsocksAeadCipherCodec.this.decrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
         }
     }
 

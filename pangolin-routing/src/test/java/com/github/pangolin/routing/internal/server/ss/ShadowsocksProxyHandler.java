@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.internal.server.ss.codec;
+package com.github.pangolin.routing.internal.server.ss;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
