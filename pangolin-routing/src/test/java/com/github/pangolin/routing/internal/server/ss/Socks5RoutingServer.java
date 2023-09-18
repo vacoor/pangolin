@@ -2,6 +2,7 @@ package com.github.pangolin.routing.internal.server.ss;
 
 import com.github.pangolin.routing.RoutingRule;
 import com.github.pangolin.routing.internal.server.ss.crypto.impl.aead.ChaCha20Poly1305Crypt;
+import com.github.pangolin.routing.internal.server.ss.crypto.impl.stream.Rc4Md5Crypt;
 import com.github.pangolin.routing.pattern.DomainPattern;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
@@ -51,10 +52,16 @@ public class Socks5RoutingServer extends NettyServer {
 
         // final List<RoutingRule> routingRules = RoutingFileParser.parse();
 
-        final List<RoutingRule> routingRules = Arrays.asList(new RoutingRule(new DomainPattern("**"), () ->
-                new ShadowsocksProxyHandler(
+        List<RoutingRule> routingRules = Arrays.asList(new RoutingRule(new DomainPattern("**"), () ->
+                new ShadowsocksProxyAeadHandler(
                         new InetSocketAddress("192.168.1.201", 8388),
                         new ChaCha20Poly1305Crypt(), "000000"
+                )
+        ));
+        routingRules = Arrays.asList(new RoutingRule(new DomainPattern("**"), () ->
+                new ShadowsocksProxyStreamHandler(
+                        new InetSocketAddress("127.0.0.1", 8388),
+                        new Rc4Md5Crypt(), "000000"
                 )
         ));
 
