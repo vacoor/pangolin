@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.internal.server.ss;
 
 import com.github.pangolin.routing.RoutingRule;
-import com.github.pangolin.routing.internal.server.ss.crypto.impl.aead.ChaCha20Poly1305Crypt;
-import com.github.pangolin.routing.internal.server.ss.crypto.impl.stream.Rc4Md5Crypt;
+import com.github.pangolin.routing.internal.server.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.internal.server.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.pattern.DomainPattern;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
@@ -10,9 +10,7 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
-import javax.crypto.Cipher;
 import javax.net.ssl.SSLException;
 import java.net.InetSocketAddress;
 import java.security.cert.CertificateException;
@@ -47,21 +45,14 @@ public class Socks5RoutingServer extends NettyServer {
 
 
     public static void main(String[] args) throws Exception {
-        final BouncyCastleProvider bc = new BouncyCastleProvider();
-        Cipher instance = Cipher.getInstance("AES/CTR/NoPadding", bc);
 
         // final List<RoutingRule> routingRules = RoutingFileParser.parse();
 
+        final CipherAlgorithm algorithm = CipherAlgorithmSpi.getInstance("rc4-md5");
         List<RoutingRule> routingRules = Arrays.asList(new RoutingRule(new DomainPattern("**"), () ->
-                new ShadowsocksProxyAeadHandler(
+                new SsProxyHandler(
                         new InetSocketAddress("192.168.1.201", 8388),
-                        new ChaCha20Poly1305Crypt(), "000000"
-                )
-        ));
-        routingRules = Arrays.asList(new RoutingRule(new DomainPattern("**"), () ->
-                new ShadowsocksProxyStreamHandler(
-                        new InetSocketAddress("127.0.0.1", 8388),
-                        new Rc4Md5Crypt(), "000000"
+                        algorithm, "000000"
                 )
         ));
 

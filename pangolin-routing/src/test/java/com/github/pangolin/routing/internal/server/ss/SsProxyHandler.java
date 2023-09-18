@@ -1,5 +1,11 @@
 package com.github.pangolin.routing.internal.server.ss;
 
+import com.github.pangolin.routing.internal.server.ss.codec.SsAeadCipherCodec;
+import com.github.pangolin.routing.internal.server.ss.codec.SsStreamCipherCodec;
+import com.github.pangolin.routing.internal.server.ss.crypto.SsKeyFactory;
+import com.github.pangolin.routing.internal.server.ss.crypto.AeadCipherAlgorithm;
+import com.github.pangolin.routing.internal.server.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.internal.server.ss.crypto.StreamCipherAlgorithm;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelDuplexHandler;
@@ -14,16 +20,42 @@ import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.channels.ConnectionPendingException;
+import java.security.SecureRandom;
 
 /**
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Protocol">Protocol</a>
  */
-public class ShadowsocksProxyHandler extends ChannelDuplexHandler {
+public class SsProxyHandler extends ChannelDuplexHandler {
     private final SocketAddress proxyAddress;
+    private final StreamCipherAlgorithm streamCipherAlgorithm;
+    private final AeadCipherAlgorithm aeadCipherAlgorithm;
+    private final String password;
+
     private volatile SocketAddress destinationAddress;
 
-    public ShadowsocksProxyHandler(final SocketAddress proxyAddress) {
+    public SsProxyHandler(final SocketAddress proxyAddress, final CipherAlgorithm algorithm, final String password) {
         this.proxyAddress = ObjectUtil.checkNotNull(proxyAddress, "proxyAddress");
+        if (algorithm instanceof StreamCipherAlgorithm) {
+            aeadCipherAlgorithm = null;
+            streamCipherAlgorithm = (StreamCipherAlgorithm) algorithm;
+        } else if (algorithm instanceof AeadCipherAlgorithm) {
+            streamCipherAlgorithm = null;
+            aeadCipherAlgorithm = (AeadCipherAlgorithm) algorithm;
+        } else {
+            throw new UnsupportedOperationException("algorithm not supported: " + algorithm.getName());
+        }
+        this.password = password;
+    }
+
+    @Override
+    public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
+        if (null != aeadCipherAlgorithm) {
+            final byte[] masterKey = SsKeyFactory.generateKey(aeadCipherAlgorithm.getKeySize(), password);
+            ctx.pipeline().addBefore(ctx.name(), null, new SsAeadCipherCodec(masterKey, aeadCipherAlgorithm, new SecureRandom()));
+        } else {
+            final byte[] masterKey = SsKeyFactory.generateKey(streamCipherAlgorithm.getKeySize(), password);
+            ctx.pipeline().addBefore(ctx.name(), null, new SsStreamCipherCodec(masterKey, streamCipherAlgorithm, new SecureRandom()));
+        }
     }
 
     @Override

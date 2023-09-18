@@ -1,17 +1,12 @@
-package com.github.pangolin.routing.internal.server.ss.v2.spi;
+package com.github.pangolin.routing.internal.server.ss.crypto.spi;
 
-import com.github.pangolin.routing.internal.server.ss.v2.AeadCipherAlgorithm;
-import com.github.pangolin.routing.internal.server.ss.v2.CipherAlgorithm;
-import com.github.pangolin.routing.internal.server.ss.v2.CipherAlgorithmSpi;
-import com.github.pangolin.routing.internal.server.ss.v2.CipherHandle;
-import com.github.pangolin.routing.internal.server.ss.v2.StreamCipherAlgorithm;
+import com.github.pangolin.routing.internal.server.ss.crypto.AeadCipherAlgorithm;
+import com.github.pangolin.routing.internal.server.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.internal.server.ss.crypto.CipherHandle;
+import com.github.pangolin.routing.internal.server.ss.crypto.StreamCipherAlgorithm;
 import org.bouncycastle.crypto.CipherParameters;
 import org.bouncycastle.crypto.StreamCipher;
-import org.bouncycastle.crypto.engines.AESEngine;
-import org.bouncycastle.crypto.engines.BlowfishEngine;
-import org.bouncycastle.crypto.engines.CamelliaEngine;
-import org.bouncycastle.crypto.engines.ChaCha7539Engine;
-import org.bouncycastle.crypto.engines.ChaChaEngine;
+import org.bouncycastle.crypto.engines.*;
 import org.bouncycastle.crypto.modes.AEADCipher;
 import org.bouncycastle.crypto.modes.CFBBlockCipher;
 import org.bouncycastle.crypto.modes.ChaCha20Poly1305;
@@ -21,6 +16,8 @@ import org.bouncycastle.crypto.params.AEADParameters;
 import org.bouncycastle.crypto.params.KeyParameter;
 import org.bouncycastle.crypto.params.ParametersWithIV;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
@@ -35,9 +32,11 @@ public class BouncyCastleCipherAlgorithmSpi extends CipherAlgorithmSpi {
         final Function<Algorithm, StreamCipher> aesCtrFactory = factory -> new SICBlockCipher(new AESEngine());
         final Function<Algorithm, StreamCipher> aesCfbFactory = factory -> new CFBBlockCipher(new AESEngine(), factory.getIvSize() * Byte.SIZE);
         final Function<Algorithm, StreamCipher> camelliaCfbFactory = factory -> new CFBBlockCipher(new CamelliaEngine(), factory.getIvSize() * Byte.SIZE);
-        final Function<Algorithm, StreamCipher> chacha20IetfFactory = factory -> new ChaCha7539Engine();
+        final Function<Algorithm, StreamCipher> salsa20Factory = factory -> new Salsa20Engine();
         final Function<Algorithm, StreamCipher> chacha20Factory = factory -> new ChaChaEngine();
+        final Function<Algorithm, StreamCipher> chacha20IetfFactory = factory -> new ChaCha7539Engine();
         final Function<Algorithm, StreamCipher> blowfishCfbFactory = factory -> new CFBBlockCipher(new BlowfishEngine(), factory.getIvSize() * Byte.SIZE);
+        final Function<Algorithm, StreamCipher> rc4Factory = factory -> new RC4Engine();
 
         final Function<AEADAlgorithm, AEADCipher> aesGcmFactory = factory -> new GCMBlockCipher(new AESEngine());
         final Function<AEADAlgorithm, AEADCipher> chacha20IetfPoly1305Factory = factory -> new ChaCha20Poly1305();
@@ -60,7 +59,8 @@ public class BouncyCastleCipherAlgorithmSpi extends CipherAlgorithmSpi {
                 new Algorithm("chacha20-ietf", 256 / Byte.SIZE, 12, chacha20IetfFactory),
                 new Algorithm("bf-cfb", 128 / Byte.SIZE, 8, blowfishCfbFactory),
                 new Algorithm("chacha20", 256 / Byte.SIZE, 8, chacha20Factory),
-                new Algorithm("salsa20", 256 / Byte.SIZE, 8, chacha20IetfFactory),
+                new Algorithm("salsa20", 256 / Byte.SIZE, 8, salsa20Factory),
+                new Rc4Md5("rc4-md5", 128 / Byte.SIZE, 16, rc4Factory),
                 /*-
                  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers">AEAD Ciphers</a>
                  */
@@ -123,7 +123,7 @@ public class BouncyCastleCipherAlgorithmSpi extends CipherAlgorithmSpi {
             return new StreamCipherHandleProxy(cipher);
         }
 
-        private class StreamCipherHandleProxy implements CipherHandle {
+        class StreamCipherHandleProxy implements CipherHandle {
             private final StreamCipher cipher;
 
             private StreamCipherHandleProxy(final StreamCipher cipher) {
@@ -137,6 +137,28 @@ public class BouncyCastleCipherAlgorithmSpi extends CipherAlgorithmSpi {
 
             public int doFinal(final byte[] inBytes, final int inOffset, final int inLength, final byte[] outBytes, final int outOffset) throws Exception {
                 return cipher.processBytes(inBytes, inOffset, inLength, outBytes, outOffset);
+            }
+        }
+    }
+
+    private static class Rc4Md5 extends Algorithm {
+
+        public Rc4Md5(final String algorithm, final int keySize, final int ivSize, final Function<Algorithm, StreamCipher> factory) {
+            super(algorithm, keySize, ivSize, factory);
+        }
+
+        @Override
+        public StreamCipherHandleProxy getCipher(final boolean encrypt, final byte[] key, final byte[] iv) {
+            try {
+                final MessageDigest messageDigest = MessageDigest.getInstance("md5");
+                messageDigest.update(key);
+                final byte[] digest = messageDigest.digest(iv);
+                final RC4Engine rc4Engine = new RC4Engine();
+                rc4Engine.init(encrypt, new KeyParameter(digest));
+                // rc4Engine.init(encrypt, new ParametersWithIV(new KeyParameter(key), ivDigest));
+                return new StreamCipherHandleProxy(rc4Engine);
+            } catch (NoSuchAlgorithmException e) {
+                throw new IllegalStateException(e);
             }
         }
     }
@@ -211,7 +233,7 @@ public class BouncyCastleCipherAlgorithmSpi extends CipherAlgorithmSpi {
 
 
     public static void main(String[] args) {
-        final CipherAlgorithm instance = BouncyCastleCipherAlgorithmSpi.getInstance("chacha20-ietf-poly1305");
+        final CipherAlgorithm instance = CipherAlgorithmSpi.getInstance("chacha20-ietf-poly1305");
         System.out.println(instance);
     }
 }

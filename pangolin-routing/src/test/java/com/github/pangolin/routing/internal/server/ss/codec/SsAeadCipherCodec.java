@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.internal.server.ss.codec;
 
-import com.github.pangolin.routing.internal.server.ss.crypto.ShadowsocksAeadCrypt;
+import com.github.pangolin.routing.internal.server.ss.crypto.AeadCipherAlgorithm;
 import freework.util.Bytes;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -19,20 +19,20 @@ import java.util.List;
 /**
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers">AEAD Ciphers</a>
  */
-public class ShadowsocksAeadCipherCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {
+public class SsAeadCipherCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {
     private static final int LENGTH_SIZE = 2;
     private static final int CHUNK_SIZE_MASK = 0x3FFF;
 
-    private final ShadowsocksAeadCrypt crypt;
+    private final AeadCipherAlgorithm algorithm;
 
-    public ShadowsocksAeadCipherCodec(final byte[] masterKey, final ShadowsocksAeadCrypt crypt, final SecureRandom random) {
-        if (masterKey.length != crypt.getKeySize()) {
+    public SsAeadCipherCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
+        if (masterKey.length != algorithm.getKeySize()) {
             throw new IllegalArgumentException("master key size != crypt.getKeySize()");
         }
-        this.crypt = crypt;
+        this.algorithm = algorithm;
         this.init(
-                new ShadowsocksAeadDecoder(masterKey, crypt.getSaltSize(), crypt.getNonceSize(), crypt.getTagSize()),
-                new ShadowsocksAeadEncoder(masterKey, crypt.getSaltSize(), crypt.getNonceSize(), crypt.getTagSize(), random)
+                new ShadowsocksAeadDecoder(masterKey, algorithm.getSaltSize(), algorithm.getNonceSize(), algorithm.getTagSize()),
+                new ShadowsocksAeadEncoder(masterKey, algorithm.getSaltSize(), algorithm.getNonceSize(), algorithm.getTagSize(), random)
         );
     }
 
@@ -67,13 +67,13 @@ public class ShadowsocksAeadCipherCodec extends CombinedChannelDuplexHandler<Byt
     private int encrypt0(final byte[] subkey, final byte[] nonce,
                          final byte[] inBytes, int inOffset, int inLength,
                          final byte[] outBytes, final int outOffset) throws Exception {
-        return crypt.encrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
+        return algorithm.getCipher(true, subkey, nonce).doFinal(inBytes, inOffset, inLength, outBytes, outOffset);
     }
 
     private int decrypt0(final byte[] subkey, final byte[] nonce,
                          final byte[] inBytes, int inOffset, int inLength,
                          final byte[] outBytes, final int outOffset) throws Exception {
-        return crypt.decrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
+        return algorithm.getCipher(false, subkey, nonce).doFinal(inBytes, inOffset, inLength, outBytes, outOffset);
     }
 
     /**
@@ -170,7 +170,7 @@ public class ShadowsocksAeadCipherCodec extends CombinedChannelDuplexHandler<Byt
         }
 
         private int encrypt(final byte[] inBytes, int inOffset, int inLength, final byte[] outBytes, final int outOffset) throws Exception {
-            return ShadowsocksAeadCipherCodec.this.encrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
+            return SsAeadCipherCodec.this.encrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
         }
     }
 
@@ -234,7 +234,7 @@ public class ShadowsocksAeadCipherCodec extends CombinedChannelDuplexHandler<Byt
         }
 
         private int decrypt(final byte[] inBytes, int inOffset, int inLength, final byte[] outBytes, final int outOffset) throws Exception {
-            return ShadowsocksAeadCipherCodec.this.decrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
+            return SsAeadCipherCodec.this.decrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
         }
     }
 

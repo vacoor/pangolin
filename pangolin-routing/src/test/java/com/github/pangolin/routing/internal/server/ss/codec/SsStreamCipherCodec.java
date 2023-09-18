@@ -1,13 +1,13 @@
 package com.github.pangolin.routing.internal.server.ss.codec;
 
-import com.github.pangolin.routing.internal.server.ss.crypto.ShadowsocksStreamCrypt;
+import com.github.pangolin.routing.internal.server.ss.crypto.CipherHandle;
+import com.github.pangolin.routing.internal.server.ss.crypto.StreamCipherAlgorithm;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.CombinedChannelDuplexHandler;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.MessageToByteEncoder;
-import org.bouncycastle.crypto.StreamCipher;
 
 import java.security.SecureRandom;
 import java.util.List;
@@ -16,16 +16,16 @@ import java.util.List;
 /**
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Stream-Ciphers">Stream Ciphers</a>
  */
-public class ShadowsocksStreamCipherCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {
+public class SsStreamCipherCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {
     private static final int MAX_BUF_SIZE = 1024;
 
-    private final ShadowsocksStreamCrypt crypt;
+    private final StreamCipherAlgorithm algorithm;
 
-    public ShadowsocksStreamCipherCodec(final byte[] masterKey, final ShadowsocksStreamCrypt crypt, final SecureRandom random) {
-        this.crypt = crypt;
+    public SsStreamCipherCodec(final byte[] masterKey, final StreamCipherAlgorithm algorithm, final SecureRandom random) {
+        this.algorithm = algorithm;
         this.init(
-                new ShadowsocksStreamDecoder(masterKey, crypt.getIvSize()),
-                new ShadowsocksStreamEncoder(masterKey, crypt.getIvSize(), random)
+                new ShadowsocksStreamDecoder(masterKey, algorithm.getIvSize()),
+                new ShadowsocksStreamEncoder(masterKey, algorithm.getIvSize(), random)
         );
     }
 
@@ -34,8 +34,8 @@ public class ShadowsocksStreamCipherCodec extends CombinedChannelDuplexHandler<B
      * If you were encrypting the data between the client and server with a block cipher,
      * you’d have to wait until the client typed enough characters to fill a block
      */
-    private StreamCipher createStreamCipher(final byte[] masterKey, final byte[] iv, final boolean encrypt) {
-        return crypt.getCipher(encrypt, masterKey, iv);
+    private CipherHandle createStreamCipher(final byte[] masterKey, final byte[] iv, final boolean encrypt) {
+        return algorithm.getCipher(encrypt, masterKey, iv);
     }
 
     private byte[] nextBytes(final SecureRandom random, final byte[] bytes) {
@@ -57,7 +57,7 @@ public class ShadowsocksStreamCipherCodec extends CombinedChannelDuplexHandler<B
         private final byte[] masterKey;
         private final int ivSize;
         private final byte[] ivBytes;
-        private final StreamCipher cipher;
+        private final CipherHandle cipher;
 
         private boolean ivWrote;
 
@@ -100,7 +100,7 @@ public class ShadowsocksStreamCipherCodec extends CombinedChannelDuplexHandler<B
         }
 
         private int encrypt(final byte[] inBytes, int inOffset, int inLength, final byte[] outBytes, final int outOffset) throws Exception {
-            return cipher.processBytes(inBytes, inOffset, inLength, outBytes, outOffset);
+            return cipher.update(inBytes, inOffset, inLength, outBytes, outOffset);
         }
     }
 
@@ -113,7 +113,7 @@ public class ShadowsocksStreamCipherCodec extends CombinedChannelDuplexHandler<B
         private final int ivSize;
 
         private byte[] ivBytes;
-        private StreamCipher cipher;
+        private CipherHandle cipher;
 
         public ShadowsocksStreamDecoder(final byte[] masterKey, final int ivSize) {
             this.masterKey = masterKey;
@@ -151,7 +151,7 @@ public class ShadowsocksStreamCipherCodec extends CombinedChannelDuplexHandler<B
         }
 
         private int decrypt(final byte[] inBytes, int inOffset, int inLength, final byte[] outBytes, final int outOffset) throws Exception {
-            return cipher.processBytes(inBytes, inOffset, inLength, outBytes, outOffset);
+            return cipher.update(inBytes, inOffset, inLength, outBytes, outOffset);
         }
     }
 

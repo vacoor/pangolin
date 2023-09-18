@@ -1,4 +1,6 @@
-package com.github.pangolin.routing.internal.server.ss.v2;
+package com.github.pangolin.routing.internal.server.ss.crypto.spi;
+
+import com.github.pangolin.routing.internal.server.ss.crypto.CipherAlgorithm;
 
 import java.util.ServiceLoader;
 

@@ -3,7 +3,7 @@ package com.github.pangolin.routing.internal.server.ss.crypto;
 import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
 
-public class ShadowsocksKeyFactory {
+public class SsKeyFactory {
     private static final int KEY_LENGTH = 32;
 
     public static byte[] generateKey(final int keySize, final String password) {
