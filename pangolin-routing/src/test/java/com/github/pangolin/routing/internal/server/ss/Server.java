@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.internal.server.ss;
 
 import com.github.pangolin.routing.RoutingRule;
+import com.github.pangolin.routing.Socks5RoutingServerHandler;
 import com.github.pangolin.routing.internal.server.ss.crypto.CipherAlgorithm;
 import com.github.pangolin.routing.internal.server.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.pattern.DomainPattern;
@@ -20,17 +21,17 @@ import java.util.List;
 /**
  *
  */
-public class Socks5RoutingServer extends NettyServer {
+public class Server extends NettyServer {
 
-    public Socks5RoutingServer(final int listenPort) {
+    public Server(final int listenPort) {
         super(listenPort);
     }
 
-    public Socks5RoutingServer(final String listenHost, final int listenPort) {
+    public Server(final String listenHost, final int listenPort) {
         super(listenHost, listenPort);
     }
 
-    public Socks5RoutingServer(final String listenHost, final int listenPort, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
+    public Server(final String listenHost, final int listenPort, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
         super(listenHost, listenPort, bossGroup, workerGroup);
     }
 
@@ -56,7 +57,7 @@ public class Socks5RoutingServer extends NettyServer {
                 )
         ));
 
-        new Socks5RoutingServer(1080).start(routingRules).addListener(new ChannelFutureListener() {
+        new Server(1080).start(routingRules).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
