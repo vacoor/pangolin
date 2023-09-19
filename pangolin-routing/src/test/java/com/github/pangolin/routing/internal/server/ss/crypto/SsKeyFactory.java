@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.internal.server.ss.crypto;
 
 import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
 public class SsKeyFactory {
@@ -20,13 +21,8 @@ public class SsKeyFactory {
 
         try {
             md = MessageDigest.getInstance("MD5");
-            passwordBytes = password.getBytes("UTF-8");
-        } catch (UnsupportedEncodingException e) {
-//            logger.error("ShadowSocksKey: Unsupported string encoding", e);
-            throw new RuntimeException(e);
+            passwordBytes = password.getBytes(StandardCharsets.UTF_8);
         } catch (Exception e) {
-//            logger.error("init error", e);
-//            return null;
             throw new RuntimeException(e);
         }
 
