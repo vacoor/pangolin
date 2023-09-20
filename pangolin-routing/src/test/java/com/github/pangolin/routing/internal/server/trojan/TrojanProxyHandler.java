@@ -23,6 +23,7 @@ import java.security.NoSuchAlgorithmException;
 
 /**
  *
+ * @see <a href="https://trojan-gfw.github.io/trojan/protocol">The Trojan Protocol</a>
  */
 public class TrojanProxyHandler extends ChannelDuplexHandler {
     private static final byte[] CRLF = {0x0D, 0x0A};
