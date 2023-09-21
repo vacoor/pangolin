@@ -29,6 +29,7 @@ import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 public class LbProxyServer implements ProxyServer {
@@ -108,7 +109,7 @@ public class LbProxyServer implements ProxyServer {
         b.option(ChannelOption.SO_KEEPALIVE, false);
         b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 2000);
         b.resolver(NoopAddressResolverGroup.INSTANCE);
-        long sinceMs = System.currentTimeMillis();
+        AtomicLong sinceMs = new AtomicLong(System.currentTimeMillis());
         b.group(g).channel(NioSocketChannel.class).handler(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel channel) throws Exception {
@@ -118,7 +119,7 @@ public class LbProxyServer implements ProxyServer {
                 channel.pipeline().addLast(new SimpleChannelInboundHandler<HttpResponse>() {
                     @Override
                     protected void channelRead0(final ChannelHandlerContext channelHandlerContext, final HttpResponse httpResponse) throws Exception {
-                        log.info("{} Response: {}, elapsed: {}ms", s, httpResponse.status(), System.currentTimeMillis() - sinceMs);
+                        log.info("{} Response: {}, elapsed: {}ms", s, httpResponse.status(), System.currentTimeMillis() - sinceMs.get());
                         if (HttpResponseStatus.NO_CONTENT.equals(httpResponse.status())) {
                             promise.trySuccess(s);
                         } else {
@@ -162,6 +163,7 @@ public class LbProxyServer implements ProxyServer {
                     future.channel().eventLoop().execute(new Runnable() {
                         @Override
                         public void run() {
+                            sinceMs.set(System.currentTimeMillis());
                             future.channel().writeAndFlush(httpRequest);
                         }
                     });
