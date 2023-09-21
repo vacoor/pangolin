@@ -18,6 +18,8 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.GenericFutureListener;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
 import javax.net.ssl.SSLException;
@@ -30,6 +32,7 @@ import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.ServiceLoader;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  *
@@ -51,7 +54,8 @@ public class Server {
     }
 
     private static DestinationPattern resolvePattern(final String pattern) {
-        return new DomainPattern("**.youtube.com");
+//        return new DomainPattern("**.youtube.com");
+        return new DomainPattern("**");
     }
 
     public static List<ProxyServer> load(String url) throws Exception {
@@ -74,9 +78,9 @@ public class Server {
 
     public static void main(String[] args) throws Exception {
         final List<RoutingRule> routingRules = new LinkedList<>();
-        /*
         final String url = "ss://aes-128-gcm:653addca-f87d-49e1-8fc1-235fa53a8ccd";
-        final ProxyServer resolveServer = resolve(url);
+        final ProxyServer ssServer = resolve(url);
+        /*
         final RoutingRule rule = new RoutingRule(resolvePattern(null), resolveServer::newProxyHandler);
         */
         /*-
@@ -87,14 +91,32 @@ public class Server {
          */
 
         final String subscribeUrl = "https://sub1.smallstrawberry.com/api/v1/client/subscribe?token=1ab79cc4b202d916cdc8e375c7b0326";
-        final List<ProxyServer> servers = load(subscribeUrl);
+        List<ProxyServer> servers = load(subscribeUrl);
 
-        NioEventLoopGroup nioEventLoopGroup = new NioEventLoopGroup();
+        NioEventLoopGroup nioEventLoopGroup = new NioEventLoopGroup(100);
+//        servers = servers.subList(servers.size() - 1, servers.size());
+        final List<ProxyServer> aliveServers = new CopyOnWriteArrayList<>();
+        final List<ProxyServer> deadServers = new CopyOnWriteArrayList<>();
         for (ProxyServer server : servers) {
-            LbProxyServer.checkAlive(nioEventLoopGroup, server);
+            LbProxyServer.HeathCheckPromise p = new LbProxyServer.HeathCheckPromise();
+            p.addListener(new GenericFutureListener<Future<? super ProxyServer>>() {
+                @Override
+                public void operationComplete(final Future<? super ProxyServer> future) throws Exception {
+                    if (future.isSuccess()) {
+                        aliveServers.add(server);
+                        System.out.println("OK: " + server);
+                    } else {
+                        deadServers.add(server);
+                        System.out.println("FAIL: " + server);
+                    }
+                }
+            });
+            LbProxyServer.checkAlive(nioEventLoopGroup, server, p);
         }
 
-        /*
+        LbProxyServer lb = new LbProxyServer("lb", aliveServers);
+        routingRules.add(new RoutingRule(resolvePattern(null), () -> lb.newProxyHandler()));
+
         final Socks5RoutingServer server = new Socks5RoutingServer(1080);
         server.start(routingRules).addListener(new ChannelFutureListener() {
             @Override
@@ -107,7 +129,6 @@ public class Server {
                 }
             }
         }).sync().channel().closeFuture().sync();
-        */
         /*-
         Connect through local to http://bing.com/ failed.
         Error: Connection refused

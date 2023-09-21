@@ -69,9 +69,9 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         }
         </pre>
         */
-        if (null == cp.get(Socks5ServerEncoder.class)) {
-            cp.addBefore(ctx.name(), null, Socks5ServerEncoder.DEFAULT);
-        }
+//        if (null == cp.get(Socks5ServerEncoder.class)) {
+//            cp.addBefore(ctx.name(), null, Socks5ServerEncoder.DEFAULT);
+//        }
     }
 
     @Override

@@ -4,14 +4,13 @@ import com.github.pangolin.util.Channels;
 import freework.codec.Hex;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelDuplexHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelPromise;
+import io.netty.channel.*;
 import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressType;
 import io.netty.handler.codec.socksx.v5.Socks5CommandType;
 import io.netty.util.NetUtil;
 import io.netty.util.internal.ObjectUtil;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
@@ -25,6 +24,7 @@ import java.security.NoSuchAlgorithmException;
  *
  * @see <a href="https://trojan-gfw.github.io/trojan/protocol">The Trojan Protocol</a>
  */
+@Slf4j
 public class TrojanProxyHandler extends ChannelDuplexHandler {
     private static final byte[] CRLF = {0x0D, 0x0A};
     private final SocketAddress proxyAddress;
@@ -51,6 +51,7 @@ public class TrojanProxyHandler extends ChannelDuplexHandler {
             ctx.connect(proxyAddress, localAddress, promise);
         }
     }
+
 
     /**
      *
@@ -90,4 +91,9 @@ public class TrojanProxyHandler extends ChannelDuplexHandler {
         return Hex.encode(hash).getBytes(StandardCharsets.UTF_8);
     }
 
+    @Override
+    public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
+        log.warn("An exception was thrown: {}", cause.getMessage());
+        ctx.close();
+    }
 }
