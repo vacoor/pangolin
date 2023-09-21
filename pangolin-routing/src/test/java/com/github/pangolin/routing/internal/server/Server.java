@@ -15,7 +15,9 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.util.concurrent.EventExecutor;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
 import javax.net.ssl.SSLException;
@@ -84,10 +86,15 @@ public class Server {
          * servers.next();
          */
 
-        final String subscribeUrl = "https://sub1.smallstrawberry.com/api/v1/client/subscribe?token=";
+        final String subscribeUrl = "https://sub1.smallstrawberry.com/api/v1/client/subscribe?token=1ab79cc4b202d916cdc8e375c7b0326";
         final List<ProxyServer> servers = load(subscribeUrl);
 
+        NioEventLoopGroup nioEventLoopGroup = new NioEventLoopGroup();
+        for (ProxyServer server : servers) {
+            LbProxyServer.checkAlive(nioEventLoopGroup, server);
+        }
 
+        /*
         final Socks5RoutingServer server = new Socks5RoutingServer(1080);
         server.start(routingRules).addListener(new ChannelFutureListener() {
             @Override
@@ -100,6 +107,7 @@ public class Server {
                 }
             }
         }).sync().channel().closeFuture().sync();
+        */
         /*-
         Connect through local to http://bing.com/ failed.
         Error: Connection refused
