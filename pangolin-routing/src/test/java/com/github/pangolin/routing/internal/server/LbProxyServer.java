@@ -108,6 +108,7 @@ public class LbProxyServer implements ProxyServer {
         b.option(ChannelOption.SO_KEEPALIVE, false);
         b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 2000);
         b.resolver(NoopAddressResolverGroup.INSTANCE);
+        long sinceMs = System.currentTimeMillis();
         b.group(g).channel(NioSocketChannel.class).handler(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel channel) throws Exception {
@@ -117,7 +118,7 @@ public class LbProxyServer implements ProxyServer {
                 channel.pipeline().addLast(new SimpleChannelInboundHandler<HttpResponse>() {
                     @Override
                     protected void channelRead0(final ChannelHandlerContext channelHandlerContext, final HttpResponse httpResponse) throws Exception {
-                        log.info("{} Response: {}", s, httpResponse.status());
+                        log.info("{} Response: {}, elapsed: {}ms", s, httpResponse.status(), System.currentTimeMillis() - sinceMs);
                         if (HttpResponseStatus.NO_CONTENT.equals(httpResponse.status())) {
                             promise.trySuccess(s);
                         } else {
