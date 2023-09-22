@@ -177,7 +177,9 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         return new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture channelFuture) throws Exception {
-                ctx.pipeline().remove(h);
+                if (null != ctx.pipeline().context(h)) {
+                    ctx.pipeline().remove(h);
+                }
             }
         };
     }

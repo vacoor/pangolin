@@ -476,9 +476,10 @@ class AntPathMatcher {
                 "baidu.com",
                 "img.baidu.com",
                 "test.img.baidu.com",
-                "img.baidu.com.cn"
+                "img.baidu.com.cn",
+                "img.baiduassets.com.cn"
         };
-        final String pattern = "**.baidu.com";
+        final String pattern = "**baidu**";
         for (String candidate : candidates) {
             System.out.println(candidate + " -> " + antPathMatcher.match(pattern, candidate));
         }

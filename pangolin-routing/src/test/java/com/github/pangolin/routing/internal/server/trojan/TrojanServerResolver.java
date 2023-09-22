@@ -32,7 +32,7 @@ public class TrojanServerResolver implements ServerResolver {
         final String host = uri.getHost();
         final int port = 0 < uri.getPort() ? uri.getPort() : DEFAULT_PORT;
         final String password = uri.getUserInfo();
-        return new Server(name, new InetSocketAddress(host, port), password);
+        return new Server(null != name ? name : host + ":" + port, new InetSocketAddress(host, port), password);
     }
 
     /**

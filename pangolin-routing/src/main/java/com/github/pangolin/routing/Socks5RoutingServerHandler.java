@@ -39,6 +39,7 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 if (null != networkHandler) {
+                    log.info("{} -> {}", destinationAddress, "PROXY");
                     ch.pipeline().addFirst(networkHandler);
                 }
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
