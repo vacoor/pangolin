@@ -24,4 +24,8 @@ public class DomainPattern implements DestinationPattern {
         }
     }
 
+    @Override
+    public String toString() {
+        return pattern;
+    }
 }

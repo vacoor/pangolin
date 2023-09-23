@@ -2,12 +2,10 @@ package com.github.pangolin.routing;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.internal.server.socks.v5.Socks5ProxyServerHandler;
+import com.github.pangolin.routing.pattern.DestinationPattern;
+import com.github.pangolin.routing.pattern.ProxyHandlerFactory;
 import com.github.pangolin.util.Channels;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
+import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
 import io.netty.resolver.NoopAddressResolverGroup;
@@ -15,16 +13,16 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.List;
+import java.util.Map;
 
 /**
  *
  */
 @Slf4j
 public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
-    private final List<RoutingRule> routingRules;
+    private final Map<DestinationPattern, ? extends ProxyHandlerFactory> routingRules;
 
-    public Socks5RoutingServerHandler(final List<RoutingRule> routingRules) {
+    public Socks5RoutingServerHandler(final Map<DestinationPattern, ? extends ProxyHandlerFactory> routingRules) {
         this.routingRules = routingRules;
     }
 
@@ -39,7 +37,6 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 if (null != networkHandler) {
-                    log.info("{} -> {}", destinationAddress, "PROXY");
                     ch.pipeline().addFirst(networkHandler);
                 }
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
@@ -61,9 +58,11 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
             return null;
         }
         final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
-        for (final RoutingRule routing : routingRules) {
-            if (routing.matches(sa)) {
-                return routing.newProxyHandler();
+        for (Map.Entry<DestinationPattern, ? extends ProxyHandlerFactory> entry : routingRules.entrySet()) {
+            if (entry.getKey().matches(sa)) {
+                final ProxyHandlerFactory value = entry.getValue();
+                log.info("{} -> {}", destinationAddress, "PROXY:" + value.name());
+                return entry.getValue().newProxyHandler();
             }
         }
         return null;

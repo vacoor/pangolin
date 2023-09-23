@@ -7,6 +7,6 @@ import java.net.InetSocketAddress;
  */
 public interface DestinationPattern {
 
-    boolean matches(final InetSocketAddress destionation);
+    boolean matches(final InetSocketAddress destination);
 
 }

@@ -1,5 +1,7 @@
 package com.github.pangolin.routing;
 
+import com.github.pangolin.routing.pattern.DestinationPattern;
+import com.github.pangolin.routing.pattern.ProxyHandlerFactory;
 import com.github.pangolin.routing.resolver.RoutingFileParser;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
@@ -12,6 +14,7 @@ import javax.net.ssl.SSLException;
 import java.net.InetSocketAddress;
 import java.security.cert.CertificateException;
 import java.util.List;
+import java.util.Map;
 
 /**
  *
@@ -30,7 +33,7 @@ public class Socks5RoutingServer extends NettyServer {
         super(listenHost, listenPort, bossGroup, workerGroup);
     }
 
-    public ChannelFuture start(final List<RoutingRule> routings) throws InterruptedException, CertificateException, SSLException {
+    public ChannelFuture start(final Map<DestinationPattern, ? extends ProxyHandlerFactory> routings) throws InterruptedException, CertificateException, SSLException {
         return super.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
@@ -41,7 +44,7 @@ public class Socks5RoutingServer extends NettyServer {
 
 
     public static void main(String[] args) throws Exception {
-        final List<RoutingRule> routingRules = RoutingFileParser.parse();
+        final Map<DestinationPattern, ProxyHandlerFactory> routingRules = RoutingFileParser.parse();
 
         new Socks5RoutingServer(1080).start(routingRules).addListener(new ChannelFutureListener() {
             @Override
