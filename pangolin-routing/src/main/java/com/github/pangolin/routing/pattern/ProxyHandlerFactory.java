@@ -4,8 +4,6 @@ import io.netty.channel.ChannelHandler;
 
 public interface ProxyHandlerFactory {
 
-    String name();
-
     ChannelHandler newProxyHandler();
 
 }

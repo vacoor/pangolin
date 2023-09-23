@@ -61,7 +61,7 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
         for (Map.Entry<DestinationPattern, ? extends ProxyHandlerFactory> entry : routingRules.entrySet()) {
             if (entry.getKey().matches(sa)) {
                 final ProxyHandlerFactory value = entry.getValue();
-                log.info("{} -> {}", destinationAddress, "PROXY:" + value.name());
+                log.info("{} -> {}", destinationAddress, "PROXY:" + value);
                 return entry.getValue().newProxyHandler();
             }
         }
