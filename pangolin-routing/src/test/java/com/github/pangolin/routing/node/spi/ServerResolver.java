@@ -8,6 +8,6 @@ public interface ServerResolver {
 
     boolean acceptsUrl(final String url);
 
-    ProxyServer resolve(final String url, final Properties props);
+    ProxyInstance resolve(final String url, final Properties props);
 
 }

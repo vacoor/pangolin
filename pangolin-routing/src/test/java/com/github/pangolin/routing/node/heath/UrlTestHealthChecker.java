@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.node.heath;
 
-import com.github.pangolin.routing.node.spi.ProxyServer;
+import com.github.pangolin.routing.node.spi.ProxyInstance;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -28,25 +28,24 @@ import io.netty.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
-public class UrlTestHealthCheck {
+public class UrlTestHealthChecker {
     private final String url;
     private final int timeoutMillis;
 
-    public UrlTestHealthCheck() {
+    public UrlTestHealthChecker() {
         this("http://www.gstatic.com/generate_204", 3000);
     }
 
-    public UrlTestHealthCheck(final String url, final int timeoutMillis) {
+    public UrlTestHealthChecker(final String url, final int timeoutMillis) {
         this.url = url;
         this.timeoutMillis = timeoutMillis;
     }
 
 
-    public Promise<Long> heathCheck(final ProxyServer server, final EventLoopGroup checkGroup) {
+    public Promise<Long> heathCheck(final ProxyInstance server, final EventLoopGroup checkGroup) {
         final Promise<Long> promise = GlobalEventExecutor.INSTANCE.newPromise();
         final ChannelHandler transport = server.newProxyHandler();
         final URI uri = URI.create(url);
@@ -78,8 +77,8 @@ public class UrlTestHealthCheck {
                     @Override
                     protected void channelRead0(final ChannelHandlerContext ctx, final HttpResponse httpResponse) throws Exception {
                         final long elapsedMs = System.currentTimeMillis() - sinceMs.get();
-                        if (HttpResponseStatus.NO_CONTENT.equals(httpResponse.status()) && elapsedMs < TimeUnit.SECONDS.toMillis(2)) {
-                            log.info("{} CHECK PASSING: {} in {}ms", server, httpResponse.status(), System.currentTimeMillis() - sinceMs.get());
+                        if (HttpResponseStatus.NO_CONTENT.equals(httpResponse.status())) {
+                            log.info("{} CHECK PASSING: {} in {}ms", server, httpResponse.status(), elapsedMs);
                             promise.trySuccess(elapsedMs);
                         } else {
                             promise.tryFailure(new IllegalStateException(httpResponse.status().toString()));

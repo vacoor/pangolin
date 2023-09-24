@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.node;
 
-import com.github.pangolin.routing.node.heath.UrlTestHealthCheck;
-import com.github.pangolin.routing.node.spi.ProxyServer;
+import com.github.pangolin.routing.node.heath.UrlTestHealthChecker;
+import com.github.pangolin.routing.node.spi.ProxyInstance;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.EventLoopGroup;
 import io.netty.util.concurrent.Future;
@@ -14,29 +14,33 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  */
-public class HealthProxyServerImpl implements HealthProxyServer {
-    private final ProxyServer delegate;
+public class ServerInstanceImpl implements ServerInstance {
+    private final ProxyInstance delegate;
     private final EventLoopGroup group;
-    private final UrlTestHealthCheck healthCheck;
+    private final UrlTestHealthChecker healthCheck;
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final AtomicReference<Status> status = new AtomicReference<>(Status.UP);
     private final AtomicReference<Long> time = new AtomicReference<>(-1L);
 
-    public HealthProxyServerImpl(final ProxyServer proxyServer, final EventLoopGroup group, final UrlTestHealthCheck healthCheck) {
-        this.delegate = proxyServer;
+    public ServerInstanceImpl(final ProxyInstance proxyInstance, final EventLoopGroup group, final UrlTestHealthChecker healthCheck) {
+        this.delegate = proxyInstance;
         this.group = group;
         this.healthCheck = healthCheck;
     }
 
     public String name() {
-        return delegate.name();
+        return delegate.getName();
     }
 
     public ChannelHandler newProxyHandler() {
         return delegate.newProxyHandler();
     }
 
-    public HealthProxyServerImpl start() {
+    public long getTime() {
+        return time.get();
+    }
+
+    public ServerInstanceImpl start() {
         if (started.compareAndSet(false, true)) {
             group.scheduleWithFixedDelay(() -> ping(delegate, group), 0, 10, TimeUnit.MINUTES);
         }
@@ -47,7 +51,7 @@ public class HealthProxyServerImpl implements HealthProxyServer {
         return Status.UP.equals(status.get());
     }
 
-    protected Promise<Long> ping(final ProxyServer proxy, final EventLoopGroup checkGroup) {
+    protected Promise<Long> ping(final ProxyInstance proxy, final EventLoopGroup checkGroup) {
         return healthCheck.heathCheck(proxy, checkGroup).addListener(new GenericFutureListener<Future<Long>>() {
             @Override
             public void operationComplete(final Future<Long> future) throws Exception {

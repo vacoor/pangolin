@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.internal.client.ss;
 
-import com.github.pangolin.routing.node.spi.ProxyServer;
+import com.github.pangolin.routing.node.spi.ProxyInstance;
 import com.github.pangolin.routing.node.spi.ServerResolver;
 import com.github.pangolin.routing.internal.client.ss.crypto.CipherAlgorithm;
 import com.github.pangolin.routing.internal.client.ss.crypto.spi.CipherAlgorithmSpi;
@@ -32,7 +32,7 @@ public class SsServerResolver  implements ServerResolver {
      * </pre>
      * @see <a href="#">SIP002 URI Scheme</a>
      */
-    public ProxyServer resolve(final String url, final Properties props) {
+    public ProxyInstance resolve(final String url, final Properties props) {
         if (!acceptsUrl(url)) {
             return null;
         }
@@ -47,7 +47,7 @@ public class SsServerResolver  implements ServerResolver {
         final String password = segments.length < 2 ? "" : segments[1];
 
         final CipherAlgorithm algorithm = CipherAlgorithmSpi.getInstance(method);
-        return new Server(name, new InetSocketAddress(host, port), algorithm, password);
+        return new Instance(name, new InetSocketAddress(host, port), algorithm, password);
     }
 
     private String resolveUserInfo(final String userInfo) {
@@ -63,13 +63,13 @@ public class SsServerResolver  implements ServerResolver {
     /**
      *
      */
-    private class Server implements ProxyServer {
+    private class Instance implements ProxyInstance {
         private final String name;
         private final SocketAddress address;
         private final CipherAlgorithm algorithm;
         private final String password;
 
-        public Server(final String name, final SocketAddress address, final CipherAlgorithm algorithm, final String password) {
+        public Instance(final String name, final SocketAddress address, final CipherAlgorithm algorithm, final String password) {
             this.name = name;
             this.address = address;
             this.algorithm = algorithm;
@@ -77,7 +77,7 @@ public class SsServerResolver  implements ServerResolver {
         }
 
         @Override
-        public String name() {
+        public String getName() {
             return name;
         }
 

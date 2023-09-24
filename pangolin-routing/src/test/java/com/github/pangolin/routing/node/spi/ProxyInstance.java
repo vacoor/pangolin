@@ -6,9 +6,9 @@ import io.netty.channel.ChannelHandler;
 /**
  *
  */
-public interface ProxyServer extends ProxyHandlerFactory {
+public interface ProxyInstance extends ProxyHandlerFactory {
 
-    String name();
+    String getName();
 
     ChannelHandler newProxyHandler();
 

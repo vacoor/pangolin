@@ -5,24 +5,23 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
-public class LbHealthProxyServer implements HealthProxyServer {
+public class LbServerInstanceImpl implements ServerInstance {
     private final String name;
-    private final Map<String, HealthProxyServer> servers = new ConcurrentHashMap<>();
-    private List<HealthProxyServer> aliveServers = new CopyOnWriteArrayList<>();
-    private List<HealthProxyServer> deadServers = new CopyOnWriteArrayList<>();
+    private final Map<String, ServerInstance> servers = new ConcurrentHashMap<>();
+    private List<ServerInstance> aliveServers = new CopyOnWriteArrayList<>();
+    private List<ServerInstance> deadServers = new CopyOnWriteArrayList<>();
     private EventLoopGroup g = new NioEventLoopGroup();
 
-    public LbHealthProxyServer(final String name, final List<HealthProxyServer> aliveServers) {
+    public LbServerInstanceImpl(final String name, final List<ServerInstance> aliveServers) {
         this.name = name;
-        for (HealthProxyServer aliveServer : aliveServers) {
+        for (ServerInstance aliveServer : aliveServers) {
             servers.put(aliveServer.name(), aliveServer);
         }
         this.aliveServers.addAll(aliveServers);
@@ -40,9 +39,11 @@ public class LbHealthProxyServer implements HealthProxyServer {
 
     @Override
     public ChannelHandler newProxyHandler() {
-        final HealthProxyServer p = aliveServers.get(new Random().nextInt(aliveServers.size()));
+        final int i = ThreadLocalRandom.current().nextInt(aliveServers.size());
+        final ServerInstance p = aliveServers.get(i);
         return p.newProxyHandler();
     }
+
 
     /*-
      * 执行流程
@@ -68,13 +69,13 @@ public class LbHealthProxyServer implements HealthProxyServer {
      */
 
 
-    public LbHealthProxyServer startHeathCheck() {
+    public LbServerInstanceImpl startHeathCheck() {
         g.scheduleWithFixedDelay(this::checkAliveHeath, 0, 5, TimeUnit.MINUTES);
         return this;
     }
 
     public void checkAliveHeath() {
-        for (Map.Entry<String, HealthProxyServer> entry : servers.entrySet()) {
+        for (Map.Entry<String, ServerInstance> entry : servers.entrySet()) {
             if (entry.getValue().isPassingCheck()) {
                 // if zombie move to alive
                 if (deadServers.remove(entry.getValue())) {

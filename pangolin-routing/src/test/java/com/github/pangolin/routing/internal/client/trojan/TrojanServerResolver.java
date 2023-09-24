@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.internal.client.trojan;
 
-import com.github.pangolin.routing.node.spi.ProxyServer;
+import com.github.pangolin.routing.node.spi.ProxyInstance;
 import com.github.pangolin.routing.node.spi.ServerResolver;
 import io.netty.channel.ChannelHandler;
 
@@ -23,7 +23,7 @@ public class TrojanServerResolver implements ServerResolver {
     /**
      *
      */
-    public ProxyServer resolve(final String url, final Properties props) {
+    public ProxyInstance resolve(final String url, final Properties props) {
         if (!acceptsUrl(url)) {
             return null;
         }
@@ -32,25 +32,25 @@ public class TrojanServerResolver implements ServerResolver {
         final String host = uri.getHost();
         final int port = 0 < uri.getPort() ? uri.getPort() : DEFAULT_PORT;
         final String password = uri.getUserInfo();
-        return new Server(null != name ? name : host + ":" + port, new InetSocketAddress(host, port), password);
+        return new Instance(null != name ? name : host + ":" + port, new InetSocketAddress(host, port), password);
     }
 
     /**
      *
      */
-    private class Server implements ProxyServer {
+    private class Instance implements ProxyInstance {
         private final String name;
         private final SocketAddress address;
         private final String password;
 
-        public Server(final String name, final SocketAddress address, final String password) {
+        public Instance(final String name, final SocketAddress address, final String password) {
             this.name = name;
             this.address = address;
             this.password = password;
         }
 
         @Override
-        public String name() {
+        public String getName() {
             return name;
         }
 
