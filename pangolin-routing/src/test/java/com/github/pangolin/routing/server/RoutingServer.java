@@ -12,11 +12,8 @@ import com.github.pangolin.routing.node.heath.UrlTestHealthChecker;
 import com.github.pangolin.routing.node.spi.ProxyInstance;
 import com.github.pangolin.routing.node.spi.ServerResolver;
 import com.github.pangolin.routing.pattern.DestinationPattern;
-import com.github.pangolin.routing.pattern.DomainPattern;
-import com.github.pangolin.routing.pattern.GeoIpPattern;
+//import com.github.pangolin.routing.pattern.GeoIpPattern;
 import com.github.pangolin.routing.util.IOUtils;
-import com.maxmind.db.CHMCache;
-import com.maxmind.db.Reader;
 import freework.codec.Base64;
 import freework.net.Http;
 import io.netty.channel.*;
@@ -25,7 +22,6 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -125,9 +121,9 @@ public class RoutingServer {
     };
 
     public static void main(String[] args) throws Exception {
-        final InputStream db = RoutingServer.class.getResourceAsStream("/Country.mmdb");
-        final Reader reader = new Reader(db, new CHMCache());
-        new GeoIpPattern(reader, "CN").matches(new InetSocketAddress("180.101.50.242", 80));
+//        final InputStream db = RoutingServer.class.getResourceAsStream("/Country.mmdb");
+//        final Reader reader = new Reader(db, new CHMCache());
+//        new GeoIpPattern(reader, "CN").matches(new InetSocketAddress("180.101.50.242", 80));
         /*
          */
 
@@ -164,8 +160,7 @@ public class RoutingServer {
                 lazyGroupDefinitions.put(name, proxyGroupDefinition);
                 continue;
             }
-            LbServerInstanceImpl lb = new LbServerInstanceImpl(name, serversInGroup);
-            lb.startHeathCheck();
+            LbServerInstanceImpl lb = new LbServerInstanceImpl(name, group, serversInGroup);
             servers.put(name, lb);
         }
         while (!lazyGroupDefinitions.isEmpty()) {
@@ -187,8 +182,7 @@ public class RoutingServer {
                     serversInGroup.add(dependency);
                 }
                 if (!lazy) {
-                    LbServerInstanceImpl lb = new LbServerInstanceImpl(name, serversInGroup);
-                    lb.startHeathCheck();
+                    LbServerInstanceImpl lb = new LbServerInstanceImpl(name, group, serversInGroup);
                     servers.put(name, lb);
                     lazyGroupDefinitions.remove(name);
                 }
@@ -202,7 +196,7 @@ public class RoutingServer {
 
         final PatternResolver patternResolver = new ClashRuleResolver();
         final RulesetResolver rulesetResolver = new RulesetResolver(patternResolver);
-        final ServerInstance lb = new LbServerInstanceImpl("udf", new ArrayList<>(servers.values())).startHeathCheck();
+        final ServerInstance lb = new LbServerInstanceImpl("udf", group, new ArrayList<>(servers.values()));
 
         final Set<DestinationPattern> patterns = rulesetResolver.parseClassPathResource("rule/video.list");
         for (DestinationPattern pattern : patterns) {

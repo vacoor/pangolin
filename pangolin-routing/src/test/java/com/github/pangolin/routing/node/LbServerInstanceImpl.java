@@ -2,29 +2,18 @@ package com.github.pangolin.routing.node;
 
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.EventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
+import java.util.List;
 
 @Slf4j
 public class LbServerInstanceImpl implements ServerInstance {
     private final String name;
-    private final Map<String, ServerInstance> servers = new ConcurrentHashMap<>();
-    private List<ServerInstance> aliveServers = new CopyOnWriteArrayList<>();
-    private List<ServerInstance> deadServers = new CopyOnWriteArrayList<>();
-    private EventLoopGroup g = new NioEventLoopGroup();
+    private final LoadBalancer lb;
 
-    public LbServerInstanceImpl(final String name, final List<ServerInstance> aliveServers) {
+    public LbServerInstanceImpl(final String name, final EventLoopGroup group, final List<ServerInstance> upServers) {
         this.name = name;
-        for (ServerInstance aliveServer : aliveServers) {
-            servers.put(aliveServer.name(), aliveServer);
-        }
-        this.aliveServers.addAll(aliveServers);
+        this.lb = new LoadBalancer(group, upServers);
     }
 
     @Override
@@ -34,14 +23,12 @@ public class LbServerInstanceImpl implements ServerInstance {
 
     @Override
     public boolean isPassingCheck() {
-        return !aliveServers.isEmpty();
+        return !lb.getReachableServers().isEmpty();
     }
 
     @Override
     public ChannelHandler newProxyHandler() {
-        final int i = ThreadLocalRandom.current().nextInt(aliveServers.size());
-        final ServerInstance p = aliveServers.get(i);
-        return p.newProxyHandler();
+        return lb.next().newProxyHandler();
     }
 
 
@@ -67,29 +54,6 @@ public class LbServerInstanceImpl implements ServerInstance {
      * 2. 成功则清空失败次数, 从僵尸列表中删除, 加入存活列表
      * 3. 失败则累加失败次数
      */
-
-
-    public LbServerInstanceImpl startHeathCheck() {
-        g.scheduleWithFixedDelay(this::checkAliveHeath, 0, 5, TimeUnit.MINUTES);
-        return this;
-    }
-
-    public void checkAliveHeath() {
-        for (Map.Entry<String, ServerInstance> entry : servers.entrySet()) {
-            if (entry.getValue().isPassingCheck()) {
-                // if zombie move to alive
-                if (deadServers.remove(entry.getValue())) {
-                    aliveServers.add(entry.getValue());
-                }
-            } else {
-                // if alive move to zombie
-                if (aliveServers.remove(entry.getValue())) {
-                    deadServers.add(entry.getValue());
-                }
-            }
-        }
-    }
-
     @Override
     public String toString() {
         return "[LB] " + name;

@@ -78,7 +78,6 @@ public class UrlTestHealthChecker {
                     protected void channelRead0(final ChannelHandlerContext ctx, final HttpResponse httpResponse) throws Exception {
                         final long elapsedMs = System.currentTimeMillis() - sinceMs.get();
                         if (HttpResponseStatus.NO_CONTENT.equals(httpResponse.status())) {
-                            log.info("{} CHECK PASSING: {} in {}ms", server, httpResponse.status(), elapsedMs);
                             promise.trySuccess(elapsedMs);
                         } else {
                             promise.tryFailure(new IllegalStateException(httpResponse.status().toString()));
@@ -89,7 +88,6 @@ public class UrlTestHealthChecker {
                     @Override
                     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
                         ctx.close();
-                        log.info("{} CHECK FAILED: {}", server, cause.getMessage());
                         promise.tryFailure(cause);
                     }
                 });
@@ -98,12 +96,10 @@ public class UrlTestHealthChecker {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (!future.isSuccess()) {
-                    log.info("{} CHECK FAILED-2: {}", server, future.cause().getMessage());
                     promise.tryFailure(future.cause());
                 }
             }
         });
-        log.info("{} CHECK Start..", server);
         return promise;
     }
 

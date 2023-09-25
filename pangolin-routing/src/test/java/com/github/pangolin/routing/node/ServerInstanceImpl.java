@@ -2,11 +2,13 @@ package com.github.pangolin.routing.node;
 
 import com.github.pangolin.routing.node.heath.UrlTestHealthChecker;
 import com.github.pangolin.routing.node.spi.ProxyInstance;
+import com.github.pangolin.routing.node.util.AvgMinMaxCounter;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.EventLoopGroup;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.concurrent.Promise;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -14,18 +16,19 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  */
+@Slf4j
 public class ServerInstanceImpl implements ServerInstance {
     private final ProxyInstance delegate;
     private final EventLoopGroup group;
     private final UrlTestHealthChecker healthCheck;
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final AtomicReference<Status> status = new AtomicReference<>(Status.UP);
-    private final AtomicReference<Long> time = new AtomicReference<>(-1L);
+    private final AvgMinMaxCounter latency = new AvgMinMaxCounter("latency");
 
-    public ServerInstanceImpl(final ProxyInstance proxyInstance, final EventLoopGroup group, final UrlTestHealthChecker healthCheck) {
-        this.delegate = proxyInstance;
+    public ServerInstanceImpl(final ProxyInstance instance, final EventLoopGroup group, final UrlTestHealthChecker healthChecker) {
+        this.delegate = instance;
         this.group = group;
-        this.healthCheck = healthCheck;
+        this.healthCheck = healthChecker;
     }
 
     public String name() {
@@ -36,13 +39,9 @@ public class ServerInstanceImpl implements ServerInstance {
         return delegate.newProxyHandler();
     }
 
-    public long getTime() {
-        return time.get();
-    }
-
     public ServerInstanceImpl start() {
         if (started.compareAndSet(false, true)) {
-            group.scheduleWithFixedDelay(() -> ping(delegate, group), 0, 10, TimeUnit.MINUTES);
+            group.scheduleWithFixedDelay(() -> healthCheck(delegate, group), 0, 10, TimeUnit.MINUTES);
         }
         return this;
     }
@@ -51,16 +50,20 @@ public class ServerInstanceImpl implements ServerInstance {
         return Status.UP.equals(status.get());
     }
 
-    protected Promise<Long> ping(final ProxyInstance proxy, final EventLoopGroup checkGroup) {
-        return healthCheck.heathCheck(proxy, checkGroup).addListener(new GenericFutureListener<Future<Long>>() {
+    protected Promise<Long> healthCheck(final ProxyInstance instance, final EventLoopGroup checkGroup) {
+        return healthCheck.heathCheck(instance, checkGroup).addListener(new GenericFutureListener<Future<Long>>() {
             @Override
             public void operationComplete(final Future<Long> future) throws Exception {
                 if (future.isSuccess()) {
-                    time.set(future.get());
-                    status.compareAndSet(Status.DOWN, Status.UP);
+                    latency.addDataPoint(future.get());
+                    if (status.compareAndSet(Status.DOWN, Status.UP)) {
+                        log.info("Instance UP: {}, response time: {}ms, avg: {}ms, min: {}ms, max: {}", instance,future.get(), latency.getAvg(), latency.getMin(), latency.getMax());
+                    }
                 } else {
-                    status.compareAndSet(Status.UP, Status.DOWN);
-                    time.set(-1L);
+                    latency.addDataPoint(Long.MAX_VALUE);
+                    if (status.compareAndSet(Status.UP, Status.DOWN)) {
+                        log.info("Instance Down: {}, {}", instance, future.cause());
+                    }
                 }
             }
         });

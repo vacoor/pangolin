@@ -1,9 +1,10 @@
 package com.github.pangolin.routing.node.heath;
 
 import com.github.pangolin.routing.node.ServerInstance;
+import io.netty.util.concurrent.Promise;
 
 public interface HealthChecker {
 
-    boolean isHealthy(final ServerInstance instance);
+    Promise<Long> isHealthy(final ServerInstance instance);
 
 }

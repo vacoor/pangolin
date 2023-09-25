@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.pattern;
 
-import com.maxmind.db.DatabaseRecord;
+/*
 import com.maxmind.db.MaxMindDbConstructor;
 import com.maxmind.db.MaxMindDbParameter;
 import com.maxmind.db.Reader;
@@ -8,7 +8,6 @@ import com.maxmind.db.Reader;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.Map;
 
 public class GeoIpPattern implements DestinationPattern {
     private final Reader geoReader;
@@ -51,3 +50,4 @@ public class GeoIpPattern implements DestinationPattern {
         }
     }
 }
+*/
