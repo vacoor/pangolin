@@ -183,7 +183,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                         ctx.pipeline().remove(HttpServerCodec.class);
                     });
                 } else {
-                    log.warn("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
+                    log.info("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
                     ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
                 }
             }

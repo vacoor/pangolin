@@ -150,7 +150,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                                 if (log.isDebugEnabled()) {
                                     log.debug("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
                                 }
-                                log.warn("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage());
+                                log.info("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage());
                                 ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)).addListener(ChannelFutureListener.CLOSE);
                             }
                         }

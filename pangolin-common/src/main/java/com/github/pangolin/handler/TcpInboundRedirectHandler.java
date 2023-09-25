@@ -26,7 +26,7 @@ public class TcpInboundRedirectHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void channelInactive(final ChannelHandlerContext inCtx) throws Exception {
         if (outCtx.channel().isActive()) {
-            log.info("[tun@tcp {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
+            log.debug("[tun@tcp {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
             outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }
