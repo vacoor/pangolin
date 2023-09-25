@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.node.heath;
+package com.github.pangolin.routing.node;
 
 import com.github.pangolin.routing.node.spi.ProxyInstance;
 import io.netty.bootstrap.Bootstrap;
@@ -31,7 +31,7 @@ import java.net.URI;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
-public class UrlTestHealthChecker {
+public class UrlTestHealthChecker implements HealthChecker {
     private final String url;
     private final int timeoutMillis;
 
@@ -44,6 +44,9 @@ public class UrlTestHealthChecker {
         this.timeoutMillis = timeoutMillis;
     }
 
+    public Promise<Long> ping(final ProxyInstance server, final EventLoopGroup checkGroup) {
+        return heathCheck(server, checkGroup);
+    }
 
     public Promise<Long> heathCheck(final ProxyInstance server, final EventLoopGroup checkGroup) {
         final Promise<Long> promise = GlobalEventExecutor.INSTANCE.newPromise();
