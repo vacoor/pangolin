@@ -1,9 +1,9 @@
 package com.github.pangolin.routing.internal.client.ss;
 
-import com.github.pangolin.routing.node.spi.ProxyInstance;
-import com.github.pangolin.routing.node.spi.ServerResolver;
 import com.github.pangolin.routing.internal.client.ss.crypto.CipherAlgorithm;
 import com.github.pangolin.routing.internal.client.ss.crypto.spi.CipherAlgorithmSpi;
+import com.github.pangolin.routing.node.Server;
+import com.github.pangolin.routing.node.spi.ServerResolver;
 import freework.codec.Base64;
 import freework.util.Bytes;
 import io.netty.channel.ChannelHandler;
@@ -32,7 +32,7 @@ public class SsServerResolver  implements ServerResolver {
      * </pre>
      * @see <a href="#">SIP002 URI Scheme</a>
      */
-    public ProxyInstance resolve(final String url, final Properties props) {
+    public Server resolve(final String url, final Properties props) {
         if (!acceptsUrl(url)) {
             return null;
         }
@@ -63,7 +63,7 @@ public class SsServerResolver  implements ServerResolver {
     /**
      *
      */
-    private class Instance implements ProxyInstance {
+    private class Instance implements Server {
         private final String name;
         private final SocketAddress address;
         private final CipherAlgorithm algorithm;

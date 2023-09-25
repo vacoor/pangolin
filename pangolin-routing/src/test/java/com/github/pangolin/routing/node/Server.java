@@ -1,12 +1,9 @@
-package com.github.pangolin.routing.node.spi;
+package com.github.pangolin.routing.node;
 
 import com.github.pangolin.routing.pattern.ProxyHandlerFactory;
 import io.netty.channel.ChannelHandler;
 
-/**
- *
- */
-public interface ProxyInstance extends ProxyHandlerFactory {
+public interface Server extends ProxyHandlerFactory {
 
     String getName();
 

@@ -1,27 +1,10 @@
 package com.github.pangolin.routing.node;
 
-import com.github.pangolin.routing.node.spi.ProxyInstance;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.codec.http.DefaultFullHttpRequest;
-import io.netty.handler.codec.http.FullHttpRequest;
-import io.netty.handler.codec.http.HttpClientCodec;
-import io.netty.handler.codec.http.HttpHeaderNames;
-import io.netty.handler.codec.http.HttpHeaderValues;
-import io.netty.handler.codec.http.HttpMethod;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpResponse;
-import io.netty.handler.codec.http.HttpResponseStatus;
-import io.netty.handler.codec.http.HttpVersion;
+import io.netty.handler.codec.http.*;
 import io.netty.resolver.NoopAddressResolverGroup;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.concurrent.Promise;
@@ -34,22 +17,22 @@ import java.util.concurrent.atomic.AtomicLong;
 public class UrlTestHealthChecker implements HealthChecker {
     private final String url;
     private final int timeoutMillis;
+    private final EventLoopGroup group;
 
-    public UrlTestHealthChecker() {
-        this("http://www.gstatic.com/generate_204", 3000);
+    public UrlTestHealthChecker(final EventLoopGroup group) {
+        this("http://www.gstatic.com/generate_204", 3000, group);
     }
 
-    public UrlTestHealthChecker(final String url, final int timeoutMillis) {
+    public UrlTestHealthChecker(final String url, final int timeoutMillis, final EventLoopGroup group) {
         this.url = url;
         this.timeoutMillis = timeoutMillis;
+        this.group = group;
     }
 
-    public Promise<Long> ping(final ProxyInstance server, final EventLoopGroup checkGroup) {
-        return heathCheck(server, checkGroup);
-    }
 
-    public Promise<Long> heathCheck(final ProxyInstance server, final EventLoopGroup checkGroup) {
+    public Promise<Long> checkHealth(final Server server) {
         final Promise<Long> promise = GlobalEventExecutor.INSTANCE.newPromise();
+//        final Promise<Long> promise = group.next().newPromise();
         final ChannelHandler transport = server.newProxyHandler();
         final URI uri = URI.create(url);
         String scheme = uri.getScheme() == null ? "http" : uri.getScheme();
@@ -65,7 +48,7 @@ public class UrlTestHealthChecker implements HealthChecker {
         b.resolver(NoopAddressResolverGroup.INSTANCE);
 
         final AtomicLong sinceMs = new AtomicLong(System.currentTimeMillis());
-        b.group(checkGroup).channel(NioSocketChannel.class).handler(new ChannelInitializer<SocketChannel>() {
+        b.group(group).channel(NioSocketChannel.class).handler(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel channel) throws Exception {
                 channel.pipeline().addLast(transport);
@@ -115,4 +98,5 @@ public class UrlTestHealthChecker implements HealthChecker {
         httpRequest.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
         return httpRequest;
     }
+
 }

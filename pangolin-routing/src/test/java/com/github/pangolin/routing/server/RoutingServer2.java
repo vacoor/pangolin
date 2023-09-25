@@ -5,55 +5,36 @@ import com.github.pangolin.routing.config.ClashRuleResolver;
 import com.github.pangolin.routing.config.PatternResolver;
 import com.github.pangolin.routing.config.RulesetResolver;
 import com.github.pangolin.routing.config.clash.Configuration;
-import com.github.pangolin.routing.node.HealthService;
-import com.github.pangolin.routing.node.HealthServiceFactory;
-import com.github.pangolin.routing.node.LbServiceInstance;
-import com.github.pangolin.routing.node.LoadBalancer;
-import com.github.pangolin.routing.node.ServiceInstance;
+import com.github.pangolin.routing.node.HealthChecker;
+import com.github.pangolin.routing.node.LoadBalanceServer;
+import com.github.pangolin.routing.node.Server;
 import com.github.pangolin.routing.node.UrlTestHealthChecker;
-import com.github.pangolin.routing.node.spi.ProxyInstance;
 import com.github.pangolin.routing.node.spi.ServerResolver;
 import com.github.pangolin.routing.pattern.DestinationPattern;
 import com.github.pangolin.routing.util.IOUtils;
-import com.google.common.collect.Maps;
 import freework.codec.Base64;
 import freework.net.Http;
-import io.netty.channel.ChannelDuplexHandler;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.ServiceLoader;
-import java.util.Set;
-
-//import com.github.pangolin.routing.pattern.GeoIpPattern;
+import java.util.*;
 
 /**
  *
  */
-public class RoutingServer {
+public class RoutingServer2 {
 
-    private static ProxyInstance resolve(final String url) {
+    private static Server resolve(final String url) {
         final ServiceLoader<ServerResolver> resolvers = ServiceLoader.load(ServerResolver.class);
         for (final ServerResolver resolver : resolvers) {
             if (!resolver.acceptsUrl(url)) {
                 continue;
             }
-            final ProxyInstance resolved = resolver.resolve(url, null);
+            final Server resolved = resolver.resolve(url, null);
             if (null != resolved) {
                 return resolved;
             }
@@ -61,8 +42,8 @@ public class RoutingServer {
         throw new IllegalStateException();
     }
 
-    public static List<ProxyInstance> load(String url) throws Exception {
-        final List<ProxyInstance> servers = new ArrayList<>();
+    public static List<Server> load(String url) throws Exception {
+        final List<Server> servers = new ArrayList<>();
         HttpURLConnection httpUrlConnection = null;
         try {
             httpUrlConnection = Http.get(url);
@@ -87,9 +68,9 @@ public class RoutingServer {
         return (!"DIRECT".equalsIgnoreCase(proxyType) && !"REJECT".equalsIgnoreCase(proxyType));
     }
 
-    private static final ServiceInstance DIRECT = new ServiceInstance() {
+    private static final Server DIRECT = new Server() {
         @Override
-        public String name() {
+        public String getName() {
             return "DIRECT";
         }
 
@@ -104,9 +85,9 @@ public class RoutingServer {
         }
     };
 
-    private static final ServiceInstance REJECT = new ServiceInstance() {
+    private static final Server REJECT = new Server() {
         @Override
-        public String name() {
+        public String getName() {
             return "REJECT";
         }
 
@@ -132,34 +113,36 @@ public class RoutingServer {
         }
     };
 
-    static Map<String, HealthService> parseProxies(final List<Configuration.ProxyDefinition> proxyDefinitions, final HealthServiceFactory healthServiceFactory) {
-        final Map<String, HealthService> proxies = new HashMap<>();
+    static Map<String, Server> parseProxies(final List<Configuration.ProxyDefinition> proxyDefinitions) {
+        final Map<String, Server> proxies = new HashMap<>();
         for (final Configuration.ProxyDefinition proxyDefinition : proxyDefinitions) {
             final String uri = String.format("%s://%s@%s:%s#%s", proxyDefinition.getType(), urlEncode(proxyDefinition.getPassword()), proxyDefinition.getServer(), proxyDefinition.getPort(), urlEncode(proxyDefinition.getName()));
-            final ProxyInstance server = resolve(uri);
-            proxies.put(server.getName(), healthServiceFactory.getInstance(server));
+            final Server server = resolve(uri);
+            proxies.put(server.getName(), server);
         }
         return proxies;
     }
 
-    static void parseProxyGroups(final List<Configuration.ProxyGroupDefinition> proxyGroupDefinitions, final Map<String, ServiceInstance> proxies, final EventLoopGroup group) {
+    static void parseProxyGroups(final List<Configuration.ProxyGroupDefinition> proxyGroupDefinitions, final Map<String, Server> proxies,
+                                 final HealthChecker healthChecker, final EventLoopGroup group) {
         final Map<String, Configuration.ProxyGroupDefinition> proxyGroupDefinitionMap = new HashMap<>();
         for (Configuration.ProxyGroupDefinition proxyGroupDefinition : proxyGroupDefinitions) {
             proxyGroupDefinitionMap.put(proxyGroupDefinition.getName(), proxyGroupDefinition);
         }
         for (Configuration.ProxyGroupDefinition proxyGroupDefinition : proxyGroupDefinitions) {
-            parseProxyGroup(proxyGroupDefinition, proxyGroupDefinitionMap, proxies, group);
+            parseProxyGroup(proxyGroupDefinition, proxyGroupDefinitionMap, proxies, healthChecker, group);
         }
     }
 
-    private static ServiceInstance parseProxyGroup(final Configuration.ProxyGroupDefinition proxyGroupDefinition,
-                                                   final Map<String, Configuration.ProxyGroupDefinition> proxyGroupDefinitions,
-                                                   final Map<String, ServiceInstance> proxies, final EventLoopGroup group) {
+    private static Server parseProxyGroup(final Configuration.ProxyGroupDefinition proxyGroupDefinition,
+                                          final Map<String, Configuration.ProxyGroupDefinition> proxyGroupDefinitions,
+                                          final Map<String, Server> proxies,
+                                          final HealthChecker healthChecker, final EventLoopGroup group) {
         final String name = proxyGroupDefinition.getName();
         final List<String> proxyNames = proxyGroupDefinition.getProxies();
-        final List<ServiceInstance> proxiesInGroup = new LinkedList<>();
+        final List<Server> proxiesInGroup = new LinkedList<>();
         for (final String proxyName : proxyNames) {
-            final ServiceInstance dependency = proxies.get(proxyName);
+            final Server dependency = proxies.get(proxyName);
             if (proxyName.equals(name)) {
                 continue;
             }
@@ -168,36 +151,35 @@ public class RoutingServer {
                 if (null == dependencyGroupDefinition) {
                     throw new IllegalStateException("Proxy[Group] not found: " + proxyName);
                 }
-                final ServiceInstance dependencyGroup = parseProxyGroup(dependencyGroupDefinition, proxyGroupDefinitions, proxies, group);
+                final Server dependencyGroup = parseProxyGroup(dependencyGroupDefinition, proxyGroupDefinitions, proxies, healthChecker, group);
                 proxiesInGroup.add(dependencyGroup);
             } else {
                 proxiesInGroup.add(dependency);
             }
         }
-        final LbServiceInstance proxyGroup = new LbServiceInstance(name, new LoadBalancer(group, proxiesInGroup));
+        final LoadBalanceServer proxyGroup = new LoadBalanceServer(name, healthChecker, proxiesInGroup, group);
         proxies.put(name, proxyGroup);
         return proxyGroup;
     }
 
     public static void main(String[] args) throws Exception {
         final NioEventLoopGroup group = new NioEventLoopGroup();
-        final UrlTestHealthChecker healthCheck = new UrlTestHealthChecker();
-        final HealthServiceFactory healthServiceFactory = new HealthServiceFactory(group, healthCheck);
+        final UrlTestHealthChecker healthCheck = new UrlTestHealthChecker(group);
 
-        final InputStream in = RoutingServer.class.getResourceAsStream("/1695102217152.yml");
+        final InputStream in = RoutingServer2.class.getResourceAsStream("/1695102217152.yml");
         final Configuration conf = Configuration.load(in);
         final List<Configuration.ProxyDefinition> proxyDefinitions = null != conf.getProxies() ? conf.getProxies() : Collections.emptyList();
         final List<Configuration.ProxyGroupDefinition> proxyGroupDefinitions = null != conf.getProxyGroups() ? conf.getProxyGroups() : Collections.emptyList();
-        final Map<String, HealthService> proxies = parseProxies(proxyDefinitions, healthServiceFactory);
-        final Map<String, ServiceInstance> allProxies = Maps.newHashMap(proxies);
+        final Map<String, Server> proxies = parseProxies(proxyDefinitions);
+        final Map<String, Server> allProxies = new HashMap<>(proxies);
         // parseProxyGroups(proxyGroupDefinitions, allProxies, group);
 
 
-        final Map<DestinationPattern, ServiceInstance> routingRules = new LinkedHashMap<>();
+        final Map<DestinationPattern, Server> routingRules = new LinkedHashMap<>();
         final PatternResolver patternResolver = new ClashRuleResolver();
         final RulesetResolver rulesetResolver = new RulesetResolver(patternResolver);
 
-        final ServiceInstance udf = new LbServiceInstance("UDF", new LoadBalancer(group, new ArrayList<>(proxies.values())));
+        final Server udf = new LoadBalanceServer("UDF", healthCheck, new ArrayList<>(proxies.values()), group);
         final Set<DestinationPattern> patterns = rulesetResolver.parseClassPathResource("rule/video.list");
         for (DestinationPattern pattern : patterns) {
             routingRules.put(pattern, udf);

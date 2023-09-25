@@ -1,95 +1,118 @@
 package com.github.pangolin.routing.node;
 
-import io.netty.channel.EventLoopGroup;
+import com.github.pangolin.routing.node.util.AvgMinMaxCounter;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 
 /**
  *
  */
 @Slf4j
 public class LoadBalancer {
+    private final String name;
+    private final HealthChecker healthChecker;
     private final long healthCheckIntervalSeconds = TimeUnit.MINUTES.toSeconds(1);
-    private final EventLoopGroup eventLoopGroup;
 
-    private final List<ServiceInstance> allServers = new CopyOnWriteArrayList<>();
-    private final List<ServiceInstance> upServers = new CopyOnWriteArrayList<>();
-    private final List<ServiceInstance> downServers = new CopyOnWriteArrayList<>();
+    private final List<Server> allServers = new CopyOnWriteArrayList<>();
+    private final List<Server> upServers = new CopyOnWriteArrayList<>();
+    private final List<Server> downServers = new CopyOnWriteArrayList<>();
+    private final Map<Server, ServerStats> lbServerStats = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService scheduler;
 
-    public LoadBalancer(final EventLoopGroup eventLoopGroup, final List<ServiceInstance> instances) {
+    public LoadBalancer(final String name, final HealthChecker healthChecker, final List<Server> instances, final ScheduledExecutorService scheduler) {
+        this.name = name;
+        this.healthChecker = healthChecker;
+
         this.allServers.addAll(instances);
-        this.upServers.addAll(instances);
-        this.eventLoopGroup = eventLoopGroup;
-        this.healthCheck();
-    }
-
-    public ServiceInstance next(boolean acquire) {
-        if (upServers.isEmpty()) {
-            throw new IllegalStateException("No available instance found");
+        for (Server instance : instances) {
+            lbServerStats.put(instance, new ServerStats(instance));
         }
-        final List<ServiceInstance> instances = new ArrayList<>(upServers);
-        instances.sort(new Comparator<ServiceInstance>() {
-            @Override
-            public int compare(final ServiceInstance o1, final ServiceInstance o2) {
-                if (o1 instanceof HealthService && o2 instanceof HealthService) {
-                    final HealthService.Stats s1 = ((HealthService) o1).getStats();
-                    final HealthService.Stats s2 = ((HealthService) o2).getStats();
-                    if (null == s1) {
-                        return 1;
-                    }
-                    if (null == s2) {
-                        return -1;
-                    }
-                    return Double.compare(s1.getAvgRt(), s2.getAvgRt());
-                } else if (o1 instanceof HealthService) {
-                    return -1;
-                } else {
-                    return 1;
-                }
-            }
-        });
-        // return instances.iterator().next();
-        log.info("choose: {}", upServers);
-        return upServers.get(ThreadLocalRandom.current().nextInt(Math.min(upServers.size(), 10)));
+        this.downServers.addAll(instances);
+        this.scheduler = scheduler;
+        this.startHealthCheck();
     }
 
-    public List<ServiceInstance> getReachableServers() {
-        return Collections.unmodifiableList(upServers);
+    public String getName() {
+        return name;
     }
 
-    private void healthCheck() {
-        eventLoopGroup.scheduleWithFixedDelay(() -> healthCheck(allServers), 0, healthCheckIntervalSeconds, TimeUnit.SECONDS);
+    private void startHealthCheck() {
+        if (null == healthChecker) {
+            return;
+        }
+        scheduler.scheduleWithFixedDelay(() -> runHealthCheck(scheduler), 0, healthCheckIntervalSeconds, TimeUnit.SECONDS);
     }
 
-    private void healthCheck(final List<ServiceInstance> instances) {
-        for (ServiceInstance instance : instances) {
-            if (!(instance instanceof HealthService)) {
-                continue;
-            }
-            final HealthService healthService = (HealthService) instance;
-            healthService.ping().addListener(new GenericFutureListener<Future<Long>>() {
+    private void runHealthCheck(final ScheduledExecutorService scheduler) {
+        final List<Server> instances = new ArrayList<>(allServers);
+        for (Server instance : instances) {
+            healthChecker.checkHealth(instance).addListener(new GenericFutureListener<Future<Long>>() {
                 @Override
                 public void operationComplete(final Future<Long> future) throws Exception {
                     if (future.isSuccess()) {
+                        addServerRt(instance, future.get());
                         if (downServers.remove(instance)) {
+                            log.info("Instance UP: {}, response time: {}ms", instance.getName(), future.get());
                             upServers.add(instance);
                         }
                     } else {
                         if (upServers.remove(instance)) {
+                            log.info("Instance DOWN: {}", instance.getName());
                             downServers.remove(instance);
                         }
                     }
                 }
             });
+        }
+    }
+
+
+    public Server next(boolean acquire) {
+        if (upServers.isEmpty()) {
+            throw new IllegalStateException("No available instance found");
+        }
+        final List<Server> instances = new ArrayList<>(upServers);
+        instances.sort(new Comparator<Server>() {
+            @Override
+            public int compare(final Server o1, final Server o2) {
+                return Double.compare(getServerAvgRt(o1), getServerAvgRt(o2));
+            }
+        });
+        // return instances.iterator().next();
+        return upServers.get(ThreadLocalRandom.current().nextInt(Math.min(upServers.size(), 10)));
+    }
+
+    public List<Server> getReachableServers() {
+        return Collections.unmodifiableList(upServers);
+    }
+
+    double getServerAvgRt(final Server server) {
+        final ServerStats stats = lbServerStats.get(server);
+        return null != stats ? stats.rt.getAvg() : Double.MAX_VALUE;
+    }
+
+    void addServerRt(final Server server, final long rt) {
+        final ServerStats stats = lbServerStats.get(server);
+        if (null != stats) {
+            stats.addRt(rt);
+        }
+    }
+
+    class ServerStats {
+        private final Server server;
+        private final AvgMinMaxCounter rt = new AvgMinMaxCounter("ResponseTime");
+
+        ServerStats(final Server server) {
+            this.server = server;
+        }
+
+        ServerStats addRt(final long ms) {
+            rt.addDataPoint(ms);
+            return this;
         }
     }
 }
