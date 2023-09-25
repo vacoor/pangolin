@@ -3,6 +3,7 @@ package com.github.pangolin.routing.node;
 import io.netty.channel.EventLoopGroup;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -15,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 /**
  *
  */
+@Slf4j
 public class LoadBalancer {
     private final long healthCheckIntervalSeconds = TimeUnit.MINUTES.toSeconds(1);
     private final EventLoopGroup eventLoopGroup;
@@ -56,6 +58,7 @@ public class LoadBalancer {
             }
         });
         // return instances.iterator().next();
+        log.info("choose: {}", upServers);
         return upServers.get(ThreadLocalRandom.current().nextInt(Math.min(upServers.size(), 10)));
     }
 

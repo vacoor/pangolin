@@ -121,6 +121,11 @@ public class HealthServiceFactory {
         public ChannelHandler newProxyHandler() {
             return instance.newProxyHandler();
         }
+
+        @Override
+        public String toString() {
+            return String.format("%s: %.2fms", name(), rt.getAvg());
+        }
     }
 
 }
