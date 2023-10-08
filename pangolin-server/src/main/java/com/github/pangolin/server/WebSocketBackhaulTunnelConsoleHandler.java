@@ -23,12 +23,15 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
  */
 @Slf4j
 public class WebSocketBackhaulTunnelConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
+    private static final Pattern RESIZE_PATTERN = Pattern.compile("^\\u001B\\[8;([0-9]+);([0-9])+t$");
     private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
     private final WebSocketBackhaulTunnelForwarder forwarder;
 
@@ -62,6 +65,13 @@ public class WebSocketBackhaulTunnelConsoleHandler extends SimpleChannelInboundH
     protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame frame) throws Exception {
         if (frame instanceof TextWebSocketFrame) {
             final String text = ((TextWebSocketFrame) frame).text();
+            final Matcher matcher = RESIZE_PATTERN.matcher(text);
+            if (matcher.find()) {
+                terminal.cols = Integer.parseInt(matcher.group(1));
+                terminal.rows = Integer.parseInt(matcher.group(2));
+                return;
+            }
+
             final int index = text.indexOf(' ');
             final String command = -1 < index ? text.substring(0, index) : text;
             final String commandArgs = -1 < index ? text.substring(index + 1) : "";
@@ -168,7 +178,7 @@ public class WebSocketBackhaulTunnelConsoleHandler extends SimpleChannelInboundH
 
         @Override
         public boolean hasWeirdWrap() {
-            return true;
+            return false;
         }
     }
 

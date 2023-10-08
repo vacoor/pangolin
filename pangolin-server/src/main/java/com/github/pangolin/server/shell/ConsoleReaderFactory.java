@@ -30,7 +30,12 @@ public abstract class ConsoleReaderFactory {
 
     public static ConsoleReader newConsoleReader(final InputStream consoleIn, final OutputStream consoleOut,
                                                  final Terminal terminal, final Supplier<Collection<String>> agentNames) throws IOException {
-        final ConsoleReader console = new ConsoleReader(consoleIn, consoleOut, terminal);
+        final ConsoleReader console = new ConsoleReader(consoleIn, consoleOut, terminal) {
+            @Override
+            public void println() throws IOException {
+                super.print("\r\n");
+            }
+        };
         console.addCompleter(createCompleter(agentNames));
         console.setCompletionHandler(createCompletionHandler());
         return console;

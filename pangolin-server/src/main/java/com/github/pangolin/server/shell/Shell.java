@@ -26,7 +26,6 @@ import java.util.stream.Collectors;
 public class Shell {
     private static final Pattern ARGS_PATTERN = Pattern.compile("\\s*([^\"\']\\S*|\"[^\"]*\"|'[^']*')\\s*");
     private static final Pattern QUOTED_PATTERN = Pattern.compile("^([\'\"])(.*)(\\1)$");
-    private static final String CRLF = "\n\r";
 
     private final boolean breakOnNull;
     private final ConsoleReader console;
@@ -79,14 +78,14 @@ public class Shell {
 
     protected void execute(final String line) throws IOException {
         try {
-            doExecute(line, new PrintWriter(console.getOutput()));
+            doExecute(line, console);
         } catch (final Throwable ex) {
             console.print("Error: ");
             console.println(ex.getMessage());
         }
     }
 
-    private void doExecute(final String line, final PrintWriter out) throws Exception {
+    private void doExecute(final String line, final ConsoleReader out) throws Exception {
         // find command and execute
         final String[] cmdline = tokenize(line);
         if (0 == cmdline.length) {
@@ -114,7 +113,7 @@ public class Shell {
         out.println(String.format("%s: command not found", command));
     }
 
-    private void doExecuteAgentCommand(final List<String> args, final PrintWriter out) {
+    private void doExecuteAgentCommand(final List<String> args, final ConsoleReader out) throws IOException {
         if ("list".equals(safeGet(args, 0))) {
             final Collection<WebSocketBackhaulTunnelEngine.Agent> agents = getAgents();
             final String[][] table = new String[agents.size() + 1][];
@@ -148,7 +147,7 @@ public class Shell {
         out.println();
     }
 
-    private void doExecuteForwardCommand(final List<String> args, final PrintWriter out) throws InterruptedException {
+    private void doExecuteForwardCommand(final List<String> args, final ConsoleReader out) throws InterruptedException, IOException {
         if ("list".equals(safeGet(args, 0))) {
             final Collection<WebSocketBackhaulTunnelForwarder.Forwarding> forwardings = getForwardings();
             final String[][] table = new String[forwardings.size() + 1][];
@@ -223,7 +222,7 @@ public class Shell {
         return -1 < index && index < args.size() ? args.get(index) : null;
     }
 
-    private void printTable(final String[][] table, final PrintWriter out) {
+    private void printTable(final String[][] table, final ConsoleReader out) throws IOException {
         final String[][] tableToUse = null != table ? table : new String[0][];
         final int columns = 1 > tableToUse.length ? 0 : tableToUse[0].length;
         final int[] columnWidths = new int[columns];
