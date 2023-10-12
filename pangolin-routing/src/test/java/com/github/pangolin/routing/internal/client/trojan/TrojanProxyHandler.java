@@ -28,9 +28,9 @@ import java.security.NoSuchAlgorithmException;
 @Slf4j
 public class TrojanProxyHandler extends ChannelDuplexHandler {
     private static final byte[] CRLF = {0x0D, 0x0A};
+
     private final SocketAddress proxyAddress;
     private final String password;
-
     private volatile SocketAddress destinationAddress;
 
     public TrojanProxyHandler(final SocketAddress proxyAddress, final String password) {
@@ -53,17 +53,45 @@ public class TrojanProxyHandler extends ChannelDuplexHandler {
         }
     }
 
-
-    /**
-     *
-     */
     @Override
     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
         final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
         final ByteBuf buffer = Unpooled.buffer();
+
+        /*-
+         +-----------------------+---------+----------------+---------+----------+
+         | hex(SHA224(password)) |  CRLF   | Trojan Request |  CRLF   | Payload  |
+         +-----------------------+---------+----------------+---------+----------+
+         |          56           | X'0D0A' |    Variable    | X'0D0A' | Variable |
+         +-----------------------+---------+----------------+---------+----------+
+
+         where Trojan Request is a SOCKS5-like request:
+         +-----+------+----------+----------+
+         | CMD | ATYP | DST.ADDR | DST.PORT |
+         +-----+------+----------+----------+
+         |  1  |  1   | Variable |    2     |
+         +-----+------+----------+----------+
+
+         where:
+             o  CMD
+                 o  CONNECT X'01'
+                 o  UDP ASSOCIATE X'03'
+             o  ATYP address type of following address
+                 o  IP V4 address: X'01'
+                 o  DOMAINNAME: X'03'
+                 o  IP V6 address: X'04'
+             o  DST.ADDR desired destination address
+             o  DST.PORT desired destination port in network octet order
+
+         If the connection is a UDP ASSOCIATE, then each UDP packet has the following format:
+         +------+----------+----------+--------+---------+----------+
+         | ATYP | DST.ADDR | DST.PORT | Length |  CRLF   | Payload  |
+         +------+----------+----------+--------+---------+----------+
+         |  1   | Variable |    2     |   2    | X'0D0A' | Variable |
+         +------+----------+----------+--------+---------+----------+
+         */
         buffer.writeBytes(getSecretKey(password));
         buffer.writeBytes(CRLF);
-        //
         buffer.writeByte(Socks5CommandType.CONNECT.byteValue());
         if (sa.isUnresolved()) {
             buffer.writeByte(Socks5AddressType.DOMAIN.byteValue());
@@ -84,6 +112,7 @@ public class TrojanProxyHandler extends ChannelDuplexHandler {
 
         buffer.writeBytes(CRLF);
         ctx.writeAndFlush(buffer);
+
         ctx.fireChannelActive();
     }
 

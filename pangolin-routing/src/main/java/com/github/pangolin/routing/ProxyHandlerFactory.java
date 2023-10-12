@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.pattern;
+package com.github.pangolin.routing;
 
 import io.netty.channel.ChannelHandler;
 

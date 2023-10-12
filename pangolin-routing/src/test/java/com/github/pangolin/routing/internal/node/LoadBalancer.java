@@ -1,6 +1,6 @@
-package com.github.pangolin.routing.node;
+package com.github.pangolin.routing.internal.node;
 
-import com.github.pangolin.routing.node.util.AvgMinMaxCounter;
+import com.github.pangolin.routing.internal.node.util.AvgMinMaxCounter;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
@@ -17,18 +17,18 @@ public class LoadBalancer {
     private final HealthChecker healthChecker;
     private final long healthCheckIntervalSeconds = TimeUnit.MINUTES.toSeconds(1);
 
-    private final List<Server> allServers = new CopyOnWriteArrayList<>();
-    private final List<Server> upServers = new CopyOnWriteArrayList<>();
-    private final List<Server> downServers = new CopyOnWriteArrayList<>();
-    private final Map<Server, ServerStats> lbServerStats = new ConcurrentHashMap<>();
+    private final List<ProxyServer> allServers = new CopyOnWriteArrayList<>();
+    private final List<ProxyServer> upServers = new CopyOnWriteArrayList<>();
+    private final List<ProxyServer> downServers = new CopyOnWriteArrayList<>();
+    private final Map<ProxyServer, ServerStats> lbServerStats = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler;
 
-    public LoadBalancer(final String name, final HealthChecker healthChecker, final List<Server> instances, final ScheduledExecutorService scheduler) {
+    public LoadBalancer(final String name, final HealthChecker healthChecker, final List<ProxyServer> instances, final ScheduledExecutorService scheduler) {
         this.name = name;
         this.healthChecker = healthChecker;
 
         this.allServers.addAll(instances);
-        for (Server instance : instances) {
+        for (ProxyServer instance : instances) {
             lbServerStats.put(instance, new ServerStats(instance));
         }
         this.downServers.addAll(instances);
@@ -48,8 +48,8 @@ public class LoadBalancer {
     }
 
     private void runHealthCheck(final ScheduledExecutorService scheduler) {
-        final List<Server> instances = new ArrayList<>(allServers);
-        for (Server instance : instances) {
+        final List<ProxyServer> instances = new ArrayList<>(allServers);
+        for (ProxyServer instance : instances) {
             healthChecker.checkHealth(instance).addListener(new GenericFutureListener<Future<Long>>() {
                 @Override
                 public void operationComplete(final Future<Long> future) throws Exception {
@@ -71,14 +71,14 @@ public class LoadBalancer {
     }
 
 
-    public Server next(boolean acquire) {
+    public ProxyServer next(boolean acquire) {
         if (upServers.isEmpty()) {
             throw new IllegalStateException("No available instance found");
         }
-        final List<Server> instances = new ArrayList<>(upServers);
-        instances.sort(new Comparator<Server>() {
+        final List<ProxyServer> instances = new ArrayList<>(upServers);
+        instances.sort(new Comparator<ProxyServer>() {
             @Override
-            public int compare(final Server o1, final Server o2) {
+            public int compare(final ProxyServer o1, final ProxyServer o2) {
                 return Double.compare(getServerAvgRt(o1), getServerAvgRt(o2));
             }
         });
@@ -86,16 +86,16 @@ public class LoadBalancer {
         return upServers.get(ThreadLocalRandom.current().nextInt(Math.min(upServers.size(), 10)));
     }
 
-    public List<Server> getReachableServers() {
+    public List<ProxyServer> getReachableServers() {
         return Collections.unmodifiableList(upServers);
     }
 
-    double getServerAvgRt(final Server server) {
+    double getServerAvgRt(final ProxyServer server) {
         final ServerStats stats = lbServerStats.get(server);
         return null != stats ? stats.rt.getAvg() : Double.MAX_VALUE;
     }
 
-    void addServerRt(final Server server, final long rt) {
+    void addServerRt(final ProxyServer server, final long rt) {
         final ServerStats stats = lbServerStats.get(server);
         if (null != stats) {
             stats.addRt(rt);
@@ -103,10 +103,10 @@ public class LoadBalancer {
     }
 
     class ServerStats {
-        private final Server server;
+        private final ProxyServer server;
         private final AvgMinMaxCounter rt = new AvgMinMaxCounter("ResponseTime");
 
-        ServerStats(final Server server) {
+        ServerStats(final ProxyServer server) {
             this.server = server;
         }
 

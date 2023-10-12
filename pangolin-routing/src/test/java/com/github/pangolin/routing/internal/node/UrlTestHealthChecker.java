@@ -1,10 +1,26 @@
-package com.github.pangolin.routing.node;
+package com.github.pangolin.routing.internal.node;
 
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.*;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.codec.http.*;
+import io.netty.handler.codec.http.DefaultFullHttpRequest;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaderValues;
+import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpResponse;
+import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpVersion;
 import io.netty.resolver.NoopAddressResolverGroup;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.concurrent.Promise;
@@ -29,10 +45,9 @@ public class UrlTestHealthChecker implements HealthChecker {
         this.group = group;
     }
 
-
-    public Promise<Long> checkHealth(final Server server) {
+    @Override
+    public Promise<Long> checkHealth(final ProxyServer server) {
         final Promise<Long> promise = GlobalEventExecutor.INSTANCE.newPromise();
-//        final Promise<Long> promise = group.next().newPromise();
         final ChannelHandler transport = server.newProxyHandler();
         final URI uri = URI.create(url);
         String scheme = uri.getScheme() == null ? "http" : uri.getScheme();

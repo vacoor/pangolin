@@ -1,16 +1,17 @@
-package com.github.pangolin.routing.config;
+package com.github.pangolin.routing.config.clash;
 
+import com.github.pangolin.routing.config.PatternResolver;
 import com.github.pangolin.routing.pattern.DestinationPattern;
 import com.github.pangolin.routing.pattern.DomainPattern;
 import com.github.pangolin.routing.pattern.NetworkPattern;
 import io.netty.util.NetUtil;
 
 public class ClashRuleResolver implements PatternResolver {
-    private PatternResolver[] delegate = {DOMAIN, DOMAIN_SUFFIX, DOMAINK_KEYWORD, IP_CIDR, IP_CIDR_6};
+    private PatternResolver[] delegate = {DOMAIN, DOMAIN_SUFFIX, DOMAIN_KEYWORD, IP_CIDR, IP_CIDR_6};
 
     @Override
     public boolean isSupported(final String pattern) {
-        for (PatternResolver d : delegate) {
+        for (final PatternResolver d : delegate) {
             if (d.isSupported(pattern)) {
                 return true;
             }
@@ -43,7 +44,7 @@ public class ClashRuleResolver implements PatternResolver {
         }
     };
 
-    private static final PatternResolver DOMAINK_KEYWORD = new TypedPrefixPatternResolver("DOMAIN-KEYWORD,") {
+    private static final PatternResolver DOMAIN_KEYWORD = new TypedPrefixPatternResolver("DOMAIN-KEYWORD,") {
 
         @Override
         protected DestinationPattern create(final String pattern) {

@@ -6,7 +6,7 @@ import com.github.pangolin.routing.internal.client.WebSocketProxyHandler;
 import com.github.pangolin.routing.pattern.DestinationPattern;
 import com.github.pangolin.routing.pattern.DomainPattern;
 import com.github.pangolin.routing.pattern.NetworkPattern;
-import com.github.pangolin.routing.pattern.ProxyHandlerFactory;
+import com.github.pangolin.routing.ProxyHandlerFactory;
 import io.netty.util.NetUtil;
 import io.netty.util.internal.ObjectUtil;
 

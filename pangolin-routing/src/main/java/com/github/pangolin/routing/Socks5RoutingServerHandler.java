@@ -3,7 +3,6 @@ package com.github.pangolin.routing;
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.internal.server.socks.v5.Socks5ProxyServerHandler;
 import com.github.pangolin.routing.pattern.DestinationPattern;
-import com.github.pangolin.routing.pattern.ProxyHandlerFactory;
 import com.github.pangolin.util.Channels;
 import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;

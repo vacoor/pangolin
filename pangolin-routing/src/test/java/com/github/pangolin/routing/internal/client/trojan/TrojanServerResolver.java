@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.internal.client.trojan;
 
-import com.github.pangolin.routing.node.Server;
-import com.github.pangolin.routing.node.spi.ServerResolver;
+import com.github.pangolin.routing.internal.node.ProxyServer;
+import com.github.pangolin.routing.internal.node.spi.ServerResolver;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
@@ -23,7 +23,7 @@ public class TrojanServerResolver implements ServerResolver {
     /**
      *
      */
-    public Server resolve(final String url, final Properties props) {
+    public ProxyServer resolve(final String url, final Properties props) {
         if (!acceptsUrl(url)) {
             return null;
         }
@@ -38,7 +38,7 @@ public class TrojanServerResolver implements ServerResolver {
     /**
      *
      */
-    private class Instance implements Server {
+    private class Instance implements ProxyServer {
         private final String name;
         private final SocketAddress address;
         private final String password;

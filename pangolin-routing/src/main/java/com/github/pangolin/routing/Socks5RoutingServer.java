@@ -1,7 +1,6 @@
 package com.github.pangolin.routing;
 
 import com.github.pangolin.routing.pattern.DestinationPattern;
-import com.github.pangolin.routing.pattern.ProxyHandlerFactory;
 import com.github.pangolin.routing.resolver.RoutingFileParser;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
@@ -13,7 +12,6 @@ import io.netty.channel.socket.SocketChannel;
 import javax.net.ssl.SSLException;
 import java.net.InetSocketAddress;
 import java.security.cert.CertificateException;
-import java.util.List;
 import java.util.Map;
 
 /**

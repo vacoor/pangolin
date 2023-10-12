@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package com.github.pangolin.routing.node.util;
+package com.github.pangolin.routing.internal.node.util;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
