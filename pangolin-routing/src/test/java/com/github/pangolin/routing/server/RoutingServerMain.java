@@ -48,6 +48,7 @@ public class RoutingServerMain {
         for (DestinationPattern pattern : patterns) {
             routingRules.put(pattern, extranetProxy);
         }
+
         final List<String> ruleDefinitions = conf.getRules();
         routingRules.putAll(ClashRuleFactory.parseRules(ruleDefinitions, patternResolver, extranetProxy));
 

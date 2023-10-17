@@ -33,7 +33,7 @@ public abstract class WebSocketUtils {
     private WebSocketUtils() {
     }
 
-    public static Channel openSocketChannel(final String host, final int port, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
+    private static Channel openSocketChannel(final String host, final int port, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
         return Channels.open(host, port, true, group, initializer).sync().channel();
     }
 
