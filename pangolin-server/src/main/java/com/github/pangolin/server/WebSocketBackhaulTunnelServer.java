@@ -44,8 +44,8 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
      */
     private final String endpointPath;
 
-    private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
-    private final WebSocketBackhaulTunnelForwarder webSocketBackhaulTunnelForwarder;
+    private final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine;
+    private final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder;
 
 
     private Channel boundChannel;
@@ -73,8 +73,8 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
         super(listenHost, listenPort);
         this.endpointPath = endpointPath;
         this.useSsl = useSsl;
-        this.webSocketBackhaulTunnelEngine = new WebSocketBackhaulTunnelEngine();
-        this.webSocketBackhaulTunnelForwarder = new WebSocketBackhaulTunnelForwarder(webSocketBackhaulTunnelEngine, new NioEventLoopGroup(2), new NioEventLoopGroup());
+        this.webSocketBackhaulTunnelServerEngine = new WebSocketBackhaulTunnelServerEngine();
+        this.webSocketBackhaulTunnelServerForwarder = new WebSocketBackhaulTunnelServerForwarder(webSocketBackhaulTunnelServerEngine, new NioEventLoopGroup(2), new NioEventLoopGroup());
     }
 
     /**
@@ -99,8 +99,8 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
                         */
                         new WebSocketServerProtocolHandler(endpointPath, "*", false, 65536, true, true),
-                        new WebSocketBackhaulTunnelServerInitializer(webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder)
-//                        new WebSocketBackhaulTunnelServerInitializer2(endpointPath, "*", webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder)
+                        new WebSocketBackhaulTunnelServerHandler(webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder)
+//                        new WebSocketBackhaulTunnelServerHandler2(endpointPath, "*", webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder)
                 );
             }
         }).sync().channel();
@@ -112,7 +112,7 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
         System.out.println("Start on " + channel.localAddress());
 
         /*
-        server.webSocketBackhaulTunnelForwarder.addForwarding(
+        server.webSocketBackhaulTunnelServerForwarder.addForwarding(
                 3389, "BZ",
                 InetSocketAddress.createUnresolved("127.0.0.1", 3389)
         );
@@ -120,8 +120,8 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
 
         /*
         final Terminal terminal = TerminalFactory.create();
-        final ConsoleReader console = ConsoleReaderFactory.newConsoleReader(System.in, System.out, terminal, () -> server.webSocketBackhaulTunnelEngine.getAgents().stream().map(WebSocketBackhaulTunnelEngine.Agent::getId).collect(Collectors.toSet()));
-        Shell.create(console, true, server.webSocketBackhaulTunnelEngine, server.webSocketBackhaulTunnelForwarder).start();
+        final ConsoleReader console = ConsoleReaderFactory.newConsoleReader(System.in, System.out, terminal, () -> server.webSocketBackhaulTunnelServerEngine.getAgents().stream().map(WebSocketBackhaulTunnelServerEngine.Agent::getId).collect(Collectors.toSet()));
+        WebSocketBackhaulTunnelServerShell.create(console, true, server.webSocketBackhaulTunnelServerEngine, server.webSocketBackhaulTunnelServerForwarder).start();
         */
 
         channel.closeFuture().sync();

@@ -23,10 +23,12 @@ import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 import static io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
@@ -35,20 +37,31 @@ import static io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHand
  *
  */
 @Slf4j
-public class WebSocketBackhaulTunnelEngine {
+public class WebSocketBackhaulTunnelServerEngine {
     private static final String AGENT_NAME = "X-Node-Name";
     private static final String AGENT_VERSION = "X-Node-Version";
     private static final String AGENT_INTRANET = "X-Node-Intranet";
     private static final String BACKHAUL_ID = "id";
 
     /**
-     * 已注册的broker节点(id:agent).
+     * Registered agents.
      */
     private final ConcurrentMap<String, Agent> registeredAgents = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, Tunnel> tunnelMap = new ConcurrentHashMap<>();
 
+    /**
+     * Requested tunnels.
+     */
+    private final ConcurrentMap<String, Tunnel> requestedTunnels = new ConcurrentHashMap<>();
+
+    /**
+     * Agent registered.
+     *
+     * @param handshake the handshake information
+     * @param ctx       the agent channel handler context
+     * @return true if registered, otherwise false
+     */
     boolean agentRegistered(final HandshakeComplete handshake, final ChannelHandlerContext ctx) {
-        final Agent agent = createAgent(handshake, ctx);
+        final Agent agent = this.createAgent(handshake, ctx);
         if (null == registeredAgents.putIfAbsent(agent.id, agent)) {
             log.info("Agent registered: {}", stringify(agent));
             ctx.channel().closeFuture().addListener(new ChannelFutureListener() {
@@ -63,47 +76,56 @@ public class WebSocketBackhaulTunnelEngine {
         return false;
     }
 
+    /**
+     * Agent unregistered.
+     *
+     * @param agent the agent to unregistered
+     */
     private void agentUnregistered(final Agent agent) {
         if (registeredAgents.remove(agent.id, agent)) {
             log.info("Agent unregistered: {}", stringify(agent));
             if (agent.bus.channel().isActive()) {
                 agent.bus.writeAndFlush(new CloseWebSocketFrame()).addListener(ChannelFutureListener.CLOSE);
             }
-        } else {
-
         }
     }
 
+    /**
+     * @param id
+     * @param agentKey
+     * @param target
+     * @param accessCtx
+     * @return
+     */
     Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agentKey, final URI target, final ChannelHandlerContext accessCtx) {
         return tunnelRequested(id, agentKey, target, accessCtx, TimeUnit.SECONDS.toMillis(10), accessCtx.executor().newPromise());
     }
 
-    Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agentKey, final URI target, final ChannelHandlerContext accessCtx, final long waitTimeoutMs, Promise<ChannelHandlerContext> backhaulPromise) {
-        final Agent agent = registeredAgents.get(agentKey);
-//        Preconditions.checkState(null != agent, "Connection unavailable");
-        if (null == agent) {
-            backhaulPromise.tryFailure(new ConnectException("Connection unavailable: agent '" + agentKey + "' not found"));
+    Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agent, final URI target, final ChannelHandlerContext accessCtx, final long waitTimeoutMs, Promise<ChannelHandlerContext> backhaulPromise) {
+        final Agent agentToUse = this.choose(agent);
+        if (null == agentToUse) {
+            backhaulPromise.tryFailure(new ConnectException("Connection unavailable: agent '" + agent + "' not found"));
             return backhaulPromise;
         }
 
-        final Tunnel tunnel = new Tunnel(id, agent, target, accessCtx, backhaulPromise);
-        Preconditions.checkState(null == tunnelMap.putIfAbsent(id, tunnel), "The channel id '%s' is already used", id);
+        final Tunnel tunnel = new Tunnel(id, agentToUse, target, accessCtx, backhaulPromise);
+        Preconditions.checkState(null == requestedTunnels.putIfAbsent(id, tunnel), "The channel id '%s' is already used", id);
 
-        log.info("Tunnel [{} = {}/{} => {}] Connecting", stringify(accessCtx.channel().remoteAddress()), agent.extranet, agent.intranet, target);
+        log.info("Tunnel [{} = {}/{} => {}] Connecting", stringify(accessCtx.channel().remoteAddress()), agentToUse.extranet, agentToUse.intranet, target);
 
         accessCtx.channel().config().setAutoRead(false);
         accessCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 try {
-                    log.info("Tunnel [{}(!) = {}/{} => {}] Connection closed", stringify(accessCtx.channel().remoteAddress()), agent.extranet, agent.intranet, target);
+                    log.info("Tunnel [{}(!) = {}/{} => {}] Connection closed", stringify(accessCtx.channel().remoteAddress()), agentToUse.extranet, agentToUse.intranet, target);
                     if (!backhaulPromise.isDone()) {
                         backhaulPromise.tryFailure(new IOException("Connection abort"));
                     } else if (backhaulPromise.isSuccess()) {
                         backhaulPromise.getNow().channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                     }
                 } finally {
-                    tunnelMap.remove(id, tunnel);
+                    requestedTunnels.remove(id, tunnel);
                 }
             }
         });
@@ -112,7 +134,7 @@ public class WebSocketBackhaulTunnelEngine {
             @Override
             public void run() {
                 if (!backhaulPromise.isDone()) {
-                    log.info("Tunnel [{}(!) = {}/{} => {}] Connection timeout", stringify(accessCtx.channel().remoteAddress()), agent.extranet, agent.intranet, target);
+                    log.info("Tunnel [{}(!) = {}/{} => {}] Connection timeout", stringify(accessCtx.channel().remoteAddress()), agentToUse.extranet, agentToUse.intranet, target);
                     backhaulPromise.tryFailure(new ConnectTimeoutException("backhual wait timeout"));
                 }
             }
@@ -128,8 +150,25 @@ public class WebSocketBackhaulTunnelEngine {
         });
 
         final String command = id + "->" + target;
-        agent.bus.writeAndFlush(new TextWebSocketFrame(command));
+        agentToUse.bus.writeAndFlush(new TextWebSocketFrame(command));
         return backhaulPromise;
+    }
+
+    private Agent choose(final String agent) {
+        Agent agentToUse = registeredAgents.get(agent);
+        if (null == agentToUse) {
+            final List<Agent> candidates = new ArrayList<>();
+            for (final Agent candidate : registeredAgents.values()) {
+                if (candidate.getName().equals(agent)) {
+                    candidates.add(candidate);
+                }
+            }
+            if (!candidates.isEmpty()) {
+                final int index = ThreadLocalRandom.current().nextInt(candidates.size());
+                agentToUse = candidates.get(index);
+            }
+        }
+        return agentToUse;
     }
 
     void tunnelResponded(final HandshakeComplete handshake, final ChannelHandlerContext backhaulCtx) {
@@ -144,7 +183,7 @@ public class WebSocketBackhaulTunnelEngine {
             backhaulCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             return;
         }
-        final Tunnel tunnel = tunnelMap.get(id);
+        final Tunnel tunnel = requestedTunnels.get(id);
         backhaulCtx.channel().config().setAutoRead(false);
         if (null != tunnel) {
             final Agent agent = tunnel.agent;
@@ -168,9 +207,7 @@ public class WebSocketBackhaulTunnelEngine {
         final String intranet = headers.getAsString(AGENT_INTRANET);
         final String extranet = stringify(ctx.channel().remoteAddress());
 
-        // final String id = ctx.channel().id().toString();
-        // final String id = String.format("%s@%s/%s", name, intranet, extranet);
-        final String id = name;
+        final String id = ctx.channel().id().toString();
         return new Agent(id, name, version, intranet, extranet, ctx);
     }
 
@@ -193,11 +230,11 @@ public class WebSocketBackhaulTunnelEngine {
     }
 
     public Collection<Tunnel> getTunnels() {
-        return tunnelMap.values();
+        return requestedTunnels.values();
     }
 
     public boolean kill(final String tunnelId) throws InterruptedException {
-        final Tunnel tunnel = tunnelMap.get(tunnelId);
+        final Tunnel tunnel = requestedTunnels.get(tunnelId);
         if (null != tunnel) {
             tunnel.accessCtx.close().sync();
         }

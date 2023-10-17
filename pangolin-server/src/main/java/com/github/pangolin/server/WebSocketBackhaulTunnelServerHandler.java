@@ -26,19 +26,19 @@ import java.util.Map;
  *
  */
 @Slf4j
-public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHandlerAdapter {
+public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerAdapter {
     private static final String PROTOCOL_AGENT_REGISTER = "PASSIVE-REG";
     private static final String PROTOCOL_WS_TUNNEL_REQUEST = "";
     private static final String PROTOCOL_TCP_TUNNEL_REQUEST = "CONNECT";
     private static final String PROTOCOL_TUNNEL_BACKHAUL = "PASSIVE";
     private static final String PROTOCOL_MGR_CONSOLE = "CONSOLE";
 
-    private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
-    private final WebSocketBackhaulTunnelForwarder webSocketBackhaulTunnelForwarder;
+    private final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine;
+    private final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder;
 
-    public WebSocketBackhaulTunnelServerInitializer(final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final WebSocketBackhaulTunnelForwarder webSocketBackhaulTunnelForwarder) {
-        this.webSocketBackhaulTunnelEngine = webSocketBackhaulTunnelEngine;
-        this.webSocketBackhaulTunnelForwarder = webSocketBackhaulTunnelForwarder;
+    public WebSocketBackhaulTunnelServerHandler(final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine, final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder) {
+        this.webSocketBackhaulTunnelServerEngine = webSocketBackhaulTunnelServerEngine;
+        this.webSocketBackhaulTunnelServerForwarder = webSocketBackhaulTunnelServerForwarder;
     }
 
     @Override
@@ -49,15 +49,15 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
             subprotocol = null != subprotocol ? subprotocol : PROTOCOL_WS_TUNNEL_REQUEST;
 
             if (PROTOCOL_AGENT_REGISTER.equals(subprotocol)) {
-                webSocketBackhaulTunnelEngine.agentRegistered(handshake, ctx);
+                webSocketBackhaulTunnelServerEngine.agentRegistered(handshake, ctx);
             } else if (PROTOCOL_TUNNEL_BACKHAUL.equals(subprotocol)) {
-                webSocketBackhaulTunnelEngine.tunnelResponded(handshake, ctx);
+                webSocketBackhaulTunnelServerEngine.tunnelResponded(handshake, ctx);
             } else if (PROTOCOL_WS_TUNNEL_REQUEST.equals(subprotocol)) {
                 wsTunnelRequested(handshake, ctx);
             } else if (PROTOCOL_TCP_TUNNEL_REQUEST.equals(subprotocol)) {
                 tcpTunnelRequested(handshake, ctx);
             } else if (PROTOCOL_MGR_CONSOLE.equals(subprotocol)) {
-                ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelConsoleHandler(webSocketBackhaulTunnelEngine, webSocketBackhaulTunnelForwarder));
+                ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelServerConsoleHandler(webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder));
             } else {
                 ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.PROTOCOL_ERROR)).addListener(ChannelFutureListener.CLOSE);
             }
@@ -77,7 +77,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
     private Promise<ChannelHandlerContext> wsTunnelRequested(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
         final Map<String, List<String>> params = parseParams(handshake.requestUri());
         final String target = getTarget(params);
-        final String agentKey = getAgentKey(params);
+        final String agent = getAgent(params);
 
         /*-
          * tcp://hostname:port:      ws-client --ws--> server --tcp over ws--> agent --> tcp target
@@ -86,7 +86,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
         final String targetToUse = target.contains("://") ? target : "tcp://" + target;
         final URI uri = URI.create(targetToUse);
         final String id = accessCtx.channel().id().toString();
-        return webSocketBackhaulTunnelEngine.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
+        return webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agent, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
@@ -112,7 +112,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
     private Promise<ChannelHandlerContext> tcpTunnelRequested(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
         final Map<String, List<String>> params = parseParams(handshake.requestUri());
         final String target = getTarget(params);
-        final String agentKey = getAgentKey(params);
+        final String agentKey = getAgent(params);
 
         /*-
          * tcp:tcp://hostname:port:      client --tcp--> server -----tcp over ws--------> agent --> tcp target
@@ -120,7 +120,7 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
          */
         final URI uri = URI.create(target);
         final String id = accessCtx.channel().id().toString();
-        return webSocketBackhaulTunnelEngine.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
+        return webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
@@ -153,8 +153,12 @@ public class WebSocketBackhaulTunnelServerInitializer extends ChannelInboundHand
         return Util.last(params, "target");
     }
 
-    private String getAgentKey(final Map<String, List<String>> params) {
+    private String getAgent(final Map<String, List<String>> params) {
         return Util.last(params, "agent");
+    }
+
+    private String getAuthorization(final Map<String, List<String>> params) {
+        return Util.last(params, "authorization");
     }
 
 }

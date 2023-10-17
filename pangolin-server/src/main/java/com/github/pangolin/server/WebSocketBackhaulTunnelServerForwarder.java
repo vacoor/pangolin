@@ -26,14 +26,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 @Slf4j
-public class WebSocketBackhaulTunnelForwarder {
-    private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
+public class WebSocketBackhaulTunnelServerForwarder {
+    private final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine;
     private final EventLoopGroup bossGroup;
     private final EventLoopGroup workerGroup;
     private final ConcurrentMap<SocketAddress, Forwarding> registeredForwardingMap = new ConcurrentHashMap<>();
 
-    public WebSocketBackhaulTunnelForwarder(final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
-        this.webSocketBackhaulTunnelEngine = webSocketBackhaulTunnelEngine;
+    public WebSocketBackhaulTunnelServerForwarder(final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
+        this.webSocketBackhaulTunnelServerEngine = webSocketBackhaulTunnelServerEngine;
         this.bossGroup = bossGroup;
         this.workerGroup = workerGroup;
     }
@@ -55,11 +55,11 @@ public class WebSocketBackhaulTunnelForwarder {
         return null != forwarding;
     }
 
-    public WebSocketBackhaulTunnelForwarder addForwarding(final int localPort, final String agentKey, final InetSocketAddress remoteAddr) throws InterruptedException {
-        return addForwarding(new InetSocketAddress(localPort), agentKey, remoteAddr);
+    public WebSocketBackhaulTunnelServerForwarder addForwarding(final int localPort, final String agent, final InetSocketAddress remoteAddr) throws InterruptedException {
+        return addForwarding(new InetSocketAddress(localPort), agent, remoteAddr);
     }
 
-    public WebSocketBackhaulTunnelForwarder addForwarding(final SocketAddress localAddr, final String agentKey, final InetSocketAddress remoteAddr) throws InterruptedException {
+    public WebSocketBackhaulTunnelServerForwarder addForwarding(final SocketAddress localAddr, final String agent, final InetSocketAddress remoteAddr) throws InterruptedException {
         final ChannelFuture boundChannelFuture = Channels.listen(localAddr, false, bossGroup, workerGroup, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(SocketChannel ch) throws Exception {
@@ -68,7 +68,7 @@ public class WebSocketBackhaulTunnelForwarder {
                     public void channelActive(final ChannelHandlerContext accessCtx) throws Exception {
                         final String id = "F:" + accessCtx.channel().id().toString();
                         final URI target = URI.create("tcp://" + remoteAddr.getHostString() + ":" + remoteAddr.getPort());
-                        final Promise<ChannelHandlerContext> promise = webSocketBackhaulTunnelEngine.tunnelRequested(id, agentKey, target, accessCtx);
+                        final Promise<ChannelHandlerContext> promise = webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agent, target, accessCtx);
                         promise.addListener(new FutureListener<ChannelHandlerContext>() {
                             @Override
                             public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {
@@ -93,9 +93,9 @@ public class WebSocketBackhaulTunnelForwarder {
             }
         });
 
-        log.info("Local forwarding {} = {} => {} added", localAddr, agentKey, remoteAddr);
+        log.info("Local forwarding {} = {} => {} added", localAddr, agent, remoteAddr);
 
-        registeredForwardingMap.put(localAddr, new Forwarding(localAddr, agentKey, remoteAddr, boundChannelFuture.channel()));
+        registeredForwardingMap.put(localAddr, new Forwarding(localAddr, agent, remoteAddr, boundChannelFuture.channel()));
         boundChannelFuture.channel().closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {

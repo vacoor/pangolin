@@ -1,7 +1,7 @@
 package com.github.pangolin.server;
 
 import com.github.pangolin.server.shell.ConsoleReaderFactory;
-import com.github.pangolin.server.shell.Shell;
+import com.github.pangolin.server.shell.WebSocketBackhaulTunnelServerShell;
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
@@ -30,16 +30,16 @@ import java.util.stream.Collectors;
 /**
  */
 @Slf4j
-public class WebSocketBackhaulTunnelConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
+public class WebSocketBackhaulTunnelServerConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
     private static final Pattern RESIZE_PATTERN = Pattern.compile("^\\u001B\\[8;([0-9]+);([0-9])+t$");
-    private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
-    private final WebSocketBackhaulTunnelForwarder forwarder;
+    private final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine;
+    private final WebSocketBackhaulTunnelServerForwarder forwarder;
 
     private HeadlessTerminal terminal;
     private OutputStream toConsoleIn;
 
-    public WebSocketBackhaulTunnelConsoleHandler(final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final WebSocketBackhaulTunnelForwarder forwarder) {
-        this.webSocketBackhaulTunnelEngine = webSocketBackhaulTunnelEngine;
+    public WebSocketBackhaulTunnelServerConsoleHandler(final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine, final WebSocketBackhaulTunnelServerForwarder forwarder) {
+        this.webSocketBackhaulTunnelServerEngine = webSocketBackhaulTunnelServerEngine;
         this.forwarder = forwarder;
     }
 
@@ -52,12 +52,12 @@ public class WebSocketBackhaulTunnelConsoleHandler extends SimpleChannelInboundH
                     new PipedInputStream(toConsoleIn),
                     new WebSocketBinaryOutput(ctx),
                     terminal,
-                    () -> webSocketBackhaulTunnelEngine.getAgents().stream().map(WebSocketBackhaulTunnelEngine.Agent::getId).collect(Collectors.toList())
+                    () -> webSocketBackhaulTunnelServerEngine.getAgents().stream().map(WebSocketBackhaulTunnelServerEngine.Agent::getId).collect(Collectors.toList())
             );
 
             this.terminal = terminal;
             this.toConsoleIn = toConsoleIn;
-            Shell.create(console, true, webSocketBackhaulTunnelEngine, forwarder).start();
+            WebSocketBackhaulTunnelServerShell.create(console, true, webSocketBackhaulTunnelServerEngine, forwarder).start();
         }
     }
 
@@ -184,10 +184,10 @@ public class WebSocketBackhaulTunnelConsoleHandler extends SimpleChannelInboundH
 
     public static void main(String[] args) throws InterruptedException {
 
-        final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine = new WebSocketBackhaulTunnelEngine();
+        final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine = new WebSocketBackhaulTunnelServerEngine();
         final NioEventLoopGroup bossGroup = new NioEventLoopGroup(2);
         final NioEventLoopGroup workerGroup = new NioEventLoopGroup();
-        final WebSocketBackhaulTunnelForwarder forwarder = new WebSocketBackhaulTunnelForwarder(webSocketBackhaulTunnelEngine, bossGroup, workerGroup);
+        final WebSocketBackhaulTunnelServerForwarder forwarder = new WebSocketBackhaulTunnelServerForwarder(webSocketBackhaulTunnelServerEngine, bossGroup, workerGroup);
         Channels.listen(null, 10443, new NioEventLoopGroup(), new NioEventLoopGroup(), new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
@@ -204,7 +204,7 @@ public class WebSocketBackhaulTunnelConsoleHandler extends SimpleChannelInboundH
                         */
                         new WebSocketServerProtocolHandler("", "*", true, 65536, true, true),
                         // new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
-                        new WebSocketBackhaulTunnelConsoleHandler(webSocketBackhaulTunnelEngine, forwarder)
+                        new WebSocketBackhaulTunnelServerConsoleHandler(webSocketBackhaulTunnelServerEngine, forwarder)
                 );
             }
         }).sync().channel().closeFuture().sync();
