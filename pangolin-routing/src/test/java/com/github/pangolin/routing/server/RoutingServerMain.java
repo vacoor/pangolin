@@ -38,22 +38,18 @@ public class RoutingServerMain {
         final List<Configuration.ProxyGroupDefinition> proxyGroupDefinitions = null != conf.getProxyGroups() ? conf.getProxyGroups() : Collections.emptyList();
 
         final Map<String, ProxyServer> proxies = ClashRuleFactory.parseProxies(proxyDefinitions);
-
+        final ProxyServer extranetProxy = new LoadBalanceProxyServer("extranet", healthCheck, new ArrayList<>(proxies.values()), group);
         // parseProxyGroups(proxyGroupDefinitions, allProxies, group);
-
 
         final Map<DestinationPattern, ProxyServer> routingRules = new LinkedHashMap<>();
         final PatternResolver patternResolver = new ClashRuleResolver();
         final RulesetResolver rulesetResolver = new RulesetResolver(patternResolver);
-
-        final ProxyServer udf = new LoadBalanceProxyServer("UDF", healthCheck, new ArrayList<>(proxies.values()), group);
         final Set<DestinationPattern> patterns = rulesetResolver.resolveClassPathResource("rule/video.list");
         for (DestinationPattern pattern : patterns) {
-            routingRules.put(pattern, udf);
+            routingRules.put(pattern, extranetProxy);
         }
-
         final List<String> ruleDefinitions = conf.getRules();
-        routingRules.putAll(ClashRuleFactory.parseRules(ruleDefinitions, patternResolver, udf));
+        routingRules.putAll(ClashRuleFactory.parseRules(ruleDefinitions, patternResolver, extranetProxy));
 
         final Socks5RoutingServer server = new Socks5RoutingServer(1080);
         server.start(routingRules).addListener(new ChannelFutureListener() {
