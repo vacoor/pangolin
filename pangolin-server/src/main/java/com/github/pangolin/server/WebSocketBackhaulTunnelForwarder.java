@@ -30,7 +30,7 @@ public class WebSocketBackhaulTunnelForwarder {
     private final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine;
     private final EventLoopGroup bossGroup;
     private final EventLoopGroup workerGroup;
-    private final ConcurrentMap<SocketAddress, Forwarding> forwardingMap = new ConcurrentHashMap<>();
+    private final ConcurrentMap<SocketAddress, Forwarding> registeredForwardingMap = new ConcurrentHashMap<>();
 
     public WebSocketBackhaulTunnelForwarder(final WebSocketBackhaulTunnelEngine webSocketBackhaulTunnelEngine, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
         this.webSocketBackhaulTunnelEngine = webSocketBackhaulTunnelEngine;
@@ -39,7 +39,7 @@ public class WebSocketBackhaulTunnelForwarder {
     }
 
     public Collection<Forwarding> getForwardings() {
-        return forwardingMap.values();
+        return registeredForwardingMap.values();
     }
 
     public boolean removeForwarding(final int localPort) {
@@ -47,7 +47,7 @@ public class WebSocketBackhaulTunnelForwarder {
     }
 
     public boolean removeForwarding(final SocketAddress localAddr) {
-        final Forwarding forwarding = forwardingMap.remove(localAddr);
+        final Forwarding forwarding = registeredForwardingMap.remove(localAddr);
         if (null != forwarding) {
             log.info("Local forwarding '{}' removed", localAddr);
             forwarding.boundChannel.close();
@@ -95,11 +95,11 @@ public class WebSocketBackhaulTunnelForwarder {
 
         log.info("Local forwarding {} = {} => {} added", localAddr, agentKey, remoteAddr);
 
-        forwardingMap.put(localAddr, new Forwarding(localAddr, agentKey, remoteAddr, boundChannelFuture.channel()));
+        registeredForwardingMap.put(localAddr, new Forwarding(localAddr, agentKey, remoteAddr, boundChannelFuture.channel()));
         boundChannelFuture.channel().closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
-                forwardingMap.remove(localAddr);
+                registeredForwardingMap.remove(localAddr);
             }
         });
         boundChannelFuture.sync();
