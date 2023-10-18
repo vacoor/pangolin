@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.internal.node;
 
+import com.github.pangolin.routing.internal.node.health.HealthChecker;
 import com.github.pangolin.routing.internal.node.util.AvgMinMaxCounter;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;

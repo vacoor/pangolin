@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.config.clash;
 
 import com.github.pangolin.routing.config.PatternResolver;
-import com.github.pangolin.routing.internal.node.HealthChecker;
+import com.github.pangolin.routing.internal.node.health.HealthChecker;
 import com.github.pangolin.routing.internal.node.LoadBalanceProxyServer;
 import com.github.pangolin.routing.internal.node.ProxyServer;
 import com.github.pangolin.routing.internal.node.spi.ServerResolver;

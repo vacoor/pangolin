@@ -8,7 +8,7 @@ import com.github.pangolin.routing.config.clash.Configuration;
 import com.github.pangolin.routing.config.clash.RulesetResolver;
 import com.github.pangolin.routing.internal.node.LoadBalanceProxyServer;
 import com.github.pangolin.routing.internal.node.ProxyServer;
-import com.github.pangolin.routing.internal.node.UrlTestHealthChecker;
+import com.github.pangolin.routing.internal.node.health.UrlTestHealthChecker;
 import com.github.pangolin.routing.pattern.DestinationPattern;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
