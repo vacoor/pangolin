@@ -81,13 +81,13 @@ public class RoutingFileParser {
         final URI uri = URI.create(nextHop);
         final String scheme = uri.getScheme();
         if ("ws".equalsIgnoreCase(scheme) || "wss".equalsIgnoreCase(scheme)) {
-            return () -> new WebSocketProxyHandler(uri, null);
+            return sa -> new WebSocketProxyHandler(uri, null);
         }
         if ("socks5".equalsIgnoreCase(scheme)) {
-            return () -> new Socks5ProxyHandler(new InetSocketAddress(uri.getHost(), uri.getPort()));
+            return sa -> new Socks5ProxyHandler(new InetSocketAddress(uri.getHost(), uri.getPort()));
         }
         if ("socks4".equalsIgnoreCase(scheme)) {
-            return () -> new Socks4ProxyHandler(new InetSocketAddress(uri.getHost(), uri.getPort()));
+            return sa -> new Socks4ProxyHandler(new InetSocketAddress(uri.getHost(), uri.getPort()));
         }
         throw new UnsupportedOperationException(nextHop);
     }

@@ -19,10 +19,10 @@ import java.util.Map;
  */
 @Slf4j
 public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
-    private final Map<DestinationPattern, ? extends ProxyHandlerFactory> routingRules;
+    private final ProxyHandlerFactory proxy;
 
-    public Socks5RoutingServerHandler(final Map<DestinationPattern, ? extends ProxyHandlerFactory> routingRules) {
-        this.routingRules = routingRules;
+    public Socks5RoutingServerHandler(final ProxyHandlerFactory proxy) {
+        this.proxy = proxy;
     }
 
     @Override
@@ -53,17 +53,10 @@ public class Socks5RoutingServerHandler extends Socks5ProxyServerHandler {
     }
 
     private ChannelHandler select(final SocketAddress destinationAddress) {
-        if (null == routingRules || !(destinationAddress instanceof InetSocketAddress)) {
+        if (null == proxy || !(destinationAddress instanceof InetSocketAddress)) {
             return null;
         }
         final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
-        for (Map.Entry<DestinationPattern, ? extends ProxyHandlerFactory> entry : routingRules.entrySet()) {
-            if (entry.getKey().matches(sa)) {
-                final ProxyHandlerFactory value = entry.getValue();
-                log.info("{} -> {}", destinationAddress, "PROXY:" + value);
-                return entry.getValue().newProxyHandler();
-            }
-        }
-        return null;
+        return proxy.newProxyHandler(sa);
     }
 }

@@ -1,25 +1,21 @@
 package com.github.pangolin.routing.server;
 
 import com.github.pangolin.routing.Socks5RoutingServer;
-import com.github.pangolin.routing.config.PatternResolver;
 import com.github.pangolin.routing.config.clash.ClashRuleFactory;
 import com.github.pangolin.routing.config.clash.ClashRuleResolver;
-import com.github.pangolin.routing.config.clash.Configuration;
 import com.github.pangolin.routing.config.clash.RulesetResolver;
-import com.github.pangolin.routing.internal.node.LoadBalanceProxyServer;
-import com.github.pangolin.routing.internal.node.ProxyServer;
 import com.github.pangolin.routing.internal.node.health.UrlTestHealthChecker;
+import com.github.pangolin.routing.config.clash.ClashProxyServerProviderFactory;
+import com.github.pangolin.routing.internal.proxy.ProxyServerProvider;
+import com.github.pangolin.routing.internal.proxy.rule.RuleBasedRoutingProxyServer;
 import com.github.pangolin.routing.pattern.DestinationPattern;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.nio.NioEventLoopGroup;
 
-import java.io.InputStream;
 import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
+import java.net.ProxySelector;
+import java.net.URL;
 import java.util.Map;
 import java.util.Set;
 
@@ -29,31 +25,47 @@ import java.util.Set;
 public class RoutingServerMain {
 
     public static void main(String[] args) throws Exception {
+        ProxySelector aDefault = ProxySelector.getDefault();
+        final ClashProxyServerProviderFactory factory = ClashProxyServerProviderFactory.create("https://sub1.smallstrawberry.com/api/v1/client/subscribe?token=1ab79cc4b202d916cdc8e375c7b0326");
+
+
         final NioEventLoopGroup group = new NioEventLoopGroup();
-        final UrlTestHealthChecker healthCheck = new UrlTestHealthChecker(group);
 
-        final InputStream in = RoutingServerMain.class.getResourceAsStream("/1695102217152.yml");
-        final Configuration conf = Configuration.load(in);
-        final List<Configuration.ProxyDefinition> proxyDefinitions = null != conf.getProxies() ? conf.getProxies() : Collections.emptyList();
-        final List<Configuration.ProxyGroupDefinition> proxyGroupDefinitions = null != conf.getProxyGroups() ? conf.getProxyGroups() : Collections.emptyList();
+        final ProxyServerProvider proxyServerProvider = factory.getProxyServerProvider(group);
+        final RuleBasedRoutingProxyServer router = new RuleBasedRoutingProxyServer("RuleBasedRouter", proxyServerProvider);
 
-        final Map<String, ProxyServer> proxies = ClashRuleFactory.parseProxies(proxyDefinitions);
-        final ProxyServer extranetProxy = new LoadBalanceProxyServer("extranet", healthCheck, new ArrayList<>(proxies.values()), group);
-        // parseProxyGroups(proxyGroupDefinitions, allProxies, group);
+        /*
+        final String[] ruleSets = {
+                "rule/video.list",
+                "rule/twitter.list",
+                "rule/github.list"
+        };
 
-        final Map<DestinationPattern, ProxyServer> routingRules = new LinkedHashMap<>();
-        final PatternResolver patternResolver = new ClashRuleResolver();
-        final RulesetResolver rulesetResolver = new RulesetResolver(patternResolver);
-        final Set<DestinationPattern> patterns = rulesetResolver.resolveClassPathResource("rule/video.list");
-        for (DestinationPattern pattern : patterns) {
-            routingRules.put(pattern, extranetProxy);
+        final RulesetResolver rulesetResolver = new RulesetResolver(new ClashRuleResolver());
+        for (final String ruleSet : ruleSets) {
+            final Set<DestinationPattern> patterns = rulesetResolver.resolveClassPathResource(ruleSet);
+            for (DestinationPattern pattern : patterns) {
+                router.addRouting(pattern, "一元机场");
+            }
+        }
+        */
+        final URL url = RoutingServerMain.class.getResource("/default.conf");
+        Map<DestinationPattern, String> rules = ClashRuleFactory.parseRules(
+                url,
+                ClashRuleResolver.DOMAIN,
+                ClashRuleResolver.DOMAIN_SUFFIX,
+                ClashRuleResolver.DOMAIN_KEYWORD,
+                ClashRuleResolver.IP_CIDR,
+                ClashRuleResolver.IP_CIDR_6,
+                ClashRuleResolver.RULE_SET
+        );
+        for (Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
+            System.out.println(String.format("%s -> %s", entry.getKey(), entry.getValue()));
+            router.addRouting(entry.getKey(), entry.getValue());
         }
 
-        final List<String> ruleDefinitions = conf.getRules();
-        routingRules.putAll(ClashRuleFactory.parseRules(ruleDefinitions, patternResolver, extranetProxy));
-
         final Socks5RoutingServer server = new Socks5RoutingServer(1080);
-        server.start(routingRules).addListener(new ChannelFutureListener() {
+        server.start(router).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {

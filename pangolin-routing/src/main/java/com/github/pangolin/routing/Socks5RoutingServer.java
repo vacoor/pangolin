@@ -31,11 +31,11 @@ public class Socks5RoutingServer extends NettyServer {
         super(listenHost, listenPort, bossGroup, workerGroup);
     }
 
-    public ChannelFuture start(final Map<DestinationPattern, ? extends ProxyHandlerFactory> routings) throws InterruptedException, CertificateException, SSLException {
+    public ChannelFuture start(final ProxyHandlerFactory proxy) throws InterruptedException, CertificateException, SSLException {
         return super.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new Socks5RoutingServerHandler(routings));
+                ch.pipeline().addLast(new Socks5RoutingServerHandler(proxy));
             }
         });
     }
@@ -44,7 +44,7 @@ public class Socks5RoutingServer extends NettyServer {
     public static void main(String[] args) throws Exception {
         final Map<DestinationPattern, ProxyHandlerFactory> routingRules = RoutingFileParser.parse();
 
-        new Socks5RoutingServer(1080).start(routingRules).addListener(new ChannelFutureListener() {
+        new Socks5RoutingServer(1080).start(null).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {

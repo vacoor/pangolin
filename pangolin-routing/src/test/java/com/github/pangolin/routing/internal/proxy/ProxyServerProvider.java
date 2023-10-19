@@ -1,11 +1,13 @@
 package com.github.pangolin.routing.internal.proxy;
 
+import com.github.pangolin.routing.internal.node.ProxyServer;
+
 import java.util.Collection;
 
 public interface ProxyServerProvider {
 
-    Collection<ProxyServer2> getInstances();
+    Collection<ProxyServer> getInstances();
 
-    ProxyServer2 getInstance(final String name);
+    ProxyServer getInstance(final String name);
 
 }

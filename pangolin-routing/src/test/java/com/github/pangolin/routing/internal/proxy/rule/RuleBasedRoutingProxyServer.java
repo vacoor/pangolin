@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.internal.proxy.rule;
 
-import com.github.pangolin.routing.internal.proxy.ProxyServer2;
+import com.github.pangolin.routing.internal.node.ProxyServer;
 import com.github.pangolin.routing.internal.proxy.ProxyServerProvider;
 import com.github.pangolin.routing.internal.proxy.ProxyServerStats;
 import com.github.pangolin.routing.pattern.DestinationPattern;
@@ -8,6 +8,7 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import io.netty.channel.ChannelHandler;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
 import java.util.Map;
@@ -16,7 +17,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
-public class RuleBasedRoutingProxyServer implements ProxyServer2 {
+@Slf4j
+public class RuleBasedRoutingProxyServer implements ProxyServer {
     private final String name;
 
     private final ProxyServerProvider proxyServerProvider;
@@ -48,13 +50,14 @@ public class RuleBasedRoutingProxyServer implements ProxyServer2 {
             if (!entry.getKey().matches(sa)) {
                 continue;
             }
-            final ProxyServer2 proxyToUse = getProxy(entry.getValue());
+            log.info("{} -> {}", sa, entry.getValue());
+            final ProxyServer proxyToUse = getProxy(entry.getValue());
             return null != proxyToUse ? proxyToUse.newProxyHandler(sa) : null;
         }
         return null;
     }
 
-    private ProxyServer2 getProxy(final String name) {
+    private ProxyServer getProxy(final String name) {
         return proxyServerProvider.getInstance(name);
     }
 

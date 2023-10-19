@@ -55,7 +55,7 @@ public class TrojanServerResolver implements ServerResolver {
         }
 
         @Override
-        public ChannelHandler newProxyHandler() {
+        public ChannelHandler newProxyHandler(InetSocketAddress sa) {
             return new TrojanProxyHandler(address, password);
         }
 

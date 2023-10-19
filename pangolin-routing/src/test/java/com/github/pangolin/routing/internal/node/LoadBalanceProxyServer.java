@@ -4,6 +4,7 @@ import com.github.pangolin.routing.internal.node.health.HealthChecker;
 import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -24,11 +25,11 @@ public class LoadBalanceProxyServer implements ProxyServer {
     }
 
     @Override
-    public ChannelHandler newProxyHandler() {
+    public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
         final ProxyServer next = lb.next(true);
         double serverAvgRt = lb.getServerAvgRt(next);
-        log.info("choose: {}: {}ms", next.getName(), serverAvgRt);
-        return next.newProxyHandler();
+        log.info("{} -> {} -> {}: {}ms", sa, getName(), next.getName(), serverAvgRt);
+        return next.newProxyHandler(sa);
     }
 
 }

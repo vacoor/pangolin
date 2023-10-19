@@ -5,6 +5,8 @@ import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 
+import java.net.InetSocketAddress;
+
 public interface ProxyServer extends ProxyHandlerFactory {
     ProxyServer DIRECT = new ProxyServer() {
         @Override
@@ -13,7 +15,7 @@ public interface ProxyServer extends ProxyHandlerFactory {
         }
 
         @Override
-        public ChannelHandler newProxyHandler() {
+        public ChannelHandler newProxyHandler(InetSocketAddress sa) {
             return null;
         }
 
@@ -30,7 +32,7 @@ public interface ProxyServer extends ProxyHandlerFactory {
         }
 
         @Override
-        public ChannelHandler newProxyHandler() {
+        public ChannelHandler newProxyHandler(InetSocketAddress sa) {
             return new ChannelDuplexHandler() {
                 @Override
                 public void channelRegistered(final ChannelHandlerContext ctx) throws Exception {
@@ -52,6 +54,6 @@ public interface ProxyServer extends ProxyHandlerFactory {
 
     String getName();
 
-    ChannelHandler newProxyHandler();
+    ChannelHandler newProxyHandler(InetSocketAddress sa);
 
 }

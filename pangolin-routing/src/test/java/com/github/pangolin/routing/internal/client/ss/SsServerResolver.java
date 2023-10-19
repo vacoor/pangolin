@@ -82,7 +82,7 @@ public class SsServerResolver  implements ServerResolver {
         }
 
         @Override
-        public ChannelHandler newProxyHandler() {
+        public ChannelHandler newProxyHandler(InetSocketAddress sa) {
             return new SsProxyHandler(address, algorithm, password);
         }
     }

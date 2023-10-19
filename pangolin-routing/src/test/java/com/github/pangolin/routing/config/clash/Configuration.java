@@ -31,6 +31,7 @@ public class Configuration {
     public static class ProxyGroupDefinition {
         private String name;
         private String type;
+        private String url;
         private List<String> proxies;
     }
 

@@ -27,6 +27,7 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -49,12 +50,13 @@ public class UrlTestHealthChecker implements HealthChecker {
     @Override
     public Promise<Long> checkHealth(final ProxyServer server) {
         final Promise<Long> promise = GlobalEventExecutor.INSTANCE.newPromise();
-        final ChannelHandler transport = server.newProxyHandler();
         final URI uri = URI.create(url);
         String scheme = uri.getScheme() == null ? "http" : uri.getScheme();
         String host = uri.getHost() == null ? "127.0.0.1" : uri.getHost();
         int port = uri.getPort();
         port = 0 < port ? port : ("http".equals(scheme) ? 80 : "https".equals(scheme) ? 443 : port);
+
+        final ChannelHandler transport = server.newProxyHandler(new InetSocketAddress(host, port));
 
         final Bootstrap b = new Bootstrap();
         b.option(ChannelOption.AUTO_READ, true);

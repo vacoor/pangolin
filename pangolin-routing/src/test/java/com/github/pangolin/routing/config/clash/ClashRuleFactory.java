@@ -1,41 +1,77 @@
 package com.github.pangolin.routing.config.clash;
 
 import com.github.pangolin.routing.config.PatternResolver;
-import com.github.pangolin.routing.internal.node.health.HealthChecker;
 import com.github.pangolin.routing.internal.node.LoadBalanceProxyServer;
 import com.github.pangolin.routing.internal.node.ProxyServer;
+import com.github.pangolin.routing.internal.node.health.HealthChecker;
 import com.github.pangolin.routing.internal.node.spi.ServerResolver;
 import com.github.pangolin.routing.pattern.DestinationPattern;
 import com.google.common.collect.Maps;
 import freework.net.Http;
 import io.netty.channel.EventLoopGroup;
+import io.netty.util.internal.ObjectUtil;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
+import java.util.Set;
 
 /**
+ *
  */
 public class ClashRuleFactory {
 
-    public static Map<DestinationPattern, ProxyServer> parseRules(final List<String> ruleDefinitions, final PatternResolver patternResolver, final ProxyServer udf) {
-        final Map<DestinationPattern, ProxyServer> routingRules = Maps.newLinkedHashMap();
+    public static Map<DestinationPattern, String> parseRules(final URL url, final PatternResolver... resolvers) throws IOException  {
+        final Reader reader = new InputStreamReader(url.openStream(), StandardCharsets.UTF_8);
+        final Map<DestinationPattern, String> rules = new LinkedHashMap<>();
+        final BufferedReader r = reader instanceof BufferedReader ? (BufferedReader) reader : new BufferedReader(reader);
+        String line;
+        while (null != (line = r.readLine())) {
+            final int index = line.indexOf('#');
+            final String lineToUse = -1 < index ? line.substring(0, index).trim() : line.trim();
+            if (lineToUse.isEmpty()) {
+                continue;
+            }
+
+            final int i = lineToUse.lastIndexOf(",");
+            if (-1 < i) {
+                final String patternDefinition = lineToUse.substring(0, i);
+                for (PatternResolver resolver : resolvers) {
+                    List<DestinationPattern> patterns = resolver.resolve(patternDefinition, url);
+                    if (null != patterns) {
+                        for (DestinationPattern pattern : patterns) {
+                            final String proxyType = lineToUse.substring(i + 1);
+                            rules.put(pattern, proxyType);
+                        }
+                    }
+                }
+            }
+        }
+        return rules;
+    }
+
+    private static Map<DestinationPattern, String> parseRules(final List<String> ruleDefinitions, final PatternResolver patternResolver, final URL url) throws IOException {
+        final Map<DestinationPattern, String> routingRules = Maps.newLinkedHashMap();
         for (final String ruleDefinition : ruleDefinitions) {
             final int i = ruleDefinition.lastIndexOf(",");
             if (-1 < i) {
                 final String patternDefinition = ruleDefinition.substring(0, i);
-                final DestinationPattern pattern = patternResolver.resolve(patternDefinition);
-                if (null != pattern) {
-                    final String proxyType = ruleDefinition.substring(i + 1);
-                    if ("DIRECT".equals(proxyType)) {
-                        routingRules.put(pattern, ProxyServer.DIRECT);
-                    } else if ("REJECT".equals(proxyType)) {
-                        routingRules.put(pattern, ProxyServer.REJECT);
-                    } else {
-                        routingRules.put(pattern, udf);
+                final List<DestinationPattern> patterns = patternResolver.resolve(patternDefinition, url);
+                if (null != patterns) {
+                    for (DestinationPattern pattern : patterns) {
+                        final String proxyType = ruleDefinition.substring(i + 1);
+                        routingRules.put(pattern, proxyType);
                     }
                 }
             }
@@ -72,7 +108,7 @@ public class ClashRuleFactory {
     }
 
     public static void parseProxyGroups(final List<Configuration.ProxyGroupDefinition> proxyGroupDefinitions, final Map<String, ProxyServer> proxies,
-                                 final HealthChecker healthChecker, final EventLoopGroup group) {
+                                        final HealthChecker healthChecker, final EventLoopGroup group) {
         final Map<String, Configuration.ProxyGroupDefinition> proxyGroupDefinitionMap = new HashMap<>();
         for (Configuration.ProxyGroupDefinition proxyGroupDefinition : proxyGroupDefinitions) {
             proxyGroupDefinitionMap.put(proxyGroupDefinition.getName(), proxyGroupDefinition);
