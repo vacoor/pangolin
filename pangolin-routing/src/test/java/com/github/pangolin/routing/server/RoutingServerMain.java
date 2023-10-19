@@ -6,6 +6,8 @@ import com.github.pangolin.routing.config.clash.ClashRuleResolver;
 import com.github.pangolin.routing.config.clash.RulesetResolver;
 import com.github.pangolin.routing.internal.node.health.UrlTestHealthChecker;
 import com.github.pangolin.routing.config.clash.ClashProxyServerProviderFactory;
+import com.github.pangolin.routing.internal.proxy.ComposedProxyServerProvider;
+import com.github.pangolin.routing.internal.proxy.LocalProxyServerProviderLoader;
 import com.github.pangolin.routing.internal.proxy.ProxyServerProvider;
 import com.github.pangolin.routing.internal.proxy.rule.RuleBasedRoutingProxyServer;
 import com.github.pangolin.routing.pattern.DestinationPattern;
@@ -26,12 +28,15 @@ public class RoutingServerMain {
 
     public static void main(String[] args) throws Exception {
         ProxySelector aDefault = ProxySelector.getDefault();
-        final ClashProxyServerProviderFactory factory = ClashProxyServerProviderFactory.create("https://sub1.smallstrawberry.com/api/v1/client/subscribe?token=1ab79cc4b202d916cdc8e375c7b0326");
 
 
         final NioEventLoopGroup group = new NioEventLoopGroup();
 
-        final ProxyServerProvider proxyServerProvider = factory.getProxyServerProvider(group);
+        final ProxyServerProvider localProxyServerProvider = LocalProxyServerProviderLoader.load(LocalProxyServerProviderLoader.class.getResource("/proxies.conf"));
+        final ClashProxyServerProviderFactory factory = ClashProxyServerProviderFactory.create("https://sub1.smallstrawberry.com/api/v1/client/subscribe?token=1ab79cc4b202d916cdc8e375c7b0326");
+        final ProxyServerProvider remoteProxyServerProvider = factory.getProxyServerProvider(group);
+
+        final ProxyServerProvider proxyServerProvider = new ComposedProxyServerProvider(remoteProxyServerProvider, localProxyServerProvider);
         final RuleBasedRoutingProxyServer router = new RuleBasedRoutingProxyServer("RuleBasedRouter", proxyServerProvider);
 
         /*

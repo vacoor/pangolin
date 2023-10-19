@@ -88,7 +88,7 @@ public class ClashProxyServerProviderFactory {
             httpUrlConnection.setRequestProperty("pragma", "No-Cache");
             httpUrlConnection.setRequestProperty("User-Agent", "ClashforWindows/0.19.25");
             final int responseCode = httpUrlConnection.getResponseCode();
-            Preconditions.checkState(HttpURLConnection.HTTP_OK == responseCode);
+            Preconditions.checkState(HttpURLConnection.HTTP_OK == responseCode, "responseCode = %s", responseCode);
             return Configuration.load(httpUrlConnection.getInputStream());
         } finally {
             Http.close(httpUrlConnection);

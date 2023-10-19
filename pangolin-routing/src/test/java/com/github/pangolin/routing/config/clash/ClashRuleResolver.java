@@ -66,7 +66,7 @@ public class ClashRuleResolver implements PatternResolver {
         @Override
         public boolean isSupported(final String pattern) {
             if (super.isSupported(pattern)) {
-                final String[] segments = pattern.split("/", 2);
+                final String[] segments = pattern.substring(prefix.length()).split("/", 2);
                 return segments.length == 2 && isDigit(segments[1]) && NetUtil.isValidIpV4Address(segments[0]);
             }
             return false;
@@ -85,7 +85,7 @@ public class ClashRuleResolver implements PatternResolver {
         @Override
         public boolean isSupported(final String pattern) {
             if (super.isSupported(pattern)) {
-                final String[] segments = pattern.split("/", 2);
+                final String[] segments = pattern.substring(prefix.length()).split("/", 2);
                 return segments.length == 2 && isDigit(segments[1]) && NetUtil.isValidIpV6Address(segments[0]);
             }
             return false;
@@ -100,7 +100,7 @@ public class ClashRuleResolver implements PatternResolver {
     };
 
     private static abstract class TypedPrefixPatternResolver implements PatternResolver {
-        private final String prefix;
+        protected final String prefix;
 
         public TypedPrefixPatternResolver(final String prefix) {
             this.prefix = prefix;
