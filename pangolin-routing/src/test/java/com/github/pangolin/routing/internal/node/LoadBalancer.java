@@ -84,7 +84,7 @@ public class LoadBalancer {
             }
         });
         // return instances.iterator().next();
-        return upServers.get(ThreadLocalRandom.current().nextInt(Math.min(upServers.size(), 5)));
+        return instances.get(ThreadLocalRandom.current().nextInt(Math.min(instances.size(), 5)));
     }
 
     public List<ProxyServer> getReachableServers() {
