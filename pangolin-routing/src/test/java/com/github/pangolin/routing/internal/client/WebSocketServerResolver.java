@@ -27,8 +27,8 @@ public class WebSocketServerResolver implements ServerResolver {
             return null;
         }
         int i = url.indexOf("#");
+        final String name = 0 < i ? url.substring(i + 1) : url;
         final URI uri = URI.create(0 < i ? url.substring(0, i) : url);
-        final String name = uri.getFragment();
         return new Instance(null != name ? name : url, uri);
     }
 
