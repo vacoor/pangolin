@@ -75,9 +75,16 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
      * tcp over websocket or websocket frame through.
      */
     private Promise<ChannelHandlerContext> wsTunnelRequested(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
+        final Promise<ChannelHandlerContext> backhaulPromise = accessCtx.executor().newPromise();
         final Map<String, List<String>> params = parseParams(handshake.requestUri());
         final String target = getTarget(params);
         final String agent = getAgent(params);
+        if (null == target || target.isEmpty()) {
+            return backhaulPromise.setFailure(new IllegalArgumentException("missing target"));
+        }
+        if (null == agent || agent.isEmpty()) {
+            return backhaulPromise.setFailure(new IllegalArgumentException("missing agent"));
+        }
 
         /*-
          * tcp://hostname:port:      ws-client --ws--> server --tcp over ws--> agent --> tcp target
@@ -86,7 +93,7 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
         final String targetToUse = target.contains("://") ? target : "tcp://" + target;
         final URI uri = URI.create(targetToUse);
         final String id = accessCtx.channel().id().toString();
-        return webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agent, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
+        return webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agent, uri, accessCtx, backhaulPromise).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
@@ -110,9 +117,16 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
      * tcp through or websocket frame data by tcp.
      */
     private Promise<ChannelHandlerContext> tcpTunnelRequested(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
+        final Promise<ChannelHandlerContext> backhaulPromise = accessCtx.executor().newPromise();
         final Map<String, List<String>> params = parseParams(handshake.requestUri());
         final String target = getTarget(params);
-        final String agentKey = getAgent(params);
+        final String agent = getAgent(params);
+        if (null == target || target.isEmpty()) {
+            return backhaulPromise.setFailure(new IllegalArgumentException("missing target"));
+        }
+        if (null == agent || agent.isEmpty()) {
+            return backhaulPromise.setFailure(new IllegalArgumentException("missing agent"));
+        }
 
         /*-
          * tcp:tcp://hostname:port:      client --tcp--> server -----tcp over ws--------> agent --> tcp target
@@ -120,7 +134,7 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
          */
         final URI uri = URI.create(target);
         final String id = accessCtx.channel().id().toString();
-        return webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
+        return webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agent, uri, accessCtx, backhaulPromise).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {

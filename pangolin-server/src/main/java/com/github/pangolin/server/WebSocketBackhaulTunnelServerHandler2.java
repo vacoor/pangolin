@@ -100,9 +100,16 @@ class WebSocketBackhaulTunnelServerHandler2 extends WebSocketServerHandshakeNego
      * tcp over websocket or websocket frame through.
      */
     private Promise<ChannelHandlerContext> wsTunnelRequested(final FullHttpRequest handshake, final ChannelHandlerContext accessCtx) {
+        final Promise<ChannelHandlerContext> backhaulPromise = accessCtx.executor().newPromise();
         final Map<String, List<String>> params = parseParams(handshake.uri());
         final String target = getTarget(params);
-        final String agentKey = getAgentKey(params);
+        final String agent = getAgent(params);
+        if (null == target || target.isEmpty()) {
+            return backhaulPromise.setFailure(new IllegalArgumentException("missing target"));
+        }
+        if (null == agent || agent.isEmpty()) {
+            return backhaulPromise.setFailure(new IllegalArgumentException("missing agent"));
+        }
 
         /*-
          * v1.0
@@ -112,7 +119,7 @@ class WebSocketBackhaulTunnelServerHandler2 extends WebSocketServerHandshakeNego
         final String targetToUse = target.contains("://") ? target : "tcp://" + target;
         final URI uri = URI.create(targetToUse);
         final String id = accessCtx.channel().id().toString();
-        return webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agentKey, uri, accessCtx).addListener(new FutureListener<ChannelHandlerContext>() {
+        return webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agent, uri, accessCtx, backhaulPromise).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
@@ -142,7 +149,7 @@ class WebSocketBackhaulTunnelServerHandler2 extends WebSocketServerHandshakeNego
         return Util.last(params, "target");
     }
 
-    private String getAgentKey(final Map<String, List<String>> params) {
+    private String getAgent(final Map<String, List<String>> params) {
         return Util.last(params, "agent");
     }
 

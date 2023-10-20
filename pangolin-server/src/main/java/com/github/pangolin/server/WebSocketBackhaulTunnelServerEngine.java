@@ -90,18 +90,11 @@ public class WebSocketBackhaulTunnelServerEngine {
         }
     }
 
-    /**
-     * @param id
-     * @param agentKey
-     * @param target
-     * @param accessCtx
-     * @return
-     */
-    Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agentKey, final URI target, final ChannelHandlerContext accessCtx) {
-        return tunnelRequested(id, agentKey, target, accessCtx, TimeUnit.SECONDS.toMillis(10), accessCtx.executor().newPromise());
+    Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agent, final URI target, final ChannelHandlerContext accessCtx, Promise<ChannelHandlerContext> backhaulPromise) {
+        return tunnelRequested(id, agent, target, accessCtx, TimeUnit.SECONDS.toMillis(10), backhaulPromise);
     }
 
-    Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agent, final URI target, final ChannelHandlerContext accessCtx, final long waitTimeoutMs, Promise<ChannelHandlerContext> backhaulPromise) {
+    private Promise<ChannelHandlerContext> tunnelRequested(final String id, final String agent, final URI target, final ChannelHandlerContext accessCtx, final long waitTimeoutMs, Promise<ChannelHandlerContext> backhaulPromise) {
         final Agent agentToUse = this.choose(agent);
         if (null == agentToUse) {
             backhaulPromise.tryFailure(new ConnectException("Connection unavailable: agent '" + agent + "' not found"));

@@ -13,7 +13,6 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
-import io.netty.util.concurrent.Promise;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -68,8 +67,7 @@ public class WebSocketBackhaulTunnelServerForwarder {
                     public void channelActive(final ChannelHandlerContext accessCtx) throws Exception {
                         final String id = "F:" + accessCtx.channel().id().toString();
                         final URI target = URI.create("tcp://" + remoteAddr.getHostString() + ":" + remoteAddr.getPort());
-                        final Promise<ChannelHandlerContext> promise = webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agent, target, accessCtx);
-                        promise.addListener(new FutureListener<ChannelHandlerContext>() {
+                        webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agent, target, accessCtx, accessCtx.executor().newPromise()).addListener(new FutureListener<ChannelHandlerContext>() {
                             @Override
                             public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {
                                 if (future.isSuccess()) {
