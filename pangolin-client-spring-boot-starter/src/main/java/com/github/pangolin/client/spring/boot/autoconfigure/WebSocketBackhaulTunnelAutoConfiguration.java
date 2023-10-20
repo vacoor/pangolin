@@ -8,7 +8,6 @@ import org.springframework.core.env.Environment;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.UUID;
@@ -60,10 +59,9 @@ public class WebSocketBackhaulTunnelAutoConfiguration implements EnvironmentAwar
 
     private void launchTunnelClientIfNecessary() throws IOException, InterruptedException {
         final String wsServerUrlToUse = env.getProperty(WS_SERVER_URL_PROPERTY);
-        final String name = ManagementFactory.getRuntimeMXBean().getName();
-        final String address = env.getProperty("spring.cloud.client.ip-address", UUID.randomUUID().toString());
+        final String name = env.getProperty("spring.application.name", UUID.randomUUID().toString());
         final String profiles = Arrays.toString(env.getActiveProfiles()).replaceAll("[\\[\\]]+", "");
-        final String wsTunnelInstanceName = (name + '@' + profiles + '@' + address).replace(" ", "");
+        final String wsTunnelInstanceName = (name + '@' + profiles).replace(" ", "");
         if (StringUtils.hasText(wsServerUrlToUse)) {
             final URI wsServerUri = URI.create(wsServerUrlToUse);
             final WebSocketBackhaulTunnelAgent agent = agentRef.get();
