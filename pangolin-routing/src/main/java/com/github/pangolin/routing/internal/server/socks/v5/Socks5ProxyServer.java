@@ -5,6 +5,7 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.logging.LoggingHandler;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
@@ -27,6 +28,7 @@ public class Socks5ProxyServer extends NettyServer {
         return super.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
+                ch.pipeline().addLast(new LoggingHandler());
                 ch.pipeline().addLast(new Socks5ProxyServerHandler());
             }
         });
