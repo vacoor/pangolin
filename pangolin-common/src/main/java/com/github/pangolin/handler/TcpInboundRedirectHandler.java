@@ -37,7 +37,7 @@ public class TcpInboundRedirectHandler extends ChannelInboundHandlerAdapter {
             if (log.isTraceEnabled()) {
                 final Object msgToLog = msg instanceof ByteBuf ? ((ByteBuf) msg).toString(StandardCharsets.UTF_8) : msg;
                 log.trace("[tun@tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
-                log.trace("[tun@tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), Base64.getEncoder().encodeToString(((String) msgToLog).getBytes()));
+                // log.trace("[tun@tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), Base64.getEncoder().encodeToString(((String) msgToLog).getBytes()));
             }
             outCtx.writeAndFlush(msg);
         } else {

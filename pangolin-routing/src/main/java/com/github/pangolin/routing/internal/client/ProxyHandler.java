@@ -40,11 +40,23 @@ public abstract class ProxyHandler extends ChannelDuplexHandler {
                 public void operationComplete(final ChannelFuture f) throws Exception {
                     if (!f.isSuccess()) {
                         setHandshakeFailure(ctx, f.cause());
+                        promise.tryFailure(f.cause());
+                    } else {
+                        promise.trySuccess();
                     }
                 }
             });
             destinationAddress = remoteAddress;
-            ctx.connect(proxyAddress, localAddress, promise);
+            ChannelPromise delegate = ctx.newPromise().addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(final ChannelFuture channelFuture) throws Exception {
+                    if (!channelFuture.isSuccess()) {
+                        handshakePromise.tryFailure(channelFuture.cause());
+                    }
+                }
+            });
+
+            ctx.connect(proxyAddress, localAddress, delegate);
         }
     }
 
