@@ -10,6 +10,7 @@ import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.timeout.IdleStateHandler;
+import io.netty.util.concurrent.Future;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
@@ -61,11 +62,11 @@ public class WebSocketBackhaulTunnelAgent {
         return channel.isActive();
     }
 
-    public void shutdownGracefully() {
+    public Future<?> shutdownGracefully() {
         if (null != channel) {
             channel.close();
         }
-        workerGroup.shutdownGracefully();
+        return workerGroup.shutdownGracefully();
     }
 
 }

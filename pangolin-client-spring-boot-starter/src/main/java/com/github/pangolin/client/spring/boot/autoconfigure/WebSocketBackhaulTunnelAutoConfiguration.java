@@ -69,7 +69,7 @@ public class WebSocketBackhaulTunnelAutoConfiguration implements EnvironmentAwar
             final WebSocketBackhaulTunnelAgent agent = agentRef.get();
             if (null == agent || !agent.isRunning() || !wsServerUri.equals(agent.getWebSocketServerEndpoint())) {
                 if (null != agent) {
-                    agent.shutdownGracefully();
+                    agent.shutdownGracefully().sync();
                 }
                 final WebSocketBackhaulTunnelAgent agentNew = new WebSocketBackhaulTunnelAgent(wsTunnelInstanceName, wsServerUri);
                 if (agentRef.compareAndSet(agent, agentNew)) {
