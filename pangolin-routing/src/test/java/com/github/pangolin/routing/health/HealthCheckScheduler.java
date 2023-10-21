@@ -1,7 +1,6 @@
-package com.github.pangolin.routing.internal.proxy.health;
+package com.github.pangolin.routing.health;
 
-import com.github.pangolin.routing.internal.node.ProxyServer;
-import com.github.pangolin.routing.internal.node.health.HealthChecker;
+import com.github.pangolin.routing.proxy.ProxyServer;
 
 import java.util.Map;
 import java.util.concurrent.*;

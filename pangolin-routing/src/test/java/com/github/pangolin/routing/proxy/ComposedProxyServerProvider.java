@@ -1,6 +1,4 @@
-package com.github.pangolin.routing.internal.proxy;
-
-import com.github.pangolin.routing.internal.node.ProxyServer;
+package com.github.pangolin.routing.proxy;
 
 import java.util.Collection;
 import java.util.HashSet;

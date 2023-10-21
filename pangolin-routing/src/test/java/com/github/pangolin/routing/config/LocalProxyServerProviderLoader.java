@@ -1,26 +1,21 @@
-package com.github.pangolin.routing.internal.proxy;
+package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.config.PatternResolver;
-import com.github.pangolin.routing.internal.node.ProxyServer;
-import com.github.pangolin.routing.internal.node.spi.ServerResolver;
-import com.github.pangolin.routing.pattern.DestinationPattern;
+import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.proxy.ProxyServerProvider;
+import com.github.pangolin.routing.config.spi.ServerResolver;
 import io.netty.util.internal.ObjectUtil;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
-import java.util.Set;
 
 /**
  */

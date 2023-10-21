@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.internal.server.socks.v5;
+package com.github.pangolin.routing.internal.server.socks;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.util.Channels;

@@ -1,10 +1,8 @@
 package com.github.pangolin.routing.server;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
-import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
-import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
-import com.github.pangolin.routing.internal.node.ProxyServer;
-import com.github.pangolin.routing.internal.proxy.ProxyServerProvider;
+import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import com.github.pangolin.util.Channels;
 import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;

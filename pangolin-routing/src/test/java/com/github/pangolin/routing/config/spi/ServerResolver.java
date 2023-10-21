@@ -1,6 +1,6 @@
-package com.github.pangolin.routing.internal.node.spi;
+package com.github.pangolin.routing.config.spi;
 
-import com.github.pangolin.routing.internal.node.ProxyServer;
+import com.github.pangolin.routing.proxy.ProxyServer;
 
 import java.util.Properties;
 

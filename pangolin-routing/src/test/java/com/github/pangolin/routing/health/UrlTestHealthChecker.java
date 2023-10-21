@@ -1,6 +1,6 @@
-package com.github.pangolin.routing.internal.node.health;
+package com.github.pangolin.routing.health;
 
-import com.github.pangolin.routing.internal.node.ProxyServer;
+import com.github.pangolin.routing.proxy.ProxyServer;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;

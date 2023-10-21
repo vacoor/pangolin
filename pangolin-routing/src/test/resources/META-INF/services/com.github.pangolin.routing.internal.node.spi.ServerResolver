@@ -1,3 +1,0 @@
-com.github.pangolin.routing.internal.client.ss.SsServerResolver
-com.github.pangolin.routing.internal.client.trojan.TrojanServerResolver
-com.github.pangolin.routing.internal.client.WebSocketServerResolver

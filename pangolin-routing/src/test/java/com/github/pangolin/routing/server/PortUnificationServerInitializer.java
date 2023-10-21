@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.server;
 
 import com.github.pangolin.routing.internal.server.http.HttpProxyServerHandler;
-import com.github.pangolin.routing.internal.server.socks.v4.Socks4ProxyServerHandler;
-import com.github.pangolin.routing.internal.server.socks.v5.Socks5ProxyServerHandler;
+import com.github.pangolin.routing.internal.server.socks.Socks4ProxyServerHandler;
+import com.github.pangolin.routing.internal.server.socks.Socks5ProxyServerHandler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;

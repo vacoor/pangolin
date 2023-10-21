@@ -1,7 +1,5 @@
 package com.github.pangolin.routing;
 
-import com.github.pangolin.routing.pattern.DestinationPattern;
-import com.github.pangolin.routing.resolver.RoutingFileParser;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -12,7 +10,6 @@ import io.netty.channel.socket.SocketChannel;
 import javax.net.ssl.SSLException;
 import java.net.InetSocketAddress;
 import java.security.cert.CertificateException;
-import java.util.Map;
 
 /**
  *
@@ -42,8 +39,6 @@ public class Socks5RoutingServer extends NettyServer {
 
 
     public static void main(String[] args) throws Exception {
-        final Map<DestinationPattern, ProxyHandlerFactory> routingRules = RoutingFileParser.parse();
-
         new Socks5RoutingServer(1080).start(null).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {

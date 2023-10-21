@@ -1,6 +1,6 @@
-package com.github.pangolin.routing.internal.proxy;
+package com.github.pangolin.routing.proxy;
 
-import com.github.pangolin.routing.internal.node.util.AvgMinMaxCounter;
+import com.github.pangolin.routing.util.AvgMinMaxCounter;
 
 public class ProxyServerStats {
     private final String name;

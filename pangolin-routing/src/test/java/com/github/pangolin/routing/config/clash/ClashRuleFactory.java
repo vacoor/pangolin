@@ -1,31 +1,27 @@
 package com.github.pangolin.routing.config.clash;
 
 import com.github.pangolin.routing.config.PatternResolver;
-import com.github.pangolin.routing.internal.node.LoadBalanceProxyServer;
-import com.github.pangolin.routing.internal.node.ProxyServer;
-import com.github.pangolin.routing.internal.node.health.HealthChecker;
-import com.github.pangolin.routing.internal.node.spi.ServerResolver;
+import com.github.pangolin.routing.proxy.LoadBalanceProxyServer;
+import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.health.HealthChecker;
+import com.github.pangolin.routing.config.spi.ServerResolver;
 import com.github.pangolin.routing.pattern.DestinationPattern;
 import com.google.common.collect.Maps;
 import freework.net.Http;
 import io.netty.channel.EventLoopGroup;
-import io.netty.util.internal.ObjectUtil;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
-import java.util.Set;
 
 /**
  *

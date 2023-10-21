@@ -1,8 +1,7 @@
 package com.github.pangolin.routing;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
-import com.github.pangolin.routing.internal.server.socks.v5.Socks5ProxyServerHandler;
-import com.github.pangolin.routing.pattern.DestinationPattern;
+import com.github.pangolin.routing.internal.server.socks.Socks5ProxyServerHandler;
 import com.github.pangolin.util.Channels;
 import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
@@ -12,7 +11,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.Map;
 
 /**
  *

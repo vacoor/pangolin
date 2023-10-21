@@ -1,7 +1,7 @@
-package com.github.pangolin.routing.internal.client;
+package com.github.pangolin.routing.config.spi;
 
-import com.github.pangolin.routing.internal.node.ProxyServer;
-import com.github.pangolin.routing.internal.node.spi.ServerResolver;
+import com.github.pangolin.routing.internal.client.WebSocketProxyHandler;
+import com.github.pangolin.routing.proxy.ProxyServer;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;

@@ -1,8 +1,5 @@
-package com.github.pangolin.routing.internal.proxy.rule;
+package com.github.pangolin.routing.proxy;
 
-import com.github.pangolin.routing.internal.node.ProxyServer;
-import com.github.pangolin.routing.internal.proxy.ProxyServerProvider;
-import com.github.pangolin.routing.internal.proxy.ProxyServerStats;
 import com.github.pangolin.routing.pattern.DestinationPattern;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;

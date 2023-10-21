@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.internal.node;
+package com.github.pangolin.routing.proxy;
 
 import com.github.pangolin.routing.ProxyHandlerFactory;
 import io.netty.channel.ChannelDuplexHandler;
