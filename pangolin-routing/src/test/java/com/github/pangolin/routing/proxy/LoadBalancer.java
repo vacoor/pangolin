@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.proxy;
 
+import com.github.pangolin.routing.ProxyServer;
 import com.github.pangolin.routing.health.HealthChecker;
 import com.github.pangolin.routing.util.AvgMinMaxCounter;
 import io.netty.util.concurrent.Future;

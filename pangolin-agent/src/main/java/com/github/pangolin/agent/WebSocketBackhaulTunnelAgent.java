@@ -24,6 +24,7 @@ public class WebSocketBackhaulTunnelAgent {
 
     private final String name;
     private final URI webSocketServerEndpoint;
+
     private final EventLoopGroup workerGroup = new NioEventLoopGroup();
     private final AtomicBoolean started = new AtomicBoolean(false);
 
@@ -59,7 +60,7 @@ public class WebSocketBackhaulTunnelAgent {
     }
 
     public boolean isRunning() {
-        return channel.isActive();
+        return null != channel && channel.isActive();
     }
 
     public Future<?> shutdownGracefully() {

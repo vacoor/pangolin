@@ -16,7 +16,12 @@ import java.util.regex.Pattern;
 
 @Slf4j
 public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
+    private static final String AGENT_VERSION = "1.0";
     private static final String BACKHAUL_PROTOCOL = "PASSIVE";
+
+    private static final String WS_PROTOCOL = "ws";
+    private static final String WSS_PROTOCOL = "wss";
+    private static final String TCP_PROTOCOL = "tcp";
 
     private enum State {SUSPENDED, INITIALIZING, INITIALIZED}
 
@@ -36,7 +41,7 @@ public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHan
         if (null != customHttpHeaders) {
             final InetSocketAddress localAddress = (InetSocketAddress) ctx.channel().localAddress();
             customHttpHeaders.set("X-Node-Name", name);
-            customHttpHeaders.set("X-Node-Version", "1.0");
+            customHttpHeaders.set("X-Node-Version", AGENT_VERSION);
             customHttpHeaders.set("X-Node-Intranet", localAddress.getHostString());
         }
         super.channelActive(ctx);
@@ -77,10 +82,10 @@ public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHan
             final URI target = URI.create(segments[1]);
 
             final WebSocketClientHandshaker backhaulHandshaker = newBackhaulHandshaker(id);
-            if ("tcp".equalsIgnoreCase(target.getScheme())) {
+            if (TCP_PROTOCOL.equalsIgnoreCase(target.getScheme())) {
                 final InetSocketAddress socketAddress = new InetSocketAddress(target.getHost(), target.getPort());
                 Channels2.pipe(socketAddress, backhaulHandshaker, ctx.channel().eventLoop());
-            } else if ("ws".equalsIgnoreCase(target.getScheme()) || "wss".equalsIgnoreCase(target.getScheme())) {
+            } else if (WS_PROTOCOL.equalsIgnoreCase(target.getScheme()) || WSS_PROTOCOL.equalsIgnoreCase(target.getScheme())) {
                 final WebSocketClientHandshaker upstreamHandshaker = newHandshaker(target, null);
                 Channels2.pipe(upstreamHandshaker, backhaulHandshaker, ctx.channel().eventLoop());
             }

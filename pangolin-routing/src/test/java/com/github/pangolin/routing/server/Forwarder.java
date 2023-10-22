@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.server;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
-import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import com.github.pangolin.util.Channels;
 import io.netty.channel.*;

@@ -1,12 +1,11 @@
 package com.github.pangolin.routing.config.clash;
 
+import com.github.pangolin.routing.ProxyServer;
 import com.github.pangolin.routing.config.PatternResolver;
-import com.github.pangolin.routing.proxy.LoadBalanceProxyServer;
-import com.github.pangolin.routing.proxy.ProxyServer;
-import com.github.pangolin.routing.health.HealthChecker;
 import com.github.pangolin.routing.config.spi.ServerResolver;
+import com.github.pangolin.routing.health.HealthChecker;
 import com.github.pangolin.routing.pattern.DestinationPattern;
-import com.google.common.collect.Maps;
+import com.github.pangolin.routing.proxy.LoadBalanceProxyServer;
 import freework.net.Http;
 import io.netty.channel.EventLoopGroup;
 
@@ -16,12 +15,7 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.ServiceLoader;
+import java.util.*;
 
 /**
  *
@@ -58,7 +52,7 @@ public class ClashRuleFactory {
     }
 
     private static Map<DestinationPattern, String> parseRules(final List<String> ruleDefinitions, final PatternResolver patternResolver, final URL url) throws IOException {
-        final Map<DestinationPattern, String> routingRules = Maps.newLinkedHashMap();
+        final Map<DestinationPattern, String> routingRules = new LinkedHashMap();
         for (final String ruleDefinition : ruleDefinitions) {
             final int i = ruleDefinition.lastIndexOf(",");
             if (-1 < i) {

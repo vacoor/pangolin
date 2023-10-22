@@ -3,13 +3,7 @@ package com.github.pangolin.server;
 import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.util.Channels;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.util.concurrent.Future;
@@ -27,13 +21,13 @@ import java.util.concurrent.ConcurrentMap;
 
 @Slf4j
 public class WebSocketBackhaulTunnelServerForwarder {
-    private final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine;
+    private final WebSocketBackhaulTunnelServerEngine engine;
     private final EventLoopGroup bossGroup;
     private final EventLoopGroup workerGroup;
     private final ConcurrentMap<SocketAddress, Forwarding> registeredForwardingMap = new ConcurrentHashMap<>();
 
-    public WebSocketBackhaulTunnelServerForwarder(final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
-        this.webSocketBackhaulTunnelServerEngine = webSocketBackhaulTunnelServerEngine;
+    public WebSocketBackhaulTunnelServerForwarder(final WebSocketBackhaulTunnelServerEngine engine, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
+        this.engine = engine;
         this.bossGroup = bossGroup;
         this.workerGroup = workerGroup;
     }
@@ -69,7 +63,7 @@ public class WebSocketBackhaulTunnelServerForwarder {
                     public void channelActive(final ChannelHandlerContext accessCtx) throws Exception {
                         final String id = "F:" + accessCtx.channel().id().toString();
                         final URI target = URI.create("tcp://" + remoteAddr.getHostString() + ":" + remoteAddr.getPort());
-                        webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agent, target, accessCtx, accessCtx.executor().newPromise()).addListener(new FutureListener<ChannelHandlerContext>() {
+                        engine.tunnelRequested(id, agent, target, accessCtx, accessCtx.executor().newPromise()).addListener(new FutureListener<ChannelHandlerContext>() {
                             @Override
                             public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {
                                 if (future.isSuccess()) {

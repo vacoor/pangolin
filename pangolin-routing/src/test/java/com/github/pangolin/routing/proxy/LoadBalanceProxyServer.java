@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.proxy;
 
+import com.github.pangolin.routing.ProxyServer;
 import com.github.pangolin.routing.health.HealthChecker;
 import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;

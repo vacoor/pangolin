@@ -2,18 +2,14 @@ package com.github.pangolin.server;
 
 import com.github.pangolin.server.shell.ConsoleReaderFactory;
 import com.github.pangolin.server.shell.WebSocketBackhaulTunnelServerShell;
-import com.github.pangolin.util.Channels;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
 import jline.TerminalSupport;
 import jline.console.ConsoleReader;
@@ -28,18 +24,20 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
+ *
  */
 @Slf4j
 public class WebSocketBackhaulTunnelServerConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
     private static final Pattern RESIZE_PATTERN = Pattern.compile("^\\u001B\\[8;([0-9]+);([0-9])+t$");
-    private final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine;
+
+    private final WebSocketBackhaulTunnelServerEngine engine;
     private final WebSocketBackhaulTunnelServerForwarder forwarder;
 
     private HeadlessTerminal terminal;
     private OutputStream toConsoleIn;
 
-    public WebSocketBackhaulTunnelServerConsoleHandler(final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine, final WebSocketBackhaulTunnelServerForwarder forwarder) {
-        this.webSocketBackhaulTunnelServerEngine = webSocketBackhaulTunnelServerEngine;
+    public WebSocketBackhaulTunnelServerConsoleHandler(final WebSocketBackhaulTunnelServerEngine engine, final WebSocketBackhaulTunnelServerForwarder forwarder) {
+        this.engine = engine;
         this.forwarder = forwarder;
     }
 
@@ -52,12 +50,12 @@ public class WebSocketBackhaulTunnelServerConsoleHandler extends SimpleChannelIn
                     new PipedInputStream(toConsoleIn),
                     new WebSocketBinaryOutput(ctx),
                     terminal,
-                    () -> webSocketBackhaulTunnelServerEngine.getAgents().stream().map(WebSocketBackhaulTunnelServerEngine.Agent::getId).collect(Collectors.toList())
+                    () -> engine.getAgents().stream().map(WebSocketBackhaulTunnelServerEngine.Agent::getId).collect(Collectors.toList())
             );
 
             this.terminal = terminal;
             this.toConsoleIn = toConsoleIn;
-            WebSocketBackhaulTunnelServerShell.create(console, true, webSocketBackhaulTunnelServerEngine, forwarder).start();
+            WebSocketBackhaulTunnelServerShell.create(console, true, engine, forwarder).start();
         }
     }
 
@@ -69,20 +67,6 @@ public class WebSocketBackhaulTunnelServerConsoleHandler extends SimpleChannelIn
             if (matcher.find()) {
                 terminal.cols = Integer.parseInt(matcher.group(1));
                 terminal.rows = Integer.parseInt(matcher.group(2));
-                return;
-            }
-
-            final int index = text.indexOf(' ');
-            final String command = -1 < index ? text.substring(0, index) : text;
-            final String commandArgs = -1 < index ? text.substring(index + 1) : "";
-            if ("\u0009\u0011".equals(command)) {
-                final String[] dimension = commandArgs.split("x", 2);
-                try {
-                    terminal.cols = Integer.parseInt(dimension[0]);
-                    terminal.rows = Integer.parseInt(dimension[1]);
-                } catch (final NumberFormatException ignore) {
-                    log.error("Execute command '{}' error", text, ignore);
-                }
             } else {
                 writeAndFlush(toConsoleIn, ByteBufUtil.getBytes(frame.content()));
             }
@@ -182,31 +166,4 @@ public class WebSocketBackhaulTunnelServerConsoleHandler extends SimpleChannelIn
         }
     }
 
-    public static void main(String[] args) throws InterruptedException {
-
-        final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine = new WebSocketBackhaulTunnelServerEngine();
-        final NioEventLoopGroup bossGroup = new NioEventLoopGroup(2);
-        final NioEventLoopGroup workerGroup = new NioEventLoopGroup();
-        final WebSocketBackhaulTunnelServerForwarder forwarder = new WebSocketBackhaulTunnelServerForwarder(webSocketBackhaulTunnelServerEngine, bossGroup, workerGroup);
-        Channels.listen(null, 10443, new NioEventLoopGroup(), new NioEventLoopGroup(), new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel ch) throws Exception {
-                final ChannelPipeline pipeline = ch.pipeline();
-//                if (null != sslContext) {
-//                    pipeline.addLast(sslContext.newHandler(ch.alloc()));
-//                }
-                pipeline.addLast(
-                        new HttpServerCodec(),
-                        new HttpObjectAggregator(8 * 1024 * 1024),
-                        /*- 浏览器似乎处理压缩有问题(permessage-deflate).
-                        new WebSocketServerCompressionHandler(),
-                        new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
-                        */
-                        new WebSocketServerProtocolHandler("", "*", true, 65536, true, true),
-                        // new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS),
-                        new WebSocketBackhaulTunnelServerConsoleHandler(webSocketBackhaulTunnelServerEngine, forwarder)
-                );
-            }
-        }).sync().channel().closeFuture().sync();
-    }
 }

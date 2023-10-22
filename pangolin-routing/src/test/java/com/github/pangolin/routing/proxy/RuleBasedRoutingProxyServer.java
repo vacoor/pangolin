@@ -1,9 +1,7 @@
 package com.github.pangolin.routing.proxy;
 
+import com.github.pangolin.routing.ProxyServer;
 import com.github.pangolin.routing.pattern.DestinationPattern;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
 import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;
 
@@ -11,8 +9,6 @@ import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 
 @Slf4j
 public class RuleBasedRoutingProxyServer implements ProxyServer {
@@ -66,16 +62,4 @@ public class RuleBasedRoutingProxyServer implements ProxyServer {
         registeredRoutingMap.remove(pattern);
     }
 
-    public static void main(String[] args) throws ExecutionException {
-        final LoadingCache<String, ProxyServerStats> statsCache = CacheBuilder.newBuilder()
-                .expireAfterAccess(10, TimeUnit.MINUTES)
-                .build(new CacheLoader<String, ProxyServerStats>() {
-                    @Override
-                    public ProxyServerStats load(final String key) throws Exception {
-                        return new ProxyServerStats(key);
-                    }
-                });
-        ProxyServerStats xx = statsCache.get("xx");
-        System.out.println(xx);
-    }
 }

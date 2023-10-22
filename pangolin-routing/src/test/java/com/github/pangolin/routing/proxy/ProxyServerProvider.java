@@ -1,5 +1,7 @@
 package com.github.pangolin.routing.proxy;
 
+import com.github.pangolin.routing.ProxyServer;
+
 import java.util.Collection;
 
 public interface ProxyServerProvider {
