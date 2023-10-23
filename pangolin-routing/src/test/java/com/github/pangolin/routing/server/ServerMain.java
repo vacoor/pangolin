@@ -12,7 +12,9 @@ import com.github.pangolin.routing.proxy.RuleBasedRoutingProxyServer;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelInitializer;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
 
 import java.net.InetSocketAddress;
 import java.net.URL;
@@ -52,7 +54,12 @@ public class ServerMain {
 //        forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));
 
         final NettyServer server = new NettyServer(1080);
-        server.start(true, new RoutingSocks5ServerHandler(router)).addListener(new ChannelFutureListener() {
+        server.start(true, new ChannelInitializer<SocketChannel>() {
+            @Override
+            protected void initChannel(final SocketChannel ch) throws Exception {
+                ch.pipeline().addLast(new RoutingSocks5ServerHandler(router));
+            }
+        }).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
