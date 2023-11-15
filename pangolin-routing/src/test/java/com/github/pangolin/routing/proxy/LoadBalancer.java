@@ -74,10 +74,12 @@ public class LoadBalancer {
 
 
     public ProxyServer next(boolean acquire) {
-        if (upServers.isEmpty()) {
-            throw new IllegalStateException("No available instance found");
+        List<ProxyServer> serversToUse = upServers;
+        if (serversToUse.isEmpty()) {
+            log.warn("No available instance found");
+            serversToUse = allServers;
         }
-        final List<ProxyServer> instances = new ArrayList<>(upServers);
+        final List<ProxyServer> instances = new ArrayList<>(serversToUse);
         instances.sort(new Comparator<ProxyServer>() {
             @Override
             public int compare(final ProxyServer o1, final ProxyServer o2) {
