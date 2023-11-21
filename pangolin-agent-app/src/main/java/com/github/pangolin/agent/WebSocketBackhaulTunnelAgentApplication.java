@@ -1,6 +1,5 @@
-package com.github.pangolin.client.spring.boot;
+package com.github.pangolin.agent;
 
-import com.github.pangolin.agent.WebSocketBackhaulTunnelAgent;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import org.springframework.boot.SpringApplication;
@@ -13,8 +12,8 @@ public class WebSocketBackhaulTunnelAgentApplication {
 
     public static void main(String[] args) throws Exception {
         SpringApplication.run(WebSocketBackhaulTunnelAgentApplication.class, args);
-        final String agentServer = System.getProperty("agent.server");
         final String agentName = System.getProperty("agent.name");
+        final String agentServer = System.getProperty("agent.server");
 
         final URI uri = URI.create(agentServer);
         final WebSocketBackhaulTunnelAgent client = new WebSocketBackhaulTunnelAgent(agentName, uri);
