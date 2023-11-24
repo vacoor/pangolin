@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.ProxyServer;
+import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import com.github.pangolin.routing.config.spi.ServerResolver;
 import io.netty.util.internal.ObjectUtil;

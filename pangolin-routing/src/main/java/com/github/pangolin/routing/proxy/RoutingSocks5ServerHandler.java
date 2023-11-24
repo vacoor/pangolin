@@ -1,4 +1,4 @@
-package com.github.pangolin.routing;
+package com.github.pangolin.routing.proxy;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.internal.server.socks.Socks5ProxyServerHandler;

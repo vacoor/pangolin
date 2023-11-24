@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.config.spi;
 
 import com.github.pangolin.routing.internal.client.trojan.TrojanProxyHandler;
-import com.github.pangolin.routing.ProxyServer;
+import com.github.pangolin.routing.proxy.ProxyServer;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;

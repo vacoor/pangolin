@@ -117,7 +117,8 @@ public class TrojanProxyHandler extends ChannelDuplexHandler {
     }
 
     private byte[] getSecretKey(final String password) throws NoSuchAlgorithmException {
-        final byte[] hash = MessageDigest.getInstance("SHA-224").digest(null != password ? password.getBytes(StandardCharsets.UTF_8) : new byte[0]);
+        final byte[] bytes = null != password ? password.getBytes(StandardCharsets.UTF_8) : new byte[0];
+        final byte[] hash = MessageDigest.getInstance("SHA-224").digest(bytes);
         return Hex.encode(hash).getBytes(StandardCharsets.UTF_8);
     }
 }

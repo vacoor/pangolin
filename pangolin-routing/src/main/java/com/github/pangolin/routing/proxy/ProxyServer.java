@@ -1,4 +1,4 @@
-package com.github.pangolin.routing;
+package com.github.pangolin.routing.proxy;
 
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandler;

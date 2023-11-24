@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.health;
 
-import com.github.pangolin.routing.ProxyServer;
+import com.github.pangolin.routing.proxy.ProxyServer;
 
 import java.util.Map;
 import java.util.concurrent.*;

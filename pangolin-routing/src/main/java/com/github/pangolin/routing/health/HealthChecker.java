@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.health;
 
-import com.github.pangolin.routing.ProxyServer;
+import com.github.pangolin.routing.proxy.ProxyServer;
 import io.netty.util.concurrent.Promise;
 
 public interface HealthChecker {
