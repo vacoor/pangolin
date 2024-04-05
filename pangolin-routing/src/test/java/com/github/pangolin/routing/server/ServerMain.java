@@ -1,6 +1,5 @@
 package com.github.pangolin.routing.server;
 
-import com.github.pangolin.routing.RoutingSocks5ServerHandler;
 import com.github.pangolin.routing.config.LocalProxyServerProviderLoader;
 import com.github.pangolin.routing.config.clash.ClashProxyServerProviderFactory;
 import com.github.pangolin.routing.config.clash.ClashRuleFactory;
@@ -8,6 +7,7 @@ import com.github.pangolin.routing.config.clash.ClashRuleResolver;
 import com.github.pangolin.routing.pattern.DestinationPattern;
 import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
+import com.github.pangolin.routing.proxy.RoutingSocks5ServerHandler;
 import com.github.pangolin.routing.proxy.RuleBasedRoutingProxyServer;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
@@ -29,7 +29,7 @@ public class ServerMain {
         final NioEventLoopGroup group = new NioEventLoopGroup();
 
         final ProxyServerProvider localProxyServerProvider = LocalProxyServerProviderLoader.load(LocalProxyServerProviderLoader.class.getResource("/conf/proxies.conf"));
-        final ClashProxyServerProviderFactory factory = ClashProxyServerProviderFactory.create("https://sub1.smallstrawberry.com/api/v1/client/subscribe?token=1ab79cc4b202d916cdc8e375c7b0326");
+        final ClashProxyServerProviderFactory factory = ClashProxyServerProviderFactory.create("https://sub3.smallstrawberry.com/api/v1/client/subscribe?token=1ab79cc4b202d916cdc8e375c7b03266");
         final ProxyServerProvider remoteProxyServerProvider = factory.getProxyServerProvider(group);
 
         final ProxyServerProvider proxyServerProvider = new ComposedProxyServerProvider(remoteProxyServerProvider, localProxyServerProvider);
@@ -51,7 +51,7 @@ public class ServerMain {
         }
 
 //        Forwarder forwarder = new Forwarder(proxyServerProvider, new NioEventLoopGroup(), new NioEventLoopGroup());
-//        forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));
+        // forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));
 
         final NettyServer server = new NettyServer(1080);
         server.start(true, new ChannelInitializer<SocketChannel>() {
