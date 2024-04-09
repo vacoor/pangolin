@@ -3,7 +3,7 @@ package com.github.pangolin.routing.config.clash;
 import com.github.pangolin.routing.config.PatternResolver;
 import com.github.pangolin.routing.pattern.DestinationPattern;
 import com.github.pangolin.routing.pattern.DomainPattern;
-import com.github.pangolin.routing.pattern.NetworkPattern;
+import com.github.pangolin.routing.pattern.SubnetPattern;
 import io.netty.util.NetUtil;
 
 import java.io.IOException;
@@ -76,7 +76,7 @@ public class ClashRuleResolver implements PatternResolver {
         protected DestinationPattern create(final String pattern) {
             final String[] segments = pattern.split("/", 2);
             final int cidrPrefix = Integer.parseInt(segments[1]);
-            return new NetworkPattern(segments[0], cidrPrefix);
+            return new SubnetPattern(segments[0], cidrPrefix);
         }
     };
 
@@ -95,7 +95,7 @@ public class ClashRuleResolver implements PatternResolver {
         protected DestinationPattern create(final String pattern) {
             final String[] segments = pattern.split("/", 2);
             final int cidrPrefix = Integer.parseInt(segments[1]);
-            return new NetworkPattern(segments[0], cidrPrefix);
+            return new SubnetPattern(segments[0], cidrPrefix);
         }
     };
 

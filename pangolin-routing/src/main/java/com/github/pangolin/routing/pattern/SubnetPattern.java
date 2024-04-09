@@ -12,19 +12,19 @@ import java.net.UnknownHostException;
 /**
  *
  */
-public class NetworkPattern implements DestinationPattern {
+public class SubnetPattern implements DestinationPattern {
     private final InetAddress ipAddress;
     private final int prefixLength;
     private final DestinationPattern delegate;
     private volatile InetAddress networkAddress;
 
-    public NetworkPattern(final String ipAddress, final int cidrPrefix) {
+    public SubnetPattern(final String ipAddress, final int cidrPrefix) {
         try {
             final InetAddress inetAddress = SocketUtils.addressByName(ipAddress);
             this.ipAddress = inetAddress;
             this.prefixLength = cidrPrefix;
             if (inetAddress instanceof Inet4Address) {
-                delegate = new Network4Pattern((Inet4Address) inetAddress, cidrPrefix);
+                delegate = new Inet4SubnetPattern((Inet4Address) inetAddress, cidrPrefix);
             } else if (inetAddress instanceof Inet6Address) {
                 delegate = new Inet6SubnetPattern((Inet6Address) inetAddress, cidrPrefix);
             } else {
@@ -48,6 +48,10 @@ public class NetworkPattern implements DestinationPattern {
             return networkAddress;
         }
         return networkAddress = getNetworkAddress(ipAddress, prefixLength);
+    }
+
+    public DestinationPattern getDelegate() {
+        return delegate;
     }
 
     @Override
@@ -76,11 +80,11 @@ public class NetworkPattern implements DestinationPattern {
         }
     }
 
-    private static class Network4Pattern implements DestinationPattern {
+    public static class Inet4SubnetPattern implements DestinationPattern {
         private final int subnetMask;
         private final int networkAddress;
 
-        Network4Pattern(final Inet4Address ipAddress, final int cidrPrefix) {
+        Inet4SubnetPattern(final Inet4Address ipAddress, final int cidrPrefix) {
             if (cidrPrefix < 0 || cidrPrefix > 32) {
                 throw new IllegalArgumentException(String.format("IPv4 requires the subnet prefix to be in range of [0,32]. The prefix was: %d", cidrPrefix));
             }
@@ -97,6 +101,18 @@ public class NetworkPattern implements DestinationPattern {
                 return (ipAddress & subnetMask) == networkAddress;
             }
             return false;
+        }
+
+        public String getNetworkAddress() {
+            return stringify(networkAddress);
+        }
+
+        public String getSubnetMask() {
+            return stringify(subnetMask);
+        }
+
+        private String stringify(final int ip) {
+            return (ip >> 24 & 0xff) + "." + (ip >> 16 & 0xff) + "." + (ip >> 8 & 0xff) + "." + (ip & 0xff);
         }
 
         private static int ipToInt(final Inet4Address ipAddress) {
@@ -120,7 +136,7 @@ public class NetworkPattern implements DestinationPattern {
         }
     }
 
-    private static class Inet6SubnetPattern implements DestinationPattern {
+    public static class Inet6SubnetPattern implements DestinationPattern {
         private static final BigInteger MINUS_ONE = BigInteger.valueOf(-1);
 
         private final BigInteger networkAddress;
