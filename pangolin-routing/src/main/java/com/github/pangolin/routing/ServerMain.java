@@ -2,12 +2,13 @@ package com.github.pangolin.routing;
 
 import com.github.pangolin.routing.config.ProxiesParser;
 import com.github.pangolin.routing.config.RulesParser;
+import com.github.pangolin.routing.handshake.HttpServerHandshaker;
+import com.github.pangolin.routing.handshake.ServerHandshakeInitializer;
+import com.github.pangolin.routing.handshake.Socks4ServerHandshaker;
+import com.github.pangolin.routing.handshake.Socks5ServerHandshaker;
+import com.github.pangolin.routing.internal.server.http.HttpProxyServerHandler;
 import com.github.pangolin.routing.pattern.DestinationPattern;
-import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
-import com.github.pangolin.routing.proxy.ProxyServerProvider;
-import com.github.pangolin.routing.proxy.RoutingSocks5ServerHandler;
-import com.github.pangolin.routing.proxy.RoutingSocksServerHandler;
-import com.github.pangolin.routing.proxy.RuleBasedRoutingProxyServer;
+import com.github.pangolin.routing.proxy.*;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -53,7 +54,7 @@ public class ServerMain {
         System.out.println("Rules config: " + rulesConf.getAbsolutePath());
 
         final ProxyServerProvider proxyServerProvider = proxiesConf.exists() ? ProxiesParser.parse(new FileInputStream(proxiesConf), group) : new ComposedProxyServerProvider();
-        final Map<DestinationPattern, String> rules = rulesConf.exists() ? RulesParser.parseRules(rulesConf.toURI().toURL()): Collections.emptyMap();
+        final Map<DestinationPattern, String> rules = rulesConf.exists() ? RulesParser.parseRules(rulesConf.toURI().toURL()) : Collections.emptyMap();
 
         for (Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
             System.out.println(String.format("%s -> %s", entry.getKey(), entry.getValue()));
@@ -66,8 +67,8 @@ public class ServerMain {
         new NettyServer(8088).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                 ch.pipeline().addLast(new PacServerHandler(rules));
-                 ch.pipeline().addLast(new SwitchyRuleHandler(rules));
+                ch.pipeline().addLast(new PacServerHandler(rules));
+                ch.pipeline().addLast(new SwitchyRuleHandler(rules));
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
@@ -91,8 +92,17 @@ public class ServerMain {
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new RoutingSocks5ServerHandler(router));
+                final Socks5ServerHandshaker socks5Handshaker = new Socks5ServerHandshaker(new RoutingSocks5ServerHandler(router));
+                final Socks4ServerHandshaker socks4Handshaker = new Socks4ServerHandshaker(new RoutingSocks4ServerHandler(router));
+                final HttpServerHandshaker httpHandshaker = new HttpServerHandshaker(
+                        new PacServerHandler(rules),
+                        new SwitchyRuleHandler(rules),
+                        new RoutingHttpServerHandler(router)
+                );
+//                ch.pipeline().addLast(new RoutingSocks5ServerHandler(router));
 //                ch.pipeline().addLast(new RoutingSocksServerHandler(router));
+//                ch.pipeline().addLast(new ServerHandshakeInitializer(httpHandshaker));
+                ch.pipeline().addLast(new ServerHandshakeInitializer(socks5Handshaker, socks4Handshaker, httpHandshaker));
             }
         }).addListener(new ChannelFutureListener() {
             @Override

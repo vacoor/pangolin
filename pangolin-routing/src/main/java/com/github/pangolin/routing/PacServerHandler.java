@@ -23,6 +23,8 @@ import lombok.extern.slf4j.Slf4j;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Map;
 import java.util.Set;
 
@@ -33,7 +35,7 @@ public class PacServerHandler extends ChannelInboundHandlerAdapter {
     private final Map<DestinationPattern, String> rules;
 
     public PacServerHandler(final Map<DestinationPattern, String> rules) {
-      this.rules = rules;
+        this.rules = rules;
     }
 
 
@@ -70,6 +72,7 @@ public class PacServerHandler extends ChannelInboundHandlerAdapter {
 
                     final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);
                     httpResponse.headers().add("Content-Length", body.readableBytes());
+                    // httpResponse.headers().add("Content-Type", "application/x-ns-proxy-autoconfig");
                     ctx.writeAndFlush(httpResponse);
                     return;
                 }
@@ -101,8 +104,17 @@ public class PacServerHandler extends ChannelInboundHandlerAdapter {
 
     private static String toPac(final Set<DestinationPattern> patterns) {
         final StringBuilder buff = new StringBuilder();
+        final String now = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+        buff.append("/**\r\n")
+                .append(" * Proxy Auto-Configuration (PAC) file.\r\n")
+                .append(" *\r\n")
+                .append(" * Date: ").append(now).append("\r\n")
+                .append(" * Link: https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Proxy_servers_and_tunneling/Proxy_Auto-Configuration_PAC_file\r\n")
+                .append(" * Link: https://github.com/manugarg/pacparser\r\n")
+                .append(" */\r\n");
+
         buff.append("function FindProxyForURL(url, host) {\r\n");
-        buff.append("  ").append("var $PROXY = 'SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080';\r\n");
+        buff.append("  ").append("var $PROXY = 'SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080; PROXY 127.0.0.1:1080';\r\n");
         for (DestinationPattern destinationPattern : patterns) {
             String s = toPacStatement(destinationPattern);
             buff.append("  ").append(s).append("\r\n");

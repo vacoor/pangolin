@@ -79,7 +79,28 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                 // User-Agent: curl/7.64.1
                 // Proxy-Connection: Keep-Alive
                 // content-length: 0
-                connect(ctx, httpRequest);
+                connect(ctx, httpRequest).addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(final ChannelFuture future) throws Exception {
+                        if (future.isSuccess()) {
+                            log.info("Connection established: {}", future.channel().remoteAddress());
+                            ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.OK)).addListener(g -> {
+                                ctx.pipeline().remove(HttpServerCodec.class);
+                            });
+                        } else {
+                            log.info("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
+                            ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
+                        }
+                    }
+                }).channel().closeFuture().addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(final ChannelFuture future) throws Exception {
+                        if (ctx.channel().isActive()) {
+                            log.info("Connection to {} closed", future.channel().remoteAddress());
+                            ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                        }
+                    }
+                });
             } else {
                 /*- HTTP routing */
                 // GET http://www.baidu.com/ HTTP/1.1
@@ -106,7 +127,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         return encodedStr;
     }
 
-    private InetSocketAddress getHttpRequestAddress(final HttpRequest httpRequest) {
+    protected InetSocketAddress getHttpRequestAddress(final HttpRequest httpRequest) {
         final HttpHeaders headers = httpRequest.headers();
         final String host = headers.get(HttpHeaderNames.HOST);
         if (null != host && !host.isEmpty()) {
@@ -158,13 +179,13 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         });
     }
 
-    protected void connect(final ChannelHandlerContext ctx, final HttpRequest httpRequest) throws Exception {
+    protected ChannelFuture connect(final ChannelHandlerContext ctx, final HttpRequest httpRequest) throws Exception {
         final InetSocketAddress targetAddress = getHttpRequestAddress(httpRequest);
         final String address = targetAddress.getHostString();
         final int port = targetAddress.getPort();
 
         ctx.channel().config().setAutoRead(false);
-        Channels.open(targetAddress, false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
+        return Channels.open(targetAddress, false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
                 delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(ctx));
@@ -173,27 +194,6 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                 ctx.pipeline().remove(ctx.name());
                 ctx.channel().config().setAutoRead(true);
                 delegateCtx.channel().config().setAutoRead(true);
-            }
-        }).addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture future) throws Exception {
-                if (future.isSuccess()) {
-                    log.info("Connection established: {}", future.channel().remoteAddress());
-                    ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.OK)).addListener(g -> {
-                        ctx.pipeline().remove(HttpServerCodec.class);
-                    });
-                } else {
-                    log.info("Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
-                    ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
-                }
-            }
-        }).channel().closeFuture().addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture future) throws Exception {
-                if (ctx.channel().isActive()) {
-                    log.info("Connection to {} closed", future.channel().remoteAddress());
-                    ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                }
             }
         });
     }

@@ -18,6 +18,8 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Map;
 
 @Slf4j
@@ -27,7 +29,7 @@ public class SwitchyRuleHandler extends ChannelInboundHandlerAdapter {
     private final Map<DestinationPattern, String> rules;
 
     public SwitchyRuleHandler(final Map<DestinationPattern, String> rules) {
-      this.rules = rules;
+        this.rules = rules;
     }
 
     @Override
@@ -51,24 +53,30 @@ public class SwitchyRuleHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-            try {
-              if (msg instanceof FullHttpRequest) {
-                  final FullHttpRequest httpRequest = (FullHttpRequest) msg;
-                  final String path = new QueryStringDecoder(httpRequest.uri()).path();
-                  if (path.equals(this.path)) {
-                      final StringBuilder buff = new StringBuilder();
-                      for (DestinationPattern destinationPattern : rules.keySet()) {
-                          buff.append(toSwitchyRule(destinationPattern)).append("\r\n");
-                      }
-                      final ByteBuf body = Unpooled.copiedBuffer(buff.toString(), StandardCharsets.UTF_8);
+        try {
+            if (msg instanceof FullHttpRequest) {
+                final FullHttpRequest httpRequest = (FullHttpRequest) msg;
+                final String path = new QueryStringDecoder(httpRequest.uri()).path();
+                final String now = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+                if (path.equals(this.path)) {
+                    final StringBuilder buff = new StringBuilder();
+                    buff.append("; SwitchyOmega Rule List\r\n")
+                            .append(";\r\n")
+                            .append("; Require: SwitchyOmega >= 2.3.2\r\n")
+                            .append("; Date: ").append(now).append("\r\n")
+                            .append("; Usage: https://github.com/FelisCatus/SwitchyOmega/wiki/RuleListUsage\r\n\r\n");
+                    for (DestinationPattern destinationPattern : rules.keySet()) {
+                        buff.append(toSwitchyRule(destinationPattern)).append("\r\n");
+                    }
+                    final ByteBuf body = Unpooled.copiedBuffer(buff.toString(), StandardCharsets.UTF_8);
 
-                      final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);
-                      httpResponse.headers().add("Content-Length", body.readableBytes());
-                      ctx.writeAndFlush(httpResponse);
-                      return;
-                  }
-              }
-              ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
+                    final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);
+                    httpResponse.headers().add("Content-Length", body.readableBytes());
+                    ctx.writeAndFlush(httpResponse);
+                    return;
+                }
+            }
+            ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
         } finally {
             ReferenceCountUtil.release(msg);
         }
