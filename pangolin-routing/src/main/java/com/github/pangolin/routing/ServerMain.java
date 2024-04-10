@@ -1,10 +1,7 @@
-package com.github.pangolin.routing.server;
+package com.github.pangolin.routing;
 
-import com.alibaba.fastjson.JSONObject;
-import com.github.pangolin.routing.config.LocalProxyServerProviderLoader;
-import com.github.pangolin.routing.config.clash.ClashProxyServerProviderFactory;
-import com.github.pangolin.routing.config.clash.ClashRuleFactory;
-import com.github.pangolin.routing.config.clash.ClashRuleResolver;
+import com.github.pangolin.routing.config.ProxiesParser;
+import com.github.pangolin.routing.config.RulesParser;
 import com.github.pangolin.routing.pattern.DestinationPattern;
 import com.github.pangolin.routing.pattern.DomainPattern;
 import com.github.pangolin.routing.pattern.SubnetPattern;
@@ -18,14 +15,14 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.ipfilter.IpSubnetFilterRule;
+import org.springframework.boot.system.ApplicationHome;
 
-import java.net.Inet4Address;
+import java.io.File;
+import java.io.FileInputStream;
 import java.net.InetSocketAddress;
-import java.net.URL;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  *
@@ -35,29 +32,30 @@ public class ServerMain {
     public static void main(String[] args) throws Exception {
         final NioEventLoopGroup group = new NioEventLoopGroup();
 
+        /*
         final ProxyServerProvider localProxyServerProvider = LocalProxyServerProviderLoader.load(LocalProxyServerProviderLoader.class.getResource("/conf/proxies.conf"));
 
-        final ProxyServerProvider proxyServerProvider = new ComposedProxyServerProvider(localProxyServerProvider);
-//        final ClashProxyServerProviderFactory factory = ClashProxyServerProviderFactory.create("https://sub3.smallstrawberry.com/api/v1/client/subscribe?token=1ab79cc4b202d916cdc8e375c7b03266");
-//        final ProxyServerProvider remoteProxyServerProvider = factory.getProxyServerProvider(group);
-//        final ProxyServerProvider proxyServerProvider = new ComposedProxyServerProvider(remoteProxyServerProvider, localProxyServerProvider);
+//        final ProxyServerProvider proxyServerProvider = new ComposedProxyServerProvider(localProxyServerProvider);
+        final ClashProxyServerProviderFactory factory = ClashProxyServerProviderFactory.create("https://sub3.smallstrawberry.com/api/v1/client/subscribe?token=1ab79cc4b202d916cdc8e375c7b03266");
+        final ProxyServerProvider remoteProxyServerProvider = factory.getProxyServerProvider(group);
+        final ProxyServerProvider proxyServerProvider = new ComposedProxyServerProvider(remoteProxyServerProvider, localProxyServerProvider);
+        */
+        final ApplicationHome home = new ApplicationHome(ServerMain.class);
+        final File homeFile = home.getDir();
+        final File proxiesConf = new File(homeFile, "conf/proxies2.conf");
+        final File rulesConf = new File(homeFile, "conf/default.conf");
 
-        final RuleBasedRoutingProxyServer router = new RuleBasedRoutingProxyServer("RuleBasedRouter", proxyServerProvider);
+        System.out.println("Proxies config: " + proxiesConf.getAbsolutePath());
+        System.out.println("Rules config: " + rulesConf.getAbsolutePath());
 
-        final URL url = ServerMain.class.getResource("/conf/default.conf");
-        Map<DestinationPattern, String> rules = ClashRuleFactory.parseRules(
-                url,
-                ClashRuleResolver.DOMAIN,
-                ClashRuleResolver.DOMAIN_SUFFIX,
-                ClashRuleResolver.DOMAIN_KEYWORD,
-                ClashRuleResolver.IP_CIDR,
-                ClashRuleResolver.IP_CIDR_6,
-                ClashRuleResolver.RULE_SET
-        );
+        final ProxyServerProvider proxyServerProvider = proxiesConf.exists() ? ProxiesParser.parse(new FileInputStream(proxiesConf), group) : new ComposedProxyServerProvider();
+        final Map<DestinationPattern, String> rules = rulesConf.exists() ? RulesParser.parseRules(rulesConf.toURI().toURL()): Collections.emptyMap();
+
         for (Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
             System.out.println(String.format("%s -> %s", entry.getKey(), entry.getValue()));
-            router.addRouting(entry.getKey(), entry.getValue());
         }
+
+        final RuleBasedRoutingProxyServer router = new RuleBasedRoutingProxyServer("RuleBasedRouter", proxyServerProvider, rules);
 
 //        Forwarder forwarder = new Forwarder(proxyServerProvider, new NioEventLoopGroup(), new NioEventLoopGroup());
         // forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));

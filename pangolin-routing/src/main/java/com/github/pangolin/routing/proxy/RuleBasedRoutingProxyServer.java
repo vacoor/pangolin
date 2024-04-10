@@ -26,9 +26,10 @@ public class RuleBasedRoutingProxyServer implements ProxyServer {
             });
             */
 
-    public RuleBasedRoutingProxyServer(final String name, final ProxyServerProvider provider) {
+    public RuleBasedRoutingProxyServer(final String name, final ProxyServerProvider provider, final Map<DestinationPattern, String> rules) {
         this.name = name;
         this.proxyServerProvider = provider;
+        this.registeredRoutingMap.putAll(rules);
     }
 
     @Override
