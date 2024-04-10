@@ -12,9 +12,13 @@ import com.github.pangolin.routing.proxy.RuleBasedRoutingProxyServer;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.codec.http.DefaultFullHttpResponse;
+import io.netty.handler.codec.http.HttpResponseStatus;
 import org.springframework.boot.system.ApplicationHome;
 
 import java.io.File;
@@ -23,6 +27,8 @@ import java.net.InetSocketAddress;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
+
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 /**
  *
@@ -62,7 +68,14 @@ public class ServerMain {
         new NettyServer(8088).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new PacServerHandler(toPac(rules.keySet())));
+                // ch.pipeline().addLast(new PacServerHandler(toPac(rules.keySet())));
+                 ch.pipeline().addLast(new SwitchyRuleHandler(rules));
+                ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
+                    @Override
+                    public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+                        ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.NOT_FOUND)).addListener(ChannelFutureListener.CLOSE);
+                    }
+                });
             }
         }).addListener(new ChannelFutureListener() {
             @Override
@@ -144,5 +157,4 @@ public class ServerMain {
         }
         return String.format("/* NOT SUPPORTED: %s */", pattern);
     }
-
 }
