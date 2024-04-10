@@ -3,11 +3,10 @@ package com.github.pangolin.routing;
 import com.github.pangolin.routing.config.ProxiesParser;
 import com.github.pangolin.routing.config.RulesParser;
 import com.github.pangolin.routing.pattern.DestinationPattern;
-import com.github.pangolin.routing.pattern.DomainPattern;
-import com.github.pangolin.routing.pattern.SubnetPattern;
 import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import com.github.pangolin.routing.proxy.RoutingSocks5ServerHandler;
+import com.github.pangolin.routing.proxy.RoutingSocksServerHandler;
 import com.github.pangolin.routing.proxy.RuleBasedRoutingProxyServer;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
@@ -26,7 +25,6 @@ import java.io.FileInputStream;
 import java.net.InetSocketAddress;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Set;
 
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
@@ -94,6 +92,7 @@ public class ServerMain {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(new RoutingSocks5ServerHandler(router));
+//                ch.pipeline().addLast(new RoutingSocksServerHandler(router));
             }
         }).addListener(new ChannelFutureListener() {
             @Override
