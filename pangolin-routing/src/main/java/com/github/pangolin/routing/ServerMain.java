@@ -68,7 +68,7 @@ public class ServerMain {
         new NettyServer(8088).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                // ch.pipeline().addLast(new PacServerHandler(toPac(rules.keySet())));
+                 ch.pipeline().addLast(new PacServerHandler(rules));
                  ch.pipeline().addLast(new SwitchyRuleHandler(rules));
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
@@ -109,52 +109,4 @@ public class ServerMain {
 
     }
 
-    private static String toPac(final Set<DestinationPattern> patterns) {
-        final StringBuilder buff = new StringBuilder();
-        buff.append("function FindProxyForURL(url, host) {\r\n");
-        buff.append("  ").append("var $PROXY = 'SOCKS 127.0.0.1:1080';\r\n");
-        for (DestinationPattern destinationPattern : patterns) {
-            String s = toPacStatement(destinationPattern);
-            buff.append("  ").append(s).append("\r\n");
-        }
-        buff.append("  if (!isResolvable(host)) return $PROXY + '; DIRECT';\r\n");
-        buff.append("  return 'DIRECT';\r\n");
-        buff.append("}");
-        System.out.println(buff);
-        return buff.toString();
-    }
-
-    private static String toPacStatement(final DestinationPattern pattern) {
-        if (pattern instanceof DomainPattern) {
-            final String prefixWildcard = "**.";
-            final String suffixWildcard = ".**";
-            final DomainPattern dp = (DomainPattern) pattern;
-            String s1 = dp.toString();
-            final boolean isPrefixWildcard = s1.startsWith(prefixWildcard);
-            final boolean isSuffixWildcard = s1.endsWith(suffixWildcard);
-            if (isPrefixWildcard && isSuffixWildcard) {
-                s1 = s1.replace("**.", "").replace(".**", "");
-                if (s1.startsWith("*") && s1.endsWith("*")) {
-                    return String.format("if (shExpMatch(host, '%s')) return $PROXY;", s1);
-                } else {
-                    System.out.println("Unsupported");
-                }
-            } else if (isPrefixWildcard) {
-                s1 = s1.replace("**.", "");
-                return String.format("if (dnsDomainIs(host, '.%s')) return $PROXY;", s1);
-            } else {
-                return String.format("if (shExpMatch(host, '%s')) return $PROXY;", s1);
-            }
-        } else if (pattern instanceof SubnetPattern) {
-            final SubnetPattern p = (SubnetPattern) pattern;
-            DestinationPattern delegate = p.getDelegate();
-            if (delegate instanceof SubnetPattern.Inet4SubnetPattern) {
-                SubnetPattern.Inet4SubnetPattern i4sn = (SubnetPattern.Inet4SubnetPattern) delegate;
-                String networkAddress = i4sn.getNetworkAddress();
-                String subnetMask = i4sn.getSubnetMask();
-                return String.format("if (isInNet(host, '%s', '%s')) return $PROXY;", networkAddress, subnetMask);
-            }
-        }
-        return String.format("/* NOT SUPPORTED: %s */", pattern);
-    }
 }
