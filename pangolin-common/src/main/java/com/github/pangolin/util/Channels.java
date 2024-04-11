@@ -48,19 +48,25 @@ public class Channels {
     }
 
     public static ChannelFuture open(final String hostname, final int port, final AddressResolverGroup<SocketAddress> resolver, final boolean autoRead, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
-        return open(createSocketAddress(hostname, port), resolver, autoRead, group, initializer);
+        return open(createSocketAddress(hostname, port), resolver, 10000, autoRead, group, initializer);
     }
 
     public static ChannelFuture open(final SocketAddress remoteAddress, final boolean autoRead, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
-        return open(remoteAddress, null, autoRead, group, initializer);
+        return open(remoteAddress, null, 10000, autoRead, group, initializer);
     }
 
-    public static ChannelFuture open(final SocketAddress remoteAddress, final AddressResolverGroup<SocketAddress> resolver, final boolean autoRead, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
+    public static ChannelFuture open(final SocketAddress remoteAddress, final AddressResolverGroup<SocketAddress> resolver,
+                                     final boolean autoRead, final EventLoopGroup group, final ChannelHandler initializer) {
+      return open(remoteAddress, resolver, 10000, autoRead, group, initializer);
+    }
+
+    public static ChannelFuture open(final SocketAddress remoteAddress, final AddressResolverGroup<SocketAddress> resolver,
+                                     final int connectTimeoutMillis, final boolean autoRead, final EventLoopGroup group, final ChannelHandler initializer) {
         final Bootstrap b = new Bootstrap();
         b.option(ChannelOption.AUTO_READ, autoRead);
         b.option(ChannelOption.TCP_NODELAY, true);
         b.option(ChannelOption.SO_KEEPALIVE, true);
-        b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10000);
+        b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectTimeoutMillis);
         b.option(ChannelOption.SO_RCVBUF, 32 * 1024);// 读缓冲区为32k
         b.resolver(resolver).group(group).channel(NioSocketChannel.class).handler(initializer);
         return b.connect(remoteAddress);

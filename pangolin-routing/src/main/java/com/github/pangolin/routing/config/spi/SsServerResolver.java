@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.config.spi;
 
-import com.github.pangolin.routing.internal.client.ss.SsProxyHandler;
-import com.github.pangolin.routing.internal.client.ss.crypto.CipherAlgorithm;
-import com.github.pangolin.routing.internal.client.ss.crypto.spi.CipherAlgorithmSpi;
+import com.github.pangolin.routing.handler.internal.client.ss.SsProxyHandler;
+import com.github.pangolin.routing.handler.internal.client.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.handler.internal.client.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import freework.codec.Base64;
 import freework.util.Bytes;

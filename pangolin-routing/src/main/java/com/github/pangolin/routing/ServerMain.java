@@ -2,13 +2,20 @@ package com.github.pangolin.routing;
 
 import com.github.pangolin.routing.config.ProxiesParser;
 import com.github.pangolin.routing.config.RulesParser;
-import com.github.pangolin.routing.handshake.HttpServerHandshaker;
-import com.github.pangolin.routing.handshake.ServerHandshakeInitializer;
-import com.github.pangolin.routing.handshake.Socks4ServerHandshaker;
-import com.github.pangolin.routing.handshake.Socks5ServerHandshaker;
-import com.github.pangolin.routing.internal.server.http.HttpProxyServerHandler;
+import com.github.pangolin.routing.handler.ProxyAutoConfigurationServerHandler;
+import com.github.pangolin.routing.handler.SwitchyRuleConfigurationServerHandler;
+import com.github.pangolin.routing.handler.handshake.HttpServerHandshaker;
+import com.github.pangolin.routing.handler.handshake.ServerHandshakeInitializer;
+import com.github.pangolin.routing.handler.handshake.Socks4ServerHandshaker;
+import com.github.pangolin.routing.handler.handshake.Socks5ServerHandshaker;
+import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
+import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
+import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
+import com.github.pangolin.routing.handler.internal.server.support.ProxyChannelFactory;
 import com.github.pangolin.routing.pattern.DestinationPattern;
-import com.github.pangolin.routing.proxy.*;
+import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
+import com.github.pangolin.routing.proxy.ProxyServerProvider;
+import com.github.pangolin.routing.proxy.RuleBasedRoutingProxyServer;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -24,7 +31,9 @@ import org.springframework.boot.system.ApplicationHome;
 import java.io.File;
 import java.io.FileInputStream;
 import java.net.InetSocketAddress;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
@@ -37,14 +46,6 @@ public class ServerMain {
     public static void main(String[] args) throws Exception {
         final NioEventLoopGroup group = new NioEventLoopGroup();
 
-        /*
-        final ProxyServerProvider localProxyServerProvider = LocalProxyServerProviderLoader.load(LocalProxyServerProviderLoader.class.getResource("/conf/proxies.conf"));
-
-//        final ProxyServerProvider proxyServerProvider = new ComposedProxyServerProvider(localProxyServerProvider);
-        final ClashProxyServerProviderFactory factory = ClashProxyServerProviderFactory.create("https://sub3.smallstrawberry.com/api/v1/client/subscribe?token=1ab79cc4b202d916cdc8e375c7b03266");
-        final ProxyServerProvider remoteProxyServerProvider = factory.getProxyServerProvider(group);
-        final ProxyServerProvider proxyServerProvider = new ComposedProxyServerProvider(remoteProxyServerProvider, localProxyServerProvider);
-        */
         final ApplicationHome home = new ApplicationHome(ServerMain.class);
         final File homeFile = home.getDir();
         final File proxiesConf = new File(homeFile, "conf/proxies2.conf");
@@ -62,13 +63,14 @@ public class ServerMain {
 
         final RuleBasedRoutingProxyServer router = new RuleBasedRoutingProxyServer("RuleBasedRouter", proxyServerProvider, rules);
 
-//        Forwarder forwarder = new Forwarder(proxyServerProvider, new NioEventLoopGroup(), new NioEventLoopGroup());
+//        Forwarder forwarder = new Forwarder(router, new NioEventLoopGroup(), new NioEventLoopGroup());
         // forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));
+
         new NettyServer(8088).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new PacServerHandler(rules));
-                ch.pipeline().addLast(new SwitchyRuleHandler(rules));
+                ch.pipeline().addLast(new ProxyAutoConfigurationServerHandler(rules));
+                ch.pipeline().addLast(new SwitchyRuleConfigurationServerHandler(rules));
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
@@ -92,15 +94,15 @@ public class ServerMain {
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                final Socks5ServerHandshaker socks5Handshaker = new Socks5ServerHandshaker(new RoutingSocks5ServerHandler(router));
-                final Socks4ServerHandshaker socks4Handshaker = new Socks4ServerHandshaker(new RoutingSocks4ServerHandler(router));
+                final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
+                final ProxyChannelFactory factory = new ProxyChannelFactory(router, bypass);
+                final Socks5ServerHandshaker socks5Handshaker = new Socks5ServerHandshaker(new Socks5ProxyServerHandler(null, null, factory));
+                final Socks4ServerHandshaker socks4Handshaker = new Socks4ServerHandshaker(new Socks4ProxyServerHandler(null, factory));
                 final HttpServerHandshaker httpHandshaker = new HttpServerHandshaker(
-                        new PacServerHandler(rules),
-                        new SwitchyRuleHandler(rules),
-                        new RoutingHttpServerHandler(router)
+                    new ProxyAutoConfigurationServerHandler(rules),
+                    new SwitchyRuleConfigurationServerHandler(rules),
+                    new HttpProxyServerHandler(null, null, factory)
                 );
-//                ch.pipeline().addLast(new RoutingSocks5ServerHandler(router));
-//                ch.pipeline().addLast(new RoutingSocksServerHandler(router));
 //                ch.pipeline().addLast(new ServerHandshakeInitializer(httpHandshaker));
                 ch.pipeline().addLast(new ServerHandshakeInitializer(socks5Handshaker, socks4Handshaker, httpHandshaker));
             }

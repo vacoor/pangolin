@@ -2,7 +2,7 @@ package com.github.pangolin.routing.config.clash;
 
 import com.github.pangolin.routing.proxy.LoadBalanceProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServer;
-import com.github.pangolin.routing.health.UrlTestHealthChecker;
+import com.github.pangolin.routing.proxy.health.UrlTestHealthChecker;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import com.google.common.base.Preconditions;
 import freework.net.Http;

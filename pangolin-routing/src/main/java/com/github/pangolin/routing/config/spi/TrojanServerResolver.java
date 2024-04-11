@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.config.spi;
 
-import com.github.pangolin.routing.internal.client.trojan.TrojanProxyHandler;
+import com.github.pangolin.routing.handler.internal.client.TrojanProxyHandler;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import io.netty.channel.ChannelHandler;
 
