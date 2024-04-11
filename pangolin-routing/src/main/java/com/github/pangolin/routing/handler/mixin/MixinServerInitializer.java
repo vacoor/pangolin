@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.handshake;
+package com.github.pangolin.routing.handler.mixin;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
@@ -7,10 +7,10 @@ import io.netty.handler.codec.ByteToMessageDecoder;
 
 import java.util.List;
 
-public class ServerHandshakeInitializer extends ByteToMessageDecoder {
-    private final ServerHandshaker[] handshakers;
+public class MixinServerInitializer extends ByteToMessageDecoder {
+    private final MixinServerHandshaker[] handshakers;
 
-    public ServerHandshakeInitializer(final ServerHandshaker... handshakers) {
+    public MixinServerInitializer(final MixinServerHandshaker... handshakers) {
         this.handshakers = handshakers;
     }
 
@@ -30,7 +30,7 @@ public class ServerHandshakeInitializer extends ByteToMessageDecoder {
     }
 
     private boolean handshake(final ChannelHandlerContext ctx, final ByteBuf in) {
-        for (final ServerHandshaker handshaker : handshakers) {
+        for (final MixinServerHandshaker handshaker : handshakers) {
             if (handshaker.handshake(ctx, in)) {
                 return true;
             }

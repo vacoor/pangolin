@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.handshake;
+package com.github.pangolin.routing.handler.mixin.support;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
@@ -8,10 +8,10 @@ import io.netty.handler.codec.socksx.SocksVersion;
 import io.netty.handler.codec.socksx.v4.Socks4ServerDecoder;
 import io.netty.handler.codec.socksx.v4.Socks4ServerEncoder;
 
-public class Socks4ServerHandshaker extends SocksServerHandshaker {
+public class Socks4MixinServerHandshaker extends SocksMixinServerHandshaker {
     private final ChannelHandler[] handlers;
 
-    public Socks4ServerHandshaker(final ChannelHandler... handlers) {
+    public Socks4MixinServerHandshaker(final ChannelHandler... handlers) {
         super(SocksVersion.SOCKS4a);
         this.handlers = handlers;
     }

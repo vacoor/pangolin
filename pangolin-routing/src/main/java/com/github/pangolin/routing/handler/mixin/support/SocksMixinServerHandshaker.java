@@ -1,13 +1,14 @@
-package com.github.pangolin.routing.handler.handshake;
+package com.github.pangolin.routing.handler.mixin.support;
 
+import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.socksx.SocksVersion;
 
-public abstract class SocksServerHandshaker implements ServerHandshaker {
+public abstract class SocksMixinServerHandshaker implements MixinServerHandshaker {
     private final SocksVersion version;
 
-    public SocksServerHandshaker(final SocksVersion version) {
+    public SocksMixinServerHandshaker(final SocksVersion version) {
         this.version = version;
     }
 

@@ -4,10 +4,10 @@ import com.github.pangolin.routing.config.ProxiesParser;
 import com.github.pangolin.routing.config.RulesParser;
 import com.github.pangolin.routing.handler.ProxyAutoConfigurationServerHandler;
 import com.github.pangolin.routing.handler.SwitchyRuleConfigurationServerHandler;
-import com.github.pangolin.routing.handler.handshake.HttpServerHandshaker;
-import com.github.pangolin.routing.handler.handshake.ServerHandshakeInitializer;
-import com.github.pangolin.routing.handler.handshake.Socks4ServerHandshaker;
-import com.github.pangolin.routing.handler.handshake.Socks5ServerHandshaker;
+import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
+import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
+import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
+import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
 import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
@@ -96,15 +96,15 @@ public class ServerMain {
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
                 final ProxyChannelFactory factory = new ProxyChannelFactory(router, bypass);
-                final Socks5ServerHandshaker socks5Handshaker = new Socks5ServerHandshaker(new Socks5ProxyServerHandler(null, null, factory));
-                final Socks4ServerHandshaker socks4Handshaker = new Socks4ServerHandshaker(new Socks4ProxyServerHandler(null, factory));
-                final HttpServerHandshaker httpHandshaker = new HttpServerHandshaker(
+                final Socks5MixinServerHandshaker socks5Handshaker = new Socks5MixinServerHandshaker(new Socks5ProxyServerHandler(null, null, factory));
+                final Socks4MixinServerHandshaker socks4Handshaker = new Socks4MixinServerHandshaker(new Socks4ProxyServerHandler(null, factory));
+                final HttpMixinServerHandshaker httpHandshaker = new HttpMixinServerHandshaker(
                     new ProxyAutoConfigurationServerHandler(rules),
                     new SwitchyRuleConfigurationServerHandler(rules),
                     new HttpProxyServerHandler(null, null, factory)
                 );
-//                ch.pipeline().addLast(new ServerHandshakeInitializer(httpHandshaker));
-                ch.pipeline().addLast(new ServerHandshakeInitializer(socks5Handshaker, socks4Handshaker, httpHandshaker));
+//                ch.pipeline().addLast(new MixinServerInitializer(httpHandshaker));
+                ch.pipeline().addLast(new MixinServerInitializer(socks5Handshaker, socks4Handshaker, httpHandshaker));
             }
         }).addListener(new ChannelFutureListener() {
             @Override

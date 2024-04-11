@@ -1,5 +1,6 @@
-package com.github.pangolin.routing.handler.handshake;
+package com.github.pangolin.routing.handler.mixin.support;
 
+import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -7,10 +8,10 @@ import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
 
-public class HttpServerHandshaker implements ServerHandshaker {
+public class HttpMixinServerHandshaker implements MixinServerHandshaker {
     private final ChannelHandler[] handlers;
 
-    public HttpServerHandshaker(final ChannelHandler... handlers) {
+    public HttpMixinServerHandshaker(final ChannelHandler... handlers) {
         this.handlers = handlers;
     }
 
