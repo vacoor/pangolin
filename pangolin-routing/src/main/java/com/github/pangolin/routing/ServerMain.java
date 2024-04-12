@@ -4,24 +4,19 @@ import com.github.pangolin.routing.config.ProxiesParser;
 import com.github.pangolin.routing.config.RulesParser;
 import com.github.pangolin.routing.handler.ProxyAutoConfigurationServerHandler;
 import com.github.pangolin.routing.handler.SwitchyRuleConfigurationServerHandler;
-import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
-import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
-import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
-import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
 import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
-import com.github.pangolin.routing.handler.internal.server.support.ProxyChannelFactory;
-import com.github.pangolin.routing.pattern.DestinationPattern;
+import com.github.pangolin.routing.handler.internal.server.support.SmartProxySocketChannelFactory;
+import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
+import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
+import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
+import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
 import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
-import com.github.pangolin.routing.proxy.RuleBasedRoutingProxyServer;
+import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.server.NettyServer;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
@@ -61,7 +56,9 @@ public class ServerMain {
             System.out.println(String.format("%s -> %s", entry.getKey(), entry.getValue()));
         }
 
-        final RuleBasedRoutingProxyServer router = new RuleBasedRoutingProxyServer("RuleBasedRouter", proxyServerProvider, rules);
+        final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
+        final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(rules, proxyServerProvider, bypass);
+//        final StandardSocketChannelFactory factory = new StandardSocketChannelFactory();
 
 //        Forwarder forwarder = new Forwarder(router, new NioEventLoopGroup(), new NioEventLoopGroup());
         // forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));
@@ -94,14 +91,12 @@ public class ServerMain {
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
-                final ProxyChannelFactory factory = new ProxyChannelFactory(router, bypass);
                 final Socks5MixinServerHandshaker socks5Handshaker = new Socks5MixinServerHandshaker(new Socks5ProxyServerHandler(null, null, factory));
                 final Socks4MixinServerHandshaker socks4Handshaker = new Socks4MixinServerHandshaker(new Socks4ProxyServerHandler(null, factory));
                 final HttpMixinServerHandshaker httpHandshaker = new HttpMixinServerHandshaker(
-                    new ProxyAutoConfigurationServerHandler(rules),
-                    new SwitchyRuleConfigurationServerHandler(rules),
-                    new HttpProxyServerHandler(null, null, factory)
+                        new ProxyAutoConfigurationServerHandler(rules),
+                        new SwitchyRuleConfigurationServerHandler(rules),
+                        new HttpProxyServerHandler(null, null, factory)
                 );
 //                ch.pipeline().addLast(new MixinServerInitializer(httpHandshaker));
                 ch.pipeline().addLast(new MixinServerInitializer(socks5Handshaker, socks4Handshaker, httpHandshaker));

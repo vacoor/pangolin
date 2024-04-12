@@ -4,7 +4,7 @@ import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.config.PatternResolver;
 import com.github.pangolin.routing.config.spi.ServerResolver;
 import com.github.pangolin.routing.proxy.health.HealthChecker;
-import com.github.pangolin.routing.pattern.DestinationPattern;
+import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.routing.proxy.LoadBalanceProxyServer;
 import freework.net.Http;
 import io.netty.channel.EventLoopGroup;

@@ -9,7 +9,7 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 
 import java.net.SocketAddress;
 
-public class StandardChannelFactory implements ChannelFactory {
+public class StandardSocketChannelFactory implements SocketChannelFactory {
 
   @Override
   public ChannelFuture open(final SocketAddress remoteAddress,

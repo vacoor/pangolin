@@ -24,4 +24,7 @@ public class Socks5MixinServerHandshaker extends SocksMixinServerHandshaker {
         cp.addLast(handlers);
     }
 
+    public final Socks5MixinServerHandshaker of(final ChannelHandler... handlers) {
+        return new Socks5MixinServerHandshaker(handlers);
+    }
 }

@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package com.github.pangolin.routing.pattern;
+package com.github.pangolin.routing.rule.pattern;
 
 import java.util.ArrayList;
 import java.util.Collection;

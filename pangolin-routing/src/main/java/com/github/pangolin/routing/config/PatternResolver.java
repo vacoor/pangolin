@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.pattern.DestinationPattern;
+import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 
 import java.io.IOException;
 import java.net.URL;

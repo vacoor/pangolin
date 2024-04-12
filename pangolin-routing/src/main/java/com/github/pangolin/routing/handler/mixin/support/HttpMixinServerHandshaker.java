@@ -49,4 +49,8 @@ public class HttpMixinServerHandshaker implements MixinServerHandshaker {
                 magic1 == 'T' && magic2 == 'R' || // TRACE
                 magic1 == 'C' && magic2 == 'O';   // CONNECT
     }
+
+    public final HttpMixinServerHandshaker of(final ChannelHandler... handlers) {
+        return new HttpMixinServerHandshaker(handlers);
+    }
 }

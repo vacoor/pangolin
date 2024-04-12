@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.config.clash;
 
 import com.github.pangolin.routing.config.PatternResolver;
-import com.github.pangolin.routing.pattern.DestinationPattern;
+import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import freework.io.IOUtils;
 import io.netty.util.internal.ObjectUtil;
 

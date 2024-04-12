@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.handler.internal.server;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
-import com.github.pangolin.routing.handler.internal.server.support.ChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelFuture;
@@ -41,20 +41,20 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
 
   private final String username;
   private final String password;
-  private final ChannelFactory channelFactory;
+  private final SocketChannelFactory socketChannelFactory;
 
   public Socks5ProxyServerHandler() {
-    this(null, null, new StandardChannelFactory());
+    this(null, null, new StandardSocketChannelFactory());
   }
 
   public Socks5ProxyServerHandler(final String username, final String password) {
-    this(username, password, new StandardChannelFactory());
+    this(username, password, new StandardSocketChannelFactory());
   }
 
-  public Socks5ProxyServerHandler(final String username, final String password, final ChannelFactory channelFactory) {
+  public Socks5ProxyServerHandler(final String username, final String password, final SocketChannelFactory socketChannelFactory) {
     this.username = username;
     this.password = password;
-    this.channelFactory = channelFactory;
+    this.socketChannelFactory = socketChannelFactory;
   }
 
 
@@ -206,7 +206,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     ctx.channel().config().setAutoRead(false);
 
     final ChannelConfig c = ctx.channel().config();
-    return channelFactory.open(new InetSocketAddress(address, port), c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
+    return socketChannelFactory.open(new InetSocketAddress(address, port), c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
       @Override
       public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
         delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(ctx));

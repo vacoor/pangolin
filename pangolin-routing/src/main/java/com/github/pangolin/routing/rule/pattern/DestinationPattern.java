@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.pattern;
+package com.github.pangolin.routing.rule.pattern;
 
 import java.net.InetSocketAddress;
 

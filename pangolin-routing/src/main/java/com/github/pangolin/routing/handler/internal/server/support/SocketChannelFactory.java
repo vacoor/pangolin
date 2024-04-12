@@ -6,7 +6,7 @@ import io.netty.channel.EventLoopGroup;
 
 import java.net.SocketAddress;
 
-public interface ChannelFactory {
+public interface SocketChannelFactory {
 
   ChannelFuture open(final SocketAddress remoteAddress,
                      final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler);

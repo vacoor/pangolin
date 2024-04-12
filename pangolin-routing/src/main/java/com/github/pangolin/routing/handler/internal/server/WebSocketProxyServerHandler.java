@@ -4,8 +4,8 @@ import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.handler.WebSocketServerHandshakeNegotiationHandler;
-import com.github.pangolin.routing.handler.internal.server.support.ChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelConfig;
@@ -35,13 +35,13 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
     private static final String WEB_SOCKET_PATH = "";
     private static final String PROTOCOLS = "CONNECT,";
 
-    private final ChannelFactory factory;
+    private final SocketChannelFactory factory;
 
     public WebSocketProxyServerHandler(boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch) {
-        this(allowExtensions, maxFrameSize, allowMaskMismatch, new StandardChannelFactory());
+        this(allowExtensions, maxFrameSize, allowMaskMismatch, new StandardSocketChannelFactory());
     }
 
-    public WebSocketProxyServerHandler(boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch, final ChannelFactory factory) {
+    public WebSocketProxyServerHandler(boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch, final SocketChannelFactory factory) {
         super(WEB_SOCKET_PATH, PROTOCOLS, allowExtensions, maxFrameSize, allowMaskMismatch, true);
         this.factory = factory;
     }

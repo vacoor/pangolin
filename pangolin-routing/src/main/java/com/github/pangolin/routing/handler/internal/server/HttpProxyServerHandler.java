@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.handler.internal.server;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
-import com.github.pangolin.routing.handler.internal.server.support.ChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -39,17 +39,17 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
     private final String username;
     private final String password;
     private final String authorization;
-    private final ChannelFactory factory;
+    private final SocketChannelFactory factory;
 
     public HttpProxyServerHandler() {
       this(null, null);
     }
 
     public HttpProxyServerHandler(final String username, final String password) {
-      this(username, password, new StandardChannelFactory());
+      this(username, password, new StandardSocketChannelFactory());
     }
 
-    public HttpProxyServerHandler(final String username, final String password, final ChannelFactory factory) {
+    public HttpProxyServerHandler(final String username, final String password, final SocketChannelFactory factory) {
         this.username = username;
         this.password = password;
         this.authorization = null != username && null != password ? encode(username, password) : null;
