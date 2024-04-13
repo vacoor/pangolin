@@ -11,15 +11,21 @@ import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ConnectionPendingException;
 import java.util.concurrent.TimeUnit;
 
-public abstract class ProxyHandler extends ChannelDuplexHandler {
+/**
+ * 客户端代理处理器.
+ *
+ * @author vacoor
+ */
+public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
     private final SocketAddress proxyAddress;
+
     private volatile SocketAddress destinationAddress;
     private PendingWriteQueue pendingWrites;
     private boolean suppressChannelReadComplete;
     private boolean flushedBeforeHandshake;
     private ChannelPromise handshakePromise;
 
-    public ProxyHandler(final SocketAddress proxyAddress) {
+    public AbstractProxyHandler(final SocketAddress proxyAddress) {
         this.proxyAddress = ObjectUtil.checkNotNull(proxyAddress, "proxyAddress");
     }
 
@@ -47,7 +53,8 @@ public abstract class ProxyHandler extends ChannelDuplexHandler {
                 }
             });
             destinationAddress = remoteAddress;
-            ChannelPromise delegate = ctx.newPromise().addListener(new ChannelFutureListener() {
+
+            final ChannelPromise delegate = ctx.newPromise().addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(final ChannelFuture channelFuture) throws Exception {
                     if (!channelFuture.isSuccess()) {

@@ -2,6 +2,7 @@ package com.github.pangolin.routing.handler.internal.client.ss.crypto;
 
 /**
  */
+@Deprecated
 public interface StreamCipherAlgorithm extends CipherAlgorithm {
 
     int getKeySize();

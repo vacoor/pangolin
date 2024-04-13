@@ -18,6 +18,8 @@ import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -108,6 +110,10 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
             }
         } else if (pattern instanceof SubnetPattern) {
             final SubnetPattern p = (SubnetPattern) pattern;
+            final int prefixLength = p.getPrefixLength();
+            final InetAddress sa = p.getNetworkAddress();
+            return String.format("Ip: %s/%s", sa.getHostAddress(), prefixLength);
+            /*
             DestinationPattern delegate = p.getDelegate();
             if (delegate instanceof SubnetPattern.Inet4SubnetPattern) {
                 SubnetPattern.Inet4SubnetPattern i4sn = (SubnetPattern.Inet4SubnetPattern) delegate;
@@ -115,6 +121,7 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
                 String subnetMask = i4sn.getSubnetMask();
                 return String.format("%s/%s", networkAddress, subnetMask);
             }
+            */
         }
         return String.format("! NOT SUPPORTED: %s", pattern);
     }

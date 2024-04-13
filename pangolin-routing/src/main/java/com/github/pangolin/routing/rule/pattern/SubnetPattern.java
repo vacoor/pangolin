@@ -50,6 +50,10 @@ public class SubnetPattern implements DestinationPattern {
         return networkAddress = getNetworkAddress(ipAddress, prefixLength);
     }
 
+    public int getPrefixLength() {
+        return prefixLength;
+    }
+
     public DestinationPattern getDelegate() {
         return delegate;
     }

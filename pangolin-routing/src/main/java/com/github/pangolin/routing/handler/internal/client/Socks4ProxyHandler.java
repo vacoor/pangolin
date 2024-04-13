@@ -14,7 +14,7 @@ import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 
-public class Socks4ProxyHandler extends ProxyHandler {
+public class Socks4ProxyHandler extends AbstractProxyHandler {
     private static final String NONE = "";
 
     private String username;

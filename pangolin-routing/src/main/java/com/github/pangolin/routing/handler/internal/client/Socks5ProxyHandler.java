@@ -16,7 +16,7 @@ import java.util.List;
 /**
  *
  */
-public class Socks5ProxyHandler extends ProxyHandler {
+public class Socks5ProxyHandler extends AbstractProxyHandler {
     private static final String NONE = "";
     private static final String SOCKS5_DECODER_NAME = "SOCKS5_DECODER";
 

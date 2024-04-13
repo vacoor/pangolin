@@ -64,6 +64,25 @@ public class ServerMain {
 
         final String fixedProxy = MODE_RULE;
         final RulesProvider rulesProvider = () -> rules;
+        /*-
+         * 策略
+         *   目标 --> 代理
+         *   目标集 --> 代理
+         * eg:
+         * 规则模式
+         *   目标 --> 代理
+         *   默认 --> DIRECT
+         * 全局模式
+         *   目标 --> 代理
+         *   默认 --> 代理
+         * 直连模式
+         *   默认 --> DIRECT
+         */
+
+        final RulesProvider global = () -> {
+            return Collections.singletonMap((DestinationPattern) destionation -> true, fixedProxy);
+        };
+
         final RulesProvider modedRulesProvider = () -> {
             if (StringUtils.hasText(fixedProxy)) {
                 return Collections.singletonMap((DestinationPattern) destination -> true, fixedProxy);

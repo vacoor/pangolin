@@ -21,7 +21,7 @@ import java.util.List;
  * @see io.netty.resolver.NoopAddressResolverGroup#INSTANCE
  */
 @Slf4j
-public class WebSocketProxyHandler extends ProxyHandler {
+public class WebSocketProxyHandler extends AbstractProxyHandler {
     private static final AttributeKey<WebSocketClientHandshaker> HANDSHAKER_ATTR_KEY = AttributeKey.valueOf(WebSocketClientHandshaker.class, "HANDSHAKER");
 
     private final URI webSocketProxyServerEndpoint;
