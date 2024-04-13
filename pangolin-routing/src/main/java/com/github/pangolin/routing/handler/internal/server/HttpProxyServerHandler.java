@@ -118,13 +118,14 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                             ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
                         }
                     }
-                }).addListener(closeOnComplete(ctx, method));
-            } else {
+                }).channel().closeFuture().addListener(closeOnComplete(ctx, method));
+        } else {
                 /*- HTTP routing */
                 // GET http://www.baidu.com/ HTTP/1.1
                 // Host: www.baidu.com
                 // User-Agent: curl/7.64.1
                 // Proxy-Connection: Keep-Alive
+                final FullHttpRequest httpRequestToSend = httpRequest.retain();
                 forward(ctx, httpRequest).addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
@@ -134,9 +135,8 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                             headers.add(HttpHeaderNames.CONNECTION, connection);
                             headers.remove(HttpHeaderNames.PROXY_CONNECTION);
                         }
-                        final FullHttpRequest httpRequestToSend = httpRequest.retain();
                         if (future.isSuccess()) {
-                            log.info("[HTTP][] Connection established: {}", method, future.channel().remoteAddress());
+                            log.info("[HTTP][{}] Connection established: {}", method, future.channel().remoteAddress());
                             future.channel().writeAndFlush(httpRequestToSend);
                         } else {
                             ReferenceCountUtil.release(httpRequestToSend);
@@ -146,7 +146,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                             ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
                         }
                     }
-                }).addListener(closeOnComplete(ctx, method));
+                }).channel().closeFuture().addListener(closeOnComplete(ctx, method));
             }
         } finally {
             ReferenceCountUtil.release(msg);
@@ -195,6 +195,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(new HttpClientCodec());
+//                ch.pipeline().addLast(new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRead(final ChannelHandlerContext proxyCtx, final Object msg) throws Exception {
