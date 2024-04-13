@@ -75,18 +75,17 @@ public class ServerMain {
         final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(modedRulesProvider, proxyServerProvider, bypass);
 //        final StandardSocketChannelFactory factory = new StandardSocketChannelFactory();
 
-        final ProxyAutoConfigurationServerHandler pacHandler = new ProxyAutoConfigurationServerHandler(rulesProvider);
-        final SwitchyRuleConfigurationServerHandler switchyRuleHandler = new SwitchyRuleConfigurationServerHandler(rulesProvider);
-
 //        Forwarder forwarder = new Forwarder(factory, new NioEventLoopGroup(), new NioEventLoopGroup());
         // forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));
-
 
 
         new NettyServer(8088).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(pacHandler, switchyRuleHandler);
+                ch.pipeline().addLast(
+                        new ProxyAutoConfigurationServerHandler(rulesProvider),
+                        new SwitchyRuleConfigurationServerHandler(rulesProvider)
+                );
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {

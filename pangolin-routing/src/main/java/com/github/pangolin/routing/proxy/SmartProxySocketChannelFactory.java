@@ -35,7 +35,6 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
 
     @Override
     public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
-
         final ChannelHandler networkHandler = select(remoteAddress);
         return Channels.open(remoteAddress, NoopAddressResolverGroup.INSTANCE, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
             @Override
@@ -50,10 +49,12 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
 
     private ChannelHandler select(final SocketAddress destinationAddress) {
         if (!(destinationAddress instanceof InetSocketAddress)) {
+            log.info("[Route] {} using DIRECT", destinationAddress);
             return null;
         }
         final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
         if (bypass.contains(sa.getHostString()) || bypass.contains(sa.getHostName())) {
+            log.info("[Route] {} using DIRECT", sa.getHostString());
             return null;
         }
 
@@ -62,10 +63,13 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
             if (!entry.getKey().matches(sa)) {
                 continue;
             }
-            log.info("{} -> {}", sa, entry.getValue());
+
+            log.info("[Route] {} using {}", sa.getHostString(), entry.getValue());
             final ProxyServer proxyToUse = proxyServerProvider.getInstance(entry.getValue());
             return null != proxyToUse ? proxyToUse.newProxyHandler(sa) : null;
         }
+
+        log.info("[Route] {} using DIRECT", sa.getHostString());
         return null;
     }
 }

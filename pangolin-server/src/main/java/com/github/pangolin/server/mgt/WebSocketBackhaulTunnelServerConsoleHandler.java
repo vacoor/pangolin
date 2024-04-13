@@ -1,7 +1,9 @@
-package com.github.pangolin.server;
+package com.github.pangolin.server.mgt;
 
-import com.github.pangolin.server.shell.ConsoleReaderFactory;
-import com.github.pangolin.server.shell.WebSocketBackhaulTunnelServerShell;
+import com.github.pangolin.server.WebSocketBackhaulTunnelServerEngine;
+import com.github.pangolin.server.WebSocketBackhaulTunnelServerForwarder;
+import com.github.pangolin.server.mgt.shell.ConsoleReaderFactory;
+import com.github.pangolin.server.mgt.shell.WebSocketBackhaulTunnelServerShell;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
@@ -24,7 +26,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- *
+ * 管理控制台 Handler.
  */
 @Slf4j
 public class WebSocketBackhaulTunnelServerConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> {

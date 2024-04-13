@@ -2,6 +2,7 @@ package com.github.pangolin.server;
 
 import com.github.pangolin.handler.WebSocketInboundRedirectHandler;
 import com.github.pangolin.handler.WebSocketServerHandshakeNegotiationHandler;
+import com.github.pangolin.server.mgt.WebSocketBackhaulTunnelServerConsoleHandler;
 import com.github.pangolin.util.Util;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;

@@ -1,4 +1,4 @@
-package com.github.pangolin.server.shell;
+package com.github.pangolin.server.mgt.shell;
 
 import com.github.pangolin.server.WebSocketBackhaulTunnelServerEngine;
 import com.github.pangolin.server.WebSocketBackhaulTunnelServerForwarder;
