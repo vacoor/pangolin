@@ -50,14 +50,17 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
     }
 
     private String encode(final String username, final String password) {
-        final String usernameToUse = null != username ? username : NONE;
-        final String passwordToUse = null != password ? password : NONE;
-        final ByteBuf buf = Unpooled.copiedBuffer(usernameToUse + ':' + passwordToUse, CharsetUtil.UTF_8);
-        final ByteBuf encoded = Base64.encode(buf, false);
-        final String encodedStr = "Basic " + encoded.toString(CharsetUtil.US_ASCII);
-        buf.release();
-        encoded.release();
-        return encodedStr;
+        if (null != username || null != password) {
+            final String usernameToUse = null != username ? username : NONE;
+            final String passwordToUse = null != password ? password : NONE;
+            final ByteBuf buf = Unpooled.copiedBuffer(usernameToUse + ':' + passwordToUse, CharsetUtil.UTF_8);
+            final ByteBuf encoded = Base64.encode(buf, false);
+            final String encodedStr = "Basic " + encoded.toString(CharsetUtil.US_ASCII);
+            buf.release();
+            encoded.release();
+            return encodedStr;
+        }
+        return null;
     }
 
     @Override
