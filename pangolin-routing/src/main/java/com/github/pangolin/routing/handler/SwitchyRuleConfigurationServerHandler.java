@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.handler;
 
+import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.routing.rule.pattern.DomainPattern;
 import com.github.pangolin.routing.rule.pattern.SubnetPattern;
@@ -26,10 +27,10 @@ import java.util.Map;
 public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandlerAdapter {
     private static final int MAX_HTTP_CONTENT_LENGTH = 8 * 1024 * 1024;
     private final String path = "/switchy.sorl";
-    private final Map<DestinationPattern, String> rules;
+    private final RulesProvider rulesProvider;
 
-    public SwitchyRuleConfigurationServerHandler(final Map<DestinationPattern, String> rules) {
-        this.rules = rules;
+    public SwitchyRuleConfigurationServerHandler(final RulesProvider rulesProvider) {
+        this.rulesProvider = rulesProvider;
     }
 
     @Override
@@ -65,6 +66,8 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
                             .append("; Require: SwitchyOmega >= 2.3.2\r\n")
                             .append("; Date: ").append(now).append("\r\n")
                             .append("; Usage: https://github.com/FelisCatus/SwitchyOmega/wiki/RuleListUsage\r\n\r\n");
+
+                    final Map<DestinationPattern, String> rules = rulesProvider.getRules();
                     for (DestinationPattern destinationPattern : rules.keySet()) {
                         buff.append(toSwitchyRule(destinationPattern)).append("\r\n");
                     }

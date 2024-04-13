@@ -1,7 +1,5 @@
 package com.github.pangolin.routing.proxy;
 
-import com.github.pangolin.routing.util.AvgMinMaxCounter;
-
 public class ProxyServerStats {
     private final String name;
     private final AvgMinMaxCounter responseTimeCounter = new AvgMinMaxCounter("ResponseTime");

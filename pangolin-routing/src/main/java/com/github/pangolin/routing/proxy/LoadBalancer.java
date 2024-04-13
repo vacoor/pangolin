@@ -1,7 +1,6 @@
 package com.github.pangolin.routing.proxy;
 
 import com.github.pangolin.routing.proxy.health.HealthChecker;
-import com.github.pangolin.routing.util.AvgMinMaxCounter;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;

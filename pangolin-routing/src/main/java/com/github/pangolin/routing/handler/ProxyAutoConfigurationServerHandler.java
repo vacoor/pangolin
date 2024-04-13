@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.handler;
 
+import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.routing.rule.pattern.DomainPattern;
 import com.github.pangolin.routing.rule.pattern.SubnetPattern;
@@ -40,15 +41,15 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
     private static final String DEFAULT_PATH = "/proxy.pac";
 
     private final String path;
-    private final Map<DestinationPattern, String> rules;
+    private final RulesProvider rulesProvider;
 
-    public ProxyAutoConfigurationServerHandler(final Map<DestinationPattern, String> rules) {
-      this(DEFAULT_PATH, rules);
+    public ProxyAutoConfigurationServerHandler(final RulesProvider rulesProvider) {
+      this(DEFAULT_PATH, rulesProvider);
     }
 
-    public ProxyAutoConfigurationServerHandler(final String path, final Map<DestinationPattern, String> rules) {
+    public ProxyAutoConfigurationServerHandler(final String path, final RulesProvider rulesProvider) {
         this.path = path;
-        this.rules = rules;
+        this.rulesProvider = rulesProvider;
     }
 
     @Override
@@ -78,7 +79,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
                 final String path = new QueryStringDecoder(httpRequest.uri()).path();
                 if (path.equals(this.path)) {
                     final String hostname = getHttpRequestAddress(httpRequest).getHostString();
-                    final String pac = toPac(rules.keySet());
+                    final String pac = toPac(rulesProvider.getRules());
                     final String pacToUse = pac.replace("127.0.0.1", hostname);
                     final ByteBuf body = Unpooled.copiedBuffer(pacToUse, StandardCharsets.UTF_8);
 
@@ -114,7 +115,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
         return port > 0 ? port : uri.toLowerCase().startsWith("https://") ? 443 : 80;
     }
 
-    private static String toPac(final Set<DestinationPattern> patterns) {
+    private static String toPac(final Map<DestinationPattern, String> rules) {
         final StringBuilder buff = new StringBuilder();
         final String now = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
         buff.append("/**\r\n")
@@ -127,7 +128,8 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
 
         buff.append("function FindProxyForURL(url, host) {\r\n");
         buff.append("  ").append("var $PROXY = 'SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080; PROXY 127.0.0.1:1080';\r\n");
-        for (DestinationPattern destinationPattern : patterns) {
+        for (final Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
+            DestinationPattern destinationPattern = entry.getKey();
             String s = toPacStatement(destinationPattern);
             buff.append("  ").append(s).append("\r\n");
         }

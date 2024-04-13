@@ -7,13 +7,14 @@ import com.github.pangolin.routing.handler.SwitchyRuleConfigurationServerHandler
 import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
-import com.github.pangolin.routing.handler.internal.server.support.SmartProxySocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
 import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
+import com.github.pangolin.routing.proxy.SmartProxySocketChannelFactory;
+import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.*;
@@ -22,6 +23,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import org.springframework.boot.system.ApplicationHome;
+import org.springframework.util.StringUtils;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -56,18 +58,35 @@ public class ServerMain {
             System.out.println(String.format("%s -> %s", entry.getKey(), entry.getValue()));
         }
 
+        final String MODE_RULE = null;
+        final String MODE_GLOBAL = "一元机场";
+        final String MODE_DIRECT = "DIRECT";
+
+        final String fixedProxy = MODE_RULE;
+        final RulesProvider rulesProvider = () -> rules;
+        final RulesProvider modedRulesProvider = () -> {
+            if (StringUtils.hasText(fixedProxy)) {
+                return Collections.singletonMap((DestinationPattern) destination -> true, fixedProxy);
+            }
+            return rulesProvider.getRules();
+        };
+
         final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
-        final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(rules, proxyServerProvider, bypass);
+        final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(modedRulesProvider, proxyServerProvider, bypass);
 //        final StandardSocketChannelFactory factory = new StandardSocketChannelFactory();
 
-//        Forwarder forwarder = new Forwarder(router, new NioEventLoopGroup(), new NioEventLoopGroup());
+        final ProxyAutoConfigurationServerHandler pacHandler = new ProxyAutoConfigurationServerHandler(rulesProvider);
+        final SwitchyRuleConfigurationServerHandler switchyRuleHandler = new SwitchyRuleConfigurationServerHandler(rulesProvider);
+
+//        Forwarder forwarder = new Forwarder(factory, new NioEventLoopGroup(), new NioEventLoopGroup());
         // forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));
+
+
 
         new NettyServer(8088).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new ProxyAutoConfigurationServerHandler(rules));
-                ch.pipeline().addLast(new SwitchyRuleConfigurationServerHandler(rules));
+                ch.pipeline().addLast(pacHandler, switchyRuleHandler);
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
@@ -94,8 +113,8 @@ public class ServerMain {
                 final Socks5MixinServerHandshaker socks5Handshaker = new Socks5MixinServerHandshaker(new Socks5ProxyServerHandler(null, null, factory));
                 final Socks4MixinServerHandshaker socks4Handshaker = new Socks4MixinServerHandshaker(new Socks4ProxyServerHandler(null, factory));
                 final HttpMixinServerHandshaker httpHandshaker = new HttpMixinServerHandshaker(
-                        new ProxyAutoConfigurationServerHandler(rules),
-                        new SwitchyRuleConfigurationServerHandler(rules),
+                        new ProxyAutoConfigurationServerHandler(rulesProvider),
+                        new SwitchyRuleConfigurationServerHandler(rulesProvider),
                         new HttpProxyServerHandler(null, null, factory)
                 );
 //                ch.pipeline().addLast(new MixinServerInitializer(httpHandshaker));

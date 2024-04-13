@@ -23,11 +23,9 @@ import java.security.cert.CertificateException;
 
 public class Channels {
 
-    public static ChannelFuture listen(final String listenHost, final int listenPort, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup, final ChannelHandler initializer) throws InterruptedException {
-        return listen(listenHost, listenPort, true, bossGroup, workerGroup, initializer);
-    }
-
-    public static ChannelFuture listen(final String listenHost, final int listenPort, final boolean autoRead, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup, final ChannelHandler initializer) throws InterruptedException {
+    public static ChannelFuture listen(final String listenHost, final int listenPort, final boolean autoRead,
+                                       final EventLoopGroup bossGroup, final EventLoopGroup workerGroup,
+                                       final ChannelHandler initializer) throws InterruptedException {
         return listen(createSocketAddress(listenHost, listenPort), autoRead, bossGroup, workerGroup, initializer);
     }
 
@@ -44,11 +42,7 @@ public class Channels {
     }
 
     public static ChannelFuture open(final String hostname, final int port, final boolean autoRead, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
-        return open(hostname, port, null, autoRead, group, initializer);
-    }
-
-    public static ChannelFuture open(final String hostname, final int port, final AddressResolverGroup<SocketAddress> resolver, final boolean autoRead, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {
-        return open(createSocketAddress(hostname, port), resolver, 10000, autoRead, group, initializer);
+        return open(createSocketAddress(hostname, port), null, 10000, autoRead, group, initializer);
     }
 
     public static ChannelFuture open(final SocketAddress remoteAddress, final boolean autoRead, final EventLoopGroup group, final ChannelHandler initializer) throws InterruptedException {

@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.server;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
-import com.github.pangolin.routing.handler.internal.server.support.ChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.util.Channels;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -24,12 +24,12 @@ import java.util.concurrent.ConcurrentMap;
 
 @Slf4j
 public class Forwarder {
-  private final ChannelFactory factory;
+  private final SocketChannelFactory factory;
   private final EventLoopGroup bossGroup;
   private final EventLoopGroup workerGroup;
   private final ConcurrentMap<SocketAddress, Forwarding> registeredForwardingMap = new ConcurrentHashMap<>();
 
-  public Forwarder(final ChannelFactory factory, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
+  public Forwarder(final SocketChannelFactory factory, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
     this.factory = factory;
     this.bossGroup = bossGroup;
     this.workerGroup = workerGroup;

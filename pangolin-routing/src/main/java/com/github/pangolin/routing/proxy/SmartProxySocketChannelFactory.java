@@ -1,7 +1,7 @@
-package com.github.pangolin.routing.handler.internal.server.support;
+package com.github.pangolin.routing.proxy;
 
-import com.github.pangolin.routing.proxy.ProxyServer;
-import com.github.pangolin.routing.proxy.ProxyServerProvider;
+import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
+import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.util.Channels;
 import io.netty.channel.ChannelFuture;
@@ -23,18 +23,19 @@ import java.util.Map;
  */
 @Slf4j
 public class SmartProxySocketChannelFactory implements SocketChannelFactory {
-    private final Map<DestinationPattern, String> rules;
+    private final RulesProvider rulesProvider;
     private final ProxyServerProvider proxyServerProvider;
     private final List<String> bypass;
 
-    public SmartProxySocketChannelFactory(final Map<DestinationPattern, String> rules, final ProxyServerProvider provider, final List<String> bypass) {
-        this.rules = rules;
+    public SmartProxySocketChannelFactory(final RulesProvider rulesProvider, final ProxyServerProvider provider, final List<String> bypass) {
+        this.rulesProvider = rulesProvider;
         this.proxyServerProvider = provider;
         this.bypass = null != bypass ? bypass : Collections.emptyList();
     }
 
     @Override
     public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
+
         final ChannelHandler networkHandler = select(remoteAddress);
         return Channels.open(remoteAddress, NoopAddressResolverGroup.INSTANCE, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
             @Override
@@ -55,6 +56,8 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
         if (bypass.contains(sa.getHostString()) || bypass.contains(sa.getHostName())) {
             return null;
         }
+
+        final Map<DestinationPattern, String> rules = rulesProvider.getRules();
         for (final Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
             if (!entry.getKey().matches(sa)) {
                 continue;
