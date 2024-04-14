@@ -3,6 +3,7 @@ package com.github.pangolin.routing.config.clash;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.config.PatternResolver;
 import com.github.pangolin.routing.config.spi.ServerResolver;
+import com.github.pangolin.routing.proxy.StatProxyServer;
 import com.github.pangolin.routing.proxy.health.HealthChecker;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.routing.proxy.LoadBalanceProxyServer;
@@ -72,9 +73,12 @@ public class ClashRuleFactory {
     public static Map<String, ProxyServer> parseProxies(final List<Configuration.ProxyDefinition> proxyDefinitions) {
         final Map<String, ProxyServer> proxies = new HashMap<>();
         for (final Configuration.ProxyDefinition proxyDefinition : proxyDefinitions) {
+            if ("0.0.0.0".equalsIgnoreCase(proxyDefinition.getServer())) {
+                continue;
+            }
             final String uri = String.format("%s://%s@%s:%s#%s", proxyDefinition.getType(), urlEncode(proxyDefinition.getPassword()), proxyDefinition.getServer(), proxyDefinition.getPort(), urlEncode(proxyDefinition.getName()));
             final ProxyServer server = resolve(uri);
-            proxies.put(server.getName(), server);
+            proxies.put(server.getName(), new StatProxyServer(server));
         }
         return proxies;
     }

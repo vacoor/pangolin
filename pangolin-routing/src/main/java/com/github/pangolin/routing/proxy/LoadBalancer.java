@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.proxy;
 
 import com.github.pangolin.routing.proxy.health.HealthChecker;
+import freework.util.StringUtils2;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
@@ -56,14 +57,14 @@ public class LoadBalancer {
                     if (future.isSuccess()) {
                         addServerRt(instance, future.get());
                         if (downServers.remove(instance)) {
-                            log.info("Instance UP: {}, response time: {}ms", instance.getName(), future.get());
                             upServers.add(instance);
                         }
+                        log.info("[Health Check] {} response time: {}ms", instance.getName(), future.get());
                     } else {
                         if (upServers.remove(instance)) {
-                            log.info("Instance DOWN: {}", instance.getName());
-                            downServers.remove(instance);
+                            downServers.add(instance);
                         }
+                        log.info("[Health Check] {} down: {}", instance.getName(), future.cause().getMessage());
                     }
                 }
             });
@@ -84,8 +85,41 @@ public class LoadBalancer {
                 return Double.compare(getServerAvgRt(o1), getServerAvgRt(o2));
             }
         });
+
+//        final int index = ThreadLocalRandom.current().nextInt(Math.min(instances.size(), 5));
+        final int index = ThreadLocalRandom.current().nextInt(Math.min(instances.size(), 1));
+
+        /*
+        int nameLength = 0;
+        for (ProxyServer instance : instances) {
+            nameLength = Math.max(instance.getName().length(), nameLength);
+        }
+
+        final StringBuilder buff = new StringBuilder();
+        buff.append("----------------\r\n");
+        buff.append(lpad("Instance", 3 + nameLength)).append(lpad("Avg Response Time(ms)", 25));
+        for (int i = 0; i < instances.size(); i++) {
+            final ProxyServer instance = instances.get(i);
+            final String art = String.valueOf(getServerAvgRt(instance));
+            buff.append("\r\n");
+            if (index == i) {
+                buff.append("-> ").append(lpad(instance.getName(), nameLength));
+            } else {
+                buff.append(lpad(instance.getName(), 3 + nameLength));
+            }
+            buff.append(lpad(art, 25));
+        }
+        buff.append("\r\n----------------");
+
+        log.info("{}", buff);
+        */
+
         // return instances.iterator().next();
-        return instances.get(ThreadLocalRandom.current().nextInt(Math.min(instances.size(), 5)));
+        return instances.get(index);
+    }
+
+    private String lpad(final String text, final int length) {
+        return StringUtils2.pad(text, ' ', length, true);
     }
 
     public List<ProxyServer> getReachableServers() {

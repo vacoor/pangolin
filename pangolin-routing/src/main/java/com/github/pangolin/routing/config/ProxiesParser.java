@@ -5,6 +5,7 @@ import com.github.pangolin.routing.config.spi.ServerResolver;
 import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
+import com.github.pangolin.routing.proxy.StatProxyServer;
 import freework.io.IOUtils;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.EventLoopGroup;
@@ -71,7 +72,7 @@ public class ProxiesParser {
                 return proxyServer.newProxyHandler(sa);
               }
             };
-            fixedServers.put(proxyServer.getName(), proxyServerToUse);
+            fixedServers.put(proxyServer.getName(), new StatProxyServer(proxyServerToUse));
           }
         } else {
           // log
