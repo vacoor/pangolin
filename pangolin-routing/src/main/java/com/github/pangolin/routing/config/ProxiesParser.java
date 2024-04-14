@@ -72,7 +72,7 @@ public class ProxiesParser {
                 return proxyServer.newProxyHandler(sa);
               }
             };
-            fixedServers.put(proxyServer.getName(), new StatProxyServer(proxyServerToUse));
+            fixedServers.put(proxyServer.getName(), proxyServerToUse);
           }
         } else {
           // log

@@ -1,6 +1,5 @@
 package com.github.pangolin.routing.proxy;
 
-import com.github.pangolin.routing.proxy.ProxyServer;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -8,7 +7,6 @@ import io.netty.channel.ChannelPromise;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 
-import java.lang.reflect.Proxy;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 
@@ -27,13 +25,10 @@ public class StatProxyServer implements ProxyServer {
     @Override
     public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
         ChannelHandler handler = delegate.newProxyHandler(sa);
-        return handler;
-        /*
         if (handler instanceof StatChannelHandler) {
             return handler;
         }
         return new StatChannelHandler(handler, delegate);
-        */
     }
 
     private class StatChannelHandler extends ChannelDuplexHandler {
@@ -45,6 +40,15 @@ public class StatProxyServer implements ProxyServer {
             this.proxyServer = proxyServer;
         }
 
+        @Override
+        public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
+            ctx.pipeline().addBefore(ctx.name(), null, delegate);
+        }
+
+        @Override
+        public void handlerRemoved(final ChannelHandlerContext ctx) throws Exception {
+            ctx.pipeline().remove(delegate);
+        }
 
         @Override
         public void connect(final ChannelHandlerContext ctx, final SocketAddress remoteAddress, final SocketAddress localAddress, final ChannelPromise promise) throws Exception {
@@ -58,7 +62,7 @@ public class StatProxyServer implements ProxyServer {
                     }
                 }
             });
-//            delegate.connect(ctx, remoteAddress, localAddress, promise);
+            super.connect(ctx, remoteAddress, localAddress, promise);
         }
     }
 
