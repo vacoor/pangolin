@@ -152,7 +152,7 @@ public class SsAeadCipherCodec extends CombinedChannelDuplexHandler<ByteToMessag
                 /*-
                  * Payload length is a 2-byte big-endian unsigned integer capped at 0x3FFF.
                  */
-                final int chunkSize = in.readableBytes() & CHUNK_SIZE_MASK;
+                final int chunkSize = Math.min(in.readableBytes(), CHUNK_SIZE_MASK);
                 final byte[] chunkSizeBytes = new byte[]{(byte) ((chunkSize >>> 8) & 0xff), (byte) (chunkSize & 0xff)};
                 final byte[] buffer = new byte[LENGTH_SIZE + tagSize + chunkSize + tagSize];
 
