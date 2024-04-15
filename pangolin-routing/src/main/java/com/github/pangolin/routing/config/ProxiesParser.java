@@ -1,11 +1,10 @@
 package com.github.pangolin.routing.config;
 
 import com.github.pangolin.routing.config.clash.ClashProxyServerProviderFactory;
-import com.github.pangolin.routing.config.spi.ServerResolver;
+import com.github.pangolin.routing.proxy.spi.ServerResolver;
 import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
-import com.github.pangolin.routing.proxy.StatProxyServer;
 import freework.io.IOUtils;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.EventLoopGroup;

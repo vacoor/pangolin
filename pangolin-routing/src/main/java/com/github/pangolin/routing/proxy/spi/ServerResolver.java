@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.config.spi;
+package com.github.pangolin.routing.proxy.spi;
 
 import com.github.pangolin.routing.proxy.ProxyServer;
 
