@@ -8,7 +8,7 @@ import java.util.concurrent.*;
 public class HealthCheckScheduler {
     private final HealthChecker healthChecker;
     private final ScheduledExecutorService scheduler;
-    private final long healthCheckIntervalMs = TimeUnit.SECONDS.toMillis(10);
+    private final long healthCheckIntervalMs = TimeUnit.MINUTES.toMillis(10);
     private final Map<ProxyServer, ScheduledFuture<?>> healthChecks = new ConcurrentHashMap<>();
 
     public HealthCheckScheduler(final ScheduledExecutorService scheduler, final HealthChecker healthChecker) {

@@ -76,12 +76,12 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
         try {
             if (msg instanceof FullHttpRequest) {
                 final FullHttpRequest httpRequest = (FullHttpRequest) msg;
-                final String path = new QueryStringDecoder(httpRequest.uri()).path();
+                final QueryStringDecoder decoder = new QueryStringDecoder(httpRequest.uri());
+                final String path = decoder.path();
                 if (path.equals(this.path)) {
-                    final String hostname = getHttpRequestAddress(httpRequest).getHostString();
-                    final String pac = toPac(rulesProvider.getRules());
-                    final String pacToUse = pac.replace("127.0.0.1", hostname);
-                    final ByteBuf body = Unpooled.copiedBuffer(pacToUse, StandardCharsets.UTF_8);
+                    final String addr = getHttpRequestAddress(httpRequest).getHostString() + ":1080";
+                    final String pac = toPac(rulesProvider.getRules(), addr, decoder.parameters().containsKey("http"));
+                    final ByteBuf body = Unpooled.copiedBuffer(pac, StandardCharsets.UTF_8);
 
                     final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);
                     httpResponse.headers().add("Content-Length", body.readableBytes());
@@ -115,7 +115,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
         return port > 0 ? port : uri.toLowerCase().startsWith("https://") ? 443 : 80;
     }
 
-    private static String toPac(final Map<DestinationPattern, String> rules) {
+    private static String toPac(final Map<DestinationPattern, String> rules, final String addr, final boolean onlyHttp) {
         final StringBuilder buff = new StringBuilder();
         final String now = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
         buff.append("/**\r\n")
@@ -127,7 +127,14 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
                 .append(" */\r\n");
 
         buff.append("function FindProxyForURL(url, host) {\r\n");
-        buff.append("  ").append("var $PROXY = 'SOCKS5 127.0.0.1:1080; SOCKS 127.0.0.1:1080; PROXY 127.0.0.1:1080';\r\n");
+
+        buff.append("  ").append("var $PROXY = '");
+        if (onlyHttp) {
+            buff.append(String.format("PROXY %s", addr));
+        } else {
+            buff.append(String.format("SOCKS5 %s; SOCKS %s; PROXY %s", addr, addr, addr));
+        }
+        buff.append("';\r\n");
         for (final Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
             DestinationPattern destinationPattern = entry.getKey();
             String s = toPacStatement(destinationPattern);
