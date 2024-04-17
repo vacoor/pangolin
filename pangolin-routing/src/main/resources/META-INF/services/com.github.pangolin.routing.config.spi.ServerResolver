@@ -1,3 +1,0 @@
-com.github.pangolin.routing.config.spi.SsServerResolver
-com.github.pangolin.routing.config.spi.TrojanServerResolver
-com.github.pangolin.routing.config.spi.WebSocketServerResolver

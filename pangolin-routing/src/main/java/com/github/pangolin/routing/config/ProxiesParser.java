@@ -106,7 +106,7 @@ public class ProxiesParser {
         return resolved;
       }
     }
-    throw new IllegalStateException("NOT found provider: url :" + url);
+    throw new IllegalStateException("NOT found provider, url: " + url);
   }
 
 }
