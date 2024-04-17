@@ -15,6 +15,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
@@ -99,27 +101,47 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
             }
 
             if (HttpMethod.CONNECT.equals(method)) {
-                /*- HTTPS tunnel */
-                // CONNECT www.baidu.com:443 HTTP/1.1
-                // Host: www.baidu.com:443
-                // User-Agent: curl/7.64.1
-                // Proxy-Connection: Keep-Alive
-                // content-length: 0
-                connect(ctx, httpRequest).addListener(new ChannelFutureListener() {
-                    @Override
-                    public void operationComplete(final ChannelFuture future) throws Exception {
-                        if (future.isSuccess()) {
-                            log.info("[HTTP][{}] Connection established: {}", method, future.channel().remoteAddress());
-                            ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.OK)).addListener(g -> {
-                                ctx.pipeline().remove(HttpServerCodec.class);
-                            });
-                        } else {
-                            log.info("[HTTP][{}] Failed to Connect to {}: {}", method, future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
-                            ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
+                /*-
+                 * CONNECT uses a special form of request target, unique to this method,
+                 * consisting of only the host and port number of the tunnel destination,
+                 * separated by a colon. There is no default port; a client MUST send the
+                 * port number even if the CONNECT request is based on a URI reference
+                 * that contains an authority component with an elided port (Section 4.1).
+                 * For example,
+                 * <pre>
+                 * CONNECT server.example.com:80 HTTP/1.1
+                 * Host: server.example.com
+                 * </pre>
+                 *
+                 * A server MUST reject a CONNECT request that targets an empty or invalid port number,
+                 * typically by responding with a 400 (Bad Request) status code
+                 *
+                 * @see https://www.rfc-editor.org/rfc/rfc9110.html#name-connect
+                 */
+                final Matcher matcher = CONNECT_URI_PATTERN.matcher(httpRequest.uri());
+                if (matcher.find()) {
+                    final String host = matcher.group(1);
+                    final int port = Integer.parseInt(matcher.group(2));
+
+                    connect(ctx, new InetSocketAddress(host, port)).addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(final ChannelFuture future) throws Exception {
+                            if (future.isSuccess()) {
+                                log.info("[HTTP][{}] Connection established: {}", method, future.channel().remoteAddress());
+                                final DefaultFullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.OK);
+                                ctx.writeAndFlush(response).addListener(g -> {
+                                    ctx.pipeline().remove(HttpServerCodec.class);
+                                });
+                            } else {
+                                log.info("[HTTP][{}] Failed to Connect to {}: {}", method, future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
+                                ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
+                            }
                         }
-                    }
-                }).channel().closeFuture().addListener(closeOnComplete(ctx, method));
-        } else {
+                    }).channel().closeFuture().addListener(closeOnComplete(ctx, method));
+                } else {
+                    ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.BAD_REQUEST)).addListener(ChannelFutureListener.CLOSE);
+                }
+            } else {
                 /*- HTTP routing */
                 // GET http://www.baidu.com/ HTTP/1.1
                 // Host: www.baidu.com
@@ -206,19 +228,28 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         });
     }
 
-    protected ChannelFuture connect(final ChannelHandlerContext ctx, final HttpRequest httpRequest) throws Exception {
-        final InetSocketAddress targetAddress = getHttpRequestAddress(httpRequest);
+    /**
+     * CONNECT URI pattern.
+     */
+    private static final Pattern CONNECT_URI_PATTERN = Pattern.compile("^([^:/?&]+):([1-9]+[0-9]*)$");
 
+    protected ChannelFuture connect(final ChannelHandlerContext ctx, final InetSocketAddress targetAddress) throws Exception {
         ctx.channel().config().setAutoRead(false);
         return factory.open(targetAddress, ctx.channel().config().getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
                 delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(ctx));
                 ctx.pipeline().addAfter(ctx.name(), null, new TcpInboundRedirectHandler(delegateCtx));
+//                ctx.pipeline().replace(ctx.name(), null, new TcpInboundRedirectHandler(delegateCtx));
 
                 ctx.pipeline().remove(ctx.name());
                 ctx.channel().config().setAutoRead(true);
                 delegateCtx.channel().config().setAutoRead(true);
+            }
+
+            @Override
+            public void channelActive(final ChannelHandlerContext ctx) throws Exception {
+                ctx.writeAndFlush(Unpooled.EMPTY_BUFFER);
             }
         });
     }
