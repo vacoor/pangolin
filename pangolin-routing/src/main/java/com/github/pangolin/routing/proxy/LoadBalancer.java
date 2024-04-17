@@ -16,7 +16,7 @@ import java.util.concurrent.*;
 public class LoadBalancer {
     private final String name;
     private final HealthChecker healthChecker;
-    private final long healthCheckIntervalSeconds = TimeUnit.MINUTES.toSeconds(1);
+    private final long healthCheckIntervalSeconds = TimeUnit.MINUTES.toSeconds(10);
 
     private final List<ProxyServer> allServers = new CopyOnWriteArrayList<>();
     private final List<ProxyServer> upServers = new CopyOnWriteArrayList<>();
