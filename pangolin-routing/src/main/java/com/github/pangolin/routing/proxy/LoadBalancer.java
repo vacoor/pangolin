@@ -86,8 +86,7 @@ public class LoadBalancer {
             }
         });
 
-//        final int index = ThreadLocalRandom.current().nextInt(Math.min(instances.size(), 5));
-        final int index = ThreadLocalRandom.current().nextInt(Math.min(instances.size(), 1));
+        final int index = ThreadLocalRandom.current().nextInt(Math.min(instances.size(), 5));
 
         /*
         int nameLength = 0;

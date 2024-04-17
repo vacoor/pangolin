@@ -1,16 +1,19 @@
-package com.github.pangolin.routing.config.spi;
+package com.github.pangolin.routing.proxy.spi;
 
 import com.github.pangolin.routing.handler.internal.client.TrojanProxyHandler;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
+import java.net.MalformedURLException;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.util.Properties;
 
 /**
+ * Trojan Proxy Server resolver.
  *
+ * URL format: trojan://{password}@{hostname}:{port}?{parameters}#{name}
  */
 public class TrojanServerResolver implements ServerResolver {
     private static final String URL_PREFIX = "trojan://";
@@ -24,15 +27,16 @@ public class TrojanServerResolver implements ServerResolver {
      *
      */
     public ProxyServer resolve(final String url, final Properties props) {
-        if (!acceptsUrl(url)) {
-            return null;
+        if (this.acceptsUrl(url)) {
+            final URI uri = URI.create(url);
+            final String name = uri.getFragment();
+            final String password = uri.getUserInfo();
+
+            final String host = uri.getHost();
+            final int port = 0 < uri.getPort() ? uri.getPort() : DEFAULT_PORT;
+            return new Instance(null != name ? name : host + ":" + port, new InetSocketAddress(host, port), password);
         }
-        final URI uri = URI.create(url);
-        final String name = uri.getFragment();
-        final String host = uri.getHost();
-        final int port = 0 < uri.getPort() ? uri.getPort() : DEFAULT_PORT;
-        final String password = uri.getUserInfo();
-        return new Instance(null != name ? name : host + ":" + port, new InetSocketAddress(host, port), password);
+        throw new UnsupportedOperationException();
     }
 
     /**
