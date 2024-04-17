@@ -44,7 +44,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
     private final RulesProvider rulesProvider;
 
     public ProxyAutoConfigurationServerHandler(final RulesProvider rulesProvider) {
-      this(DEFAULT_PATH, rulesProvider);
+        this(DEFAULT_PATH, rulesProvider);
     }
 
     public ProxyAutoConfigurationServerHandler(final String path, final RulesProvider rulesProvider) {
@@ -85,7 +85,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
 
                     final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);
                     httpResponse.headers().add("Content-Length", body.readableBytes());
-                    // httpResponse.headers().add("Content-Type", "application/x-ns-proxy-autoconfig");
+                    httpResponse.headers().add("Content-Type", "application/x-ns-proxy-autoconfig");
                     ctx.writeAndFlush(httpResponse);
                     return;
                 }
