@@ -36,7 +36,8 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
     @Override
     public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
         final ChannelHandler networkHandler = select(remoteAddress);
-        return Channels.open(remoteAddress, NoopAddressResolverGroup.INSTANCE, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
+        final NoopAddressResolverGroup resolverGroup = null != networkHandler ? NoopAddressResolverGroup.INSTANCE : null;
+        return Channels.open(remoteAddress, resolverGroup, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 if (null != networkHandler) {

@@ -63,13 +63,15 @@ public class UrlTestHealthChecker implements HealthChecker {
         b.option(ChannelOption.TCP_NODELAY, true);
         b.option(ChannelOption.SO_KEEPALIVE, false);
         b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, timeoutMillis);
-        b.resolver(NoopAddressResolverGroup.INSTANCE);
+        b.resolver(null != transport ? NoopAddressResolverGroup.INSTANCE : null);
 
         final AtomicLong sinceMs = new AtomicLong(System.currentTimeMillis());
         b.group(group).channel(NioSocketChannel.class).handler(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel channel) throws Exception {
-                channel.pipeline().addLast(transport);
+                if (null != transport) {
+                    channel.pipeline().addLast(transport);
+                }
                 channel.pipeline().addLast(new HttpClientCodec());
                 channel.pipeline().addLast(new HttpObjectAggregator(1024));
                 channel.pipeline().addLast(new SimpleChannelInboundHandler<HttpResponse>() {

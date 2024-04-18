@@ -8,6 +8,7 @@ import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.routing.proxy.LoadBalanceProxyServer;
 import freework.net.Http;
 import io.netty.channel.EventLoopGroup;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -20,6 +21,7 @@ import java.util.*;
 /**
  *
  */
+@Slf4j
 public class ClashRuleFactory {
 
     public static Map<DestinationPattern, String> parseRules(final URL url, final PatternResolver... resolvers) throws IOException  {
@@ -76,7 +78,9 @@ public class ClashRuleFactory {
                 continue;
             }
             final String uri = String.format("%s://%s@%s:%s#%s", proxyDefinition.getType(), urlEncode(proxyDefinition.getPassword()), proxyDefinition.getServer(), proxyDefinition.getPort(), urlEncode(proxyDefinition.getName()));
+            log.info("resolve uri: {}", uri);
             final ProxyServer server = resolve(uri);
+            log.info("resolved uri: {}", uri);
             proxies.put(server.getName(), server);
         }
         return proxies;
@@ -86,9 +90,10 @@ public class ClashRuleFactory {
         return Http.urlEncode(text, StandardCharsets.UTF_8.name());
     }
 
+    private static final ServiceLoader<ServerResolver> RESOLVERS = ServiceLoader.load(ServerResolver.class);
+
     private static ProxyServer resolve(final String url) {
-        final ServiceLoader<ServerResolver> resolvers = ServiceLoader.load(ServerResolver.class);
-        for (final ServerResolver resolver : resolvers) {
+        for (final ServerResolver resolver : RESOLVERS) {
             if (!resolver.acceptsUrl(url)) {
                 continue;
             }

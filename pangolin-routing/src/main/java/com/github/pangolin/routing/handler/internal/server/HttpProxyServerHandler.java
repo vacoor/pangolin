@@ -127,13 +127,13 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
                             if (future.isSuccess()) {
-                                log.info("[HTTP][{}] Connection established: {}", method, future.channel().remoteAddress());
+                                log.info("[HTTP][{}] Connection established: {}:{}", method, host, port);
                                 final DefaultFullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.OK);
                                 ctx.writeAndFlush(response).addListener(g -> {
                                     ctx.pipeline().remove(HttpServerCodec.class);
                                 });
                             } else {
-                                log.info("[HTTP][{}] Failed to Connect to {}: {}", method, future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
+                                log.info("[HTTP][{}] Failed to Connect to {}:{}: {}", method, host, port, future.cause().getMessage(), future.cause());
                                 ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
                             }
                         }

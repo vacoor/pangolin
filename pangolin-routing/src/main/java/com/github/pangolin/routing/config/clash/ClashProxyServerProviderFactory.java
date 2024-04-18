@@ -7,6 +7,7 @@ import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import com.google.common.base.Preconditions;
 import freework.net.Http;
 import io.netty.channel.EventLoopGroup;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
@@ -21,6 +22,7 @@ import java.util.Map;
 /**
  *
  */
+@Slf4j
 public class ClashProxyServerProviderFactory {
     private final URL url;
 
@@ -32,10 +34,15 @@ public class ClashProxyServerProviderFactory {
         try {
             final Configuration conf = fetch(url);
             final List<Configuration.ProxyDefinition> proxyDefinitions = null != conf.getProxies() ? conf.getProxies() : Collections.emptyList();
+
+            log.info("Parse proxies starting");
             final Map<String, ProxyServer> proxyRegistry = ClashRuleFactory.parseProxies(proxyDefinitions);
+            log.info("Parse proxies completed");
+
             final List<Configuration.ProxyGroupDefinition> proxyGroups = conf.getProxyGroups();
             final List<Configuration.ProxyGroupDefinition> proxyGroupsToUse = null != proxyGroups ? proxyGroups : Collections.emptyList();
 
+            log.info("Parse proxyGroup starting");
             for (Configuration.ProxyGroupDefinition proxyGroup : proxyGroupsToUse) {
                 if ("url-test".equals(proxyGroup.getType())) {
                     final List<String> proxies = proxyGroup.getProxies();
@@ -52,6 +59,8 @@ public class ClashProxyServerProviderFactory {
                     proxyRegistry.put(urlTestProxyGroup.getName(), urlTestProxyGroup);
                 }
             }
+            log.info("Parse proxyGroup completed");
+
             for (final Configuration.ProxyGroupDefinition proxyGroup : proxyGroupsToUse) {
                 if ("select".equals(proxyGroup.getType())) {
                     final List<String> proxies = proxyGroup.getProxies();
@@ -81,6 +90,7 @@ public class ClashProxyServerProviderFactory {
     }
 
     private static Configuration fetch(final URL url) throws IOException {
+        log.info("Fetch '{}' starting", url);
         HttpURLConnection httpUrlConnection = null;
         try {
             httpUrlConnection = (HttpURLConnection) url.openConnection();
@@ -92,6 +102,7 @@ public class ClashProxyServerProviderFactory {
             return Configuration.load(httpUrlConnection.getInputStream());
         } finally {
             Http.close(httpUrlConnection);
+            log.info("Fetch '{}' completed", url);
         }
     }
 
