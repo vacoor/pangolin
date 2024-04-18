@@ -53,7 +53,7 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
             return null;
         }
         final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
-        if (bypass.contains(sa.getHostString()) || bypass.contains(sa.getHostName())) {
+        if (bypass.contains(sa.getHostString())/* || bypass.contains(sa.getHostName())*/) {
             log.info("[Route] {} using DIRECT", sa.getHostString());
             return null;
         }
