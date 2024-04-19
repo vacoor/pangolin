@@ -105,8 +105,9 @@ public class WebSocketBackhaulTunnelServerShell {
         }
         if ("exit".equals(command) || "quit".equals(command)) {
             started.set(false);
-            out.println("Exit");
+            out.println("Bye");
             console.close();
+            console.getOutput().close();
             return;
         }
         out.println(String.format("%s: command not found", command));

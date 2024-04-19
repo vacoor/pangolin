@@ -14,20 +14,49 @@ import java.net.URI;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
+/**
+ * WebSocket 回传通道代理.
+ */
 @Slf4j
 public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
     private static final String AGENT_VERSION = "1.0";
     private static final String BACKHAUL_PROTOCOL = "PASSIVE";
 
+    /**
+     * ws://...
+     */
     private static final String WS_PROTOCOL = "ws";
+
+    /**
+     * wss://...
+     */
     private static final String WSS_PROTOCOL = "wss";
+
+    /**
+     * tcp://...
+     */
     private static final String TCP_PROTOCOL = "tcp";
 
     private enum State {SUSPENDED, INITIALIZING, INITIALIZED}
 
+    /**
+     * Agent name.
+     */
     private final String name;
+
+    /**
+     * WebSocket agent handshaker.
+     */
     private final WebSocketClientHandshaker handshaker;
+
+    /**
+     * WebSocket agent handshake http headers.
+     */
     private final HttpHeaders customHttpHeaders;
+
+    /**
+     * WebSocket agent state.
+     */
     private final AtomicReference<State> state = new AtomicReference<>(State.SUSPENDED);
 
     public WebSocketBackhaulTunnelAgentHandler(final String name, final WebSocketClientHandshaker handshaker, final HttpHeaders customHttpHeaders) {
