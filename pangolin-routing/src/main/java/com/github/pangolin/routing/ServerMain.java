@@ -45,8 +45,8 @@ public class ServerMain {
 
         final ApplicationHome home = new ApplicationHome(ServerMain.class);
         final File homeFile = home.getDir();
-        final File proxiesConf = new File(homeFile, "conf/proxies2.conf");
-        final File rulesConf = new File(homeFile, "conf/default.conf");
+        final File proxiesConf = new File(homeFile, "conf/proxies.conf");
+        final File rulesConf = new File(homeFile, "conf/rule.conf");
 
         System.out.println("Proxies config: " + proxiesConf.getAbsolutePath());
         System.out.println("Rules config: " + rulesConf.getAbsolutePath());

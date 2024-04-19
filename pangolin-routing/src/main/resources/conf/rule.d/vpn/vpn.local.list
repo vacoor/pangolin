@@ -1,0 +1,8 @@
+# Office Area Network
+
+# Hosts Network
+DOMAIN-KEYWORD,doris.cloud
+DOMAIN-SUFFIX,cloud.bz
+DOMAIN-SUFFIX,service.testdb
+DOMAIN-SUFFIX,service.testdb
+DOMAIN-SUFFIX,service.consul
