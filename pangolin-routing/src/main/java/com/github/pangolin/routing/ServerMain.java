@@ -7,7 +7,6 @@ import com.github.pangolin.routing.handler.SwitchyRuleConfigurationServerHandler
 import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
-import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
@@ -101,32 +100,6 @@ public class ServerMain {
         // forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));
 
 
-        new NettyServer(8088).start(true, new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(
-                        new ProxyAutoConfigurationServerHandler(rulesProvider),
-                        new SwitchyRuleConfigurationServerHandler(rulesProvider)
-                );
-                ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
-                    @Override
-                    public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-                        ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.NOT_FOUND)).addListener(ChannelFutureListener.CLOSE);
-                    }
-                });
-            }
-        }).addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture future) throws Exception {
-                if (future.isSuccess()) {
-                    final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                    log.info("Web interface started on port: {}", localAddress.getPort());
-                } else {
-                    future.cause().printStackTrace();
-                }
-            }
-        });
-
         final NettyServer server = new NettyServer(1080);
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
@@ -152,6 +125,31 @@ public class ServerMain {
             }
         }).sync().channel().closeFuture().sync();
 
+        new NettyServer(8088).start(true, new ChannelInitializer<SocketChannel>() {
+            @Override
+            protected void initChannel(final SocketChannel ch) throws Exception {
+                ch.pipeline().addLast(
+                        new ProxyAutoConfigurationServerHandler(rulesProvider),
+                        new SwitchyRuleConfigurationServerHandler(rulesProvider)
+                );
+                ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
+                    @Override
+                    public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+                        ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.NOT_FOUND)).addListener(ChannelFutureListener.CLOSE);
+                    }
+                });
+            }
+        }).addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (future.isSuccess()) {
+                    final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
+                    log.info("Web interface started on port: {}", localAddress.getPort());
+                } else {
+                    future.cause().printStackTrace();
+                }
+            }
+        });
     }
 
 }
