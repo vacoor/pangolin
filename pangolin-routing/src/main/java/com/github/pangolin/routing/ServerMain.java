@@ -100,7 +100,9 @@ public class ServerMain {
         // forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));
 
 
-        final NettyServer server = new NettyServer(1080);
+        final String portStr = System.getProperty("server.port", "1081");
+        final int port = Integer.parseInt(portStr);
+        final NettyServer server = new NettyServer(port);
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
