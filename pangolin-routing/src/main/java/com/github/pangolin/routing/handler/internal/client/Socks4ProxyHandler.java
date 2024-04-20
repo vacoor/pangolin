@@ -44,11 +44,19 @@ public class Socks4ProxyHandler extends AbstractProxyHandler {
     protected ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise promise) throws Exception {
         final InetSocketAddress destination = destinationAddress();
         final String address = destination.isUnresolved() ? destination.getHostString() : destination.getAddress().getHostAddress();
+        /*
         ctx.writeAndFlush(new DefaultSocks4CommandRequest(
                 Socks4CommandType.CONNECT,
                 address, destination.getPort(),
                 null != username ? username : NONE
         ), promise);
+        */
+        // FIXME if write fail -> promise fail
+        ctx.writeAndFlush(new DefaultSocks4CommandRequest(
+                Socks4CommandType.CONNECT,
+                address, destination.getPort(),
+                null != username ? username : NONE
+        ));
         return promise;
     }
 
