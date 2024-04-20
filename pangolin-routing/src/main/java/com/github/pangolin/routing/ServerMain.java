@@ -103,7 +103,7 @@ public class ServerMain {
         final String portStr = System.getProperty("server.port", "1081");
         final int proxyServerPort = Integer.parseInt(portStr);
         final NettyServer server = new NettyServer(proxyServerPort);
-        server.start(true, new ChannelInitializer<SocketChannel>() {
+        ChannelFuture proxyServerChannel = server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final Socks5MixinServerHandshaker socks5Handshaker = new Socks5MixinServerHandshaker(new Socks5ProxyServerHandler(null, null, factory));
@@ -115,19 +115,9 @@ public class ServerMain {
                 );
                 ch.pipeline().addLast(new MixinServerInitializer(socks5Handshaker, socks4Handshaker, httpHandshaker));
             }
-        }).addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture future) throws Exception {
-                if (future.isSuccess()) {
-                    final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                    log.info("Mixed proxy started on port {}", localAddress.getPort());
-                } else {
-                    future.cause().printStackTrace();
-                }
-            }
-        }).sync().channel().closeFuture().sync();
+        });
 
-        new NettyServer(8088).start(true, new ChannelInitializer<SocketChannel>() {
+        ChannelFuture pacChannel = new NettyServer(8088).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(
@@ -152,6 +142,19 @@ public class ServerMain {
                 }
             }
         });
+
+        proxyServerChannel.addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (future.isSuccess()) {
+                    final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
+                    log.info("Mixed proxy started on port {}", localAddress.getPort());
+                } else {
+                    future.cause().printStackTrace();
+                }
+            }
+        }).sync().channel().closeFuture().sync();
+        pacChannel.channel().close();
     }
 
 }
