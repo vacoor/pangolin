@@ -143,7 +143,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
         buff.append("  if (!isResolvable(host)) return $PROXY + '; DIRECT';\r\n");
         buff.append("  return 'DIRECT';\r\n");
         buff.append("}");
-        System.out.println(buff);
+        log.debug(buff.toString());
         return buff.toString();
     }
 

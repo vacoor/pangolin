@@ -11,7 +11,12 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.util.List;
 
+/**
+ *
+ */
 @Slf4j
 public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     private static final String DEFAULT_DECODER_NAME = "Socks5ServerDecoder";
@@ -41,20 +46,11 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         final ChannelPipeline cp = ctx.pipeline();
         final Socks5InitialRequestDecoder decoder = cp.get(Socks5InitialRequestDecoder.class);
-        if (null == decoder) {
-            cp.addBefore(ctx.name(), decoderName, new Socks5InitialRequestDecoder());
-        } else {
+        if (null != decoder) {
             decoderName = cp.context(decoder).name();
-        }
-        /*-
-        <pre>
-        if (isHasAuthorization()) {
-            cp.addBefore(ctx.name(), null, new Socks5PasswordAuthRequestDecoder());
         } else {
-            cp.addBefore(ctx.name(), null, new Socks5CommandRequestDecoder());
+            cp.addBefore(ctx.name(), decoderName, new Socks5InitialRequestDecoder());
         }
-        </pre>
-        */
         if (null == cp.get(Socks5ServerEncoder.class)) {
             cp.addBefore(ctx.name(), null, Socks5ServerEncoder.DEFAULT);
         }
@@ -82,45 +78,70 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
         try {
             if (!(msg instanceof Socks5Message) || !((Socks5Message) msg).decoderResult().isSuccess()) {
-                log.error("[SOCKS5] Connection closed by UNKNOWN message: {}", msg.getClass().getName());
+                log.warn("[SOCKS5] Connection closed by UNKNOWN message '{}'", msg.getClass().getName());
                 ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 return;
             }
 
+            final SocketAddress clientAddress = ctx.channel().remoteAddress();
             if (msg instanceof Socks5InitialRequest) {
+                final List<Socks5AuthMethod> methods = ((Socks5InitialRequest) msg).authMethods();
+                log.debug("[SOCKS5] Received INIT request from {}, methods: {}", clientAddress, methods);
+
                 final boolean needAuth = this.isHasAuthorization();
                 final ByteToMessageDecoder newDecoder = needAuth ? new Socks5PasswordAuthRequestDecoder() : new Socks5CommandRequestDecoder();
                 ctx.pipeline().replace(decoderName, decoderName, newDecoder);
                 ctx.writeAndFlush(new DefaultSocks5InitialResponse(isHasAuthorization() ? Socks5AuthMethod.PASSWORD : Socks5AuthMethod.NO_AUTH));
             } else if (msg instanceof Socks5PasswordAuthRequest) {
                 final Socks5PasswordAuthRequest request = (Socks5PasswordAuthRequest) msg;
-                if (nullSafeEquals(username, request.username()) && nullSafeEquals(password, request.password())) {
+                log.debug("[SOCKS5] Received AUTH request from {}, username: {}, password: {}", clientAddress, request.username(), request.password());
+
+                if (nullSafeEquals(this.username, request.username()) && nullSafeEquals(password, request.password())) {
                     ctx.pipeline().replace(decoderName, decoderName, new Socks5CommandRequestDecoder());
+
+                    log.debug("[SOCKS5] Respond authenticated to {}", clientAddress);
+
                     ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.SUCCESS));
                 } else {
+                    log.warn("[SOCKS5] Respond not permitted to {}", clientAddress);
+
                     ctx.writeAndFlush(new DefaultSocks5PasswordAuthResponse(Socks5PasswordAuthStatus.FAILURE));
                 }
             } else if (msg instanceof Socks5CommandRequest) {
                 final Socks5CommandRequest request = (Socks5CommandRequest) msg;
                 final Socks5CommandType type = request.type();
+
+                final int port = request.dstPort();
+                final String address = request.dstAddr();
                 final Socks5AddressType addressType = request.dstAddrType();
+
+                log.info("[SOCKS5] Received {} request {}:{}", type.toString(), address, port);
+
                 if (Socks5CommandType.CONNECT.equals(type)) {
-                    ctx.channel().config().setAutoRead(false);
                     connect(ctx, request).addListener(new ChannelFutureListener() {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
                             if (future.isSuccess()) {
-                                log.info("[SOCK5] Connection established: {}", future.channel().remoteAddress());
-                                ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)).addListener(removeOnComplete(ctx, Socks5ServerEncoder.DEFAULT));
+                                log.debug("[SOCKS5] Connection established: {}:{}", address, port);
+                                ctx.writeAndFlush(
+                                        new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)
+                                ).addListener(removeOnComplete(ctx, Socks5ServerEncoder.DEFAULT));
                             } else {
-                                if (log.isDebugEnabled()) {
-                                    log.debug("[SOCKS5] Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
-                                }
-                                log.info("[SOCKS5] Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage());
-                                ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)).addListener(ChannelFutureListener.CLOSE);
+                                log.error("[SOCKS5] Error: {} {}:{}", future.cause().getMessage(), address, port);
+                                ctx.writeAndFlush(
+                                        new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)
+                                ).addListener(ChannelFutureListener.CLOSE);
                             }
                         }
-                    }).channel().closeFuture().addListener(closeOnComplete(ctx));
+                    }).channel().closeFuture().addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(final ChannelFuture future) throws Exception {
+                            if (ctx.channel().isActive()) {
+                                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                            }
+                            log.info("[SOCKS5] Connection closed: {}:{}", address, port);
+                        }
+                    });
                 } else {
                     /*
                     if (Socks5CommandType.UDP_ASSOCIATE.equals(type)) {
@@ -142,27 +163,16 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                         }
                     }
                     */
+                    log.warn("[SOCKS5] Connection closed {}:{}: '{}' unsupported", address, port, type);
                     ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
                 }
             } else {
-                log.error("[SOCKS5] Connection closed by UNKNOWN message: {}", msg.getClass().getName());
+                log.error("[SOCKS5] Connection closed by UNKNOWN message '{}'", msg.getClass().getName());
                 ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         } finally {
             ReferenceCountUtil.release(msg);
         }
-    }
-
-    private ChannelFutureListener closeOnComplete(final ChannelHandlerContext ctx) {
-        return new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture future) throws Exception {
-                if (ctx.channel().isActive()) {
-                    log.info("[SOCKS5] Connection to {} closed", future.channel().remoteAddress());
-                    ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                }
-            }
-        };
     }
 
     private ChannelFutureListener removeOnComplete(final ChannelHandlerContext ctx, final ChannelHandler h) {

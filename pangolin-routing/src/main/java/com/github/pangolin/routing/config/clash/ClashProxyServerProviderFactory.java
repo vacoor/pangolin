@@ -35,14 +35,14 @@ public class ClashProxyServerProviderFactory {
             final Configuration conf = fetch(url);
             final List<Configuration.ProxyDefinition> proxyDefinitions = null != conf.getProxies() ? conf.getProxies() : Collections.emptyList();
 
-            log.info("Parse proxies starting");
+            log.debug("Parse proxies starting");
             final Map<String, ProxyServer> proxyRegistry = ClashRuleFactory.parseProxies(proxyDefinitions);
-            log.info("Parse proxies completed");
+            log.debug("Parse proxies completed");
 
             final List<Configuration.ProxyGroupDefinition> proxyGroups = conf.getProxyGroups();
             final List<Configuration.ProxyGroupDefinition> proxyGroupsToUse = null != proxyGroups ? proxyGroups : Collections.emptyList();
 
-            log.info("Parse proxyGroup starting");
+            log.debug("Parse proxyGroup starting");
             for (Configuration.ProxyGroupDefinition proxyGroup : proxyGroupsToUse) {
                 if ("url-test".equals(proxyGroup.getType())) {
                     final List<String> proxies = proxyGroup.getProxies();
@@ -59,7 +59,7 @@ public class ClashProxyServerProviderFactory {
                     proxyRegistry.put(urlTestProxyGroup.getName(), urlTestProxyGroup);
                 }
             }
-            log.info("Parse proxyGroup completed");
+            log.debug("Parse proxyGroup completed");
 
             for (final Configuration.ProxyGroupDefinition proxyGroup : proxyGroupsToUse) {
                 if ("select".equals(proxyGroup.getType())) {
@@ -90,7 +90,7 @@ public class ClashProxyServerProviderFactory {
     }
 
     private static Configuration fetch(final URL url) throws IOException {
-        log.info("Fetch '{}' starting", url);
+        log.debug("Fetch '{}' starting", url);
         HttpURLConnection httpUrlConnection = null;
         try {
             httpUrlConnection = (HttpURLConnection) url.openConnection();
@@ -102,7 +102,7 @@ public class ClashProxyServerProviderFactory {
             return Configuration.load(httpUrlConnection.getInputStream());
         } finally {
             Http.close(httpUrlConnection);
-            log.info("Fetch '{}' completed", url);
+            log.debug("Fetch '{}' completed", url);
         }
     }
 

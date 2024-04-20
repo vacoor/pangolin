@@ -10,6 +10,7 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 
 @Slf4j
 public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
@@ -54,53 +55,56 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
         try {
             if (!(msg instanceof Socks4Message) || !((Socks4Message) msg).decoderResult().isSuccess()) {
-                log.error("[SOCKS4] Connection closed by UNKNOWN message: {}", msg.getClass().getName());
+                log.warn("[SOCKS4a] Connection closed by UNKNOWN message '{}'", msg.getClass().getName());
                 ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 return;
             }
 
+            final SocketAddress clientAddress = ctx.channel().remoteAddress();
             if (msg instanceof Socks4CommandRequest) {
                 final Socks4CommandRequest request = (Socks4CommandRequest) msg;
                 final String requestUid = request.userId();
                 final Socks4CommandType type = request.type();
 
+                final int port = request.dstPort();
+                final String address = request.dstAddr();
+
+                log.info("[SOCKS4a] Received {} request {}:{}", type.toString(), address, port);
+
                 if (!nullSafeEquals(uid, requestUid)) {
+                    log.warn("[SOCKS4a] Respond not permitted to {}", clientAddress);
                     ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_AUTH_FAILURE)).addListener(ChannelFutureListener.CLOSE);
                 } else if (Socks4CommandType.CONNECT.equals(type)) {
                     this.connect(ctx, request).addListener(new ChannelFutureListener() {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
                             if (future.isSuccess()) {
-                                log.info("[SOCKS4] Connection established: {}", future.channel().remoteAddress());
+                                log.debug("[SOCKS4a] Connection established: {}:{}", address, port);
                                 ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.SUCCESS)).addListener(removeOnComplete(ctx, Socks4ServerEncoder.INSTANCE));
                             } else {
-                                log.info("[SOCKS4] Failed to Connect to {}: {}", future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
+                                log.error("[SOCKS4a] Error: {} {}:{}", future.cause().getMessage(), address, port);
                                 ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_UNREACHABLE)).addListener(ChannelFutureListener.CLOSE);
                             }
                         }
-                    }).channel().closeFuture().addListener(closeOnComplete(ctx));
+                    }).channel().closeFuture().addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(final ChannelFuture future) throws Exception {
+                            if (ctx.channel().isActive()) {
+                                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                            }
+                            log.info("[SOCKS4a] Connection closed: {}:{}", address, port);
+                        }
+                    });
                 } else {
                     ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.REJECTED_OR_FAILED)).addListener(ChannelFutureListener.CLOSE);
                 }
             } else {
-                log.error("[SOCKS4] Connection closed by UNKNOWN message: {}", msg.getClass().getName());
+                log.error("[SOCKS4a] Connection closed by UNKNOWN message '{}'", msg.getClass().getName());
                 ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         } finally {
             ReferenceCountUtil.release(msg);
         }
-    }
-
-    private ChannelFutureListener closeOnComplete(final ChannelHandlerContext ctx) {
-        return new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture future) throws Exception {
-                if (ctx.channel().isActive()) {
-                    log.info("[SOCKS4] Connection to {} closed", future.channel().remoteAddress());
-                    ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                }
-            }
-        };
     }
 
     private ChannelFutureListener removeOnComplete(final ChannelHandlerContext ctx, final ChannelHandler h) {

@@ -78,9 +78,9 @@ public class ClashRuleFactory {
                 continue;
             }
             final String uri = String.format("%s://%s@%s:%s#%s", proxyDefinition.getType(), urlEncode(proxyDefinition.getPassword()), proxyDefinition.getServer(), proxyDefinition.getPort(), urlEncode(proxyDefinition.getName()));
-            log.info("resolve uri: {}", uri);
+            log.debug("resolve uri: {}", uri);
             final ProxyServer server = resolve(uri);
-            log.info("resolved uri: {}", uri);
+            log.debug("resolved uri: {}", uri);
             proxies.put(server.getName(), server);
         }
         return proxies;

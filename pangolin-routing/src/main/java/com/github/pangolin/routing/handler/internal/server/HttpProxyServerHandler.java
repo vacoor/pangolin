@@ -14,6 +14,7 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.URI;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -88,14 +89,17 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
         try {
             if (!(msg instanceof FullHttpRequest) || !((FullHttpRequest) msg).decoderResult().isSuccess()) {
-                log.warn("[HTTP] Connection closed by UNKNOWN message: {}", msg.getClass());
+                log.warn("[HTTP] Connection closed by UNKNOWN message '{}'", msg.getClass());
                 ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 return;
             }
 
             final FullHttpRequest httpRequest = (FullHttpRequest) msg;
             final HttpMethod method = httpRequest.method();
+            final SocketAddress clientAddress = ctx.channel().remoteAddress();
+
             if (!this.authenticate(httpRequest)) {
+                log.warn("[HTTP] Respond not permitted to {}", clientAddress);
                 ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.UNAUTHORIZED)).addListener(ChannelFutureListener.CLOSE);
                 return;
             }
@@ -118,27 +122,39 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                  *
                  * @see https://www.rfc-editor.org/rfc/rfc9110.html#name-connect
                  */
+                log.info("[HTTP] received https CONNECT request {}", httpRequest.uri());
+
                 final Matcher matcher = CONNECT_URI_PATTERN.matcher(httpRequest.uri());
                 if (matcher.find()) {
-                    final String host = matcher.group(1);
+                    final String address = matcher.group(1);
                     final int port = Integer.parseInt(matcher.group(2));
 
-                    connect(ctx, new InetSocketAddress(host, port)).addListener(new ChannelFutureListener() {
+                    connect(ctx, new InetSocketAddress(address, port)).addListener(new ChannelFutureListener() {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
                             if (future.isSuccess()) {
-                                log.info("[HTTP][{}] Connection established: {}:{}", method, host, port);
+                                log.debug("[HTTP][{}] Connection established: {}:{}", method, address, port);
+
                                 final DefaultFullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.OK);
                                 ctx.writeAndFlush(response).addListener(g -> {
                                     ctx.pipeline().remove(HttpServerCodec.class);
                                 });
                             } else {
-                                log.info("[HTTP][{}] Failed to Connect to {}:{}: {}", method, host, port, future.cause().getMessage(), future.cause());
+                                log.error("[HTTP] Error: {} {}:{}", future.cause().getMessage(), address, port);
                                 ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
                             }
                         }
-                    }).channel().closeFuture().addListener(closeOnComplete(ctx, method));
+                    }).channel().closeFuture().addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(final ChannelFuture future) throws Exception {
+                            if (ctx.channel().isActive()) {
+                                ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                            }
+                            log.info("[HTTP] Connection closed: {}:{}", address, port);
+                        }
+                    });
                 } else {
+                    log.info("[HTTP] bad CONNECT request: {}", httpRequest.uri());
                     ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.BAD_REQUEST)).addListener(ChannelFutureListener.CLOSE);
                 }
             } else {
@@ -148,6 +164,9 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                 // User-Agent: curl/7.64.1
                 // Proxy-Connection: Keep-Alive
                 final FullHttpRequest httpRequestToSend = httpRequest.retain();
+                final InetSocketAddress targetAddress = getHttpRequestAddress(httpRequest);
+                final int port = targetAddress.getPort();
+                final String address = targetAddress.getHostString();
                 forward(ctx, httpRequest).addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
@@ -158,17 +177,25 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                             headers.remove(HttpHeaderNames.PROXY_CONNECTION);
                         }
                         if (future.isSuccess()) {
-                            log.info("[HTTP][{}] Connection established: {}", method, future.channel().remoteAddress());
+                            log.debug("[HTTP][{}] Connection established: {}", method, future.channel().remoteAddress());
                             future.channel().writeAndFlush(httpRequestToSend);
                         } else {
                             ReferenceCountUtil.release(httpRequestToSend);
 
-                            log.info("[HTTP][{}] Failed to Connect to {}: {}", method, future.channel().remoteAddress(), future.cause().getMessage(), future.cause());
-//                            ctx.fireExceptionCaught(future.cause());
+                            log.error("[HTTP] Error: {} {}:{}", future.cause().getMessage(), address, port);
+
                             ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
                         }
                     }
-                }).channel().closeFuture().addListener(closeOnComplete(ctx, method));
+                }).channel().closeFuture().addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(final ChannelFuture future) throws Exception {
+                        if (ctx.channel().isActive()) {
+                            ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                        }
+                        log.info("[HTTP] Connection closed: {}:{}", address, port);
+                    }
+                });
             }
         } finally {
             ReferenceCountUtil.release(msg);
@@ -178,19 +205,6 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
     private boolean authenticate(final FullHttpRequest httpRequest) {
         return null == authorization || authorization.equals(httpRequest.headers().get(HttpHeaderNames.PROXY_AUTHORIZATION));
     }
-
-    private ChannelFutureListener closeOnComplete(final ChannelHandlerContext ctx, final HttpMethod method) {
-        return new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture future) throws Exception {
-                if (ctx.channel().isActive()) {
-                    log.info("[HTTP][{}] Connection to {} closed", method, future.channel().remoteAddress());
-                    ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                }
-            }
-        };
-    }
-
 
     protected InetSocketAddress getHttpRequestAddress(final HttpRequest httpRequest) {
         final HttpHeaders headers = httpRequest.headers();

@@ -59,12 +59,12 @@ public class LoadBalancer {
                         if (downServers.remove(instance)) {
                             upServers.add(instance);
                         }
-                        log.info("[Health Check] {} response time: {}ms", instance.getName(), future.get());
+                        log.debug("[Health Check] {} response time: {}ms", instance.getName(), future.get());
                     } else {
                         if (upServers.remove(instance)) {
                             downServers.add(instance);
                         }
-                        log.info("[Health Check] {} down: {}", instance.getName(), future.cause().getMessage());
+                        log.debug("[Health Check] {} down: {}", instance.getName(), future.cause().getMessage());
                     }
                 }
             });
@@ -110,7 +110,7 @@ public class LoadBalancer {
         }
         buff.append("\r\n----------------");
 
-        log.info("{}", buff);
+        log.debug("{}", buff);
         */
 
         // return instances.iterator().next();

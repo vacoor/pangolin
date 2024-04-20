@@ -7,6 +7,7 @@ import com.github.pangolin.routing.handler.SwitchyRuleConfigurationServerHandler
 import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
+import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
@@ -22,6 +23,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.system.ApplicationHome;
 import org.springframework.util.StringUtils;
 
@@ -38,6 +40,7 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 /**
  *
  */
+@Slf4j
 public class ServerMain {
 
     public static void main(String[] args) throws Exception {
@@ -48,14 +51,14 @@ public class ServerMain {
         final File proxiesConf = new File(homeFile, "conf/proxies.conf");
         final File rulesConf = new File(homeFile, "conf/rule.conf");
 
-        System.out.println("Proxies config: " + proxiesConf.getAbsolutePath());
-        System.out.println("Rules config: " + rulesConf.getAbsolutePath());
+        log.info("Rules config: " + rulesConf.getAbsolutePath());
+        log.info("Proxies config: " + proxiesConf.getAbsolutePath());
 
         final ProxyServerProvider proxyServerProvider = proxiesConf.exists() ? ProxiesParser.parse(new FileInputStream(proxiesConf), group) : new ComposedProxyServerProvider();
         final Map<DestinationPattern, String> rules = rulesConf.exists() ? RulesParser.parseRules(rulesConf.toURI().toURL()) : Collections.emptyMap();
 
         for (Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
-            System.out.println(String.format("%s -> %s", entry.getKey(), entry.getValue()));
+            log.debug(String.format("%s -> %s", entry.getKey(), entry.getValue()));
         }
 
         final String MODE_RULE = null;
@@ -117,7 +120,7 @@ public class ServerMain {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                    System.out.println(String.format("PacServer started on %s:%s", localAddress.getHostString(), localAddress.getPort()));
+                    log.info("Web interface started on port: {}", localAddress.getPort());
                 } else {
                     future.cause().printStackTrace();
                 }
@@ -135,7 +138,6 @@ public class ServerMain {
                         new SwitchyRuleConfigurationServerHandler(rulesProvider),
                         new HttpProxyServerHandler(null, null, factory)
                 );
-//                ch.pipeline().addLast(new MixinServerInitializer(httpHandshaker));
                 ch.pipeline().addLast(new MixinServerInitializer(socks5Handshaker, socks4Handshaker, httpHandshaker));
             }
         }).addListener(new ChannelFutureListener() {
@@ -143,7 +145,7 @@ public class ServerMain {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                    System.out.println(String.format("ProxyServer started on %s:%s", localAddress.getHostString(), localAddress.getPort()));
+                    log.info("Mixed proxy started on port {}", localAddress.getPort());
                 } else {
                     future.cause().printStackTrace();
                 }

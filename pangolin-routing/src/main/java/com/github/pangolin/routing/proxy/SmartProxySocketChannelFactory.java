@@ -50,14 +50,14 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
 
     private ChannelHandler select(final SocketAddress destinationAddress) {
         if (!(destinationAddress instanceof InetSocketAddress)) {
-            log.info("[Route] {} using DIRECT", destinationAddress);
+            log.info("[ROUTE] will bypass the proxy {}", destinationAddress);
             return null;
         }
         final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
         if ((sa.isUnresolved() && bypass.contains(sa.getHostString()))
                 || (!sa.isUnresolved() && bypass.contains(sa.getHostName()))
         ) {
-            log.info("[Route] {} using DIRECT", sa.getHostString());
+            log.info("[ROUTE] will bypass the proxy {}", sa.getHostString());
             return null;
         }
 
@@ -67,12 +67,16 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
                 continue;
             }
 
-            log.info("[Route] {} using {}", sa.getHostString(), entry.getValue());
             final ProxyServer proxyToUse = proxyServerProvider.getInstance(entry.getValue());
-            return null != proxyToUse ? proxyToUse.newProxyHandler(sa) : null;
+            log.info("[ROUTE] will use the proxy '{}' {}", entry.getValue(), sa.getHostString());
+            if (null != proxyToUse) {
+                return proxyToUse.newProxyHandler(sa);
+            } else {
+                log.warn("[ROUTE] not found the proxy '{}' {}", entry.getValue(), sa.getHostString());
+            }
         }
 
-        log.info("[Route] {} using DIRECT", sa.getHostString());
+        log.info("[ROUTE] will bypass the proxy {}", sa.getHostString());
         return null;
     }
 }
