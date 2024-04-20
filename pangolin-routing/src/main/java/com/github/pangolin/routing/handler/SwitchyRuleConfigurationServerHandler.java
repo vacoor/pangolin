@@ -70,8 +70,11 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
                             .append("; Usage: https://github.com/FelisCatus/SwitchyOmega/wiki/RuleListUsage\r\n\r\n");
 
                     final Map<DestinationPattern, String> rules = rulesProvider.getRules();
-                    for (DestinationPattern destinationPattern : rules.keySet()) {
-                        buff.append(toSwitchyRule(destinationPattern)).append("\r\n");
+                    for (Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
+                        DestinationPattern destinationPattern = entry.getKey();
+                        if (!"DIRECT".equalsIgnoreCase(entry.getValue())) {
+                            buff.append(toSwitchyRule(destinationPattern)).append("\r\n");
+                        }
                     }
                     final ByteBuf body = Unpooled.copiedBuffer(buff.toString(), StandardCharsets.UTF_8);
 

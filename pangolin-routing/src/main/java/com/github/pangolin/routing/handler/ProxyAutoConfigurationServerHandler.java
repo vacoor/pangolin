@@ -42,14 +42,16 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
 
     private final String path;
     private final RulesProvider rulesProvider;
+    private final int serverPort;
 
-    public ProxyAutoConfigurationServerHandler(final RulesProvider rulesProvider) {
-        this(DEFAULT_PATH, rulesProvider);
+    public ProxyAutoConfigurationServerHandler(final RulesProvider rulesProvider, final int serverPort) {
+        this(DEFAULT_PATH, rulesProvider, serverPort);
     }
 
-    public ProxyAutoConfigurationServerHandler(final String path, final RulesProvider rulesProvider) {
+    public ProxyAutoConfigurationServerHandler(final String path, final RulesProvider rulesProvider, final int serverPort) {
         this.path = path;
         this.rulesProvider = rulesProvider;
+        this.serverPort = serverPort;
     }
 
     @Override
@@ -79,7 +81,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
                 final QueryStringDecoder decoder = new QueryStringDecoder(httpRequest.uri());
                 final String path = decoder.path();
                 if (path.equals(this.path)) {
-                    final String addr = getHttpRequestAddress(httpRequest).getHostString() + ":1080";
+                    final String addr = getHttpRequestAddress(httpRequest).getHostString() + ":" + serverPort;
                     final String pac = toPac(rulesProvider.getRules(), addr, decoder.parameters().containsKey("http"));
                     final ByteBuf body = Unpooled.copiedBuffer(pac, StandardCharsets.UTF_8);
 
@@ -136,9 +138,11 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
         }
         buff.append("';\r\n");
         for (final Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
-            DestinationPattern destinationPattern = entry.getKey();
-            String s = toPacStatement(destinationPattern);
-            buff.append("  ").append(s).append("\r\n");
+            if (!"DIRECT".equalsIgnoreCase(entry.getValue())) {
+                DestinationPattern destinationPattern = entry.getKey();
+                String s = toPacStatement(destinationPattern);
+                buff.append("  ").append(s).append("\r\n");
+            }
         }
         buff.append("  if (!isResolvable(host)) return $PROXY + '; DIRECT';\r\n");
         buff.append("  return 'DIRECT';\r\n");

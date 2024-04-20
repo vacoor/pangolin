@@ -101,15 +101,15 @@ public class ServerMain {
 
 
         final String portStr = System.getProperty("server.port", "1081");
-        final int port = Integer.parseInt(portStr);
-        final NettyServer server = new NettyServer(port);
+        final int proxyServerPort = Integer.parseInt(portStr);
+        final NettyServer server = new NettyServer(proxyServerPort);
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 final Socks5MixinServerHandshaker socks5Handshaker = new Socks5MixinServerHandshaker(new Socks5ProxyServerHandler(null, null, factory));
                 final Socks4MixinServerHandshaker socks4Handshaker = new Socks4MixinServerHandshaker(new Socks4ProxyServerHandler(null, factory));
                 final HttpMixinServerHandshaker httpHandshaker = new HttpMixinServerHandshaker(
-                        new ProxyAutoConfigurationServerHandler(rulesProvider),
+                        new ProxyAutoConfigurationServerHandler(rulesProvider, proxyServerPort),
                         new SwitchyRuleConfigurationServerHandler(rulesProvider),
                         new HttpProxyServerHandler(null, null, factory)
                 );
@@ -131,8 +131,8 @@ public class ServerMain {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(
-                        new ProxyAutoConfigurationServerHandler(rulesProvider),
-                        new SwitchyRuleConfigurationServerHandler(rulesProvider)
+                        new SwitchyRuleConfigurationServerHandler(rulesProvider),
+                        new ProxyAutoConfigurationServerHandler(rulesProvider, proxyServerPort)
                 );
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
