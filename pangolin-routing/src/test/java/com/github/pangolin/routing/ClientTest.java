@@ -12,18 +12,17 @@ import io.netty.handler.proxy.HttpProxyHandler;
 import java.net.InetSocketAddress;
 import java.net.URI;
 
-public class ProxyChainTest {
+public class ClientTest {
     public static void main(String[] args) throws InterruptedException {
-        final InetSocketAddress sa = new InetSocketAddress("www.baidu.com", 80);
+        final InetSocketAddress sa = new InetSocketAddress("", 80);
 //        final InetSocketAddress sa = new InetSocketAddress("wiki.baozun.com", 80);
 //        final InetSocketAddress sa = new InetSocketAddress("proxy.baozun.com", 808);
         final StandardSocketChannelFactory factory = new StandardSocketChannelFactory();
         ChannelFuture open = factory.open(sa, 0, true, new NioEventLoopGroup(), new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addFirst(new WebSocketProxyHandler(URI.create("ws://192.168.1.201:2345/tunnel?agent=BZ"), null));
-//                ch.pipeline().addFirst(new Socks5ProxyHandler(new InetSocketAddress("127.0.0.1", 1080)));
-                ch.pipeline().addLast(new HttpProxyHandler(new InetSocketAddress("proxy.baozun.com", 808)));
+                ch.pipeline().addFirst(new WebSocketProxyHandler(URI.create(""), null));
+                ch.pipeline().addLast(new HttpProxyHandler(new InetSocketAddress("", 808)));
 
                 ch.pipeline().addLast(new HttpClientCodec());
                 ch.pipeline().addLast(new HttpContentDecompressor());
@@ -34,15 +33,16 @@ public class ProxyChainTest {
                         super.channelActive(ctx);
                         final DefaultFullHttpRequest request = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, "/");
 //                        request.headers().set("Host", "www.baidu.com");
-//                        ctx.writeAndFlush(request);
+                        ctx.writeAndFlush(request);
 //                        ctx.channel().config().setAutoRead(true);
-//                        ctx.writeAndFlush(new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.CONNECT, "www.baidu.com:80"));
+//                        ctx.writeAndFlush(new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.CONNECT, "baidu.com:80"));
                     }
 
                     @Override
                     public void channelInactive(final ChannelHandlerContext ctx) throws Exception {
                         System.out.println("Inactive");
                         super.channelInactive(ctx);
+                        ctx.close();
                     }
 
                     @Override
