@@ -11,12 +11,11 @@ import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
-import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
-import com.github.pangolin.routing.proxy.ProxyServerProvider;
-import com.github.pangolin.routing.proxy.SmartProxySocketChannelFactory;
+import com.github.pangolin.routing.proxy.*;
 import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.server.NettyServer;
+import com.google.common.collect.Lists;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
@@ -29,10 +28,7 @@ import org.springframework.util.StringUtils;
 import java.io.File;
 import java.io.FileInputStream;
 import java.net.InetSocketAddress;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
@@ -53,7 +49,7 @@ public class ServerMain {
         log.info("Rules config: " + rulesConf.getAbsolutePath());
         log.info("Proxies config: " + proxiesConf.getAbsolutePath());
 
-        final ProxyServerProvider proxyServerProvider = proxiesConf.exists() ? ProxiesParser.parse(new FileInputStream(proxiesConf), group) : new ComposedProxyServerProvider();
+        ProxyServerProvider proxyServerProvider = proxiesConf.exists() ? ProxiesParser.parse(new FileInputStream(proxiesConf), group) : new ComposedProxyServerProvider();
         final Map<DestinationPattern, String> rules = rulesConf.exists() ? RulesParser.parseRules(rulesConf.toURI().toURL()) : Collections.emptyMap();
 
         for (Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
@@ -93,6 +89,27 @@ public class ServerMain {
         };
 
         final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
+
+        final ProxyServer tunnelNextHop = proxyServerProvider.getInstance("TUNNEL-NEXT-HOP");
+        if (null != tunnelNextHop) {
+            final ProxyServer tunnel = proxyServerProvider.getInstance("TUNNEL");
+            final ProxyChainServer proxyChainServer = new ProxyChainServer("TUNNEL-DIRECT-HOP", tunnel, tunnelNextHop);
+            final ProxyServerProvider origProvider = proxyServerProvider;
+            proxyServerProvider = new ProxyServerProvider() {
+                @Override
+                public Collection<ProxyServer> getInstances() {
+                    final List<ProxyServer> servers = Lists.newArrayList(origProvider.getInstances());
+                    servers.add(proxyChainServer);
+                    return servers;
+                }
+
+                @Override
+                public ProxyServer getInstance(final String name) {
+                    return proxyChainServer.getName().equals(name) ? proxyChainServer : origProvider.getInstance(name);
+                }
+            };
+        }
+
         final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(modedRulesProvider, proxyServerProvider, bypass);
 //        final StandardSocketChannelFactory factory = new StandardSocketChannelFactory();
 

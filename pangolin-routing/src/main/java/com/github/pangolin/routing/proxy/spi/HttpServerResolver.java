@@ -77,12 +77,12 @@ public class HttpServerResolver implements ServerResolver {
 
         @Override
         public ChannelHandler newProxyHandler(InetSocketAddress sa) {
+            final DefaultHttpHeaders headers = new DefaultHttpHeaders();
             /*-
              * FIXED 499
-             */
-            final DefaultHttpHeaders headers = new DefaultHttpHeaders();
             headers.add("Proxy-Connection", "keep-alive")
                    .add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+             */
 
             if (null == username || null == password) {
                 return new HttpProxyHandler(address, headers, false);
