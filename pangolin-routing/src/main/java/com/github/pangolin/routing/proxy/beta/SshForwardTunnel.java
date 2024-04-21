@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.ssh;
+package com.github.pangolin.routing.proxy.beta;
 
 import com.google.common.collect.Maps;
 import com.jcraft.jsch.JSch;
@@ -13,7 +13,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.LockSupport;
 
 /**
  * @since 20200416
@@ -73,9 +72,11 @@ public class SshForwardTunnel {
     }
 
     public void shutdownGracefully() {
+        /*
         while (!registeredCount.compareAndSet(0, -1)) {
             LockSupport.parkNanos( 100);
         }
+        */
         if (session.isConnected()) {
             session.disconnect();
         }

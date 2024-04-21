@@ -1,10 +1,12 @@
-package com.github.pangolin.routing.beta.ssh;
+package com.github.pangolin.routing.proxy.beta;
 
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.spi.ServerResolver;
 import freework.codec.Base64;
 import freework.util.Bytes;
+import io.netty.channel.ChannelHandler;
 
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.util.Properties;
 
@@ -48,5 +50,31 @@ public class SshServerResolver implements ServerResolver {
             return Bytes.toString(Base64.decode(userInfo, true));
         }
         return userInfo;
+    }
+
+    private class SshProxyServer implements ProxyServer {
+        private final String name;
+        private final String hostname;
+        private final int port;
+        private final String username;
+        private final String password;
+
+        private SshProxyServer(final String name, final String hostname, final int port, final String username, final String password) {
+            this.name = name;
+            this.hostname = hostname;
+            this.port = port;
+            this.username = username;
+            this.password = password;
+        }
+
+        @Override
+        public String getName() {
+            return name;
+        }
+
+        @Override
+        public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+            return new SshProxyHandler(InetSocketAddress.createUnresolved(hostname, port), username, password);
+        }
     }
 }
