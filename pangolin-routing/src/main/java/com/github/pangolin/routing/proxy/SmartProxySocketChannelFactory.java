@@ -35,7 +35,8 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
 
     @Override
     public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
-        final ChannelHandler networkHandler = select(remoteAddress);
+        final ProxyServer proxyServer = select(remoteAddress);
+        ChannelHandler networkHandler = null != proxyServer ? proxyServer.newProxyHandler((InetSocketAddress) remoteAddress) : null;
         final NoopAddressResolverGroup resolverGroup = null != networkHandler ? NoopAddressResolverGroup.INSTANCE : null;
         return Channels.open(remoteAddress, resolverGroup, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
             @Override
@@ -48,7 +49,7 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
         });
     }
 
-    private ChannelHandler select(final SocketAddress destinationAddress) {
+    private ProxyServer select(final SocketAddress destinationAddress) {
         if (!(destinationAddress instanceof InetSocketAddress)) {
             log.info("[ROUTING] will bypass the proxy => {}", destinationAddress);
             return null;
@@ -57,7 +58,7 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
         if ((sa.isUnresolved() && bypass.contains(sa.getHostString()))
                 || (!sa.isUnresolved() && bypass.contains(sa.getHostName()))
         ) {
-            log.info("[ROUTING] will bypass the proxy => {}", sa.getHostString());
+            log.info("[ROUTING] will bypass the proxy => {}:{}", sa.getHostString(), sa.getPort());
             return null;
         }
 
@@ -68,15 +69,15 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
             }
 
             final ProxyServer proxyToUse = proxyServerProvider.getInstance(entry.getValue());
-            log.info("[ROUTING] will use the proxy '{}' => {}", entry.getValue(), sa.getHostString());
+            log.info("[ROUTING] will use the proxy '{}' => {}:{}", entry.getValue(), sa.getHostString(), sa.getPort());
             if (null != proxyToUse) {
-                return proxyToUse.newProxyHandler(sa);
+                return proxyToUse;
             } else {
-                log.warn("[ROUTING] NOT FOUND the proxy '{}' => {}", entry.getValue(), sa.getHostString());
+                log.warn("[ROUTING] NOT FOUND the proxy '{}' => {}:{}", entry.getValue(), sa.getHostString(), sa.getPort());
             }
         }
 
-        log.info("[ROUTING] will bypass the proxy => {}", sa.getHostString());
+        log.info("[ROUTING] will bypass the proxy => {}:{}", sa.getHostString(), sa.getPort());
         return null;
     }
 }

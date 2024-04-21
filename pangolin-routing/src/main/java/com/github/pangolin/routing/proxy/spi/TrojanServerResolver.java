@@ -34,7 +34,7 @@ public class TrojanServerResolver implements ServerResolver {
 
             final String host = uri.getHost();
             final int port = 0 < uri.getPort() ? uri.getPort() : DEFAULT_PORT;
-            return new Instance(null != name ? name : host + ":" + port, new InetSocketAddress(host, port), password);
+            return new Instance(null != name ? name : host + ":" + port, InetSocketAddress.createUnresolved(host, port), password);
         }
         throw new UnsupportedOperationException();
     }

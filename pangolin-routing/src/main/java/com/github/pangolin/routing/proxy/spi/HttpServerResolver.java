@@ -41,7 +41,7 @@ public class HttpServerResolver implements ServerResolver {
             return new Instance(name, new InetSocketAddress(host, port), username, password);
         }
 
-        return new Instance(name, new InetSocketAddress(host, port), null, null);
+        return new Instance(name, InetSocketAddress.createUnresolved(host, port), null, null);
     }
 
     private String resolveUserInfo(final String userInfo) {
