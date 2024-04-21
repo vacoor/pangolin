@@ -53,24 +53,6 @@ public class ClashRuleFactory {
         return rules;
     }
 
-    private static Map<DestinationPattern, String> parseRules(final List<String> ruleDefinitions, final PatternResolver patternResolver, final URL url) throws IOException {
-        final Map<DestinationPattern, String> routingRules = new LinkedHashMap();
-        for (final String ruleDefinition : ruleDefinitions) {
-            final int i = ruleDefinition.lastIndexOf(",");
-            if (-1 < i) {
-                final String patternDefinition = ruleDefinition.substring(0, i);
-                final List<DestinationPattern> patterns = patternResolver.resolve(patternDefinition, url);
-                if (null != patterns) {
-                    for (DestinationPattern pattern : patterns) {
-                        final String proxyType = ruleDefinition.substring(i + 1);
-                        routingRules.put(pattern, proxyType);
-                    }
-                }
-            }
-        }
-        return routingRules;
-    }
-
     public static Map<String, ProxyServer> parseProxies(final List<Configuration.ProxyDefinition> proxyDefinitions) {
         final Map<String, ProxyServer> proxies = new HashMap<>();
         for (final Configuration.ProxyDefinition proxyDefinition : proxyDefinitions) {
@@ -103,45 +85,6 @@ public class ClashRuleFactory {
             }
         }
         throw new IllegalStateException();
-    }
-
-    public static void parseProxyGroups(final List<Configuration.ProxyGroupDefinition> proxyGroupDefinitions, final Map<String, ProxyServer> proxies,
-                                        final HealthChecker healthChecker, final EventLoopGroup group) {
-        final Map<String, Configuration.ProxyGroupDefinition> proxyGroupDefinitionMap = new HashMap<>();
-        for (Configuration.ProxyGroupDefinition proxyGroupDefinition : proxyGroupDefinitions) {
-            proxyGroupDefinitionMap.put(proxyGroupDefinition.getName(), proxyGroupDefinition);
-        }
-        for (Configuration.ProxyGroupDefinition proxyGroupDefinition : proxyGroupDefinitions) {
-            parseProxyGroup(proxyGroupDefinition, proxyGroupDefinitionMap, proxies, healthChecker, group);
-        }
-    }
-
-    private static ProxyServer parseProxyGroup(final Configuration.ProxyGroupDefinition proxyGroupDefinition,
-                                               final Map<String, Configuration.ProxyGroupDefinition> proxyGroupDefinitions,
-                                               final Map<String, ProxyServer> proxies,
-                                               final HealthChecker healthChecker, final EventLoopGroup group) {
-        final String name = proxyGroupDefinition.getName();
-        final List<String> proxyNames = proxyGroupDefinition.getProxies();
-        final List<ProxyServer> proxiesInGroup = new LinkedList<>();
-        for (final String proxyName : proxyNames) {
-            final ProxyServer dependency = proxies.get(proxyName);
-            if (proxyName.equals(name)) {
-                continue;
-            }
-            if (null == dependency) {
-                final Configuration.ProxyGroupDefinition dependencyGroupDefinition = proxyGroupDefinitions.get(proxyName);
-                if (null == dependencyGroupDefinition) {
-                    throw new IllegalStateException("Proxy[Group] not found: " + proxyName);
-                }
-                final ProxyServer dependencyGroup = parseProxyGroup(dependencyGroupDefinition, proxyGroupDefinitions, proxies, healthChecker, group);
-                proxiesInGroup.add(dependencyGroup);
-            } else {
-                proxiesInGroup.add(dependency);
-            }
-        }
-        final LoadBalanceProxyServer proxyGroup = new LoadBalanceProxyServer(name, healthChecker, proxiesInGroup, group);
-        proxies.put(name, proxyGroup);
-        return proxyGroup;
     }
 
 }
