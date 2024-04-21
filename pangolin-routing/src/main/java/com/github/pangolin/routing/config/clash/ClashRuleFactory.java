@@ -97,7 +97,7 @@ public class ClashRuleFactory {
             if (!resolver.acceptsUrl(url)) {
                 continue;
             }
-            final ProxyServer resolved = resolver.resolve(url, null);
+            final ProxyServer resolved = resolver.resolve(url, new Properties());
             if (null != resolved) {
                 return resolved;
             }
