@@ -122,7 +122,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                  *
                  * @see https://www.rfc-editor.org/rfc/rfc9110.html#name-connect
                  */
-                log.info("[HTTP] received https CONNECT request {}", httpRequest.uri());
+                log.info("[HTTP] received https CONNECT request => {}", httpRequest.uri());
 
                 final Matcher matcher = CONNECT_URI_PATTERN.matcher(httpRequest.uri());
                 if (matcher.find()) {
@@ -133,14 +133,14 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
                             if (future.isSuccess()) {
-                                log.debug("[HTTP][{}] Connection established: {}:{}", method, address, port);
+                                log.debug("[HTTP][{}] Connection established: => {}:{}", method, address, port);
 
                                 final DefaultFullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.OK);
                                 ctx.writeAndFlush(response).addListener(g -> {
                                     ctx.pipeline().remove(HttpServerCodec.class);
                                 });
                             } else {
-                                log.error("[HTTP] Error: {} {}:{}", future.cause().getMessage(), address, port);
+                                log.error("[HTTP] Error: {} => {}:{}", future.cause().getMessage(), address, port);
                                 ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
                             }
                         }
@@ -150,11 +150,11 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                             if (ctx.channel().isActive()) {
                                 ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                             }
-                            log.info("[HTTP] Connection closed: {}:{}", address, port);
+                            log.info("[HTTP] Connection closed => {}:{}", address, port);
                         }
                     });
                 } else {
-                    log.info("[HTTP] bad CONNECT request: {}", httpRequest.uri());
+                    log.info("[HTTP] bad CONNECT request => {}", httpRequest.uri());
                     ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.BAD_REQUEST)).addListener(ChannelFutureListener.CLOSE);
                 }
             } else {
@@ -177,12 +177,12 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                             headers.remove(HttpHeaderNames.PROXY_CONNECTION);
                         }
                         if (future.isSuccess()) {
-                            log.debug("[HTTP][{}] Connection established: {}", method, future.channel().remoteAddress());
+                            log.debug("[HTTP][{}] Connection established => {}:{}", method, address, port);
                             future.channel().writeAndFlush(httpRequestToSend);
                         } else {
                             ReferenceCountUtil.release(httpRequestToSend);
 
-                            log.error("[HTTP] Error: {} {}:{}", future.cause().getMessage(), address, port);
+                            log.error("[HTTP] Error: {} => {}:{}", future.cause().getMessage(), address, port);
 
                             ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
                         }
@@ -193,7 +193,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                         if (ctx.channel().isActive()) {
                             ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                         }
-                        log.info("[HTTP] Connection closed: {}:{}", address, port);
+                        log.info("[HTTP] Connection closed => {}:{}", address, port);
                     }
                 });
             }

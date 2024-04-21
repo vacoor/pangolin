@@ -115,19 +115,19 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final String address = request.dstAddr();
                 final Socks5AddressType addressType = request.dstAddrType();
 
-                log.info("[SOCKS5] Received {} request {}:{}", type.toString(), address, port);
+                log.info("[SOCKS5] Received {} request => {}:{}", type.toString(), address, port);
 
                 if (Socks5CommandType.CONNECT.equals(type)) {
                     connect(ctx, request).addListener(new ChannelFutureListener() {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
                             if (future.isSuccess()) {
-                                log.debug("[SOCKS5] Connection established: {}:{}", address, port);
+                                log.debug("[SOCKS5] Connection established => {}:{}", address, port);
                                 ctx.writeAndFlush(
                                         new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)
                                 ).addListener(removeOnComplete(ctx, Socks5ServerEncoder.DEFAULT));
                             } else {
-                                log.error("[SOCKS5] Error: {} {}:{}", future.cause().getMessage(), address, port);
+                                log.error("[SOCKS5] Error: {} => {}:{}", future.cause().getMessage(), address, port);
                                 ctx.writeAndFlush(
                                         new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)
                                 ).addListener(ChannelFutureListener.CLOSE);
@@ -139,7 +139,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                             if (ctx.channel().isActive()) {
                                 ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                             }
-                            log.info("[SOCKS5] Connection closed: {}:{}", address, port);
+                            log.info("[SOCKS5] Connection closed => {}:{}", address, port);
                         }
                     });
                 } else {
@@ -163,7 +163,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                         }
                     }
                     */
-                    log.warn("[SOCKS5] Connection closed {}:{}: '{}' unsupported", address, port, type);
+                    log.warn("[SOCKS5] Connection closed: '{}' unsupported => {}:{}", type, address, port);
                     ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
                 }
             } else {

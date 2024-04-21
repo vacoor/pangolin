@@ -69,7 +69,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final int port = request.dstPort();
                 final String address = request.dstAddr();
 
-                log.info("[SOCKS4a] Received {} request {}:{}", type.toString(), address, port);
+                log.info("[SOCKS4a] Received {} request => {}:{}", type.toString(), address, port);
 
                 if (!nullSafeEquals(uid, requestUid)) {
                     log.warn("[SOCKS4a] Respond not permitted to {}", clientAddress);
@@ -79,10 +79,10 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
                             if (future.isSuccess()) {
-                                log.debug("[SOCKS4a] Connection established: {}:{}", address, port);
+                                log.debug("[SOCKS4a] Connection established => {}:{}", address, port);
                                 ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.SUCCESS)).addListener(removeOnComplete(ctx, Socks4ServerEncoder.INSTANCE));
                             } else {
-                                log.error("[SOCKS4a] Error: {} {}:{}", future.cause().getMessage(), address, port);
+                                log.error("[SOCKS4a] Error: {} => {}:{}", future.cause().getMessage(), address, port);
                                 ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_UNREACHABLE)).addListener(ChannelFutureListener.CLOSE);
                             }
                         }
@@ -92,7 +92,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                             if (ctx.channel().isActive()) {
                                 ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                             }
-                            log.info("[SOCKS4a] Connection closed: {}:{}", address, port);
+                            log.info("[SOCKS4a] Connection closed => {}:{}", address, port);
                         }
                     });
                 } else {

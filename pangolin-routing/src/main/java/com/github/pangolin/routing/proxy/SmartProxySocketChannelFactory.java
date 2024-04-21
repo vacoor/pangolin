@@ -50,14 +50,14 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
 
     private ChannelHandler select(final SocketAddress destinationAddress) {
         if (!(destinationAddress instanceof InetSocketAddress)) {
-            log.info("[ROUTING] will bypass the proxy {}", destinationAddress);
+            log.info("[ROUTING] will bypass the proxy => {}", destinationAddress);
             return null;
         }
         final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
         if ((sa.isUnresolved() && bypass.contains(sa.getHostString()))
                 || (!sa.isUnresolved() && bypass.contains(sa.getHostName()))
         ) {
-            log.info("[ROUTING] will bypass the proxy {}", sa.getHostString());
+            log.info("[ROUTING] will bypass the proxy => {}", sa.getHostString());
             return null;
         }
 
@@ -68,15 +68,15 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
             }
 
             final ProxyServer proxyToUse = proxyServerProvider.getInstance(entry.getValue());
-            log.info("[ROUTING] will use the proxy '{}' {}", entry.getValue(), sa.getHostString());
+            log.info("[ROUTING] will use the proxy '{}' => {}", entry.getValue(), sa.getHostString());
             if (null != proxyToUse) {
                 return proxyToUse.newProxyHandler(sa);
             } else {
-                log.warn("[ROUTING] NOT FOUND the proxy '{}' {}", entry.getValue(), sa.getHostString());
+                log.warn("[ROUTING] NOT FOUND the proxy '{}' => {}", entry.getValue(), sa.getHostString());
             }
         }
 
-        log.info("[ROUTING] will bypass the proxy {}", sa.getHostString());
+        log.info("[ROUTING] will bypass the proxy => {}", sa.getHostString());
         return null;
     }
 }
