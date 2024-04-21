@@ -17,12 +17,7 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.Collection;
-import java.util.LinkedHashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.ServiceLoader;
+import java.util.*;
 
 /**
  * TODO DOC ME!.
@@ -59,19 +54,8 @@ public class ProxiesParser {
             ProxyServerProvider proxyServerProvider = ClashProxyServerProviderFactory.create(subscribeUrl).getProxyServerProvider(group);
             providers.add(proxyServerProvider);
           } else {
-            final ProxyServer proxyServer = resolve(url);
-            final ProxyServer proxyServerToUse = new ProxyServer() {
-              @Override
-              public String getName() {
-                return name;
-              }
-
-              @Override
-              public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
-                return proxyServer.newProxyHandler(sa);
-              }
-            };
-            fixedServers.put(proxyServer.getName(), proxyServerToUse);
+            final ProxyServer proxyServer = resolve(name, url);
+            fixedServers.put(proxyServer.getName(), proxyServer);
           }
         } else {
           // log
@@ -95,13 +79,17 @@ public class ProxiesParser {
     return new ComposedProxyServerProvider(providersToUse);
   }
 
-  private static ProxyServer resolve(final String url) {
+  private static ProxyServer resolve(final String name, final String url) {
     final ServiceLoader<ServerResolver> resolvers = ServiceLoader.load(ServerResolver.class);
     for (final ServerResolver resolver : resolvers) {
       if (!resolver.acceptsUrl(url)) {
         continue;
       }
-      final ProxyServer resolved = resolver.resolve(url, null);
+      final Properties props = new Properties();
+      if (null != name) {
+        props.setProperty("name", name);
+      }
+      final ProxyServer resolved = resolver.resolve(url, props);
       if (null != resolved) {
         return resolved;
       }

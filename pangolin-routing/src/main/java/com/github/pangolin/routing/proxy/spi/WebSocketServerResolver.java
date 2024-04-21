@@ -28,8 +28,9 @@ public class WebSocketServerResolver implements ServerResolver {
         }
         int i = url.indexOf("#");
         final String name = 0 < i ? url.substring(i + 1) : url;
+        final String nameToUse = props.getProperty("name", name);
         final URI uri = URI.create(0 < i ? url.substring(0, i) : url);
-        return new Instance(null != name ? name : url, uri);
+        return new Instance(null != nameToUse ? nameToUse : url, uri);
     }
 
     /**

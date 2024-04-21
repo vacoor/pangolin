@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.server.ss;
+package com.github.pangolin.routing.handler.internal.server;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.handler.internal.client.ss.codec.SsAeadCipherCodec;

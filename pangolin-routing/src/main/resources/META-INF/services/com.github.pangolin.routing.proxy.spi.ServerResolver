@@ -1,3 +1,4 @@
 com.github.pangolin.routing.proxy.spi.SsServerResolver
 com.github.pangolin.routing.proxy.spi.TrojanServerResolver
 com.github.pangolin.routing.proxy.spi.WebSocketServerResolver
+com.github.pangolin.routing.proxy.spi.HttpServerResolver

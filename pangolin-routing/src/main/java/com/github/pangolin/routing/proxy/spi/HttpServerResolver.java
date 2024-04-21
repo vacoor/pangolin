@@ -1,12 +1,11 @@
 package com.github.pangolin.routing.proxy.spi;
 
-import com.github.pangolin.routing.handler.internal.client.ss.SsProxyHandler;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.CipherAlgorithm;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import freework.codec.Base64;
 import freework.util.Bytes;
 import io.netty.channel.ChannelHandler;
+import io.netty.handler.codec.http.DefaultHttpHeaders;
+import io.netty.handler.proxy.HttpProxyHandler;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -16,21 +15,15 @@ import java.util.Properties;
 /**
  *
  */
-public class SsServerResolver  implements ServerResolver {
-    private static final String URL_PREFIX = "ss://";
-    private static final int DEFAULT_PORT = 1080;
+public class HttpServerResolver implements ServerResolver {
+    private static final String URL_PREFIX = "http://";
+    private static final int DEFAULT_PORT = 80;
 
     public boolean acceptsUrl(final String url) {
         return null != url && url.startsWith(URL_PREFIX);
     }
 
     /**
-     * <pre>
-     * SS-URI = "ss://" userinfo "@" hostname ":" port [ "/" ] [ "?" plugin ] [ "#" tag ]
-     * userinfo = websafe-base64-encode-utf8(method  ":" password)
-     *            method ":" password
-     * </pre>
-     * @see <a href="#">SIP002 URI Scheme</a>
      */
     public ProxyServer resolve(final String url, final Properties props) {
         if (!acceptsUrl(url)) {
@@ -41,13 +34,14 @@ public class SsServerResolver  implements ServerResolver {
         final String host = uri.getHost();
         final int port = 0 < uri.getPort() ? uri.getPort() : DEFAULT_PORT;
         final String userInfo = resolveUserInfo(uri.getUserInfo());
-        final String[] segments = userInfo.split(":", 2);
+        if (null != userInfo) {
+            final String[] segments = userInfo.split(":", 2);
+            final String username = segments[0];
+            final String password = segments.length < 2 ? "" : segments[1];
+            return new Instance(name, new InetSocketAddress(host, port), username, password);
+        }
 
-        final String method = segments[0];
-        final String password = segments.length < 2 ? "" : segments[1];
-
-        final CipherAlgorithm algorithm = CipherAlgorithmSpi.getInstance(method);
-        return new Instance(name, new InetSocketAddress(host, port), algorithm, password);
+        return new Instance(name, new InetSocketAddress(host, port), null, null);
     }
 
     private String resolveUserInfo(final String userInfo) {
@@ -66,13 +60,13 @@ public class SsServerResolver  implements ServerResolver {
     private class Instance implements ProxyServer {
         private final String name;
         private final SocketAddress address;
-        private final CipherAlgorithm algorithm;
+        private final String username;
         private final String password;
 
-        public Instance(final String name, final SocketAddress address, final CipherAlgorithm algorithm, final String password) {
+        public Instance(final String name, final SocketAddress address, final String username, final String password) {
             this.name = name;
             this.address = address;
-            this.algorithm = algorithm;
+            this.username = username;
             this.password = password;
         }
 
@@ -83,7 +77,17 @@ public class SsServerResolver  implements ServerResolver {
 
         @Override
         public ChannelHandler newProxyHandler(InetSocketAddress sa) {
-            return new SsProxyHandler(address, algorithm, password);
+            /*-
+             * FIXED 499
+             */
+            final DefaultHttpHeaders headers = new DefaultHttpHeaders();
+            headers.add("Proxy-Connection", "keep-alive")
+                   .add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+
+            if (null == username || null == password) {
+                return new HttpProxyHandler(address, headers, false);
+            }
+            return new HttpProxyHandler(address, username, password, headers, false);
         }
     }
 }

@@ -29,7 +29,7 @@ public class TrojanServerResolver implements ServerResolver {
     public ProxyServer resolve(final String url, final Properties props) {
         if (this.acceptsUrl(url)) {
             final URI uri = URI.create(url);
-            final String name = uri.getFragment();
+            final String name = props.getProperty("name", uri.getFragment());
             final String password = uri.getUserInfo();
 
             final String host = uri.getHost();
