@@ -1,5 +1,6 @@
-package com.github.pangolin.routing.proxy.beta;
+package com.github.pangolin.routing.proxy.spi;
 
+import com.github.pangolin.routing.handler.internal.client.SshProxyHandler;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.spi.ServerResolver;
 import freework.codec.Base64;
@@ -17,6 +18,7 @@ public class SshServerResolver implements ServerResolver {
     private static final String URL_PREFIX = "ssh://";
     private static final int DEFAULT_PORT = 22;
 
+    @Override
     public boolean acceptsUrl(final String url) {
         return null != url && url.startsWith(URL_PREFIX);
     }
@@ -24,6 +26,7 @@ public class SshServerResolver implements ServerResolver {
     /**
      *
      */
+    @Override
     public ProxyServer resolve(final String url, final Properties props) {
         if (!acceptsUrl(url)) {
             return null;
@@ -74,7 +77,7 @@ public class SshServerResolver implements ServerResolver {
 
         @Override
         public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
-            return new SshProxyHandler(InetSocketAddress.createUnresolved(hostname, port), username, password);
+            return new SshProxyHandler(hostname, port, username, password);
         }
     }
 }
