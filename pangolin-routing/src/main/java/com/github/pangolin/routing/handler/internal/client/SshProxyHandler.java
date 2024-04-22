@@ -217,7 +217,47 @@ public class SshProxyHandler extends ChannelDuplexHandler {
 
   }
 
-  class TcpInboundBridgeHandler extends ChannelInboundHandlerAdapter {
+  private class TcpInboundBridgeHandler extends ChannelInboundHandlerAdapter {
+    ChannelHandlerContext ctx;
+
+    @Override
+    public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
+      this.ctx = ctx;
+    }
+
+    public void sendToPort(final byte cmd, final byte[] data, final int off, final long len) throws IOException {
+      ctx.fireChannelRead(Unpooled.wrappedBuffer(data, off, (int) len));
+    }
+  }
+
+
+  private class TcpBridgeHandler extends ChannelDuplexHandler {
+    private final IoSession ioSession;
+    private final ClientChannel channel;
+
+    private TcpBridgeHandler(final IoSession ioSession, final ClientChannel channel) {
+      this.ioSession = ioSession;
+      this.channel = channel;
+    }
+
+    @Override
+    public void write(final ChannelHandlerContext ctx, final Object msg, final ChannelPromise promise) throws Exception {
+      ioSession.suspendRead();
+
+      ByteBuf buf = (ByteBuf) msg;
+      final byte[] bytes = new byte[buf.readableBytes()];
+      buf.readBytes(bytes);
+      ThreadUtils.runAsInternal(channel.getAsyncIn(), out -> out.writeBuffer(new ByteArrayBuffer(bytes)).addListener(f -> {
+        ioSession.resumeRead();
+        Throwable exception = f.getException();
+        if (null != exception) {
+          promise.tryFailure(exception);
+        } else {
+          promise.trySuccess();
+        }
+      }));
+    }
+
     ChannelHandlerContext ctx;
 
     @Override
