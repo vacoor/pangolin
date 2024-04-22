@@ -188,11 +188,11 @@ public class SshProxyHandler extends ChannelDuplexHandler {
     super.write(ctx, msg, promise);
   }
 
-  private class TcpEncoder extends ChannelOutboundHandlerAdapter {
+  private class TcpOutboundBridgeHandler extends ChannelOutboundHandlerAdapter {
     private final IoSession ioSession;
     private final ClientChannel channel;
 
-    private TcpEncoder(final IoSession ioSession, final ClientChannel channel) {
+    private TcpOutboundBridgeHandler(final IoSession ioSession, final ClientChannel channel) {
       this.ioSession = ioSession;
       this.channel = channel;
     }
@@ -217,7 +217,7 @@ public class SshProxyHandler extends ChannelDuplexHandler {
 
   }
 
-  class TcpipInboundHandler extends ChannelInboundHandlerAdapter {
+  class TcpInboundBridgeHandler extends ChannelInboundHandlerAdapter {
     ChannelHandlerContext ctx;
 
     @Override
@@ -231,7 +231,7 @@ public class SshProxyHandler extends ChannelDuplexHandler {
   }
 
   private void openChannel(final NettyIoSession ioSession, final InetSocketAddress remoteAddress, ChannelHandlerContext ctx, final ChannelPromise promise) throws IOException {
-    final TcpipInboundHandler tcpipHandler = new TcpipInboundHandler();
+    final TcpInboundBridgeHandler tcpipHandler = new TcpInboundBridgeHandler();
 
     final TcpipClientChannel tcpipClientChannel = new TcpipClientChannel(TcpipClientChannel.Type.Direct, ioSession, new SshdSocketAddress(remoteAddress)) {
       @Override
@@ -250,7 +250,7 @@ public class SshProxyHandler extends ChannelDuplexHandler {
 
     tcpipClientChannel.open().addListener(openToNext(ctx, ctx0 -> {
       ctx.channel().pipeline().addAfter(SSHD_NETTY_ADAPTER_NAME, "SSHD-DATA-INBOUND-ADAPTER", tcpipHandler);
-      ctx.channel().pipeline().addAfter(SSHD_NETTY_ADAPTER_NAME, "SSHD-DATA-OUTBOUND-ADAPTER", new TcpEncoder(ioSession, tcpipClientChannel));
+      ctx.channel().pipeline().addAfter(SSHD_NETTY_ADAPTER_NAME, "SSHD-DATA-OUTBOUND-ADAPTER", new TcpOutboundBridgeHandler(ioSession, tcpipClientChannel));
     }, promise));
   }
 
