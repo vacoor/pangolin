@@ -6,3 +6,5 @@ DOMAIN-SUFFIX,cloud.bz
 DOMAIN-SUFFIX,service.testdb
 DOMAIN-SUFFIX,service.testdb
 DOMAIN-SUFFIX,service.consul
+
+IP-CIDR,10.41.8.0/23

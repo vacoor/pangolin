@@ -82,8 +82,9 @@
         <pangolin.version>0.0.3-SNAPSHOT</pangolin.version>
         <nougat.version>1.0.12</nougat.version>
         <lombok.version>1.18.20</lombok.version>
-        <slf4j.version>1.7.6</slf4j.version>
-        <log4j.version>1.2.17</log4j.version>
+        <!--<slf4j.version>1.7.6</slf4j.version>-->
+      <slf4j.version>1.7.32</slf4j.version>
+      <log4j.version>1.2.17</log4j.version>
         <!--
         <netty.version>4.1.59.Final</netty.version>
         -->
