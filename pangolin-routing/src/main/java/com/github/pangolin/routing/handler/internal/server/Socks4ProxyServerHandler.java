@@ -82,7 +82,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                                 log.debug("[SOCKS4a] Connection established => {}:{}", address, port);
                                 ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.SUCCESS)).addListener(removeOnComplete(ctx, Socks4ServerEncoder.INSTANCE));
                             } else {
-                                log.error("[SOCKS4a] Error: {} => {}:{}", future.cause().getMessage(), address, port);
+                                log.error("[SOCKS4a] Error: {}/{} => {}:{}", future.cause().getMessage(), future.cause().getClass().getSimpleName(), address, port);
                                 ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_UNREACHABLE)).addListener(ChannelFutureListener.CLOSE);
                             }
                         }

@@ -140,7 +140,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                                     ctx.pipeline().remove(HttpServerCodec.class);
                                 });
                             } else {
-                                log.error("[HTTP] Error: {} => {}:{}", future.cause().getMessage(), address, port);
+                                log.error("[HTTP] Error: {}/{} => {}:{}", future.cause().getMessage(), future.cause().getClass().getSimpleName(), address, port);
                                 ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
                             }
                         }

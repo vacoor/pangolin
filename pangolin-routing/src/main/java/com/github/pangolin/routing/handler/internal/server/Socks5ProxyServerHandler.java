@@ -127,7 +127,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                                         new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)
                                 ).addListener(removeOnComplete(ctx, Socks5ServerEncoder.DEFAULT));
                             } else {
-                                log.error("[SOCKS5] Error: {} => {}:{}", future.cause().getMessage(), address, port);
+                                log.error("[SOCKS5] Error: {}/{} => {}:{}", future.cause().getMessage(), future.cause().getClass().getSimpleName(), address, port);
                                 ctx.writeAndFlush(
                                         new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)
                                 ).addListener(ChannelFutureListener.CLOSE);
