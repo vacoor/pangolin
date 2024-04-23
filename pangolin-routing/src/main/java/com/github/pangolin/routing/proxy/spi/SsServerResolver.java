@@ -47,7 +47,7 @@ public class SsServerResolver  implements ServerResolver {
         final String password = segments.length < 2 ? "" : segments[1];
 
         final CipherAlgorithm algorithm = CipherAlgorithmSpi.getInstance(method);
-        return new Instance(name, InetSocketAddress.createUnresolved(host, port), algorithm, password);
+        return new Instance(name, new InetSocketAddress(host, port), algorithm, password);
     }
 
     private String resolveUserInfo(final String userInfo) {
