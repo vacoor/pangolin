@@ -86,7 +86,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
             final SocketAddress clientAddress = ctx.channel().remoteAddress();
             if (msg instanceof Socks5InitialRequest) {
                 final List<Socks5AuthMethod> methods = ((Socks5InitialRequest) msg).authMethods();
-                log.debug("[SOCKS5] Received INIT request from {}, methods: {}", clientAddress, methods);
+                log.debug("[SOCKS5] Received {} INIT request, methods: {}", clientAddress, methods);
 
                 final boolean needAuth = this.isHasAuthorization();
                 final ByteToMessageDecoder newDecoder = needAuth ? new Socks5PasswordAuthRequestDecoder() : new Socks5CommandRequestDecoder();
@@ -94,7 +94,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 ctx.writeAndFlush(new DefaultSocks5InitialResponse(isHasAuthorization() ? Socks5AuthMethod.PASSWORD : Socks5AuthMethod.NO_AUTH));
             } else if (msg instanceof Socks5PasswordAuthRequest) {
                 final Socks5PasswordAuthRequest request = (Socks5PasswordAuthRequest) msg;
-                log.debug("[SOCKS5] Received AUTH request from {}, username: {}, password: {}", clientAddress, request.username(), request.password());
+                log.debug("[SOCKS5] Received {} AUTH request, username: {}, password: {}", clientAddress, request.username(), request.password());
 
                 if (nullSafeEquals(this.username, request.username()) && nullSafeEquals(password, request.password())) {
                     ctx.pipeline().replace(decoderName, decoderName, new Socks5CommandRequestDecoder());
@@ -115,7 +115,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final String address = request.dstAddr();
                 final Socks5AddressType addressType = request.dstAddrType();
 
-                log.info("[SOCKS5] Received {} request => {}:{}", type.toString(), address, port);
+                log.info("[SOCKS5] Received {} {} request => {}:{}", clientAddress, type.toString(), address, port);
 
                 if (Socks5CommandType.CONNECT.equals(type)) {
                     connect(ctx, request).addListener(new ChannelFutureListener() {

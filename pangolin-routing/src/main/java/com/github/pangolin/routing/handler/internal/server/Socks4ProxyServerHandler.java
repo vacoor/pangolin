@@ -69,7 +69,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final int port = request.dstPort();
                 final String address = request.dstAddr();
 
-                log.info("[SOCKS4a] Received {} request => {}:{}", type.toString(), address, port);
+                log.info("[SOCKS4a] Received {} {} request => {}:{}", clientAddress, type.toString(), address, port);
 
                 if (!nullSafeEquals(uid, requestUid)) {
                     log.warn("[SOCKS4a] Respond not permitted to {}", clientAddress);

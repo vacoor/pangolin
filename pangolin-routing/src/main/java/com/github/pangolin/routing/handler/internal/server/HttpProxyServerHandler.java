@@ -122,7 +122,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                  *
                  * @see https://www.rfc-editor.org/rfc/rfc9110.html#name-connect
                  */
-                log.info("[HTTP] received https CONNECT request => {}", httpRequest.uri());
+                log.info("[HTTP] Received {} HTTPS CONNECT request => {}", clientAddress, httpRequest.uri());
 
                 final Matcher matcher = CONNECT_URI_PATTERN.matcher(httpRequest.uri());
                 if (matcher.find()) {
