@@ -154,7 +154,7 @@ public class ServerMain {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                    log.info("Web interface started on port: {}", localAddress.getPort());
+                    log.info("Web interface started on port: {} ({})", localAddress.getPort(), localAddress);
                 } else {
                     future.cause().printStackTrace();
                 }
@@ -166,7 +166,7 @@ public class ServerMain {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                    log.info("Mixed proxy started on port {}", localAddress.getPort());
+                    log.info("Mixed proxy started on port {} ({})", localAddress.getPort(), localAddress);
                 } else {
                     future.cause().printStackTrace();
                 }
