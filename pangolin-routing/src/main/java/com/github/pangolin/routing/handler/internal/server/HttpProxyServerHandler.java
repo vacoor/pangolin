@@ -122,7 +122,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                  *
                  * @see https://www.rfc-editor.org/rfc/rfc9110.html#name-connect
                  */
-                log.info("[HTTP] received https CONNECT request => {}", httpRequest.uri());
+                log.info("[HTTP] Received {} HTTPS CONNECT request => {}", clientAddress, httpRequest.uri());
 
                 final Matcher matcher = CONNECT_URI_PATTERN.matcher(httpRequest.uri());
                 if (matcher.find()) {
@@ -140,7 +140,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                                     ctx.pipeline().remove(HttpServerCodec.class);
                                 });
                             } else {
-                                log.error("[HTTP] Error: {} => {}:{}", future.cause().getMessage(), address, port);
+                                log.error("[HTTP] Error: {}/{} => {}:{}", future.cause().getMessage(), future.cause().getClass().getSimpleName(), address, port);
                                 ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.FORBIDDEN)).addListener(ChannelFutureListener.CLOSE);
                             }
                         }

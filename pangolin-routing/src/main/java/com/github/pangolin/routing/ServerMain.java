@@ -117,9 +117,10 @@ public class ServerMain {
         // forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));
 
 
+        final String hostStr = System.getProperty("server.host");
         final String portStr = System.getProperty("server.port", "1081");
         final int proxyServerPort = Integer.parseInt(portStr);
-        final NettyServer server = new NettyServer(proxyServerPort);
+        final NettyServer server = new NettyServer(hostStr, proxyServerPort);
         ChannelFuture proxyServerChannel = server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
@@ -134,7 +135,7 @@ public class ServerMain {
             }
         });
 
-        ChannelFuture pacChannel = new NettyServer(8088).start(true, new ChannelInitializer<SocketChannel>() {
+        ChannelFuture pacChannel = new NettyServer(hostStr, 8088).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(
@@ -153,7 +154,7 @@ public class ServerMain {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                    log.info("Web interface started on port: {}", localAddress.getPort());
+                    log.info("Web interface started on port: {} ({})", localAddress.getPort(), localAddress);
                 } else {
                     future.cause().printStackTrace();
                 }
@@ -165,7 +166,7 @@ public class ServerMain {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                    log.info("Mixed proxy started on port {}", localAddress.getPort());
+                    log.info("Mixed proxy started on port {} ({})", localAddress.getPort(), localAddress);
                 } else {
                     future.cause().printStackTrace();
                 }
