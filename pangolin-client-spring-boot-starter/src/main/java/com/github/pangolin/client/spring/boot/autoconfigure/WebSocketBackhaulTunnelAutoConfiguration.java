@@ -1,20 +1,17 @@
 package com.github.pangolin.client.spring.boot.autoconfigure;
 
-import com.github.pangolin.agent.WebSocketBackhaulTunnelAgent;
+import com.github.pangolin.agent.WebSocketBackhaulTunnelAgentLauncher;
 import org.springframework.context.EnvironmentAware;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
-import org.springframework.util.StringUtils;
 
 import java.io.IOException;
-import java.net.URI;
 import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  *
@@ -24,7 +21,7 @@ public class WebSocketBackhaulTunnelAutoConfiguration implements EnvironmentAwar
     private static final String WS_SERVER_URL_PROPERTY = "spring.management.tunnel";
 
     private Environment env;
-    private final AtomicReference<WebSocketBackhaulTunnelAgent> agentRef = new AtomicReference<>(null);
+    private final WebSocketBackhaulTunnelAgentLauncher launcher = new WebSocketBackhaulTunnelAgentLauncher();
 
     @Bean(destroyMethod = "stop")
     public DebugTunnelInitializer tunnel() {
@@ -45,10 +42,11 @@ public class WebSocketBackhaulTunnelAutoConfiguration implements EnvironmentAwar
                     try {
                         launchTunnelClientIfNecessary();
                     } catch (final Exception e) {
+                        e.printStackTrace();
                         // ignore
                     }
                 }
-            }, 60, 60, TimeUnit.SECONDS);
+            }, 15, 15, TimeUnit.SECONDS);
             return this;
         }
 
@@ -62,24 +60,8 @@ public class WebSocketBackhaulTunnelAutoConfiguration implements EnvironmentAwar
         final String name = env.getProperty("spring.application.name", UUID.randomUUID().toString());
         final String profiles = Arrays.toString(env.getActiveProfiles()).replaceAll("[\\[\\]]+", "");
         final String wsTunnelInstanceName = (name + '@' + profiles).replace(" ", "");
-        if (StringUtils.hasText(wsServerUrlToUse)) {
-            final URI wsServerUri = URI.create(wsServerUrlToUse);
-            final WebSocketBackhaulTunnelAgent agent = agentRef.get();
-            if (null == agent || !agent.isRunning() || !wsServerUri.equals(agent.getWebSocketServerEndpoint())) {
-                if (null != agent) {
-                    agent.shutdownGracefully().sync();
-                }
-                final WebSocketBackhaulTunnelAgent agentNew = new WebSocketBackhaulTunnelAgent(wsTunnelInstanceName, wsServerUri);
-                if (agentRef.compareAndSet(agent, agentNew)) {
-                    agentNew.start();
-                }
-            }
-        } else {
-            final WebSocketBackhaulTunnelAgent agent = agentRef.getAndSet(null);
-            if (null != agent) {
-                agent.shutdownGracefully();
-            }
-        }
+
+        launcher.launchIfNecessary(wsTunnelInstanceName, wsServerUrlToUse);
     }
 
     @Override

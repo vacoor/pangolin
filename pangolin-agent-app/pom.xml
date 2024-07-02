@@ -86,6 +86,14 @@
             <groupId>io.netty</groupId>
             <artifactId>netty-codec-socks</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.nomou.pangolin</groupId>
+            <artifactId>pangolin-client-spring-boot-starter</artifactId>
+        </dependency>
     </dependencies>
 
 

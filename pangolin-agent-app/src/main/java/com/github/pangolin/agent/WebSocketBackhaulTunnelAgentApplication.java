@@ -12,6 +12,7 @@ public class WebSocketBackhaulTunnelAgentApplication {
 
     public static void main(String[] args) throws Exception {
         SpringApplication.run(WebSocketBackhaulTunnelAgentApplication.class, args);
+        /*
         final String agentName = System.getProperty("agent.name");
         final String agentServer = System.getProperty("agent.server");
 
@@ -24,6 +25,7 @@ public class WebSocketBackhaulTunnelAgentApplication {
             }
         }).sync();
         System.out.println("Over");
+        */
     }
 
 }
