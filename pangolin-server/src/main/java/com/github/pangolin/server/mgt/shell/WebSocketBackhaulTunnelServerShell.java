@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -131,8 +132,11 @@ public class WebSocketBackhaulTunnelServerShell {
             table.add(new String[]{"AGENT", "RESULT"});
             for (final String agentKey : args.subList(1, args.size())) {
                 try {
-                    removeAgent(agentKey);
-                    table.add(new String[]{agentKey, "Removed"});
+                    if (removeAgent(agentKey)) {
+                        table.add(new String[]{agentKey, "Removed"});
+                    } else {
+                        table.add(new String[]{agentKey, "Not found"});
+                    }
                 } catch (final Exception e) {
                     table.add(new String[]{agentKey, "Error: " + e.getMessage()});
                 }
@@ -196,7 +200,17 @@ public class WebSocketBackhaulTunnelServerShell {
         return webSocketBackhaulTunnelServerEngine.getAgents();
     }
 
-    private void removeAgent(final String agentKey) {
+    private boolean removeAgent(final String agentKey) throws InterruptedException {
+        final Collection<WebSocketBackhaulTunnelServerEngine.Agent> agents = webSocketBackhaulTunnelServerEngine.getAgents();
+        final Iterator<WebSocketBackhaulTunnelServerEngine.Agent> it = agents.iterator();
+        while (it.hasNext()) {
+            final WebSocketBackhaulTunnelServerEngine.Agent agent = it.next();
+            if (agent.getId().equals(agentKey)) {
+                agent.getBus().close().sync();
+                return true;
+            }
+        }
+        return false;
     }
 
     private Collection<WebSocketBackhaulTunnelServerForwarder.Forwarding> getForwardings() {
