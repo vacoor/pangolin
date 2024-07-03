@@ -7,15 +7,24 @@ import io.netty.handler.codec.ByteToMessageDecoder;
 
 import java.util.List;
 
+/**
+ * Mixin port server initializer.
+ */
 public class MixinServerInitializer extends ByteToMessageDecoder {
+    /**
+     * Protocol handshakers.
+     */
     private final MixinServerHandshaker[] handshakers;
 
     public MixinServerInitializer(final MixinServerHandshaker... handshakers) {
         this.handshakers = handshakers;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
-    protected void decode(final ChannelHandlerContext ctx, final ByteBuf in, final List<Object> out) throws Exception {
+    protected void decode(final ChannelHandlerContext ctx, final ByteBuf in, final List<Object> out) {
         if (in.writerIndex() == in.readerIndex()) {
             return;
         }

@@ -1,9 +1,10 @@
-package com.github.pangolin.routing.handler;
+package com.github.pangolin.routing.handler.extra;
 
 import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.routing.rule.pattern.DomainPattern;
 import com.github.pangolin.routing.rule.pattern.SubnetPattern;
+import com.sun.net.httpserver.HttpServer;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -19,30 +20,42 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Map;
 
+/**
+ * Chrome Switchy/SwitchyOmega rule list handler.
+ */
 @Slf4j
 public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandlerAdapter {
     private static final int MAX_HTTP_CONTENT_LENGTH = 8 * 1024 * 1024;
-    private final String path = "/switchy.sorl";
+    private static final String DEFAULT_SWITCHY_SORL_PATH = "/switchy.sorl";
+
+    private final String switchySorlPath;
     private final RulesProvider rulesProvider;
 
     public SwitchyRuleConfigurationServerHandler(final RulesProvider rulesProvider) {
+        this(DEFAULT_SWITCHY_SORL_PATH, rulesProvider);
+    }
+
+    public SwitchyRuleConfigurationServerHandler(final String switchySorlPath, final RulesProvider rulesProvider) {
+        this.switchySorlPath = switchySorlPath;
         this.rulesProvider = rulesProvider;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         final ChannelPipeline cp = ctx.pipeline();
         if (null == cp.get(HttpServerCodec.class)) {
-            cp.addBefore(ctx.name(), null, new HttpServerCodec());
+            cp.addBefore(ctx.name(), HttpServer.class.getName(), new HttpServerCodec());
         }
         if (null == cp.get(HttpObjectAggregator.class)) {
-            cp.addBefore(ctx.name(), null, new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
+            cp.addBefore(ctx.name(), HttpObjectAggregator.class.getName(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
         }
     }
 
@@ -59,25 +72,25 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
         try {
             if (msg instanceof FullHttpRequest) {
                 final FullHttpRequest httpRequest = (FullHttpRequest) msg;
-                final String path = new QueryStringDecoder(httpRequest.uri()).path();
-                final String now = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
-                if (path.equals(this.path)) {
+                final String requestPath = new QueryStringDecoder(httpRequest.uri()).path();
+                if (requestPath.equals(this.switchySorlPath)) {
+                    final String generatedDate = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
                     final StringBuilder buff = new StringBuilder();
                     buff.append("; SwitchyOmega Rule List\r\n")
                             .append(";\r\n")
                             .append("; Require: SwitchyOmega >= 2.3.2\r\n")
-                            .append("; Date: ").append(now).append("\r\n")
+                            .append("; Date: ").append(generatedDate).append("\r\n")
                             .append("; Usage: https://github.com/FelisCatus/SwitchyOmega/wiki/RuleListUsage\r\n\r\n");
 
                     final Map<DestinationPattern, String> rules = rulesProvider.getRules();
                     for (Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
-                        DestinationPattern destinationPattern = entry.getKey();
+                        final DestinationPattern destinationPattern = entry.getKey();
                         if (!"DIRECT".equalsIgnoreCase(entry.getValue())) {
                             buff.append(toSwitchyRule(destinationPattern)).append("\r\n");
                         }
                     }
-                    final ByteBuf body = Unpooled.copiedBuffer(buff.toString(), StandardCharsets.UTF_8);
 
+                    final ByteBuf body = Unpooled.copiedBuffer(buff.toString(), StandardCharsets.UTF_8);
                     final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);
                     httpResponse.headers().add("Content-Length", body.readableBytes());
                     ctx.writeAndFlush(httpResponse);
@@ -96,20 +109,21 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
             final String prefixWildcard = "**.";
             final String suffixWildcard = ".**";
             final DomainPattern dp = (DomainPattern) pattern;
-            String s1 = dp.toString();
-            final boolean isPrefixWildcard = s1.startsWith(prefixWildcard);
-            final boolean isSuffixWildcard = s1.endsWith(suffixWildcard);
+
+            String patternStr = dp.toString();
+            final boolean isPrefixWildcard = patternStr.startsWith(prefixWildcard);
+            final boolean isSuffixWildcard = patternStr.endsWith(suffixWildcard);
             if (isPrefixWildcard && isSuffixWildcard) {
-                s1 = s1.replace("**.", "").replace(".**", "");
-                if (s1.startsWith("*") && s1.endsWith("*")) {
-                    s1 = s1.substring("*".length(), s1.length() - 1);
-                    return "*." + s1 + ".*";
+                patternStr = patternStr.replace("**.", "").replace(".**", "");
+                if (patternStr.startsWith("*") && patternStr.endsWith("*")) {
+                    patternStr = patternStr.substring("*".length(), patternStr.length() - 1);
+                    return "*." + patternStr + ".*";
                 }
             } else if (isPrefixWildcard) {
-                s1 = s1.replace("**.", "");
-                return "*." + s1;
+                patternStr = patternStr.replace("**.", "");
+                return "*." + patternStr;
             } else {
-                return s1;
+                return patternStr;
             }
         } else if (pattern instanceof SubnetPattern) {
             final SubnetPattern p = (SubnetPattern) pattern;

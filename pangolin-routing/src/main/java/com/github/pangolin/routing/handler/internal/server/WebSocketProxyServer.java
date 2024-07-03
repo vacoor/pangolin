@@ -39,15 +39,18 @@ public class WebSocketProxyServer extends NettyServer {
                     cp.addLast(createServerSslContext().newHandler(ch.alloc()));
                 }
                 cp.addLast(new HttpServerCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
+                /*
                 cp.addLast(new WebSocketProxyServerHandler(
                         true, 65536, true
                 ));
+                */
+                cp.addLast(new HttpProxyServerHandler());
             }
         });
     }
 
     public static void main(String[] args) throws Exception {
-        new WebSocketProxyServer(2345, false).start().addListener(new ChannelFutureListener() {
+        new WebSocketProxyServer(808, false).start().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {

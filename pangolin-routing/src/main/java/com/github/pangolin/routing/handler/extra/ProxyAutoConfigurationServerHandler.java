@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler;
+package com.github.pangolin.routing.handler.extra;
 
 import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
@@ -27,7 +27,6 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Proxy Auto-Configuration File Server Handler.
@@ -37,21 +36,21 @@ import java.util.Set;
  */
 @Slf4j
 public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAdapter {
+    private static final String DEFAULT_PAC_PATH = "/proxy.pac";
     private static final int MAX_HTTP_CONTENT_LENGTH = 8 * 1024 * 1024;
-    private static final String DEFAULT_PATH = "/proxy.pac";
 
-    private final String path;
+    private final String pacPath;
     private final RulesProvider rulesProvider;
-    private final int serverPort;
+    private final int proxyPort;
 
-    public ProxyAutoConfigurationServerHandler(final RulesProvider rulesProvider, final int serverPort) {
-        this(DEFAULT_PATH, rulesProvider, serverPort);
+    public ProxyAutoConfigurationServerHandler(final RulesProvider rulesProvider, final int proxyPort) {
+        this(DEFAULT_PAC_PATH, rulesProvider, proxyPort);
     }
 
-    public ProxyAutoConfigurationServerHandler(final String path, final RulesProvider rulesProvider, final int serverPort) {
-        this.path = path;
+    public ProxyAutoConfigurationServerHandler(final String pacPath, final RulesProvider rulesProvider, final int proxyPort) {
+        this.pacPath = pacPath;
         this.rulesProvider = rulesProvider;
-        this.serverPort = serverPort;
+        this.proxyPort = proxyPort;
     }
 
     @Override
@@ -79,12 +78,12 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
             if (msg instanceof FullHttpRequest) {
                 final FullHttpRequest httpRequest = (FullHttpRequest) msg;
                 final QueryStringDecoder decoder = new QueryStringDecoder(httpRequest.uri());
-                final String path = decoder.path();
-                if (path.equals(this.path)) {
-                    final String addr = getHttpRequestAddress(httpRequest).getHostString() + ":" + serverPort;
+                final String requestPath = decoder.path();
+                if (requestPath.equals(this.pacPath)) {
+                    final String addr = getHttpRequestAddress(httpRequest).getHostString() + ":" + proxyPort;
                     final String pac = toPac(rulesProvider.getRules(), addr, decoder.parameters().containsKey("http"));
-                    final ByteBuf body = Unpooled.copiedBuffer(pac, StandardCharsets.UTF_8);
 
+                    final ByteBuf body = Unpooled.copiedBuffer(pac, StandardCharsets.UTF_8);
                     final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);
                     httpResponse.headers().add("Content-Length", body.readableBytes());
                     httpResponse.headers().add("Content-Type", "application/x-ns-proxy-autoconfig");

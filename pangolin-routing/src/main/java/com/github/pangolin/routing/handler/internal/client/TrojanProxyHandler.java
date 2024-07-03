@@ -31,6 +31,7 @@ public class TrojanProxyHandler extends ChannelDuplexHandler {
 
     private final SocketAddress proxyAddress;
     private final String password;
+
     private volatile SocketAddress destinationAddress;
 
     public TrojanProxyHandler(final SocketAddress proxyAddress, final String password) {

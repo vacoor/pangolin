@@ -49,10 +49,7 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
- * TODO DOC ME!.
  *
- * @author changhe.yang
- * @since 20240422
  */
 @Slf4j
 public class SshProxyHandler extends ChannelDuplexHandler {
@@ -192,7 +189,7 @@ public class SshProxyHandler extends ChannelDuplexHandler {
             // TODO
             final SshdSocketAddress source = new SshdSocketAddress(0);
             final SshdSocketAddress dest = new SshdSocketAddress(remoteAddress);
-            final TcpipClientChannel2 channel = new TcpipClientChannel2(ioSession, source, dest);
+            final RedirectTcpipClientChannel channel = new RedirectTcpipClientChannel(ioSession, source, dest);
 
             this.getClientSession(ioSession).getService(ConnectionService.class).registerChannel(channel);
             channel.open().addListener(openToNext(ctx, ctx0 -> {
@@ -229,7 +226,7 @@ public class SshProxyHandler extends ChannelDuplexHandler {
     }
 
 
-    private static class TcpipClientChannel2 extends AbstractClientChannel {
+    private static class RedirectTcpipClientChannel extends AbstractClientChannel {
         private static final String DIRECT_TCPIP = "direct-tcpip";
 
         protected final SshdSocketAddress source;
@@ -237,7 +234,7 @@ public class SshProxyHandler extends ChannelDuplexHandler {
         protected final Adapter adapter;
 
 
-        public TcpipClientChannel2(final IoSession clientSession, SshdSocketAddress source, SshdSocketAddress remote) {
+        public RedirectTcpipClientChannel(final IoSession clientSession, SshdSocketAddress source, SshdSocketAddress remote) {
             super(DIRECT_TCPIP);
             this.source = source;
             this.remote = remote;
@@ -308,8 +305,7 @@ public class SshProxyHandler extends ChannelDuplexHandler {
                 };
                 asyncOut = new ChannelAsyncInputStream(this);
             } else {
-                out = new ChannelOutputStream(
-                        this, getRemoteWindow(), log, SshConstants.SSH_MSG_CHANNEL_DATA, true);
+                out = new ChannelOutputStream(this, getRemoteWindow(), log, SshConstants.SSH_MSG_CHANNEL_DATA, true);
                 invertedIn = out;
             }
         }
@@ -341,10 +337,10 @@ public class SshProxyHandler extends ChannelDuplexHandler {
 
         private static class Adapter extends ChannelDuplexHandler {
             private final IoSession ioSession;
-            private final TcpipClientChannel2 channel;
+            private final RedirectTcpipClientChannel channel;
             private ChannelHandlerContext ctx;
 
-            private Adapter(final IoSession ioSession, final TcpipClientChannel2 channel) {
+            private Adapter(final IoSession ioSession, final RedirectTcpipClientChannel channel) {
                 this.ioSession = ioSession;
                 this.channel = channel;
             }

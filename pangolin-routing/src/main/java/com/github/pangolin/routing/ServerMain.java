@@ -2,8 +2,8 @@ package com.github.pangolin.routing;
 
 import com.github.pangolin.routing.config.ProxiesParser;
 import com.github.pangolin.routing.config.RulesParser;
-import com.github.pangolin.routing.handler.ProxyAutoConfigurationServerHandler;
-import com.github.pangolin.routing.handler.SwitchyRuleConfigurationServerHandler;
+import com.github.pangolin.routing.handler.extra.ProxyAutoConfigurationServerHandler;
+import com.github.pangolin.routing.handler.extra.SwitchyRuleConfigurationServerHandler;
 import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;

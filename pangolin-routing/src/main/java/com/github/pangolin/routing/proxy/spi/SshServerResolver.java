@@ -2,7 +2,6 @@ package com.github.pangolin.routing.proxy.spi;
 
 import com.github.pangolin.routing.handler.internal.client.SshProxyHandler;
 import com.github.pangolin.routing.proxy.ProxyServer;
-import com.github.pangolin.routing.proxy.spi.ServerResolver;
 import freework.codec.Base64;
 import freework.util.Bytes;
 import io.netty.channel.ChannelHandler;

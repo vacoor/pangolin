@@ -66,7 +66,6 @@ public class SsProxyServerHandler extends ChannelDuplexHandler {
 
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
-//                ctx.pipeline().replace(ctx.handler(), null, new TcpInboundRedirectHandler(delegateCtx));
                 ctx.pipeline().replace(ctx.handler(), null, new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
@@ -106,7 +105,6 @@ public class SsProxyServerHandler extends ChannelDuplexHandler {
                     }
                 });
                 delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(ctx));
-//                delegateCtx.writeAndFlush(buf);
                 delegateCtx.channel().config().setAutoRead(true);
                 ctx.channel().config().setAutoRead(true);
             }

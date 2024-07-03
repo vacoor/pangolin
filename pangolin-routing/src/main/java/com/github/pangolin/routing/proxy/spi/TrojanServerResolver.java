@@ -5,7 +5,6 @@ import com.github.pangolin.routing.proxy.ProxyServer;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
-import java.net.MalformedURLException;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.util.Properties;
