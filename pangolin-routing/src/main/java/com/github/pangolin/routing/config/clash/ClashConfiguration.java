@@ -15,15 +15,18 @@ import java.util.List;
  */
 @Getter
 @Setter
-public class Configuration {
+public class ClashConfiguration {
+
     @Getter
     @Setter
     public static class ProxyDefinition {
         private String name;
         private String type;
         private String server;
-        private String port;
+        private int port;
+        private String cipher;
         private String password;
+        private boolean udp;
     }
 
     @Getter
@@ -37,18 +40,22 @@ public class Configuration {
 
     private List<ProxyDefinition> proxies;
     private List<ProxyGroupDefinition> proxyGroups;
+
     private List<String> rules;
 
-    public static Configuration load(final InputStream in) {
-        final TypeDescription typeDescription = new TypeDescription(Configuration.class);
-        typeDescription.substituteProperty(new PropertySubstitute("proxy-groups", List.class, "getProxyGroups", "setProxyGroups", ProxyGroupDefinition.class));
+    public static ClashConfiguration load(final InputStream in) {
+        final TypeDescription typeDescription = new TypeDescription(ClashConfiguration.class);
+        typeDescription.substituteProperty(new PropertySubstitute(
+                "proxy-groups", List.class,
+                "getProxyGroups", "setProxyGroups", ProxyGroupDefinition.class
+        ));
 
         final Representer representer = new Representer();
         representer.getPropertyUtils().setSkipMissingProperties(true);
 
         final Yaml yaml = new Yaml(representer);
         yaml.addTypeDescription(typeDescription);
-        return yaml.loadAs(in, Configuration.class);
+        return yaml.loadAs(in, ClashConfiguration.class);
     }
 
 }

@@ -3,12 +3,10 @@ package com.github.pangolin.routing.config.clash;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.config.PatternResolver;
 import com.github.pangolin.routing.proxy.spi.ServerResolver;
-import com.github.pangolin.routing.proxy.health.HealthChecker;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
-import com.github.pangolin.routing.proxy.LoadBalanceProxyServer;
 import freework.net.Http;
-import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.util.StringUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -53,13 +51,18 @@ public class ClashRuleFactory {
         return rules;
     }
 
-    public static Map<String, ProxyServer> parseProxies(final List<Configuration.ProxyDefinition> proxyDefinitions) {
+    public static Map<String, ProxyServer> parseProxies(final List<ClashConfiguration.ProxyDefinition> proxyDefinitions) {
         final Map<String, ProxyServer> proxies = new HashMap<>();
-        for (final Configuration.ProxyDefinition proxyDefinition : proxyDefinitions) {
+        for (final ClashConfiguration.ProxyDefinition proxyDefinition : proxyDefinitions) {
             if ("0.0.0.0".equalsIgnoreCase(proxyDefinition.getServer())) {
                 continue;
             }
-            final String uri = String.format("%s://%s@%s:%s#%s", proxyDefinition.getType(), urlEncode(proxyDefinition.getPassword()), proxyDefinition.getServer(), proxyDefinition.getPort(), urlEncode(proxyDefinition.getName()));
+
+            final String cipher = proxyDefinition.getCipher();
+            final String password = proxyDefinition.getPassword();
+            final String userInfo = StringUtils.hasText(cipher) ? String.format("%s:%s", cipher, password) : password;
+
+            final String uri = String.format("%s://%s@%s:%s#%s", proxyDefinition.getType(), urlEncode(userInfo), proxyDefinition.getServer(), proxyDefinition.getPort(), urlEncode(proxyDefinition.getName()));
             log.debug("resolve uri: {}", uri);
             final ProxyServer server = resolve(uri);
             log.debug("resolved uri: {}", uri);
