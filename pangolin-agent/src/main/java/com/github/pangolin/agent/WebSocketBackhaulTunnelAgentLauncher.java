@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class WebSocketBackhaulTunnelAgentLauncher {
     private final AtomicBoolean running = new AtomicBoolean(false);
-    private volatile WebSocketBackhaulTunnelAgent2 agent;
+    private volatile WebSocketBackhaulTunnelAgent agent;
 
     public void launchIfNecessary(final String name, final String uri) throws IOException, InterruptedException {
         if (null == uri || uri.isEmpty()) {
@@ -24,7 +24,7 @@ public class WebSocketBackhaulTunnelAgentLauncher {
         }
 
         if (running.compareAndSet(false, true)) {
-            agent = new WebSocketBackhaulTunnelAgent2(name, URI.create(uri));
+            agent = new WebSocketBackhaulTunnelAgent(name, URI.create(uri));
             try {
 
                 agent.start().channel().closeFuture().addListener(new ChannelFutureListener() {
