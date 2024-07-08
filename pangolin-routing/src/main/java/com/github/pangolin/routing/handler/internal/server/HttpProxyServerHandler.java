@@ -141,7 +141,9 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                     final String address = matcher.group(1);
                     final int port = Integer.parseInt(matcher.group(2));
 
-                    connect(ctx, new InetSocketAddress(address, port)).addListener(new ChannelFutureListener() {
+                    // FIXME
+                    final InetSocketAddress addr = InetSocketAddress.createUnresolved(address, port);
+                    connect(ctx, addr).addListener(new ChannelFutureListener() {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
                             if (future.isSuccess()) {

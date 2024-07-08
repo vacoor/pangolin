@@ -127,7 +127,10 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
         final String address = request.dstAddr();
 
         ctx.channel().config().setAutoRead(false);
-        return factory.open(new InetSocketAddress(address, port), ctx.channel().config().getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
+
+        // FIXME
+        final InetSocketAddress addr = InetSocketAddress.createUnresolved(address, port);
+        return factory.open(addr, ctx.channel().config().getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
                 delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(ctx));

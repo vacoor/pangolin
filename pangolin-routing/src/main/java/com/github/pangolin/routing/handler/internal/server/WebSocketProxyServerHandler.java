@@ -79,7 +79,9 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
          */
         ctx.channel().config().setAutoRead(false);
         ChannelConfig c = ctx.channel().config();
-        factory.open(new InetSocketAddress(hostname, port), c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
+        // FIXME
+        final InetSocketAddress addr = InetSocketAddress.createUnresolved(hostname, port);
+        factory.open(addr, c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
                 ctx.pipeline().addLast("Socket->Socket", new TcpInboundRedirectHandler(targetCtx));
@@ -130,7 +132,9 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
          */
 
         ChannelConfig c = ctx.channel().config();
-        factory.open(new InetSocketAddress(hostname, port), c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
+        // FIXME
+        final InetSocketAddress addr = InetSocketAddress.createUnresolved(hostname, port);
+        factory.open(addr, c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
                 ctx.pipeline().addLast("WebSocket->Socket", new TcpOverWebSocketDecodeHandler(targetCtx));

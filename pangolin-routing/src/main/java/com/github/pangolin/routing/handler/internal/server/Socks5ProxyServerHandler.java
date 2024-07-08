@@ -200,7 +200,9 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         ctx.channel().config().setAutoRead(false);
 
         final ChannelConfig c = ctx.channel().config();
-        return socketChannelFactory.open(new InetSocketAddress(address, port), c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
+        // FIXME
+        final InetSocketAddress addr = InetSocketAddress.createUnresolved(address, port);
+        return socketChannelFactory.open(addr, c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
                 delegateCtx.pipeline().replace(this, null, new TcpInboundRedirectHandler(ctx));

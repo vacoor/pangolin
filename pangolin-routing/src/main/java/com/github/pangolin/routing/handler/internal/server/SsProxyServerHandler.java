@@ -62,7 +62,9 @@ public class SsProxyServerHandler extends ChannelDuplexHandler {
         ctx.channel().config().setAutoRead(false);
 
         final ChannelConfig c = ctx.channel().config();
-        factory.open(new InetSocketAddress(address, port), c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelDuplexHandler() {
+        // FIXME
+        final InetSocketAddress addr = InetSocketAddress.createUnresolved(address, port);
+        factory.open(addr, c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelDuplexHandler() {
 
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {
@@ -125,13 +127,14 @@ public class SsProxyServerHandler extends ChannelDuplexHandler {
     }
 
     public static void main(String[] args) throws Exception {
-        final String method = "rc4-md5";
+//        final String method = "rc4-md5";
+        final String method = "chacha20-ietf-poly1305";
         final CipherAlgorithm instance = (CipherAlgorithm) CipherAlgorithmSpi.getInstance(method);
-        final NettyServer server = new NettyServer(2222);
+        final NettyServer server = new NettyServer(56001);
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new SsProxyServerHandler("1234", instance, new StandardSocketChannelFactory()));
+                ch.pipeline().addLast(new SsProxyServerHandler("jASkBs", instance, new StandardSocketChannelFactory()));
             }
         }).addListener(new ChannelFutureListener() {
             @Override

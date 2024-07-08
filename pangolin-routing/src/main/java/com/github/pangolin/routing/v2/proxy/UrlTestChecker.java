@@ -44,6 +44,7 @@ public class UrlTestChecker {
         int port = uri.getPort();
         port = 0 < port ? port : ("http".equals(scheme) ? 80 : "https".equals(scheme) ? 443 : port);
 
+        // FIXME
         final ChannelHandler transport = server.newProxyHandler(new InetSocketAddress(host, port));
 
         final Bootstrap b = new Bootstrap();
