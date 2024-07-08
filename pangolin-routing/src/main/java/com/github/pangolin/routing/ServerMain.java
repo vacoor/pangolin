@@ -50,6 +50,7 @@ public class ServerMain {
         log.info("Proxies config: " + proxiesConf.getAbsolutePath());
 
         ProxyServerProvider proxyServerProvider = proxiesConf.exists() ? ProxiesParser.parse(new FileInputStream(proxiesConf), group) : new ComposedProxyServerProvider();
+
         final Map<DestinationPattern, String> rules = rulesConf.exists() ? RulesParser.parseRules(rulesConf.toURI().toURL()) : Collections.emptyMap();
 
         for (Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {

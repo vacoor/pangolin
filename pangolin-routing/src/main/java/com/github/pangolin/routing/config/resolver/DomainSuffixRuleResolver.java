@@ -1,0 +1,30 @@
+package com.github.pangolin.routing.config.resolver;
+
+import com.github.pangolin.routing.rule.pattern.DestinationPattern;
+import com.github.pangolin.routing.rule.pattern.DomainPattern;
+
+import java.io.IOException;
+import java.net.URL;
+import java.util.Collections;
+import java.util.List;
+
+/**
+ *
+ */
+public class DomainSuffixRuleResolver extends AbstractPrefixRuleResolver<DestinationPattern> {
+
+    public DomainSuffixRuleResolver() {
+        super("DOMAIN-SUFFIX,");
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected List<DestinationPattern> doResolve(final String rule, final URL url) throws IOException {
+        return Collections.singletonList(
+                new DomainPattern("**." + rule)
+        );
+    }
+
+}

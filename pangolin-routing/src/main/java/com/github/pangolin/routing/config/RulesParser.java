@@ -1,11 +1,15 @@
 package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.config.clash.ClashRuleFactory;
-import com.github.pangolin.routing.config.clash.ClashRuleResolver;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
+import com.github.pangolin.routing.config.resolver.RuleResolvers;
+import com.github.pangolin.routing.config.resolver.Utils;
+import com.google.common.collect.Maps;
+import freework.util.StringUtils2;
 
 import java.io.IOException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -16,16 +20,38 @@ import java.util.Map;
  */
 public class RulesParser {
 
-  public static Map<DestinationPattern, String> parseRules(final URL url) throws IOException {
-    return ClashRuleFactory.parseRules(
-        url,
-        ClashRuleResolver.DOMAIN,
-        ClashRuleResolver.DOMAIN_SUFFIX,
-        ClashRuleResolver.DOMAIN_KEYWORD,
-        ClashRuleResolver.IP_CIDR,
-        ClashRuleResolver.IP_CIDR_6,
-        ClashRuleResolver.RULE_SET
-    );
-  }
+    /*
+    public static Map<DestinationPattern, String> parseRules(final URL url) throws IOException {
+        return ClashProxiesParser.parseRules(
+                url,
+                ClashRuleResolver.DOMAIN,
+                ClashRuleResolver.DOMAIN_SUFFIX,
+                ClashRuleResolver.DOMAIN_KEYWORD,
+                ClashRuleResolver.IP_CIDR,
+                ClashRuleResolver.IP_CIDR_6,
+                ClashRuleResolver.RULE_SET
+        );
+    }
+    */
+
+    public static Map<DestinationPattern, String> parseRules(final URL url) throws IOException {
+        final Map<DestinationPattern, String> rules = Maps.newHashMap();
+        Utils.lines(url, StandardCharsets.UTF_8)
+                .filter(StringUtils2::hasText)
+                .forEach(lineToUse -> {
+                    final int i = lineToUse.lastIndexOf(",");
+                    if (-1 < i) {
+                        final String patternDefinition = lineToUse.substring(0, i);
+                        final List<DestinationPattern> patterns = RuleResolvers.resolve(patternDefinition, url);
+                        if (null != patterns) {
+                            for (DestinationPattern pattern : patterns) {
+                                final String proxyType = lineToUse.substring(i + 1);
+                                rules.put(pattern, proxyType);
+                            }
+                        }
+                    }
+                });
+        return rules;
+    }
 
 }

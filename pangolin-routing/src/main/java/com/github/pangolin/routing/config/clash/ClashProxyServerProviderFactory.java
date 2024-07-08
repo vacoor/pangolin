@@ -9,8 +9,6 @@ import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import com.github.pangolin.routing.proxy.health.UrlTestHealthChecker;
 import com.github.pangolin.routing.proxy.spi.ServerResolver;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import freework.net.Http;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
@@ -24,8 +22,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -51,7 +47,7 @@ public class ClashProxyServerProviderFactory {
             final List<ClashConfiguration.ProxyDefinition> proxyDefinitions = null != conf.getProxies() ? conf.getProxies() : Collections.emptyList();
 
             log.debug("Parse proxies starting");
-            final Map<String, ProxyServer> proxyRegistry = ClashRuleFactory.parseProxies(proxyDefinitions);
+            final Map<String, ProxyServer> proxyRegistry = ClashProxiesParser.parseProxies(proxyDefinitions);
             log.debug("Parse proxies completed");
 
             final List<ClashConfiguration.ProxyGroupDefinition> proxyGroups = conf.getProxyGroups();
