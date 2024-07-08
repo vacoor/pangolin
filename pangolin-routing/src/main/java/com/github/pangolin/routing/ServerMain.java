@@ -7,11 +7,14 @@ import com.github.pangolin.routing.handler.extra.SwitchyRuleConfigurationServerH
 import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
+import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
 import com.github.pangolin.routing.proxy.*;
+import com.github.pangolin.routing.proxy.group.chain.ProxyChainServer;
+import com.github.pangolin.routing.proxy.group.rule.RuleBasedProxyServer;
 import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.server.NettyServer;
@@ -39,6 +42,8 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 public class ServerMain {
 
     public static void main(String[] args) throws Exception {
+        System.out.println(Optional.ofNullable("").filter(StringUtils::hasText).orElse("OK"));
+        System.exit(0);
         final NioEventLoopGroup group = new NioEventLoopGroup();
 
         final ApplicationHome home = new ApplicationHome(ServerMain.class);
@@ -110,7 +115,11 @@ public class ServerMain {
             };
         }
 
-        final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(modedRulesProvider, proxyServerProvider, bypass);
+
+        final RuleBasedProxyServer routingProxyServer = new RuleBasedProxyServer("ROUTING-PROXY", modedRulesProvider, proxyServerProvider);
+        final SocketChannelFactory factory = new ProxySocketChannelFactory(routingProxyServer, bypass);
+
+//        final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(modedRulesProvider, proxyServerProvider, bypass);
 //        final StandardSocketChannelFactory factory = new StandardSocketChannelFactory();
 
 //        Forwarder forwarder = new Forwarder(factory, new NioEventLoopGroup(), new NioEventLoopGroup());

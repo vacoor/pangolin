@@ -1,0 +1,8 @@
+# Office Area Network
+
+# Intranet
+DOMAIN-SUFFIX,mysql.rds.aliyuncs.com
+
+#
+IP-CIDR,172.16.0.201/23
+
