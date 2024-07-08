@@ -1,5 +1,6 @@
-package com.github.pangolin.routing.proxy;
+package com.github.pangolin.routing.proxy.group.chain;
 
+import com.github.pangolin.routing.proxy.ProxyServer;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;

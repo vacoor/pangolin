@@ -1,34 +1,19 @@
 package com.github.pangolin.routing.config.clash;
 
-import static com.github.pangolin.routing.config.clash.ClashConfiguration.ProxyDefinition;
-import static com.github.pangolin.routing.config.clash.ClashConfiguration.ProxyGroupDefinition;
-
-import com.github.pangolin.routing.proxy.LoadBalanceProxyServer;
+import com.github.pangolin.routing.proxy.group.lb.LoadBalanceProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import com.github.pangolin.routing.proxy.health.UrlTestHealthChecker;
-import com.github.pangolin.routing.proxy.spi.ServerResolver;
 import com.google.common.base.Preconditions;
 import freework.net.Http;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Properties;
-import java.util.ServiceLoader;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.*;
 
 /**
  *
@@ -100,98 +85,6 @@ public class ClashProxyServerProviderFactory {
         }
     }
 
-    public void refresh() throws IOException {
-        final ClashConfiguration conf = loadClashConfiguration(subscribeUrl);
-        final List<ProxyDefinition> proxyDefinitions = nvl(conf.getProxies(), Collections.emptyList());
-        final List<ProxyGroupDefinition> proxyGroupDefinitions = nvl(conf.getProxyGroups(), Collections.emptyList());
-        final List<String> rules = nvl(conf.getRules(), Collections.emptyList());
-
-        final Map<String, ProxyServer> nameToProxies = parseProxies(proxyDefinitions);
-    }
-
-    /*
-    private Map<String, ProxyServer> parseProxyGroups(final List<ProxyGroupDefinition> definitions,
-                                                      final Map<String, ProxyServer> nameToProxyMap) {
-        final Map<String, ProxyServer> nameToGroupMap = Maps.newHashMap();
-        final Map<String, ProxyGroupDefinition> definitionMap = definitions.stream()
-                .collect(Collectors.toMap(ProxyGroupDefinition::getName, Function.identity(), (prev, next) -> next));
-        for (final Map.Entry<String, ProxyGroupDefinition> entry : definitionMap.entrySet()) {
-            if (!nameToGroupMap.containsKey(entry.getKey())) {
-                parseProxyGroup(entry.getValue(), nameToProxyMap, nameToGroupMap, definitionMap);
-            }
-        }
-        return nameToGroupMap;
-    }
-
-    private ProxyServer parseProxyGroup(final ProxyGroupDefinition definition,
-                                 final Map<String, ProxyServer> nameToProxyMap,
-                                 final Map<String, ProxyServer> nameToGroupMap,
-                                 final Map<String, ProxyGroupDefinition> definitionMap) {
-        final List<String> referenceNames = nvl(definition.getProxies(), Collections.emptyList());
-        final List<ProxyServer> referencesToUse = Lists.newArrayList();
-        for (final String referenceName : referenceNames) {
-            ProxyServer reference = nameToProxyMap.get(referenceName);
-            if (null == reference) {
-                final ProxyGroupDefinition definitionRef = definitionMap.remove(referenceName);
-                if (null == definitionRef) {
-                    continue;
-                }
-                reference = parseProxyGroup(definitionRef, nameToProxyMap, nameToGroupMap, definitionMap);
-                nameToGroupMap.put(referenceName, reference);
-            }
-            referencesToUse.add(reference);
-        }
-
-        final String name = definition.getName();
-        final String type = definition.getType();
-        final String url = definition.getUrl();
-
-        // nameToGroupMap.put(name, )
-    }
-    */
-
-    private Map<String, ProxyServer> parseProxies(final List<ProxyDefinition> definitions) {
-        return definitions.stream()
-                .filter(definition -> !"0.0.0.0".equals(definition.getServer()))
-                .map(this::parseProxy)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toMap(ProxyServer::getName, Function.identity(), (prev, next) -> next));
-    }
-
-    private ProxyServer parseProxy(final ProxyDefinition definition) {
-        final String cipher = definition.getCipher();
-        final String password = definition.getPassword();
-        final String userInfo = StringUtils.hasText(cipher) ? String.format("%s:%s", cipher, password) : password;
-
-        final String uri = String.format("%s://%s@%s:%s#%s", definition.getType(), urlEncode(userInfo), definition.getServer(), definition.getPort(), urlEncode(definition.getName()));
-        log.debug("resolve uri: {}", uri);
-        return resolve(uri);
-    }
-
-    private static String urlEncode(final String text) {
-        return Http.urlEncode(text, StandardCharsets.UTF_8.name());
-    }
-
-    private static final ServiceLoader<ServerResolver> RESOLVERS = ServiceLoader.load(ServerResolver.class);
-
-    private static ProxyServer resolve(final String url) {
-        for (final ServerResolver resolver : RESOLVERS) {
-            if (!resolver.acceptsUrl(url)) {
-                continue;
-            }
-            final ProxyServer resolved = resolver.resolve(url, new Properties());
-            if (null != resolved) {
-                return resolved;
-            }
-        }
-        throw new IllegalStateException();
-    }
-
-
-    private <T> T nvl(final T val, final T def) {
-        return null != val ? val : def;
-    }
-
     private static ClashConfiguration loadClashConfiguration(final URL subscribeUrl) throws IOException {
         log.debug("Load Clash configuration from '{}'...", subscribeUrl);
         HttpURLConnection httpUrlConnection = null;
@@ -212,5 +105,4 @@ public class ClashProxyServerProviderFactory {
     public static ClashProxyServerProviderFactory create(final String url) throws MalformedURLException {
         return new ClashProxyServerProviderFactory(new URL(url));
     }
-
 }

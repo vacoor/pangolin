@@ -20,17 +20,14 @@ import java.util.Map;
 
 /**
  * @since 20240411
- * @deprecated
  */
 @Slf4j
-public class SmartProxySocketChannelFactory implements SocketChannelFactory {
-    private final RulesProvider rulesProvider;
-    private final ProxyServerProvider proxyServerProvider;
+public class ProxySocketChannelFactory implements SocketChannelFactory {
+    private final ProxyServer server;
     private final List<String> bypass;
 
-    public SmartProxySocketChannelFactory(final RulesProvider rulesProvider, final ProxyServerProvider provider, final List<String> bypass) {
-        this.rulesProvider = rulesProvider;
-        this.proxyServerProvider = provider;
+    public ProxySocketChannelFactory(final ProxyServer server, final List<String> bypass) {
+        this.server = server;
         this.bypass = null != bypass ? bypass : Collections.emptyList();
     }
 
@@ -63,22 +60,6 @@ public class SmartProxySocketChannelFactory implements SocketChannelFactory {
             return null;
         }
 
-        final Map<DestinationPattern, String> rules = rulesProvider.getRules();
-        for (final Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
-            if (!entry.getKey().matches(sa)) {
-                continue;
-            }
-
-            final ProxyServer proxyToUse = proxyServerProvider.getInstance(entry.getValue());
-            log.info("[ROUTING] will use the proxy '{}' => {}:{}", entry.getValue(), sa.getHostString(), sa.getPort());
-            if (null != proxyToUse) {
-                return proxyToUse;
-            } else {
-                log.warn("[ROUTING] NOT FOUND the proxy '{}' => {}:{}", entry.getValue(), sa.getHostString(), sa.getPort());
-            }
-        }
-
-        log.info("[ROUTING] will bypass the proxy => {}:{}", sa.getHostString(), sa.getPort());
-        return null;
+        return server;
     }
 }
