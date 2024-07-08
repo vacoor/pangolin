@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.proxy;
+package com.github.pangolin.routing.proxy.stats;
 
 public class ProxyServerStats {
     private final String name;

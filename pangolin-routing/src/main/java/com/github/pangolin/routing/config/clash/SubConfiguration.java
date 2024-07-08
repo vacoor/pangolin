@@ -1,50 +1,102 @@
-package com.github.pangolin.routing.v2.proxy;
+package com.github.pangolin.routing.config.clash;
 
-import com.github.pangolin.routing.config.clash.ClashConfiguration;
-import com.github.pangolin.routing.config.clash.ClashProxyServerProviderFactory;
+import com.github.pangolin.routing.config.RulesParser;
+import com.github.pangolin.routing.handler.internal.client.ss.SsProxyHandler;
+import com.github.pangolin.routing.handler.internal.client.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.handler.internal.client.ss.crypto.spi.CipherAlgorithmSpi;
+import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
 import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.proxy.ProxyServerProvider;
+import com.github.pangolin.routing.proxy.ProxySocketChannelFactory;
+import com.github.pangolin.routing.proxy.group.rule.RuleBasedProxyServer;
 import com.github.pangolin.routing.proxy.spi.ServerResolver;
+import com.github.pangolin.routing.rule.RulesProvider;
+import com.github.pangolin.routing.rule.pattern.DestinationPattern;
+import com.github.pangolin.routing.v2.proxy.ServerGroup;
+import com.github.pangolin.server.NettyServer;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import freework.net.Http;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.socket.SocketChannel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Properties;
+import java.util.ServiceLoader;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
-public class Configuration {
+public class SubConfiguration {
     private final URL url;
 
     private volatile Map<String, ProxyServer> nameToProxyMap;
     private volatile Map<String, ProxyServer> nameToProxyGroupMap;
+    private volatile Map<DestinationPattern, String> rulesMap;
 
-    public Configuration(final URL url) {
+    public SubConfiguration(final URL url) {
         this.url = url;
     }
 
-    public void refresh() throws IOException {
-        refresh(loadClashConfiguration(url));
+    public RulesProvider getRulesProvider() {
+        return new RulesProvider() {
+            @Override
+            public Map<DestinationPattern, String> getRules() {
+                return Collections.unmodifiableMap(rulesMap);
+            }
+        };
     }
 
-    Map<String, ProxyServer> refresh(final ClashConfiguration conf) {
+    public ProxyServerProvider getServerProvider() {
+        return new ProxyServerProvider() {
+            @Override
+            public Collection<ProxyServer> getInstances() {
+                List<ProxyServer> ret = Lists.newArrayList(nameToProxyMap.values());
+                ret.addAll(nameToProxyGroupMap.values());
+                return ret;
+            }
+
+            @Override
+            public ProxyServer getInstance(final String name) {
+                ProxyServer proxyServer = nameToProxyMap.get(name);
+                proxyServer = null != proxyServer ? proxyServer : nameToProxyGroupMap.get(name);
+                return proxyServer;
+            }
+        };
+    }
+
+    public SubConfiguration refresh() throws IOException {
+        refresh(loadClashConfiguration(url));
+        return this;
+    }
+
+    Map<String, ProxyServer> refresh(final ClashConfiguration conf) throws IOException {
         final List<ClashConfiguration.ProxyDefinition> proxyDefinitions = nvl(conf.getProxies(), Collections.emptyList());
         final List<ClashConfiguration.ProxyGroupDefinition> proxyGroupDefinitions = nvl(conf.getProxyGroups(), Collections.emptyList());
         final List<String> rules = nvl(conf.getRules(), Collections.emptyList());
 
         final Map<String, ProxyServer> nameToProxyMap = parseProxies(proxyDefinitions);
         final Map<String, ProxyServer> nameToProxyGroupMap = parseProxyGroups(proxyGroupDefinitions, nameToProxyMap);
+        final Map<DestinationPattern, String> rulesMap = RulesParser.parseRules(rules, url);
 
         this.nameToProxyMap = nameToProxyMap;
         this.nameToProxyGroupMap = nameToProxyGroupMap;
+        this.rulesMap = rulesMap;
         return nameToProxyMap;
     }
 
@@ -85,7 +137,7 @@ public class Configuration {
         final String url = definition.getUrl();
 
         // UrlTestHealthChecker urlTestHealthChecker = new UrlTestHealthChecker(url, 3000, )
-        final ProxyServer group = new ServerGroup(name, referencesToUse);
+        final ProxyServer group = new ServerGroup(name, type, referencesToUse);
         nameToGroupMap.put(name, group);
         return group;
     }
@@ -150,12 +202,48 @@ public class Configuration {
         }
     }
 
-    public static void main(String[] args) {
-        InputStream in = ClashProxyServerProviderFactory.class.getResourceAsStream("/FlyingBird_1720166597.yaml");
-        Configuration config = new Configuration(null);
-        config.refresh(ClashConfiguration.load(in));
+    public static void main(String[] args) throws Exception {
+        /*
+        SubConfiguration config = new SubConfiguration(new URL(""));
+//        SubConfiguration config = new SubConfiguration(new URL(""));
+        config.refresh();
 
-        Collection<ProxyServer> values = config.nameToProxyMap.values();
+        final RuleBasedProxyServer proxyServer = new RuleBasedProxyServer("R", config.getRulesProvider(), config.getServerProvider());
+        */
+        final ProxyServer proxyServer = new ProxyServer() {
+            @Override
+            public String getName() {
+                return "SS";
+            }
 
+            @Override
+            public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+                final InetSocketAddress proxyAddress = new InetSocketAddress("86d65b23.pnd6xm1ljcfpc3b-fbnode.6pzfwf.com", 56001);
+                final CipherAlgorithm cipher = CipherAlgorithmSpi.getInstance("chacha20-ietf-poly1305");
+                final String password = "jASkBs";
+                return new SsProxyHandler(proxyAddress, cipher, password);
+            }
+        };
+        final ProxySocketChannelFactory factory = new ProxySocketChannelFactory(proxyServer, Arrays.asList("127.0.0.1", "localhost"));
+
+        final String hostStr = System.getProperty("server.host");
+        final String portStr = System.getProperty("server.port", "1082");
+        final int proxyServerPort = Integer.parseInt(portStr);
+        final NettyServer server = new NettyServer(hostStr, proxyServerPort);
+        ChannelFuture proxyServerChannel = server.start(true, new ChannelInitializer<SocketChannel>() {
+            @Override
+            protected void initChannel(final SocketChannel ch) throws Exception {
+                /*
+                final Socks5MixinServerHandshaker socks5Handshaker = new Socks5MixinServerHandshaker(new Socks5ProxyServerHandler(null, null, factory));
+                final Socks4MixinServerHandshaker socks4Handshaker = new Socks4MixinServerHandshaker(new Socks4ProxyServerHandler(null, factory));
+                final HttpMixinServerHandshaker httpHandshaker = new HttpMixinServerHandshaker(
+                        new HttpProxyServerHandler(null, null, factory)
+                );
+                ch.pipeline().addLast(new MixinServerInitializer(socks5Handshaker, socks4Handshaker, httpHandshaker));
+                */
+                ch.pipeline().addLast(new Socks5ProxyServerHandler(null, null, factory));
+            }
+        });
+        proxyServerChannel.channel().closeFuture().sync();
     }
 }

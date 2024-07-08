@@ -5,7 +5,9 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
+ * @deprecated
  */
+@Deprecated
 public class ComposedProxyServerProvider implements ProxyServerProvider {
     private final ProxyServerProvider[] providers;
 

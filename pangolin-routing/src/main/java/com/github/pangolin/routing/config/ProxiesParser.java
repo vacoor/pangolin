@@ -1,13 +1,11 @@
 package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.config.clash.ClashProxyServerProviderFactory;
+import com.github.pangolin.routing.config.clash.SubConfiguration;
 import com.github.pangolin.routing.proxy.spi.ServerResolver;
 import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import freework.io.IOUtils;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.EventLoopGroup;
 import io.netty.util.internal.ObjectUtil;
 
 import java.io.BufferedReader;
@@ -15,23 +13,19 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.net.InetSocketAddress;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
- * TODO DOC ME!.
- *
- * @author changhe.yang
- * @since 20240410
  */
 public class ProxiesParser {
 
-  public static ProxyServerProvider parse(final InputStream conf, final EventLoopGroup group) throws IOException {
-    return resolve(new InputStreamReader(conf, StandardCharsets.UTF_8), group);
+  public static ProxyServerProvider parse(final InputStream conf) throws IOException {
+    return resolve(new InputStreamReader(conf, StandardCharsets.UTF_8));
   }
 
-  public static ComposedProxyServerProvider resolve(final Reader reader, final EventLoopGroup group) throws IOException {
+  public static ComposedProxyServerProvider resolve(final Reader reader) throws IOException {
     ObjectUtil.checkNotNull(reader, "reader");
     final Map<String, ProxyServer> fixedServers = new LinkedHashMap<>();
     final List<ProxyServerProvider> providers = new LinkedList<>();
@@ -51,7 +45,7 @@ public class ProxiesParser {
           final String url = lineToUse.substring(i + 1).trim();
           if (url.startsWith("subscribe:")) {
             final String subscribeUrl = url.substring("subscribe:".length());
-            ProxyServerProvider proxyServerProvider = ClashProxyServerProviderFactory.create(subscribeUrl).getProxyServerProvider(group);
+            ProxyServerProvider proxyServerProvider = new SubConfiguration(new URL(subscribeUrl)).refresh().getServerProvider();
             providers.add(proxyServerProvider);
           } else {
             final ProxyServer proxyServer = resolve(name, url);

@@ -42,8 +42,6 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 public class ServerMain {
 
     public static void main(String[] args) throws Exception {
-        System.out.println(Optional.ofNullable("").filter(StringUtils::hasText).orElse("OK"));
-        System.exit(0);
         final NioEventLoopGroup group = new NioEventLoopGroup();
 
         final ApplicationHome home = new ApplicationHome(ServerMain.class);
@@ -54,7 +52,7 @@ public class ServerMain {
         log.info("Rules config: " + rulesConf.getAbsolutePath());
         log.info("Proxies config: " + proxiesConf.getAbsolutePath());
 
-        ProxyServerProvider proxyServerProvider = proxiesConf.exists() ? ProxiesParser.parse(new FileInputStream(proxiesConf), group) : new ComposedProxyServerProvider();
+        ProxyServerProvider proxyServerProvider = proxiesConf.exists() ? ProxiesParser.parse(new FileInputStream(proxiesConf)) : new ComposedProxyServerProvider();
 
         final Map<DestinationPattern, String> rules = rulesConf.exists() ? RulesParser.parseRules(rulesConf.toURI().toURL()) : Collections.emptyMap();
 
@@ -62,11 +60,6 @@ public class ServerMain {
             log.debug(String.format("%s -> %s", entry.getKey(), entry.getValue()));
         }
 
-        final String MODE_RULE = null;
-        final String MODE_GLOBAL = "一元机场";
-        final String MODE_DIRECT = "DIRECT";
-
-        final String fixedProxy = MODE_RULE;
         final RulesProvider rulesProvider = () -> rules;
         /*-
          * 策略
@@ -83,16 +76,6 @@ public class ServerMain {
          *   默认 --> DIRECT
          */
 
-        final RulesProvider global = () -> {
-            return Collections.singletonMap((DestinationPattern) destionation -> true, fixedProxy);
-        };
-
-        final RulesProvider modedRulesProvider = () -> {
-            if (StringUtils.hasText(fixedProxy)) {
-                return Collections.singletonMap((DestinationPattern) destination -> true, fixedProxy);
-            }
-            return rulesProvider.getRules();
-        };
 
         final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
 
@@ -117,8 +100,8 @@ public class ServerMain {
         }
 
 
-        final RuleBasedProxyServer routingProxyServer = new RuleBasedProxyServer("ROUTING-PROXY", modedRulesProvider, proxyServerProvider);
-        final SocketChannelFactory factory = new ProxySocketChannelFactory(routingProxyServer, bypass);
+        final RuleBasedProxyServer ruleProxy = new RuleBasedProxyServer("ROUTING-PROXY", rulesProvider, proxyServerProvider);
+        final SocketChannelFactory factory = new ProxySocketChannelFactory(ruleProxy, bypass);
 
 //        final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(modedRulesProvider, proxyServerProvider, bypass);
 //        final StandardSocketChannelFactory factory = new StandardSocketChannelFactory();
