@@ -9,12 +9,18 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
 
 public class HttpMixinServerHandshaker implements MixinServerHandshaker {
+    /**
+     * HTTP handlers.
+     */
     private final ChannelHandler[] handlers;
 
-    public HttpMixinServerHandshaker(final ChannelHandler... handlers) {
+    private HttpMixinServerHandshaker(final ChannelHandler... handlers) {
         this.handlers = handlers;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public boolean handshake(final ChannelHandlerContext ctx, final ByteBuf in) {
         final int readerIndex = in.readerIndex();
@@ -38,7 +44,7 @@ public class HttpMixinServerHandshaker implements MixinServerHandshaker {
         cp.addLast(handlers);
     }
 
-    private boolean isHttp(int magic1, int magic2) {
+    private boolean isHttp(final int magic1, final int magic2) {
         return magic1 == 'G' && magic2 == 'E' || // GET
                 magic1 == 'P' && magic2 == 'O' || // POST
                 magic1 == 'P' && magic2 == 'U' || // PUT
@@ -50,7 +56,7 @@ public class HttpMixinServerHandshaker implements MixinServerHandshaker {
                 magic1 == 'C' && magic2 == 'O';   // CONNECT
     }
 
-    public final HttpMixinServerHandshaker of(final ChannelHandler... handlers) {
+    public static HttpMixinServerHandshaker of(final ChannelHandler... handlers) {
         return new HttpMixinServerHandshaker(handlers);
     }
 }

@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.config;
 
 import com.github.pangolin.routing.config.clash.SubConfiguration;
-import com.github.pangolin.routing.proxy.spi.ServerResolver;
+import com.github.pangolin.routing.proxy.group.lb.ServerFactory;
 import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
@@ -21,11 +21,11 @@ import java.util.*;
  */
 public class ProxiesParser {
 
-  public static ProxyServerProvider parse(final InputStream conf) throws IOException {
-    return resolve(new InputStreamReader(conf, StandardCharsets.UTF_8));
+  public static ProxyServerProvider parse(final InputStream conf, final ServerFactory factory) throws IOException {
+    return resolve(new InputStreamReader(conf, StandardCharsets.UTF_8), factory);
   }
 
-  public static ComposedProxyServerProvider resolve(final Reader reader) throws IOException {
+  public static ComposedProxyServerProvider resolve(final Reader reader, final ServerFactory factory) throws IOException {
     ObjectUtil.checkNotNull(reader, "reader");
     final Map<String, ProxyServer> fixedServers = new LinkedHashMap<>();
     final List<ProxyServerProvider> providers = new LinkedList<>();
@@ -45,11 +45,10 @@ public class ProxiesParser {
           final String url = lineToUse.substring(i + 1).trim();
           if (url.startsWith("subscribe:")) {
             final String subscribeUrl = url.substring("subscribe:".length());
-            ProxyServerProvider proxyServerProvider = new SubConfiguration(new URL(subscribeUrl)).refresh().getServerProvider();
+            ProxyServerProvider proxyServerProvider = new SubConfiguration(new URL(subscribeUrl), factory).refresh().getServerProvider();
             providers.add(proxyServerProvider);
           } else {
-            final ProxyServer proxyServer = resolve(name, url);
-            fixedServers.put(proxyServer.getName(), proxyServer);
+            fixedServers.put(name, factory.resolve(name, url));
           }
         } else {
           // log
@@ -71,24 +70,6 @@ public class ProxiesParser {
       }
     };
     return new ComposedProxyServerProvider(providersToUse);
-  }
-
-  private static ProxyServer resolve(final String name, final String url) {
-    final ServiceLoader<ServerResolver> resolvers = ServiceLoader.load(ServerResolver.class);
-    for (final ServerResolver resolver : resolvers) {
-      if (!resolver.acceptsUrl(url)) {
-        continue;
-      }
-      final Properties props = new Properties();
-      if (null != name) {
-        props.setProperty("name", name);
-      }
-      final ProxyServer resolved = resolver.resolve(url, props);
-      if (null != resolved) {
-        return resolved;
-      }
-    }
-    throw new IllegalStateException("NOT found provider, url: " + url);
   }
 
 }

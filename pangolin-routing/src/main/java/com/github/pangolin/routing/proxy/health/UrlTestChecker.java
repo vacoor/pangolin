@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.v2.proxy;
+package com.github.pangolin.routing.proxy.health;
 
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.health.HealthChecker;

@@ -8,15 +8,15 @@ import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHand
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import com.github.pangolin.routing.proxy.ProxySocketChannelFactory;
+import com.github.pangolin.routing.proxy.group.lb.ServerFactory;
 import com.github.pangolin.routing.proxy.group.rule.RuleBasedProxyServer;
-import com.github.pangolin.routing.proxy.spi.ServerResolver;
 import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
-import com.github.pangolin.routing.v2.proxy.ServerGroup;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.netflix.loadbalancer.LoadBalancerStats;
 import freework.net.Http;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
@@ -36,21 +36,21 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Properties;
-import java.util.ServiceLoader;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
 public class SubConfiguration {
     private final URL url;
+    private final ServerFactory factory;
 
     private volatile Map<String, ProxyServer> nameToProxyMap;
     private volatile Map<String, ProxyServer> nameToProxyGroupMap;
     private volatile Map<DestinationPattern, String> rulesMap;
 
-    public SubConfiguration(final URL url) {
+    public SubConfiguration(final URL url, final ServerFactory factory) {
         this.url = url;
+        this.factory = factory;
     }
 
     public RulesProvider getRulesProvider() {
@@ -137,7 +137,7 @@ public class SubConfiguration {
         final String url = definition.getUrl();
 
         // UrlTestHealthChecker urlTestHealthChecker = new UrlTestHealthChecker(url, 3000, )
-        final ProxyServer group = new ServerGroup(name, type, referencesToUse);
+        final ProxyServer group = factory.createServerGroup(name, type, url, referencesToUse);
         nameToGroupMap.put(name, group);
         return group;
     }
@@ -158,28 +158,12 @@ public class SubConfiguration {
         final String uri = String.format("%s://%s@%s:%s#%s", definition.getType(), urlEncode(userInfo), definition.getServer(), definition.getPort(), urlEncode(definition.getName()));
         log.debug("resolve uri: {}", uri);
         log.info("Parse proxy uri: {}", uri);
-        return resolve(uri);
+        return factory.resolve(null, uri);
     }
 
     private static String urlEncode(final String text) {
         return Http.urlEncode(text, StandardCharsets.UTF_8.name());
     }
-
-    private static final ServiceLoader<ServerResolver> RESOLVERS = ServiceLoader.load(ServerResolver.class);
-
-    private static ProxyServer resolve(final String url) {
-        for (final ServerResolver resolver : RESOLVERS) {
-            if (!resolver.acceptsUrl(url)) {
-                continue;
-            }
-            final ProxyServer resolved = resolver.resolve(url, new Properties());
-            if (null != resolved) {
-                return resolved;
-            }
-        }
-        throw new IllegalStateException();
-    }
-
 
     private <T> T nvl(final T val, final T def) {
         return null != val ? val : def;
@@ -203,27 +187,12 @@ public class SubConfiguration {
     }
 
     public static void main(String[] args) throws Exception {
-        /*
-        SubConfiguration config = new SubConfiguration(new URL(""));
-//        SubConfiguration config = new SubConfiguration(new URL(""));
+        final LoadBalancerStats stats = new LoadBalancerStats();
+        final ServerFactory serverFactory = new ServerFactory(stats);
+        SubConfiguration config = new SubConfiguration(new URL(""), serverFactory);
         config.refresh();
 
         final RuleBasedProxyServer proxyServer = new RuleBasedProxyServer("R", config.getRulesProvider(), config.getServerProvider());
-        */
-        final ProxyServer proxyServer = new ProxyServer() {
-            @Override
-            public String getName() {
-                return "SS";
-            }
-
-            @Override
-            public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
-                final InetSocketAddress proxyAddress = new InetSocketAddress("86d65b23.pnd6xm1ljcfpc3b-fbnode.6pzfwf.com", 56001);
-                final CipherAlgorithm cipher = CipherAlgorithmSpi.getInstance("chacha20-ietf-poly1305");
-                final String password = "jASkBs";
-                return new SsProxyHandler(proxyAddress, cipher, password);
-            }
-        };
         final ProxySocketChannelFactory factory = new ProxySocketChannelFactory(proxyServer, Arrays.asList("127.0.0.1", "localhost"));
 
         final String hostStr = System.getProperty("server.host");

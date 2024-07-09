@@ -14,19 +14,19 @@ import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandsh
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
 import com.github.pangolin.routing.proxy.*;
 import com.github.pangolin.routing.proxy.group.chain.ProxyChainServer;
+import com.github.pangolin.routing.proxy.group.lb.ServerFactory;
 import com.github.pangolin.routing.proxy.group.rule.RuleBasedProxyServer;
 import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Lists;
+import com.netflix.loadbalancer.LoadBalancerStats;
 import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.system.ApplicationHome;
-import org.springframework.util.StringUtils;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -42,7 +42,8 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 public class ServerMain {
 
     public static void main(String[] args) throws Exception {
-        final NioEventLoopGroup group = new NioEventLoopGroup();
+        final LoadBalancerStats stats = new LoadBalancerStats();
+        final ServerFactory groupFactory = new ServerFactory(stats);
 
         final ApplicationHome home = new ApplicationHome(ServerMain.class);
         final File homeFile = home.getDir();
@@ -52,7 +53,7 @@ public class ServerMain {
         log.info("Rules config: " + rulesConf.getAbsolutePath());
         log.info("Proxies config: " + proxiesConf.getAbsolutePath());
 
-        ProxyServerProvider proxyServerProvider = proxiesConf.exists() ? ProxiesParser.parse(new FileInputStream(proxiesConf)) : new ComposedProxyServerProvider();
+        ProxyServerProvider proxyServerProvider = proxiesConf.exists() ? ProxiesParser.parse(new FileInputStream(proxiesConf), groupFactory) : new ComposedProxyServerProvider();
 
         final Map<DestinationPattern, String> rules = rulesConf.exists() ? RulesParser.parseRules(rulesConf.toURI().toURL()) : Collections.emptyMap();
 
@@ -111,15 +112,15 @@ public class ServerMain {
 
 
         final String hostStr = System.getProperty("server.host");
-        final String portStr = System.getProperty("server.port", "1081");
+        final String portStr = System.getProperty("server.port", "1082");
         final int proxyServerPort = Integer.parseInt(portStr);
         final NettyServer server = new NettyServer(hostStr, proxyServerPort);
         ChannelFuture proxyServerChannel = server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                final Socks5MixinServerHandshaker socks5Handshaker = new Socks5MixinServerHandshaker(new Socks5ProxyServerHandler(null, null, factory));
-                final Socks4MixinServerHandshaker socks4Handshaker = new Socks4MixinServerHandshaker(new Socks4ProxyServerHandler(null, factory));
-                final HttpMixinServerHandshaker httpHandshaker = new HttpMixinServerHandshaker(
+                final Socks5MixinServerHandshaker socks5Handshaker = Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, factory));
+                final Socks4MixinServerHandshaker socks4Handshaker = Socks4MixinServerHandshaker.of(new Socks4ProxyServerHandler(null, factory));
+                final HttpMixinServerHandshaker httpHandshaker = HttpMixinServerHandshaker.of(
                         new ProxyAutoConfigurationServerHandler(rulesProvider, proxyServerPort),
                         new SwitchyRuleConfigurationServerHandler(rulesProvider),
                         new HttpProxyServerHandler(null, null, factory)
@@ -128,7 +129,7 @@ public class ServerMain {
             }
         });
 
-        ChannelFuture pacChannel = new NettyServer(hostStr, 8088).start(true, new ChannelInitializer<SocketChannel>() {
+        ChannelFuture pacChannel = new NettyServer(hostStr, 8098).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(

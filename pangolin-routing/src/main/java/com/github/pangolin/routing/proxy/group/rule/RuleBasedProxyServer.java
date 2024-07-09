@@ -34,7 +34,11 @@ public class RuleBasedProxyServer implements ProxyServer {
     @Override
     public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
         final ProxyServer proxyServer = select(sa);
-        return null != proxyServer ? proxyServer.newProxyHandler((InetSocketAddress) sa) : null;
+        return null != proxyServer ? newProxyHandler(proxyServer, (InetSocketAddress) sa) : null;
+    }
+
+    protected ChannelHandler newProxyHandler(final ProxyServer server, final InetSocketAddress sa) {
+        return server.newProxyHandler(sa);
     }
 
     private ProxyServer select(final SocketAddress destinationAddress) {

@@ -11,11 +11,14 @@ import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
 public class Socks5MixinServerHandshaker extends SocksMixinServerHandshaker {
     private final ChannelHandler[] handlers;
 
-    public Socks5MixinServerHandshaker(final ChannelHandler... handlers) {
+    private Socks5MixinServerHandshaker(final ChannelHandler... handlers) {
         super(SocksVersion.SOCKS5);
         this.handlers = handlers;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     protected void doHandshake(final ChannelHandlerContext ctx, final ByteBuf in) {
         final ChannelPipeline cp = ctx.pipeline();
@@ -24,7 +27,7 @@ public class Socks5MixinServerHandshaker extends SocksMixinServerHandshaker {
         cp.addLast(handlers);
     }
 
-    public final Socks5MixinServerHandshaker of(final ChannelHandler... handlers) {
+    public static Socks5MixinServerHandshaker of(final ChannelHandler... handlers) {
         return new Socks5MixinServerHandshaker(handlers);
     }
 }

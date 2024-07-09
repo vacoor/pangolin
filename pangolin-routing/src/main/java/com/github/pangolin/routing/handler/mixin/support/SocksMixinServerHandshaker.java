@@ -12,6 +12,9 @@ public abstract class SocksMixinServerHandshaker implements MixinServerHandshake
         this.version = version;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public boolean handshake(final ChannelHandlerContext ctx, final ByteBuf in) {
         final byte b = in.getByte(in.readerIndex());

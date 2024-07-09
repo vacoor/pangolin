@@ -28,7 +28,7 @@ public class ProxyChainServer implements ProxyServer {
     @Override
     public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
         final List<ChannelHandler> handlers = Arrays.stream(proxyServers)
-                .map(s -> s.newProxyHandler(sa))
+                .map(s -> this.newProxyHandler(s, sa))
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
         if (!handlers.isEmpty()) {
@@ -42,4 +42,7 @@ public class ProxyChainServer implements ProxyServer {
         return null;
     }
 
+    protected ChannelHandler newProxyHandler(final ProxyServer server, final InetSocketAddress sa) {
+        return server.newProxyHandler(sa);
+    }
 }

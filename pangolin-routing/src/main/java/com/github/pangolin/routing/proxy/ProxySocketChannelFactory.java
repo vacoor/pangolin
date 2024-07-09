@@ -1,8 +1,6 @@
 package com.github.pangolin.routing.proxy;
 
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
-import com.github.pangolin.routing.rule.RulesProvider;
-import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.util.Channels;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
@@ -16,7 +14,6 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /**
  * @since 20240411
@@ -33,7 +30,7 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
 
     @Override
     public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
-        final ProxyServer proxyServer = select(remoteAddress);
+        final ProxyServer proxyServer = choose(remoteAddress);
         ChannelHandler networkHandler = null != proxyServer ? proxyServer.newProxyHandler((InetSocketAddress) remoteAddress) : null;
         final NoopAddressResolverGroup resolverGroup = null != networkHandler ? NoopAddressResolverGroup.INSTANCE : null;
         return Channels.open(remoteAddress, resolverGroup, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
@@ -47,7 +44,7 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
         });
     }
 
-    private ProxyServer select(final SocketAddress destinationAddress) {
+    private ProxyServer choose(final SocketAddress destinationAddress) {
         if (!(destinationAddress instanceof InetSocketAddress)) {
             log.info("[ROUTING] will bypass the proxy => {}", destinationAddress);
             return null;
