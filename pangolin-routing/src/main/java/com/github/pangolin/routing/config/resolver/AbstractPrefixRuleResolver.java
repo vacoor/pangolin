@@ -7,7 +7,7 @@ import java.util.List;
 /**
  *
  */
-public abstract class AbstractPrefixRuleResolver<T> implements RuleResolver<T> {
+public abstract class AbstractPrefixRuleResolver<T> implements Resolver<T> {
     protected final String prefix;
 
     public AbstractPrefixRuleResolver(final String prefix) {

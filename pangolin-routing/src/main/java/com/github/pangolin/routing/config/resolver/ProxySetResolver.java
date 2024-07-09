@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.config.resolver;
 
+import com.github.pangolin.routing.proxy.ProxyServer;
 import freework.util.StringUtils2;
 import lombok.extern.slf4j.Slf4j;
 
@@ -16,44 +17,34 @@ import java.util.stream.Collectors;
  *
  */
 @Slf4j
-public class RuleSetResolver<T> extends AbstractPrefixRuleResolver<T> {
+public class ProxySetResolver extends AbstractPrefixRuleResolver<ProxyServer> {
     private static final String PATH_DIV = "/";
     private static final String PROTOCOL_FILE = "file";
 
-    private Resolver<T>[] resolvers;
+    private ProxyResolver resolver = new ProxyResolver();
 
-    public RuleSetResolver(final Resolver<T>... resolvers) {
-        super("RULE-SET,");
-        this.resolvers = resolvers;
+    public ProxySetResolver() {
+        super("PROXY-SET,");
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    protected List<T> doResolve(final String rule, final URL url) throws IOException {
-        final URL ruleSetUrl = resolveUrl(url, rule);
-        return Utils.lines(ruleSetUrl, StandardCharsets.UTF_8)
+    protected List<ProxyServer> doResolve(final String proxy, final URL url) throws IOException {
+        final URL proxySetUrl = resolveUrl(url, proxy);
+        return Utils.lines(proxySetUrl, StandardCharsets.UTF_8)
                 .filter(StringUtils2::hasText)
-                .map(line -> doResolveInternal(line, ruleSetUrl))
+                .map(line -> doResolveInternal(line, proxySetUrl))
                 .flatMap(Collection::stream)
                 .collect(Collectors.toList());
     }
 
-    protected List<T> doResolveInternal(final String rule, final URL url) {
+    protected List<ProxyServer> doResolveInternal(final String line, final URL url) {
         try {
-            if (this.matches(rule)) {
-                return this.resolve(rule, url);
-            }
-            for (final Resolver<T> resolver : resolvers) {
-                if (resolver.matches(rule)) {
-                    return resolver.resolve(rule, url);
-                }
-            }
-            // XXX resolver not found.
-            return Collections.emptyList();
+            return resolver.doResolve(line, url);
         } catch (final IOException e) {
-            log.error("Resolve error:  {} in {} -> {}", rule, url, e.getMessage(), e);
+            log.error("Resolve error:  {} in {} -> {}", line, url, e.getMessage(), e);
             return Collections.emptyList();
         }
     }

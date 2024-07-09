@@ -6,7 +6,7 @@ import java.util.List;
 
 /**
  */
-public interface RuleResolver<T> {
+public interface Resolver<T> {
     boolean matches(String rule);
 
     List<T> resolve(String rule, URL baseUrl) throws IOException;

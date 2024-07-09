@@ -23,14 +23,14 @@ public class RuleResolvers {
             IP_CIDR, IP_CIDR6
     );
 
-    public static final RuleResolver<DestinationPattern>[] ALL = new RuleResolver[]{
+    public static final Resolver<DestinationPattern>[] ALL = new Resolver[]{
             DOMAIN, DOMAIN_SUFFIX, DOMAIN_KEYWORD,
             IP_CIDR, IP_CIDR6, RULE_SET
     };
 
     public static List<DestinationPattern> resolve(final String rule, final URL url) {
         try {
-            for (final RuleResolver<DestinationPattern> resolver : ALL) {
+            for (final Resolver<DestinationPattern> resolver : ALL) {
                 if (resolver.matches(rule)) {
                     return resolver.resolve(rule, url);
                 }
