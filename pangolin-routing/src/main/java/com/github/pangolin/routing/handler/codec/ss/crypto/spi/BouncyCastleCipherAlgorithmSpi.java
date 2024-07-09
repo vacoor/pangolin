@@ -1,9 +1,9 @@
-package com.github.pangolin.routing.handler.internal.client.ss.crypto.spi;
+package com.github.pangolin.routing.handler.codec.ss.crypto.spi;
 
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.AeadCipherAlgorithm;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.CipherAlgorithm;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.CipherHandle;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.StreamCipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.CipherHandle;
+import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm;
 import org.bouncycastle.crypto.CipherParameters;
 import org.bouncycastle.crypto.StreamCipher;
 import org.bouncycastle.crypto.engines.*;

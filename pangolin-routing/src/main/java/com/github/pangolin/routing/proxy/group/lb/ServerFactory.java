@@ -20,6 +20,7 @@ import com.netflix.loadbalancer.ZoneAwareLoadBalancer;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
 import java.util.List;
@@ -161,6 +162,7 @@ public class ServerFactory {
     /**
      *
      */
+    @Slf4j
     public static class LoadBalancingServer implements ProxyServer {
         private final String name;
         private final ILoadBalancer lb;
@@ -178,7 +180,11 @@ public class ServerFactory {
         @Override
         public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
             final ProxyServer server = choose(sa);
-            return null != server ? newProxyHandler(server, sa) : null;
+            if (null != server) {
+                log.info("Choose {} -> {}", server.getName(), sa);
+                return newProxyHandler(server, sa);
+            }
+            return null;
         }
 
         protected ChannelHandler newProxyHandler(final ProxyServer server, final InetSocketAddress sa) {

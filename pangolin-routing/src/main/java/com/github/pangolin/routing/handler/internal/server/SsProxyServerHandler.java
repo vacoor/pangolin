@@ -1,13 +1,12 @@
 package com.github.pangolin.routing.handler.internal.server;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
-import com.github.pangolin.routing.handler.internal.client.ss.codec.SsAeadCipherCodec;
-import com.github.pangolin.routing.handler.internal.client.ss.codec.SsStreamCipherCodec;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.AeadCipherAlgorithm;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.CipherAlgorithm;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.SsKeyFactory;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.StreamCipherAlgorithm;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.spi.CipherAlgorithmSpi;
+import com.github.pangolin.routing.handler.codec.ss.SsAeadCipherCodec;
+import com.github.pangolin.routing.handler.codec.ss.SsStreamCipherCodec;
+import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.server.NettyServer;
@@ -40,12 +39,10 @@ public class SsProxyServerHandler extends ChannelDuplexHandler {
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         if (algorithm instanceof StreamCipherAlgorithm) {
             StreamCipherAlgorithm sca = (StreamCipherAlgorithm) algorithm;
-            final byte[] masterKey = SsKeyFactory.generateKey(sca.getKeySize(), password);
-            ctx.pipeline().addBefore(ctx.name(), null, new SsStreamCipherCodec(masterKey, sca, new SecureRandom()));
+            ctx.pipeline().addBefore(ctx.name(), null, new SsStreamCipherCodec(sca, password, new SecureRandom()));
         } else if (algorithm instanceof AeadCipherAlgorithm) {
             AeadCipherAlgorithm aca = (AeadCipherAlgorithm) algorithm;
-            final byte[] masterKey = SsKeyFactory.generateKey(aca.getKeySize(), password);
-            ctx.pipeline().addBefore(ctx.name(), null, new SsAeadCipherCodec(masterKey, aca, new SecureRandom()));
+            ctx.pipeline().addBefore(ctx.name(), null, new SsAeadCipherCodec(aca, password, new SecureRandom()));
         } else {
             throw new UnsupportedOperationException("algorithm not supported: " + algorithm.getName());
         }

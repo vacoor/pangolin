@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.internal.client.ss.crypto.spi;
+package com.github.pangolin.routing.handler.codec.ss.crypto.spi;
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 

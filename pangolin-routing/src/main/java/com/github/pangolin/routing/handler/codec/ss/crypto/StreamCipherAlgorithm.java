@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.internal.client.ss.crypto;
+package com.github.pangolin.routing.handler.codec.ss.crypto;
 
 /**
  */

@@ -1,6 +1,7 @@
-package com.github.pangolin.routing.handler.internal.client.ss.codec;
+package com.github.pangolin.routing.handler.codec.ss;
 
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.AeadCipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.SsKeyFactory;
 import freework.util.Bytes;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -24,6 +25,14 @@ public class SsAeadCipherCodec extends CombinedChannelDuplexHandler<ByteToMessag
     private static final int CHUNK_SIZE_MASK = 0x3FFF;
 
     private final AeadCipherAlgorithm algorithm;
+
+    public SsAeadCipherCodec(final AeadCipherAlgorithm algorithm, final String password, final SecureRandom random) {
+        this(generateMasterKey(algorithm, password), algorithm, random);
+    }
+
+    private static byte[] generateMasterKey(final AeadCipherAlgorithm algorithm, final String password) {
+        return SsKeyFactory.generateKey(password, algorithm.getKeySize());
+    }
 
     public SsAeadCipherCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
         if (masterKey.length != algorithm.getKeySize()) {

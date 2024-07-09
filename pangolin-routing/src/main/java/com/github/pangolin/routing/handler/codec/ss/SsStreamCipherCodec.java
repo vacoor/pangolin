@@ -1,7 +1,8 @@
-package com.github.pangolin.routing.handler.internal.client.ss.codec;
+package com.github.pangolin.routing.handler.codec.ss;
 
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.CipherHandle;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.StreamCipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.CipherHandle;
+import com.github.pangolin.routing.handler.codec.ss.crypto.SsKeyFactory;
+import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -20,6 +21,15 @@ public class SsStreamCipherCodec extends CombinedChannelDuplexHandler<ByteToMess
     private static final int MAX_BUF_SIZE = 1024;
 
     private final StreamCipherAlgorithm algorithm;
+
+
+    public SsStreamCipherCodec(final StreamCipherAlgorithm algorithm, final String password, final SecureRandom random) {
+        this(generateMasterKey(algorithm, password), algorithm, random);
+    }
+
+    private static byte[] generateMasterKey(final StreamCipherAlgorithm algorithm, final String password) {
+        return SsKeyFactory.generateKey(password, algorithm.getKeySize());
+    }
 
     public SsStreamCipherCodec(final byte[] masterKey, final StreamCipherAlgorithm algorithm, final SecureRandom random) {
         this.algorithm = algorithm;

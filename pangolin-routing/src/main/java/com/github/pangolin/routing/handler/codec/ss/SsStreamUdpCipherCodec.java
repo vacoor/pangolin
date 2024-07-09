@@ -1,6 +1,7 @@
-package com.github.pangolin.routing.handler.internal.client.ss.codec;
+package com.github.pangolin.routing.handler.codec.ss;
 
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.StreamCipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.SsKeyFactory;
+import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -20,6 +21,14 @@ public class SsStreamUdpCipherCodec extends MessageToMessageCodec<DatagramPacket
     private final SecureRandom random;
 
     private final int ivSize;
+
+    public SsStreamUdpCipherCodec(final StreamCipherAlgorithm algorithm, final String password, final SecureRandom random) {
+        this(generateMasterKey(algorithm, password), algorithm, random);
+    }
+
+    private static byte[] generateMasterKey(final StreamCipherAlgorithm algorithm, final String password) {
+        return SsKeyFactory.generateKey(password, algorithm.getKeySize());
+    }
 
     public SsStreamUdpCipherCodec(final byte[] masterKey, final StreamCipherAlgorithm algorithm, final SecureRandom random) {
         if (masterKey.length != algorithm.getKeySize()) {

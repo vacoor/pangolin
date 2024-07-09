@@ -1,9 +1,6 @@
 package com.github.pangolin.routing.config.clash;
 
 import com.github.pangolin.routing.config.RulesParser;
-import com.github.pangolin.routing.handler.internal.client.ss.SsProxyHandler;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.CipherAlgorithm;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
@@ -19,7 +16,6 @@ import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
 import freework.net.Http;
 import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +23,6 @@ import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.InetSocketAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;

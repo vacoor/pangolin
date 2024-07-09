@@ -1,11 +1,10 @@
-package com.github.pangolin.routing.handler.internal.client.ss;
+package com.github.pangolin.routing.handler.internal.client;
 
-import com.github.pangolin.routing.handler.internal.client.ss.codec.SsAeadCipherCodec;
-import com.github.pangolin.routing.handler.internal.client.ss.codec.SsStreamCipherCodec;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.SsKeyFactory;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.AeadCipherAlgorithm;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.CipherAlgorithm;
-import com.github.pangolin.routing.handler.internal.client.ss.crypto.StreamCipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.SsAeadCipherCodec;
+import com.github.pangolin.routing.handler.codec.ss.SsStreamCipherCodec;
+import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelDuplexHandler;
@@ -50,11 +49,9 @@ public class SsProxyHandler extends ChannelDuplexHandler {
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         if (null != aeadCipherAlgorithm) {
-            final byte[] masterKey = SsKeyFactory.generateKey(aeadCipherAlgorithm.getKeySize(), password);
-            ctx.pipeline().addBefore(ctx.name(), null, new SsAeadCipherCodec(masterKey, aeadCipherAlgorithm, new SecureRandom()));
+            ctx.pipeline().addBefore(ctx.name(), null, new SsAeadCipherCodec(aeadCipherAlgorithm, password, new SecureRandom()));
         } else {
-            final byte[] masterKey = SsKeyFactory.generateKey(streamCipherAlgorithm.getKeySize(), password);
-            ctx.pipeline().addBefore(ctx.name(), null, new SsStreamCipherCodec(masterKey, streamCipherAlgorithm, new SecureRandom()));
+            ctx.pipeline().addBefore(ctx.name(), null, new SsStreamCipherCodec(streamCipherAlgorithm, password, new SecureRandom()));
         }
     }
 
