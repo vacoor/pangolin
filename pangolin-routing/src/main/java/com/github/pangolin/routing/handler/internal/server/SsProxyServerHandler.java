@@ -72,6 +72,9 @@ public class SsProxyServerHandler extends ChannelDuplexHandler {
                     }
                 });
 
+//                ChannelOutboundBuffer ob = delegateCtx.channel().unsafe().outboundBuffer();
+//                ob.setUserDefinedWritability(1, false);
+
                 delegateCtx.pipeline().addBefore(delegateCtx.name(), null, new ChannelDuplexHandler() {
                     private PendingWriteQueue pendingWrites;
 
