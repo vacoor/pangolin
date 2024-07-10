@@ -65,7 +65,7 @@ public class DefaultServerReader implements ServerReader {
 
 
     private RouteletContext load(final String url, final RouteletContext parent) throws IOException, ConfigurationException {
-        return new RefreshableServerRegistry(new ExternalServerReader(stats), new URL(url), parent);
+        return new RefreshableServerRegistry(new ExternalServerReader(stats), new URL(url), parent).refresh();
     }
 
     public static void main(String[] args) throws ConfigurationException, IOException {
