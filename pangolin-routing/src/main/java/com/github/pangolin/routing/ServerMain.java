@@ -13,9 +13,8 @@ import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshak
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
 import com.github.pangolin.routing.proxy.*;
-import com.github.pangolin.routing.proxy.group.chain.ProxyChainServer;
-import com.github.pangolin.routing.proxy.group.lb.ServerFactory;
-import com.github.pangolin.routing.proxy.group.rule.RuleBasedProxyServer;
+import com.github.pangolin.routing.proxy.ServerFactory;
+import com.github.pangolin.routing.proxy.RuleBasedProxyServer;
 import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.server.NettyServer;
@@ -83,19 +82,19 @@ public class ServerMain {
         final ProxyServer tunnelNextHop = proxyServerProvider.getInstance("TUNNEL-NEXT-HOP");
         if (null != tunnelNextHop) {
             final ProxyServer tunnel = proxyServerProvider.getInstance("TUNNEL");
-            final ProxyChainServer proxyChainServer = new ProxyChainServer("TUNNEL-DIRECT-HOP", tunnel, tunnelNextHop);
+            final ServerFactory.ProxyServerChain proxyServerChain = new ServerFactory.ProxyServerChain("TUNNEL-DIRECT-HOP", tunnel, tunnelNextHop);
             final ProxyServerProvider origProvider = proxyServerProvider;
             proxyServerProvider = new ProxyServerProvider() {
                 @Override
                 public Collection<ProxyServer> getInstances() {
                     final List<ProxyServer> servers = Lists.newArrayList(origProvider.getInstances());
-                    servers.add(proxyChainServer);
+                    servers.add(proxyServerChain);
                     return servers;
                 }
 
                 @Override
                 public ProxyServer getInstance(final String name) {
-                    return proxyChainServer.getName().equals(name) ? proxyChainServer : origProvider.getInstance(name);
+                    return proxyServerChain.getName().equals(name) ? proxyServerChain : origProvider.getInstance(name);
                 }
             };
         }

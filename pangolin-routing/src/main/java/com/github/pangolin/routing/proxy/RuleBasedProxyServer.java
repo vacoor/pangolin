@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.proxy.group.rule;
+package com.github.pangolin.routing.proxy;
 
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;

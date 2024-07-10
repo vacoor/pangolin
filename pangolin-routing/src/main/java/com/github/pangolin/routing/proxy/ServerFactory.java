@@ -1,8 +1,9 @@
-package com.github.pangolin.routing.proxy.group.lb;
+package com.github.pangolin.routing.proxy;
 
-import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.spi.ServerResolver;
 import com.netflix.client.config.IClientConfig;
+import com.netflix.client.config.PropertyResolver;
+import com.netflix.client.config.ReloadableClientConfig;
 import com.netflix.loadbalancer.DummyPing;
 import com.netflix.loadbalancer.ILoadBalancer;
 import com.netflix.loadbalancer.IPing;
@@ -20,12 +21,18 @@ import com.netflix.loadbalancer.ZoneAwareLoadBalancer;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.socket.SocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.ServiceLoader;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 /**
@@ -63,6 +70,9 @@ public class ServerFactory {
 
     public ProxyServer createServerGroup(final String name, final String type,
                                                  final String url, final List<ProxyServer> servers) {
+        if ("chain".equals(type)) {
+            return new StatsProxyServer(new ProxyServerChain(name, servers.toArray(new ProxyServer[0])));
+        }
         final IClientConfig config = new DefaultClientConfig();
         final IRule rule = new WeightedResponseTimeRule();
         final IPing ping = new DummyPing();
@@ -79,7 +89,7 @@ public class ServerFactory {
 //        lb.setRule(new WeightedResponseTimeRule());
 //        lb.setServersList();
 
-        return new StatsProxyServer(new LoadBalancingServer(name, lb));
+        return new StatsProxyServer(new LoadBalancingProxyServer(name, lb));
     }
 
     private class StaticServerList<T extends Server> implements ServerList<T> {
@@ -163,11 +173,11 @@ public class ServerFactory {
      *
      */
     @Slf4j
-    public static class LoadBalancingServer implements ProxyServer {
+    public static class LoadBalancingProxyServer implements ProxyServer {
         private final String name;
         private final ILoadBalancer lb;
 
-        public LoadBalancingServer(final String name, final ILoadBalancer lb) {
+        public LoadBalancingProxyServer(final String name, final ILoadBalancer lb) {
             this.name = name;
             this.lb = lb;
         }
@@ -202,6 +212,80 @@ public class ServerFactory {
 
         private ILoadBalancer getLoadBalancer() {
             return lb;
+        }
+    }
+
+    public static class ProxyServerChain implements ProxyServer {
+        private final String name;
+        private final ProxyServer[] proxyServers;
+
+        public ProxyServerChain(final String name, final ProxyServer... proxyServers) {
+            this.name = name;
+            this.proxyServers = proxyServers;
+        }
+
+        @Override
+        public String getName() {
+            return name;
+        }
+
+        @Override
+        public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+            final List<ChannelHandler> handlers = Arrays.stream(proxyServers)
+                    .map(s -> this.newProxyHandler(s, sa))
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!handlers.isEmpty()) {
+                return new ChannelInitializer<SocketChannel>() {
+                    @Override
+                    protected void initChannel(final SocketChannel ch) throws Exception {
+                        ch.pipeline().addLast(handlers.toArray(new ChannelHandler[0]));
+                    }
+                };
+            }
+            return null;
+        }
+
+        protected ChannelHandler newProxyHandler(final ProxyServer server, final InetSocketAddress sa) {
+            return server.newProxyHandler(sa);
+        }
+    }
+
+    /**
+     * TODO DOC ME!.
+     *
+     * @author changhe.yang
+     * @since 20240709
+     */
+    public static class DefaultClientConfig extends ReloadableClientConfig {
+
+        public DefaultClientConfig() {
+            super(new PropertyResolver() {
+                @Override
+                public <T> Optional<T> get(final String s, final Class<T> aClass) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public void forEach(final String s, final BiConsumer<String, String> biConsumer) {
+
+                }
+
+                @Override
+                public void onChange(final Runnable runnable) {
+
+                }
+            });
+        }
+
+        @Override
+        public void loadDefaultValues() {
+
+        }
+
+        @Override
+        public String resolveDeploymentContextbasedVipAddresses() {
+            return null;
         }
     }
 }

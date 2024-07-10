@@ -1,12 +1,13 @@
 package com.github.pangolin.routing.config.clash;
 
+import com.github.pangolin.routing.config.ProxyGroupDefinition;
 import com.github.pangolin.routing.config.RulesParser;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import com.github.pangolin.routing.proxy.ProxySocketChannelFactory;
-import com.github.pangolin.routing.proxy.group.lb.ServerFactory;
-import com.github.pangolin.routing.proxy.group.rule.RuleBasedProxyServer;
+import com.github.pangolin.routing.proxy.ServerFactory;
+import com.github.pangolin.routing.proxy.RuleBasedProxyServer;
 import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.server.NettyServer;
@@ -36,6 +37,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class SubConfiguration {
+    private final SubConfiguration parent;
     private final URL url;
     private final ServerFactory factory;
 
@@ -44,6 +46,10 @@ public class SubConfiguration {
     private volatile Map<DestinationPattern, String> rulesMap;
 
     public SubConfiguration(final URL url, final ServerFactory factory) {
+        this(null, url, factory);
+    }
+    public SubConfiguration(final SubConfiguration parent, final URL url, final ServerFactory factory) {
+        this.parent = parent;
         this.url = url;
         this.factory = factory;
     }
@@ -52,7 +58,12 @@ public class SubConfiguration {
         return new RulesProvider() {
             @Override
             public Map<DestinationPattern, String> getRules() {
-                return Collections.unmodifiableMap(rulesMap);
+                final Map<DestinationPattern, String> ret = Maps.newLinkedHashMap();
+                if (null != parent) {
+                    ret.putAll(parent.getRulesProvider().getRules());
+                }
+                ret.putAll(rulesMap);
+                return Collections.unmodifiableMap(ret);
             }
         };
     }
@@ -61,7 +72,11 @@ public class SubConfiguration {
         return new ProxyServerProvider() {
             @Override
             public Collection<ProxyServer> getInstances() {
-                List<ProxyServer> ret = Lists.newArrayList(nameToProxyMap.values());
+                List<ProxyServer> ret = Lists.newArrayList();
+                if (null != parent) {
+                    ret.addAll(parent.getServerProvider().getInstances());
+                }
+                ret.addAll(nameToProxyMap.values());
                 ret.addAll(nameToProxyGroupMap.values());
                 return ret;
             }
@@ -70,7 +85,7 @@ public class SubConfiguration {
             public ProxyServer getInstance(final String name) {
                 ProxyServer proxyServer = nameToProxyMap.get(name);
                 proxyServer = null != proxyServer ? proxyServer : nameToProxyGroupMap.get(name);
-                return proxyServer;
+                return null != proxyServer ? proxyServer : parent.getServerProvider().getInstance(name);
             }
         };
     }
@@ -82,11 +97,11 @@ public class SubConfiguration {
 
     Map<String, ProxyServer> refresh(final ClashConfiguration conf) throws IOException {
         final List<ClashConfiguration.ProxyDefinition> proxyDefinitions = nvl(conf.getProxies(), Collections.emptyList());
-        final List<ClashConfiguration.ProxyGroupDefinition> proxyGroupDefinitions = nvl(conf.getProxyGroups(), Collections.emptyList());
+        final List<ProxyGroupDefinition> proxyGroupDefinitions = nvl(conf.getProxyGroups(), Collections.emptyList());
         final List<String> rules = nvl(conf.getRules(), Collections.emptyList());
 
         final Map<String, ProxyServer> nameToProxyMap = parseProxies(proxyDefinitions);
-        final Map<String, ProxyServer> nameToProxyGroupMap = parseProxyGroups(proxyGroupDefinitions, nameToProxyMap);
+        final Map<String, ProxyServer> nameToProxyGroupMap = parseProxyGroups(proxyGroupDefinitions, nameToProxyMap, factory);
         final Map<DestinationPattern, String> rulesMap = RulesParser.parseRules(rules, url);
 
         this.nameToProxyMap = nameToProxyMap;
@@ -95,33 +110,34 @@ public class SubConfiguration {
         return nameToProxyMap;
     }
 
-    private Map<String, ProxyServer> parseProxyGroups(final List<ClashConfiguration.ProxyGroupDefinition> definitions,
-                                                      final Map<String, ProxyServer> nameToProxyMap) {
+    public static Map<String, ProxyServer> parseProxyGroups(final List<ProxyGroupDefinition> definitions,
+                                                      final Map<String, ProxyServer> nameToProxyMap, final ServerFactory factory) {
         final Map<String, ProxyServer> nameToGroupMap = Maps.newHashMap();
-        final Map<String, ClashConfiguration.ProxyGroupDefinition> definitionMap = definitions.stream()
-                .collect(Collectors.toMap(ClashConfiguration.ProxyGroupDefinition::getName, Function.identity(), (prev, next) -> next));
-        for (final Map.Entry<String, ClashConfiguration.ProxyGroupDefinition> entry : Maps.newHashMap(definitionMap).entrySet()) {
+        final Map<String, ProxyGroupDefinition> definitionMap = definitions.stream()
+                .collect(Collectors.toMap(ProxyGroupDefinition::getName, Function.identity(), (prev, next) -> next));
+        for (final Map.Entry<String, ProxyGroupDefinition> entry : Maps.newHashMap(definitionMap).entrySet()) {
             if (!nameToGroupMap.containsKey(entry.getKey())) {
-                parseProxyGroup(entry.getValue(), nameToProxyMap, nameToGroupMap, definitionMap);
+                parseProxyGroup(entry.getValue(), nameToProxyMap, nameToGroupMap, definitionMap, factory);
             }
         }
         return nameToGroupMap;
     }
 
-    private ProxyServer parseProxyGroup(final ClashConfiguration.ProxyGroupDefinition definition,
+    private static ProxyServer parseProxyGroup(final ProxyGroupDefinition definition,
                                         final Map<String, ProxyServer> nameToProxyMap,
                                         final Map<String, ProxyServer> nameToGroupMap,
-                                        final Map<String, ClashConfiguration.ProxyGroupDefinition> definitionMap) {
+                                        final Map<String, ProxyGroupDefinition> definitionMap,
+                                               final ServerFactory factory) {
         final List<String> referenceNames = nvl(definition.getProxies(), Collections.emptyList());
         final List<ProxyServer> referencesToUse = Lists.newArrayList();
         for (final String referenceName : referenceNames) {
             ProxyServer reference = nameToProxyMap.get(referenceName);
             if (null == reference) {
-                final ClashConfiguration.ProxyGroupDefinition definitionRef = definitionMap.remove(referenceName);
+                final ProxyGroupDefinition definitionRef = definitionMap.remove(referenceName);
                 if (null == definitionRef) {
                     continue;
                 }
-                reference = parseProxyGroup(definitionRef, nameToProxyMap, nameToGroupMap, definitionMap);
+                reference = parseProxyGroup(definitionRef, nameToProxyMap, nameToGroupMap, definitionMap, factory);
                 nameToGroupMap.put(referenceName, reference);
             }
             referencesToUse.add(reference);
@@ -160,7 +176,7 @@ public class SubConfiguration {
         return Http.urlEncode(text, StandardCharsets.UTF_8.name());
     }
 
-    private <T> T nvl(final T val, final T def) {
+    private static <T> T nvl(final T val, final T def) {
         return null != val ? val : def;
     }
 

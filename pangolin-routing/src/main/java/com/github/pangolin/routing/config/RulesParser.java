@@ -14,26 +14,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * TODO DOC ME!.
- *
- * @author changhe.yang
- * @since 20240410
  */
 public class RulesParser {
-
-    /*
-    public static Map<DestinationPattern, String> parseRules(final URL url) throws IOException {
-        return ClashProxiesParser.parseRules(
-                url,
-                ClashRuleResolver.DOMAIN,
-                ClashRuleResolver.DOMAIN_SUFFIX,
-                ClashRuleResolver.DOMAIN_KEYWORD,
-                ClashRuleResolver.IP_CIDR,
-                ClashRuleResolver.IP_CIDR_6,
-                ClashRuleResolver.RULE_SET
-        );
-    }
-    */
 
     public static Map<DestinationPattern, String> parseRules(final URL url) throws IOException {
         final Map<DestinationPattern, String> rules = Maps.newHashMap();

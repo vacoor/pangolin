@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.config.clash;
 
+import com.github.pangolin.routing.config.ProxyGroupDefinition;
 import lombok.Getter;
 import lombok.Setter;
 import org.yaml.snakeyaml.TypeDescription;
@@ -16,27 +17,6 @@ import java.util.List;
 @Getter
 @Setter
 public class ClashConfiguration {
-
-    @Getter
-    @Setter
-    public static class ProxyDefinition {
-        private String name;
-        private String type;
-        private String server;
-        private int port;
-        private String cipher;
-        private String password;
-        private boolean udp;
-    }
-
-    @Getter
-    @Setter
-    public static class ProxyGroupDefinition {
-        private String name;
-        private String type;
-        private String url;
-        private List<String> proxies;
-    }
 
     private List<ProxyDefinition> proxies;
     private List<ProxyGroupDefinition> proxyGroups;
@@ -58,4 +38,18 @@ public class ClashConfiguration {
         return yaml.loadAs(in, ClashConfiguration.class);
     }
 
+    /**
+     *
+     */
+    @Getter
+    @Setter
+    public static class ProxyDefinition {
+        private String name;
+        private String type;
+        private String server;
+        private int port;
+        private String cipher;
+        private String password;
+        private boolean udp;
+    }
 }

@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.config;
 
 import com.github.pangolin.routing.config.clash.SubConfiguration;
-import com.github.pangolin.routing.proxy.group.lb.ServerFactory;
+import com.github.pangolin.routing.proxy.ServerFactory;
 import com.github.pangolin.routing.proxy.ComposedProxyServerProvider;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxyServerProvider;
