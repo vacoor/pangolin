@@ -1,45 +1,66 @@
-package com.github.pangolin.routing.proxy;
+package com.github.pangolin.routing.context;
 
+import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.proxy.ServerProvider;
+import com.github.pangolin.routing.proxy.spi.ServerResolver;
 import com.netflix.client.config.IClientConfig;
-import com.netflix.loadbalancer.DummyPing;
-import com.netflix.loadbalancer.IPing;
-import com.netflix.loadbalancer.IRule;
-import com.netflix.loadbalancer.LoadBalancerStats;
-import com.netflix.loadbalancer.PollingServerListUpdater;
-import com.netflix.loadbalancer.Server;
-import com.netflix.loadbalancer.ServerList;
-import com.netflix.loadbalancer.ServerListFilter;
-import com.netflix.loadbalancer.ServerListUpdater;
-import com.netflix.loadbalancer.ServerStats;
-import com.netflix.loadbalancer.WeightedResponseTimeRule;
-import com.netflix.loadbalancer.ZoneAffinityServerListFilter;
-import com.netflix.loadbalancer.ZoneAwareLoadBalancer;
+import com.netflix.loadbalancer.*;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  *
  */
-public class LazyServerFactory {
+public class ServerFactory {
     private final LoadBalancerStats stats;
 
-    public LazyServerFactory(final LoadBalancerStats stats) {
+    public ServerFactory(final LoadBalancerStats stats) {
         this.stats = stats;
     }
+
+    static class LazyServerProvider implements ServerProvider {
+        private final List<String> names;
+        private final ServerProvider registry;
+
+        LazyServerProvider(final List<String> names, final ServerProvider registry) {
+            this.names = names;
+            this.registry = registry;
+        }
+
+        @Override
+        public Collection<String> names() {
+            return names;
+        }
+
+        @Override
+        public ProxyServer getServer(final String name) {
+            return names.contains(name) ? registry.getServer(name) : null;
+        }
+
+        @Override
+        public List<ProxyServer> getServers() {
+            return names.stream()
+                    .map(registry::getServer)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+        }
+    }
+
 
     public ProxyServer createServerGroup(final String name, final String type, final ServerProvider servers) {
         if ("chain".equals(type)) {
             return new StatsProxyServer(new LazyServerChain(name, servers));
         }
 
-        final IClientConfig config = new ServerFactory.DefaultClientConfig();
+        final IClientConfig config = new com.github.pangolin.routing.proxy.ServerFactory.DefaultClientConfig();
         final IRule rule = new WeightedResponseTimeRule();
         final IPing ping = new DummyPing();
         final ServerList<? extends Server> serverList = new LazyServerList<>(servers);
@@ -52,7 +73,7 @@ public class LazyServerFactory {
         lb.setLoadBalancerStats(stats);
 //        lb.setRule(new WeightedResponseTimeRule());
 //        lb.setServersList();
-        return new StatsProxyServer(new ServerFactory.LoadBalancingProxyServer(name, lb));
+        return new StatsProxyServer(new LoadBalancingProxyServer(name, lb));
     }
 
     private class StatsProxyServer extends Server implements ProxyServer {
@@ -160,7 +181,72 @@ public class LazyServerFactory {
 
         @Override
         public List<T> getUpdatedListOfServers() {
-            return (List<T>) servers.getServers();
+            return (List) servers.getServers();
+        }
+    }
+
+    public ProxyServer resolve(final String name, final String url) {
+        return new StatsProxyServer(doResolve(name, url));
+    }
+
+    private static ProxyServer doResolve(final String name, final String url) {
+        final ServiceLoader<ServerResolver> resolvers = ServiceLoader.load(ServerResolver.class);
+        for (final ServerResolver resolver : resolvers) {
+            if (!resolver.acceptsUrl(url)) {
+                continue;
+            }
+            final Properties props = new Properties();
+            if (null != name) {
+                props.setProperty("name", name);
+            }
+            final ProxyServer resolved = resolver.resolve(url, props);
+            if (null != resolved) {
+                return resolved;
+            }
+        }
+        throw new IllegalStateException("NOT found provider, url: " + url);
+    }
+
+    @Slf4j
+    public static class LoadBalancingProxyServer implements ProxyServer {
+        private final String name;
+        private final ILoadBalancer lb;
+
+        public LoadBalancingProxyServer(final String name, final ILoadBalancer lb) {
+            this.name = name;
+            this.lb = lb;
+        }
+
+        @Override
+        public String getName() {
+            return name;
+        }
+
+        @Override
+        public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+            final ProxyServer server = choose(sa);
+            if (null != server) {
+                log.info("Choose {} -> {}", server.getName(), sa);
+                return newProxyHandler(server, sa);
+            }
+            return null;
+        }
+
+        protected ChannelHandler newProxyHandler(final ProxyServer server, final InetSocketAddress sa) {
+            return server.newProxyHandler(sa);
+        }
+
+        protected ProxyServer choose(final InetSocketAddress hint) {
+            final Server server = getLoadBalancer().chooseServer(hint);
+            return null != server ? unwrapServer(server) : null;
+        }
+
+        protected ProxyServer unwrapServer(final Server server) {
+            return ((StatsProxyServer) server).delegate;
+        }
+
+        private ILoadBalancer getLoadBalancer() {
+            return lb;
         }
     }
 }

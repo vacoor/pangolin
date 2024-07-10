@@ -19,7 +19,7 @@ import java.util.Map;
 
 public class ConfigTest {
     public static void main(String[] args) throws IOException {
-        final URL url = ConfigTest.class.getResource("/conf/pangolin.conf");
+        final URL url = ConfigTest.class.getResource("/conf/default.conf");
 
 
         final List<ProxyServer> proxies = Lists.newLinkedList();
