@@ -53,8 +53,7 @@ public class RefreshableServerRegistry implements RouteletContext {
 
     @Override
     public ProxyServer getServer(final String name) {
-        ProxyServer p = null != snapshot ? snapshot.getServer(name) : null;
-        return null != p ? p : parent.getServer(name);
+        return null != snapshot ? snapshot.getServer(name) : null;
     }
 
     @Override
