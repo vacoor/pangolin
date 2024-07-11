@@ -4,6 +4,7 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 import com.github.pangolin.routing.config.ConfigurationException;
 import com.github.pangolin.routing.config.DefaultServerReader;
+import com.github.pangolin.routing.config.Ini;
 import com.github.pangolin.routing.config.RefreshableServerRegistry;
 import com.github.pangolin.routing.handler.extra.ProxyAutoConfigurationServerHandler;
 import com.github.pangolin.routing.handler.extra.SwitchyRuleConfigurationServerHandler;
@@ -11,16 +12,20 @@ import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandle
 import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
+import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
+import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxySocketChannelFactory;
 import com.github.pangolin.routing.proxy.RuleBasedProxyServer;
 import com.github.pangolin.server.NettyServer;
+import com.google.common.collect.Lists;
 import com.netflix.loadbalancer.LoadBalancerStats;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
@@ -36,6 +41,8 @@ import java.net.InetSocketAddress;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  *
@@ -43,17 +50,37 @@ import java.util.List;
 @Slf4j
 public class ServerMain {
 
+    private static MixinServerHandshaker createHandshaker(final String type,
+                                                          final SocketChannelFactory socketChannelFactory) {
+        if ("SOCKS5".equalsIgnoreCase(type)) {
+            return Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, socketChannelFactory));
+        } else if ("SOCKS4".equalsIgnoreCase(type)) {
+            return Socks4MixinServerHandshaker.of(new Socks4ProxyServerHandler(null, socketChannelFactory));
+        } else if ("HTTP".equalsIgnoreCase(type)){
+            return HttpMixinServerHandshaker.of(new HttpProxyServerHandler(null, null, socketChannelFactory));
+        }
+        throw new IllegalStateException(String.format("ILLEGAL_TYPE: %s", type));
+    }
+
     public static void main(String[] args) throws Exception, ConfigurationException {
         final ApplicationHome home = new ApplicationHome(ServerMain.class);
         final File conf = new File(home.getDir(), "conf/default.conf");
         final URL url = conf.toURI().toURL();
 
+        final Ini ini = new Ini();
+        ini.load(url.openStream());
+
+        Ini.Section listen = ini.getSection("Listen");
+        if (null == listen) {
+            listen = ini.addSection("Listen");
+            listen.put("1080", "DEFAULT,SOCKS5,SOCKS4,HTTP");
+        }
+
         final LoadBalancerStats stats = new LoadBalancerStats();
         final RefreshableServerRegistry config = new RefreshableServerRegistry(new DefaultServerReader(stats), url).refresh();
 
         final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
-        final RuleBasedProxyServer ruleProxy = new RuleBasedProxyServer("ROUTING-PROXY", config, config);
-        final SocketChannelFactory factory = new ProxySocketChannelFactory(ruleProxy, bypass);
+        final RuleBasedProxyServer defaultProxy = new RuleBasedProxyServer("ROUTING-PROXY", config, config);
 
 //        final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(modedRulesProvider, proxyServerProvider, bypass);
 //        final StandardSocketChannelFactory factory = new StandardSocketChannelFactory();
@@ -61,31 +88,61 @@ public class ServerMain {
 //        Forwarder forwarder = new Forwarder(factory, new NioEventLoopGroup(), new NioEventLoopGroup());
         // forwarder.addForwarding(3389, "TUNNEL", InetSocketAddress.createUnresolved("10.188.71.3", 3389));
 
+        final List<ChannelFuture> futures = Lists.newLinkedList();
+        int defaultPort = 0;
+        for (final Map.Entry<String, String> entry : listen.entrySet()) {
+            final int listenPort = Integer.parseInt(entry.getKey());
+            final String value = entry.getValue();
+            final String[] segments = value.split("\\s*,\\s*");
+            final String proxy = segments[0];
+            defaultPort = "DEFAULT".equals(proxy) ? listenPort : defaultPort;
+            final ProxyServer proxyServer = "DEFAULT".equals(proxy) ? defaultProxy : new ProxyServer() {
+                @Override
+                public String getName() {
+                    return proxy;
+                }
 
-        final String hostStr = System.getProperty("server.host");
-        final String portStr = System.getProperty("server.port", "1082");
-        final int proxyServerPort = Integer.parseInt(portStr);
-        final NettyServer server = new NettyServer(hostStr, proxyServerPort);
-        ChannelFuture proxyServerChannel = server.start(true, new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel ch) throws Exception {
-                final Socks5MixinServerHandshaker socks5Handshaker = Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, factory));
-                final Socks4MixinServerHandshaker socks4Handshaker = Socks4MixinServerHandshaker.of(new Socks4ProxyServerHandler(null, factory));
-                final HttpMixinServerHandshaker httpHandshaker = HttpMixinServerHandshaker.of(
-                        new ProxyAutoConfigurationServerHandler(config, proxyServerPort),
-                        new SwitchyRuleConfigurationServerHandler(config),
-                        new HttpProxyServerHandler(null, null, factory)
-                );
-                ch.pipeline().addLast(new MixinServerInitializer(socks5Handshaker, socks4Handshaker, httpHandshaker));
-            }
-        });
+                @Override
+                public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+                    ProxyServer server = config.getServer(proxy);
+                    return null != server ? server.newProxyHandler(sa) : null;
+                }
+            };
 
-        ChannelFuture pacChannel = new NettyServer(hostStr, 8098).start(true, new ChannelInitializer<SocketChannel>() {
+            final SocketChannelFactory socketChannelFactory = new ProxySocketChannelFactory(proxyServer, bypass);
+            final List<MixinServerHandshaker> handshakers = Arrays.asList(segments).subList(1, segments.length)
+                    .stream()
+                    .map(type -> createHandshaker(type, socketChannelFactory))
+                    .collect(Collectors.toList());
+
+            final NettyServer server = new NettyServer(listenPort);
+            ChannelFuture f = server.start(true, new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(final SocketChannel channel) throws Exception {
+                    channel.pipeline().addLast(new MixinServerInitializer(handshakers.toArray(new MixinServerHandshaker[0])));
+                }
+            }).addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(final ChannelFuture future) throws Exception {
+                    if (future.isSuccess()) {
+                        final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
+                        log.info("Mixed proxy {} started on port {} ({})", proxy, localAddress.getPort(), localAddress);
+                    } else {
+                        future.cause().printStackTrace();
+                    }
+                }
+            });
+            futures.add(f);
+        }
+
+
+        final int proxyPort = defaultPort;
+        ChannelFuture pacChannel = new NettyServer(8080).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(
                         new SwitchyRuleConfigurationServerHandler(config),
-                        new ProxyAutoConfigurationServerHandler(config, proxyServerPort)
+                        new ProxyAutoConfigurationServerHandler(config, proxyPort)
                 );
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
@@ -106,18 +163,10 @@ public class ServerMain {
             }
         });
 
-        proxyServerChannel.addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture future) throws Exception {
-                if (future.isSuccess()) {
-                    final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                    log.info("Mixed proxy started on port {} ({})", localAddress.getPort(), localAddress);
-                } else {
-                    future.cause().printStackTrace();
-                }
-            }
-        }).sync().channel().closeFuture().sync();
-        pacChannel.channel().close();
+        for (ChannelFuture future : futures) {
+            future.sync().channel().closeFuture().sync();
+        }
+        pacChannel.channel().closeFuture().sync();
     }
 
 }
