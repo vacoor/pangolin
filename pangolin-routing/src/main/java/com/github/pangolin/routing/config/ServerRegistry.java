@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.context;
+package com.github.pangolin.routing.config;
 
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ServerProvider;
@@ -9,7 +9,6 @@ import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class ServerRegistry extends ServerFactory implements ServerProvider, RulesProvider, RouteletContext {
     private final RouteletContext parent;
@@ -28,7 +27,7 @@ public class ServerRegistry extends ServerFactory implements ServerProvider, Rul
     }
 
     public void register(final String name, final String serverUrl) {
-        proxies.put(name, resolve(name, serverUrl));
+        proxies.put(name, create(name, serverUrl));
     }
 
     public void register(final String name, final String type, final List<String> servers) {
@@ -77,15 +76,5 @@ public class ServerRegistry extends ServerFactory implements ServerProvider, Rul
         }
         x.putAll(rules);
         return x;
-    }
-
-    @Override
-    public Collection<ProxyServer> getInstances() {
-        return getServers();
-    }
-
-    @Override
-    public ProxyServer getInstance(final String name) {
-        return getServer(name);
     }
 }

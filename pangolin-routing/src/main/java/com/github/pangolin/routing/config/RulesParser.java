@@ -1,31 +1,19 @@
 package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.routing.config.resolver.RuleResolvers;
-import com.github.pangolin.routing.config.resolver.Utils;
+import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.google.common.collect.Maps;
-import freework.util.StringUtils2;
 
 import java.io.IOException;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
 /**
+ *
  */
 public class RulesParser {
-
-    public static Map<DestinationPattern, String> parseRules(final URL url) throws IOException {
-        final Map<DestinationPattern, String> rules = Maps.newHashMap();
-        Utils.lines(url, StandardCharsets.UTF_8)
-                .filter(StringUtils2::hasText)
-                .forEach(lineToUse -> {
-                    parseRule(lineToUse, url, rules);
-                });
-        return rules;
-    }
 
     public static Map<DestinationPattern, String> parseRules(final Collection<String> rules, final URL url) throws IOException {
         final Map<DestinationPattern, String> rulesToUse = Maps.newHashMap();
@@ -35,7 +23,8 @@ public class RulesParser {
         return rulesToUse;
     }
 
-    private static void parseRule(final String lineToUse, final URL url, final Map<DestinationPattern, String> collector) {
+    private static void parseRule(final String line, final URL url, final Map<DestinationPattern, String> collector) {
+        final String lineToUse = line.replaceAll(",no-resolve$", "");
         final int i = lineToUse.lastIndexOf(",");
         if (-1 < i) {
             final String patternDefinition = lineToUse.substring(0, i);

@@ -1,7 +1,10 @@
 package com.github.pangolin.routing;
 
-import com.github.pangolin.routing.config.ProxiesParser;
-import com.github.pangolin.routing.config.RulesParser;
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
+
+import com.github.pangolin.routing.config.ConfigurationException;
+import com.github.pangolin.routing.config.DefaultServerReader;
+import com.github.pangolin.routing.config.RefreshableServerRegistry;
 import com.github.pangolin.routing.handler.extra.ProxyAutoConfigurationServerHandler;
 import com.github.pangolin.routing.handler.extra.SwitchyRuleConfigurationServerHandler;
 import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
@@ -12,15 +15,15 @@ import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
-import com.github.pangolin.routing.proxy.*;
-import com.github.pangolin.routing.proxy.ServerFactory;
+import com.github.pangolin.routing.proxy.ProxySocketChannelFactory;
 import com.github.pangolin.routing.proxy.RuleBasedProxyServer;
-import com.github.pangolin.routing.rule.RulesProvider;
-import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.server.NettyServer;
-import com.google.common.collect.Lists;
 import com.netflix.loadbalancer.LoadBalancerStats;
-import io.netty.channel.*;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
@@ -28,11 +31,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.system.ApplicationHome;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.net.InetSocketAddress;
-import java.util.*;
-
-import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
+import java.net.URL;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  *
@@ -40,67 +42,16 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 @Slf4j
 public class ServerMain {
 
-    public static void main(String[] args) throws Exception {
-        final LoadBalancerStats stats = new LoadBalancerStats();
-        final ServerFactory groupFactory = new ServerFactory(stats);
-
+    public static void main(String[] args) throws Exception, ConfigurationException {
         final ApplicationHome home = new ApplicationHome(ServerMain.class);
-        final File homeFile = home.getDir();
-        final File proxiesConf = new File(homeFile, "conf/proxies.conf");
-        final File rulesConf = new File(homeFile, "conf/rule.conf");
+        final File conf = new File(home.getDir(), "conf/default.conf");
+        final URL url = conf.toURI().toURL();
 
-        log.info("Rules config: " + rulesConf.getAbsolutePath());
-        log.info("Proxies config: " + proxiesConf.getAbsolutePath());
-
-        ProxyServerProvider proxyServerProvider = proxiesConf.exists() ? ProxiesParser.parse(new FileInputStream(proxiesConf), groupFactory) : new ComposedProxyServerProvider();
-
-        final Map<DestinationPattern, String> rules = rulesConf.exists() ? RulesParser.parseRules(rulesConf.toURI().toURL()) : Collections.emptyMap();
-
-        for (Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
-            log.debug(String.format("%s -> %s", entry.getKey(), entry.getValue()));
-        }
-
-        final RulesProvider rulesProvider = () -> rules;
-        /*-
-         * 策略
-         *   目标 --> 代理
-         *   目标集 --> 代理
-         * eg:
-         * 规则模式
-         *   目标 --> 代理
-         *   默认 --> DIRECT
-         * 全局模式
-         *   目标 --> 代理
-         *   默认 --> 代理
-         * 直连模式
-         *   默认 --> DIRECT
-         */
-
+        final LoadBalancerStats stats = new LoadBalancerStats();
+        final RefreshableServerRegistry config = new RefreshableServerRegistry(new DefaultServerReader(stats), url).refresh();
 
         final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
-
-        final ProxyServer tunnelNextHop = proxyServerProvider.getInstance("TUNNEL-NEXT-HOP");
-        if (null != tunnelNextHop) {
-            final ProxyServer tunnel = proxyServerProvider.getInstance("TUNNEL");
-            final ServerFactory.ProxyServerChain proxyServerChain = new ServerFactory.ProxyServerChain("TUNNEL-DIRECT-HOP", tunnel, tunnelNextHop);
-            final ProxyServerProvider origProvider = proxyServerProvider;
-            proxyServerProvider = new ProxyServerProvider() {
-                @Override
-                public Collection<ProxyServer> getInstances() {
-                    final List<ProxyServer> servers = Lists.newArrayList(origProvider.getInstances());
-                    servers.add(proxyServerChain);
-                    return servers;
-                }
-
-                @Override
-                public ProxyServer getInstance(final String name) {
-                    return proxyServerChain.getName().equals(name) ? proxyServerChain : origProvider.getInstance(name);
-                }
-            };
-        }
-
-
-        final RuleBasedProxyServer ruleProxy = new RuleBasedProxyServer("ROUTING-PROXY", rulesProvider, proxyServerProvider);
+        final RuleBasedProxyServer ruleProxy = new RuleBasedProxyServer("ROUTING-PROXY", config, config);
         final SocketChannelFactory factory = new ProxySocketChannelFactory(ruleProxy, bypass);
 
 //        final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(modedRulesProvider, proxyServerProvider, bypass);
@@ -120,8 +71,8 @@ public class ServerMain {
                 final Socks5MixinServerHandshaker socks5Handshaker = Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, factory));
                 final Socks4MixinServerHandshaker socks4Handshaker = Socks4MixinServerHandshaker.of(new Socks4ProxyServerHandler(null, factory));
                 final HttpMixinServerHandshaker httpHandshaker = HttpMixinServerHandshaker.of(
-                        new ProxyAutoConfigurationServerHandler(rulesProvider, proxyServerPort),
-                        new SwitchyRuleConfigurationServerHandler(rulesProvider),
+                        new ProxyAutoConfigurationServerHandler(config, proxyServerPort),
+                        new SwitchyRuleConfigurationServerHandler(config),
                         new HttpProxyServerHandler(null, null, factory)
                 );
                 ch.pipeline().addLast(new MixinServerInitializer(socks5Handshaker, socks4Handshaker, httpHandshaker));
@@ -132,8 +83,8 @@ public class ServerMain {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(
-                        new SwitchyRuleConfigurationServerHandler(rulesProvider),
-                        new ProxyAutoConfigurationServerHandler(rulesProvider, proxyServerPort)
+                        new SwitchyRuleConfigurationServerHandler(config),
+                        new ProxyAutoConfigurationServerHandler(config, proxyServerPort)
                 );
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override

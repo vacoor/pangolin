@@ -1,6 +1,4 @@
-package com.github.pangolin.routing.context;
-
-import com.github.pangolin.routing.config.ConfigurationException;
+package com.github.pangolin.routing.config;
 
 import java.io.IOException;
 import java.net.URL;

@@ -1,6 +1,9 @@
-package com.github.pangolin.routing.proxy;
+package com.github.pangolin.routing.config;
 
+import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.proxy.ServerProvider;
 import com.github.pangolin.routing.proxy.spi.ServerResolver;
+import com.google.common.collect.Lists;
 import com.netflix.client.config.IClientConfig;
 import com.netflix.client.config.PropertyResolver;
 import com.netflix.client.config.ReloadableClientConfig;
@@ -26,7 +29,7 @@ import io.netty.channel.socket.SocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
-import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -45,8 +48,8 @@ public class ServerFactory {
         this.stats = stats;
     }
 
-    public ProxyServer resolve(final String name, final String url) {
-        return new StatsProxyServer(doResolve(name, url));
+    public ProxyServer create(final String name, final String url) {
+        return wrapIfNecessary(doResolve(name, url));
     }
 
     private static ProxyServer doResolve(final String name, final String url) {
@@ -67,46 +70,52 @@ public class ServerFactory {
         throw new IllegalStateException("NOT found provider, url: " + url);
     }
 
-
-    public ProxyServer createServerGroup(final String name, final String type,
-                                                 final String url, final List<ProxyServer> servers) {
+    public ProxyServer createServerGroup(final String name, final String type, final ServerProvider servers) {
         if ("chain".equals(type)) {
-            return new StatsProxyServer(new ProxyServerChain(name, servers.toArray(new ProxyServer[0])));
+            return wrapIfNecessary(new LazyServerChain(name, servers));
         }
+
         final IClientConfig config = new DefaultClientConfig();
         final IRule rule = new WeightedResponseTimeRule();
         final IPing ping = new DummyPing();
-        final ServerList<? extends Server> serverList = new StaticServerList<>(
-                servers.stream().map(StatsProxyServer::new).collect(Collectors.toList())
-        );
+        final ServerList<? extends Server> serverList = new LazyServerList<>(servers);
         final ServerListFilter<? extends Server> serverListFilter = new ZoneAffinityServerListFilter<>(config);
         final ServerListUpdater serverListUpdater = new PollingServerListUpdater(config);
 
         final ZoneAwareLoadBalancer<? extends Server> lb = new ZoneAwareLoadBalancer(config, rule, ping, serverList, serverListFilter, serverListUpdater);
-
-//        lb.initWithNiwsConfig(new DefaultClientConfig());
         lb.setLoadBalancerStats(stats);
-//        lb.setRule(new WeightedResponseTimeRule());
-//        lb.setServersList();
-
-        return new StatsProxyServer(new LoadBalancingProxyServer(name, lb));
+        return wrapIfNecessary(new LoadBalancingProxyServer(name, lb));
     }
 
-    private class StaticServerList<T extends Server> implements ServerList<T> {
-        private final List<T> servers;
+    private ProxyServer wrapIfNecessary(final ProxyServer server) {
+        return server instanceof StatsProxyServer ? server : new StatsProxyServer(server);
+    }
 
-        private StaticServerList(final List<T> servers) {
-            this.servers = servers;
+    static class LazyServerProvider implements ServerProvider {
+        private final List<String> names;
+        private final ServerProvider registry;
+
+        LazyServerProvider(final List<String> names, final ServerProvider registry) {
+            this.names = names;
+            this.registry = registry;
         }
 
         @Override
-        public List<T> getInitialListOfServers() {
-            return servers;
+        public Collection<String> names() {
+            return names;
         }
 
         @Override
-        public List<T> getUpdatedListOfServers() {
-            return servers;
+        public ProxyServer getServer(final String name) {
+            return names.contains(name) ? registry.getServer(name) : null;
+        }
+
+        @Override
+        public List<ProxyServer> getServers() {
+            return names.stream()
+                    .map(registry::getServer)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
         }
     }
 
@@ -169,9 +178,38 @@ public class ServerFactory {
         }
     }
 
-    /**
-     *
-     */
+    private class LazyServerChain implements ProxyServer {
+        private final String name;
+        private final ServerProvider chain;
+
+        private LazyServerChain(final String name, final ServerProvider chain) {
+            this.name = name;
+            this.chain = chain;
+        }
+
+        @Override
+        public String getName() {
+            return name;
+        }
+
+        @Override
+        public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+            final List<ChannelHandler> handlers = chain.getServers()
+                    .stream()
+                    .map(s -> s.newProxyHandler(sa))
+                    .collect(Collectors.toList());
+            if (handlers.isEmpty()) {
+                return null;
+            }
+            return new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(final SocketChannel ch) {
+                    ch.pipeline().addLast(handlers.toArray(new ChannelHandler[0]));
+                }
+            };
+        }
+    }
+
     @Slf4j
     public static class LoadBalancingProxyServer implements ProxyServer {
         private final String name;
@@ -202,12 +240,7 @@ public class ServerFactory {
         }
 
         protected ProxyServer choose(final InetSocketAddress hint) {
-            final Server server = getLoadBalancer().chooseServer(hint);
-            return null != server ? unwrapServer(server) : null;
-        }
-
-        protected ProxyServer unwrapServer(final Server server) {
-            return ((StatsProxyServer) server).delegate;
+            return (StatsProxyServer) getLoadBalancer().chooseServer(hint);
         }
 
         private ILoadBalancer getLoadBalancer() {
@@ -215,48 +248,25 @@ public class ServerFactory {
         }
     }
 
-    public static class ProxyServerChain implements ProxyServer {
-        private final String name;
-        private final ProxyServer[] proxyServers;
+    private class LazyServerList<T extends Server & ProxyServer> implements ServerList<T> {
+        private final ServerProvider servers;
 
-        public ProxyServerChain(final String name, final ProxyServer... proxyServers) {
-            this.name = name;
-            this.proxyServers = proxyServers;
+        private LazyServerList(final ServerProvider servers) {
+            this.servers = servers;
         }
 
         @Override
-        public String getName() {
-            return name;
+        public List<T> getInitialListOfServers() {
+            return getUpdatedListOfServers();
         }
 
         @Override
-        public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
-            final List<ChannelHandler> handlers = Arrays.stream(proxyServers)
-                    .map(s -> this.newProxyHandler(s, sa))
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-            if (!handlers.isEmpty()) {
-                return new ChannelInitializer<SocketChannel>() {
-                    @Override
-                    protected void initChannel(final SocketChannel ch) throws Exception {
-                        ch.pipeline().addLast(handlers.toArray(new ChannelHandler[0]));
-                    }
-                };
-            }
-            return null;
-        }
-
-        protected ChannelHandler newProxyHandler(final ProxyServer server, final InetSocketAddress sa) {
-            return server.newProxyHandler(sa);
+        public List<T> getUpdatedListOfServers() {
+            return (List) Lists.newArrayList(this.servers.getServers());
         }
     }
 
-    /**
-     * TODO DOC ME!.
-     *
-     * @author changhe.yang
-     * @since 20240709
-     */
+
     public static class DefaultClientConfig extends ReloadableClientConfig {
 
         public DefaultClientConfig() {

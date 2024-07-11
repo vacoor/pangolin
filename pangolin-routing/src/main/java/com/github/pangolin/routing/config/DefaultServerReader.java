@@ -1,19 +1,17 @@
-package com.github.pangolin.routing.context;
+package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.config.ConfigurationException;
-import com.github.pangolin.routing.config.Ini;
-import com.github.pangolin.routing.config.RulesParser;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 public class DefaultServerReader implements ServerReader {
     private final LoadBalancerStats stats;
 
@@ -68,13 +66,4 @@ public class DefaultServerReader implements ServerReader {
         return new RefreshableServerRegistry(new ExternalServerReader(stats), new URL(url), parent).refresh();
     }
 
-    public static void main(String[] args) throws ConfigurationException, IOException {
-        final LoadBalancerStats stats = new LoadBalancerStats();
-        final URL url = DefaultServerReader.class.getResource("/conf/default.conf");
-
-        RefreshableServerRegistry config = new RefreshableServerRegistry(new DefaultServerReader(stats), url);
-        config.refresh();
-
-        System.out.println();
-    }
 }

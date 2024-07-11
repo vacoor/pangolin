@@ -1,8 +1,5 @@
-package com.github.pangolin.routing.context;
+package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.config.ConfigurationException;
-import com.github.pangolin.routing.config.ProxyGroupDefinition;
-import com.github.pangolin.routing.config.RulesParser;
 import com.github.pangolin.routing.config.clash.ClashConfiguration;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.google.common.base.Preconditions;
@@ -33,7 +30,7 @@ public class ExternalServerReader implements ServerReader {
         final ClashConfiguration conf = loadClashConfiguration(url);
 
         final List<ClashConfiguration.ProxyDefinition> proxyDefinitions = nvl(conf.getProxies(), Collections.emptyList());
-        final List<ProxyGroupDefinition> proxyGroupDefinitions = nvl(conf.getProxyGroups(), Collections.emptyList());
+        final List<ClashConfiguration.ProxyGroupDefinition> proxyGroupDefinitions = nvl(conf.getProxyGroups(), Collections.emptyList());
         final List<String> rules = nvl(conf.getRules(), Collections.emptyList());
 
         proxyDefinitions.stream()

@@ -1,7 +1,5 @@
 package com.github.pangolin.routing.proxy;
 
-import com.github.pangolin.routing.proxy.ProxyServer;
-import com.github.pangolin.routing.proxy.ProxyServerProvider;
 import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import io.netty.channel.ChannelHandler;
@@ -18,9 +16,9 @@ import java.util.Map;
 public class RuleBasedProxyServer implements ProxyServer {
     private final String name;
     private final RulesProvider rulesProvider;
-    private final ProxyServerProvider proxyServerProvider;
+    private final ServerProvider proxyServerProvider;
 
-    public RuleBasedProxyServer(final String name, final RulesProvider rulesProvider, final ProxyServerProvider provider) {
+    public RuleBasedProxyServer(final String name, final RulesProvider rulesProvider, final ServerProvider provider) {
         this.name = name;
         this.rulesProvider = rulesProvider;
         this.proxyServerProvider = provider;
@@ -53,7 +51,7 @@ public class RuleBasedProxyServer implements ProxyServer {
                 continue;
             }
 
-            final ProxyServer proxyToUse = proxyServerProvider.getInstance(entry.getValue());
+            final ProxyServer proxyToUse = proxyServerProvider.getServer(entry.getValue());
             log.info("[ROUTING] will use the proxy '{}' => {}:{}", entry.getValue(), sa.getHostString(), sa.getPort());
             if (null != proxyToUse) {
                 return proxyToUse;

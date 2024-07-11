@@ -1,10 +1,7 @@
-package com.github.pangolin.routing.context;
+package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.config.ConfigurationException;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
-import com.google.common.collect.Lists;
-import com.netflix.loadbalancer.LoadBalancerStats;
 
 import java.io.IOException;
 import java.net.URL;
@@ -31,19 +28,8 @@ public class RefreshableServerRegistry implements RouteletContext {
     }
 
     public RefreshableServerRegistry refresh() throws ConfigurationException, IOException {
-//        final SubConfiguration external = parseExternal(ini.getSection("External"), serverFactory);
         snapshot = reader.load(conf, parent);
         return this;
-    }
-
-    @Override
-    public Collection<ProxyServer> getInstances() {
-        return getServers();
-    }
-
-    @Override
-    public ProxyServer getInstance(final String name) {
-        return getServer(name);
     }
 
     @Override

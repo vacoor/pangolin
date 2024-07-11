@@ -29,7 +29,7 @@ import java.util.Date;
 import java.util.Map;
 
 /**
- * Proxy Auto-SubConfiguration File Server Handler.
+ * Proxy Auto-Configuration File Server Handler.
  *
  * @see <a href="https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Proxy_servers_and_tunneling/Proxy_Auto-Configuration_PAC_file">代理自动配置文件（PAC）</a>
  * @see <a href="https://github.com/manugarg/pacparser">PAC parser</a>
@@ -120,7 +120,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
         final StringBuilder buff = new StringBuilder();
         final String now = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
         buff.append("/**\r\n")
-                .append(" * Proxy Auto-SubConfiguration (PAC) file.\r\n")
+                .append(" * Proxy Auto-Configuration (PAC) file.\r\n")
                 .append(" *\r\n")
                 .append(" * Date: ").append(now).append("\r\n")
                 .append(" * Link: https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Proxy_servers_and_tunneling/Proxy_Auto-Configuration_PAC_file\r\n")

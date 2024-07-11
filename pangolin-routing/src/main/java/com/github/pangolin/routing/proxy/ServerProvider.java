@@ -12,6 +12,6 @@ public interface ServerProvider {
 
     ProxyServer getServer(final String name);
 
-    List<ProxyServer> getServers();
+    Collection<ProxyServer> getServers();
 
 }
