@@ -57,10 +57,10 @@ public class ServerRegistry extends ServerFactory implements ServerProvider, Rul
     @Override
     public List<ProxyServer> getServers() {
         final List<ProxyServer> a = Lists.newLinkedList();
+        a.addAll(proxies.values());
         if (null != parent) {
             a.addAll(parent.getServers());
         }
-        a.addAll(proxies.values());
         return a;
     }
 
@@ -71,10 +71,10 @@ public class ServerRegistry extends ServerFactory implements ServerProvider, Rul
     @Override
     public Map<DestinationPattern, String> getRules() {
         Map<DestinationPattern, String> x = Maps.newLinkedHashMap();
+        x.putAll(rules);
         if (null != parent) {
             x.putAll(parent.getRules());
         }
-        x.putAll(rules);
         return x;
     }
 }

@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.rule.pattern;
 
+import com.github.pangolin.routing.AddressUtils;
 import io.netty.util.internal.SocketUtils;
 
 import java.math.BigInteger;
@@ -24,9 +25,9 @@ public class SubnetPattern implements DestinationPattern {
             this.ipAddress = inetAddress;
             this.prefixLength = cidrPrefix;
             if (inetAddress instanceof Inet4Address) {
-                delegate = new Inet4SubnetPattern((Inet4Address) inetAddress, cidrPrefix);
+                delegate = new Inet4SubnetPattern(ipAddress + "/" + cidrPrefix, (Inet4Address) inetAddress, cidrPrefix);
             } else if (inetAddress instanceof Inet6Address) {
-                delegate = new Inet6SubnetPattern((Inet6Address) inetAddress, cidrPrefix);
+                delegate = new Inet6SubnetPattern(ipAddress + "/" + cidrPrefix, (Inet6Address) inetAddress, cidrPrefix);
             } else {
                 throw new IllegalArgumentException("Only IPv4 and IPv6 addresses are supported");
             }
@@ -85,26 +86,38 @@ public class SubnetPattern implements DestinationPattern {
     }
 
     public static class Inet4SubnetPattern implements DestinationPattern {
+        private final String name;
         private final int subnetMask;
         private final int networkAddress;
 
-        Inet4SubnetPattern(final Inet4Address ipAddress, final int cidrPrefix) {
+        Inet4SubnetPattern(final String name, final Inet4Address ipAddress, final int cidrPrefix) {
             if (cidrPrefix < 0 || cidrPrefix > 32) {
                 throw new IllegalArgumentException(String.format("IPv4 requires the subnet prefix to be in range of [0,32]. The prefix was: %d", cidrPrefix));
             }
 
+            this.name = name;
             subnetMask = prefixToSubnetMask(cidrPrefix);
             networkAddress = ipToInt(ipAddress) & subnetMask;
         }
 
         @Override
         public boolean matches(final InetSocketAddress destination) {
-            final InetAddress inetAddress = destination.getAddress();
-            if (inetAddress instanceof Inet4Address) {
-                final int ipAddress = ipToInt((Inet4Address) inetAddress);
-                return (ipAddress & subnetMask) == networkAddress;
+            try {
+                InetAddress inetAddress;
+                if (destination.isUnresolved()) {
+                    byte[] bytes = AddressUtils.textToNumericFormatV4(destination.getHostString());
+                    inetAddress = null != bytes ? InetAddress.getByAddress(bytes) : null;
+                } else {
+                    inetAddress = destination.getAddress();
+                }
+                if (inetAddress instanceof Inet4Address) {
+                    final int ipAddress = ipToInt((Inet4Address) inetAddress);
+                    return (ipAddress & subnetMask) == networkAddress;
+                }
+                return false;
+            } catch (UnknownHostException e) {
+                return false;
             }
-            return false;
         }
 
         public String getNetworkAddress() {
@@ -143,27 +156,39 @@ public class SubnetPattern implements DestinationPattern {
     public static class Inet6SubnetPattern implements DestinationPattern {
         private static final BigInteger MINUS_ONE = BigInteger.valueOf(-1);
 
+        private final String name;
         private final BigInteger networkAddress;
         private final BigInteger subnetMask;
 
-        Inet6SubnetPattern(final Inet6Address ipAddress, int cidrPrefix) {
+        Inet6SubnetPattern(final String name, final Inet6Address ipAddress, int cidrPrefix) {
             if (cidrPrefix < 0 || cidrPrefix > 128) {
                 throw new IllegalArgumentException(String.format("IPv6 requires the subnet prefix to be in range of " +
                         "[0,128]. The prefix was: %d", cidrPrefix));
             }
 
+            this.name = name;
             subnetMask = prefixToSubnetMask(cidrPrefix);
             networkAddress = ipToInt(ipAddress).and(subnetMask);
         }
 
         @Override
         public boolean matches(final InetSocketAddress destination) {
-            final InetAddress inetAddress = destination.getAddress();
-            if (inetAddress instanceof Inet6Address) {
-                final BigInteger ipAddress = ipToInt((Inet6Address) inetAddress);
-                return ipAddress.and(subnetMask).equals(networkAddress);
+            InetAddress inetAddress;
+            try {
+                if (destination.isUnresolved()) {
+                    byte[] bytes = AddressUtils.textToNumericFormatV6(destination.getHostString());
+                    inetAddress = null != bytes ? InetAddress.getByAddress(bytes) : null;
+                } else {
+                    inetAddress = destination.getAddress();
+                }
+                if (inetAddress instanceof Inet6Address) {
+                    final BigInteger ipAddress = ipToInt((Inet6Address) inetAddress);
+                    return ipAddress.and(subnetMask).equals(networkAddress);
+                }
+                return false;
+            } catch (UnknownHostException e) {
+                return false;
             }
-            return false;
         }
 
         private static BigInteger ipToInt(Inet6Address ipAddress) {
