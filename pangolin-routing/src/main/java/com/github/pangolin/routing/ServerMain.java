@@ -32,7 +32,6 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
-import io.netty.util.internal.SocketUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.system.ApplicationHome;
 
@@ -42,7 +41,6 @@ import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  *
@@ -115,11 +113,9 @@ public class ServerMain {
             ChannelFuture f = server.start(true, new ChannelInitializer<SocketChannel>() {
                 @Override
                 protected void initChannel(final SocketChannel channel) throws Exception {
-                    final List<MixinServerHandshaker> handshakers = Arrays.asList(segments).subList(1, segments.length)
+                    channel.pipeline().addLast(new MixinServerInitializer(Arrays.asList(segments).subList(1, segments.length)
                             .stream()
-                            .map(type -> createHandshaker(type, socketChannelFactory))
-                            .collect(Collectors.toList());
-                    channel.pipeline().addLast(new MixinServerInitializer(handshakers.toArray(new MixinServerHandshaker[0])));
+                            .map(type -> createHandshaker(type, socketChannelFactory)).toArray(MixinServerHandshaker[]::new)));
                 }
             }).addListener(new ChannelFutureListener() {
                 @Override
