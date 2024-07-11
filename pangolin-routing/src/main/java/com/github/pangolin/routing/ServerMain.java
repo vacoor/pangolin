@@ -110,15 +110,15 @@ public class ServerMain {
             };
 
             final SocketChannelFactory socketChannelFactory = new ProxySocketChannelFactory(proxyServer, bypass);
-            final List<MixinServerHandshaker> handshakers = Arrays.asList(segments).subList(1, segments.length)
-                    .stream()
-                    .map(type -> createHandshaker(type, socketChannelFactory))
-                    .collect(Collectors.toList());
 
             final NettyServer server = new NettyServer(listenPort);
             ChannelFuture f = server.start(true, new ChannelInitializer<SocketChannel>() {
                 @Override
                 protected void initChannel(final SocketChannel channel) throws Exception {
+                    final List<MixinServerHandshaker> handshakers = Arrays.asList(segments).subList(1, segments.length)
+                            .stream()
+                            .map(type -> createHandshaker(type, socketChannelFactory))
+                            .collect(Collectors.toList());
                     channel.pipeline().addLast(new MixinServerInitializer(handshakers.toArray(new MixinServerHandshaker[0])));
                 }
             }).addListener(new ChannelFutureListener() {
