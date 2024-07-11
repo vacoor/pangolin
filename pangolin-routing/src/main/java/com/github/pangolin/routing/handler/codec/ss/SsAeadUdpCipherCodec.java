@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.handler.codec.ss;
 
 import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
-import com.github.pangolin.routing.handler.codec.ss.crypto.SsKeyFactory;
+import com.github.pangolin.routing.handler.codec.ss.crypto.SsSecretKey;
 import freework.util.Bytes;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -35,7 +35,7 @@ public class SsAeadUdpCipherCodec extends MessageToMessageCodec<DatagramPacket, 
     }
 
     private static byte[] generateMasterKey(final AeadCipherAlgorithm algorithm, final String password) {
-        return SsKeyFactory.generateKey(password, algorithm.getKeySize());
+        return SsSecretKey.generateKey(password, algorithm.getKeySize());
     }
 
     public SsAeadUdpCipherCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {

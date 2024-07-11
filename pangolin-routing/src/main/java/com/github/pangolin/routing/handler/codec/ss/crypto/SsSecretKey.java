@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.handler.codec.ss.crypto;
 
+import javax.crypto.SecretKey;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -9,7 +10,7 @@ import java.util.Arrays;
 /**
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Stream-Ciphers#stream-encryptiondecryption">EVP_BytesToKey</a>
  */
-public class SsKeyFactory {
+public class SsSecretKey /*implements SecretKey*/ {
     private static final int DIGEST_LENGTH = 32;
     private static final String DIGEST_ALGORITHM = "MD5";
 
