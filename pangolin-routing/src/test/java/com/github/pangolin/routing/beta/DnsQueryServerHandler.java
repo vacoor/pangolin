@@ -46,19 +46,22 @@ public class DnsQueryServerHandler extends SimpleChannelInboundHandler<DatagramD
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final DatagramDnsQuery query) throws Exception {
         final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
-        final String name = dnsQuestion.name();
+        final String domain = dnsQuestion.name();
 
         final int ttl = 10;
-        if ("iproxy.io.".equalsIgnoreCase(name)) {
-            final byte[] bytes = NetUtil.createByteArrayFromIpAddressString("192.168.1.201");
+        if ("iproxyvacoor.io.".equalsIgnoreCase(domain)) {
+            final byte[] bytes = NetUtil.createByteArrayFromIpAddressString("10.188.71.3");
             final ByteBuf buf = Unpooled.wrappedBuffer(bytes);
-            final DefaultDnsRawRecord answer = new DefaultDnsRawRecord(dnsQuestion.name(), DnsRecordType.A, ttl, buf);
+            final DefaultDnsRawRecord dnsQuestionAnswer = new DefaultDnsRawRecord(dnsQuestion.name(), DnsRecordType.A, ttl, buf);
 
             final DatagramDnsResponse response = new DatagramDnsResponse(query.recipient(), query.sender(), query.id());
-            response.addRecord(DnsSection.ANSWER, answer);
+            response.addRecord(DnsSection.QUESTION, dnsQuestion);
+            response.addRecord(DnsSection.ANSWER, dnsQuestionAnswer);
+            System.out.println(response);
             ctx.writeAndFlush(response);
             return;
         }
+        /*
         Bootstrap b = new Bootstrap();
         b.group(ctx.channel().eventLoop()).channel(NioDatagramChannel.class).handler(new SimpleChannelInboundHandler<DatagramDnsResponse>() {
 
@@ -102,6 +105,7 @@ public class DnsQueryServerHandler extends SimpleChannelInboundHandler<DatagramD
                 System.out.println("CLOSED");
             }
         });
+        */
     }
 
 
