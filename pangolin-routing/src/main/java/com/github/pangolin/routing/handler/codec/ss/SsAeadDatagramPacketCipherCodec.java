@@ -19,7 +19,7 @@ import java.util.List;
 /**
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers#udp">UDP</a>
  */
-public class SsAeadUdpCipherCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
+public class SsAeadDatagramPacketCipherCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
     private final byte[] masterKey;
     private final AeadCipherAlgorithm algorithm;
     private final SecureRandom random;
@@ -30,7 +30,7 @@ public class SsAeadUdpCipherCodec extends MessageToMessageCodec<DatagramPacket, 
 
     private final byte[] nonce;
 
-    public SsAeadUdpCipherCodec(final AeadCipherAlgorithm algorithm, final String password, final SecureRandom random) {
+    public SsAeadDatagramPacketCipherCodec(final AeadCipherAlgorithm algorithm, final String password, final SecureRandom random) {
         this(generateMasterKey(algorithm, password), algorithm, random);
     }
 
@@ -38,7 +38,7 @@ public class SsAeadUdpCipherCodec extends MessageToMessageCodec<DatagramPacket, 
         return SsSecretKey.generateKey(password, algorithm.getKeySize());
     }
 
-    public SsAeadUdpCipherCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
+    public SsAeadDatagramPacketCipherCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
         if (masterKey.length != algorithm.getKeySize()) {
             throw new IllegalArgumentException("master key size != crypt.getKeySize()");
         }
@@ -104,7 +104,7 @@ public class SsAeadUdpCipherCodec extends MessageToMessageCodec<DatagramPacket, 
      */
     private byte[] generateSubkey(final byte[] masterKey, final byte[] salt) {
         final HKDFBytesGenerator hkdf = new HKDFBytesGenerator(new SHA1Digest());
-        hkdf.init(new HKDFParameters(masterKey, salt, Bytes.toBytes("ss-encodeSubkey")));
+        hkdf.init(new HKDFParameters(masterKey, salt, Bytes.toBytes("ss-subkey")));
 
         final byte[] okm = new byte[masterKey.length];
         final int written = hkdf.generateBytes(okm, 0, masterKey.length);

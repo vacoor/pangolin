@@ -10,7 +10,7 @@ import java.security.cert.CertificateException;
 
 public class SocksServerTest {
     public static void main(String[] args) throws InterruptedException, SSLException, CertificateException {
-        NettyServer server = new NettyServer(1080);
+        NettyServer server = new NettyServer("192.168.1.12", 1080);
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {

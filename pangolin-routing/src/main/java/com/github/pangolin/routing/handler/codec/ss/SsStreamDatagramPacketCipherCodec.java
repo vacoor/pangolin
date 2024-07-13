@@ -15,14 +15,14 @@ import java.util.List;
 /**
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Stream-Ciphers#udp">UDP</a>
  */
-public class SsStreamUdpCipherCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
+public class SsStreamDatagramPacketCipherCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
     private final byte[] masterKey;
     private final StreamCipherAlgorithm algorithm;
     private final SecureRandom random;
 
     private final int ivSize;
 
-    public SsStreamUdpCipherCodec(final StreamCipherAlgorithm algorithm, final String password, final SecureRandom random) {
+    public SsStreamDatagramPacketCipherCodec(final StreamCipherAlgorithm algorithm, final String password, final SecureRandom random) {
         this(generateMasterKey(algorithm, password), algorithm, random);
     }
 
@@ -30,7 +30,7 @@ public class SsStreamUdpCipherCodec extends MessageToMessageCodec<DatagramPacket
         return SsSecretKey.generateKey(password, algorithm.getKeySize());
     }
 
-    public SsStreamUdpCipherCodec(final byte[] masterKey, final StreamCipherAlgorithm algorithm, final SecureRandom random) {
+    public SsStreamDatagramPacketCipherCodec(final byte[] masterKey, final StreamCipherAlgorithm algorithm, final SecureRandom random) {
         if (masterKey.length != algorithm.getKeySize()) {
             throw new IllegalArgumentException("master key size != crypt.getKeySize()");
         }

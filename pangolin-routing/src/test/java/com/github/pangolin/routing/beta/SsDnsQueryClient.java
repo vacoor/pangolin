@@ -1,36 +1,34 @@
 package com.github.pangolin.routing.beta;
 
+import com.github.pangolin.routing.handler.codec.ss.SsAeadDatagramPacketCipherCodec;
+import com.github.pangolin.routing.handler.codec.ss.SsClientDatagramPacketCodec;
+import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.handler.codec.dns.*;
 import io.netty.util.NetUtil;
-import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.security.SecureRandom;
 
 /**
  *
  */
-@Slf4j
-public class Socks5DnsQueryClient {
-
+public class SsDnsQueryClient {
     public static void main(String[] args) throws Exception {
-        final InetSocketAddress proxyAddress = new InetSocketAddress("192.168.1.12", 1080);
+        final InetSocketAddress proxyAddress = new InetSocketAddress("f0990972.pnd6xm1ljcfpc3b-fbnode.6pzfwf.com", 56001);
+        CipherAlgorithm cipher = CipherAlgorithmSpi.getInstance("chacha20-ietf-poly1305");
 
-//        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
-        final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
-//        final InetSocketAddress dnsServer = new InetSocketAddress("127.0.0.1", 1080);
-        DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
+        final InetSocketAddress dnsServer = new InetSocketAddress("8.8.8.8", 53);
+        DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsServer, 1);
 //        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("iproxyvacoor.io.", DnsRecordType.A));
-        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("www.baidu.com", DnsRecordType.A));
+        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
 
         EventLoopGroup proxyGroup = new NioEventLoopGroup();
         Bootstrap b = new Bootstrap();
@@ -38,9 +36,10 @@ public class Socks5DnsQueryClient {
                 .handler(new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
-                        ch.pipeline().addLast(new Socks5ClientDatagramPacketCodec(proxyAddress));
-                        ch.pipeline().addLast(new DatagramDnsResponseDecoder());
+                        ch.pipeline().addLast(new SsAeadDatagramPacketCipherCodec((AeadCipherAlgorithm) cipher, "jASkBs", new SecureRandom()));
+                        ch.pipeline().addLast(new SsClientDatagramPacketCodec(proxyAddress));
                         ch.pipeline().addLast(new DatagramDnsQueryEncoder());
+                        ch.pipeline().addLast(new DatagramDnsResponseDecoder());
                         ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramDnsResponse>() {
 
                             @Override
@@ -60,10 +59,9 @@ public class Socks5DnsQueryClient {
 
                         });
                     }
-                }).option(ChannelOption.SO_BROADCAST, true).bind(2080)
+                }).option(ChannelOption.SO_BROADCAST, false).bind(0)
                 .sync()
                 .channel().writeAndFlush(query)
-                .channel().closeFuture().sync()
         ;
 
     }

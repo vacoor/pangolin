@@ -150,14 +150,14 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                             ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.DOMAIN, sa.getHostString(), 1080));
                             return;
                         }
-                        InetAddress address = sa.getAddress();
-                        if (address instanceof Inet4Address) {
-                            Inet4Address a = (Inet4Address) address;
+                        InetAddress inetAddress = sa.getAddress();
+                        if (inetAddress instanceof Inet4Address) {
+                            Inet4Address a = (Inet4Address) inetAddress;
                             ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv4, a.getHostAddress(), 1080));
                             return;
                         }
-                        if (address instanceof Inet6Address) {
-                            Inet6Address a = (Inet6Address) address;
+                        if (inetAddress instanceof Inet6Address) {
+                            Inet6Address a = (Inet6Address) inetAddress;
                             ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv6, a.getHostAddress(), 1080));
                             return;
                         }
