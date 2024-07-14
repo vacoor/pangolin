@@ -25,7 +25,7 @@ import java.util.List;
 public class Socks5DatagramPacketCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
     private final InetSocketAddress proxyAddress;
 
-    Socks5DatagramPacketCodec(final InetSocketAddress proxyAddress) {
+    public Socks5DatagramPacketCodec(final InetSocketAddress proxyAddress) {
         this.proxyAddress = proxyAddress;
     }
 
