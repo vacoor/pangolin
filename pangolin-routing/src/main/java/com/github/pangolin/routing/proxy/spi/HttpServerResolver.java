@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.proxy.spi;
 
+import com.github.pangolin.routing.proxy.AbstractServer;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import freework.codec.Base64;
 import freework.util.Bytes;
@@ -33,15 +34,18 @@ public class HttpServerResolver implements ServerResolver {
         final String name = props.getProperty("name", uri.getFragment());
         final String host = uri.getHost();
         final int port = 0 < uri.getPort() ? uri.getPort() : DEFAULT_PORT;
+
+        final InetSocketAddress address = Utils.toSocketAddress(host, port);
+
         final String userInfo = resolveUserInfo(uri.getUserInfo());
         if (null != userInfo) {
             final String[] segments = userInfo.split(":", 2);
             final String username = segments[0];
             final String password = segments.length < 2 ? "" : segments[1];
-            return new Instance(name, new InetSocketAddress(host, port), username, password);
+            return new HttpServer(name, address, username, password);
         }
 
-        return new Instance(name, new InetSocketAddress(host, port), null, null);
+        return new HttpServer(name, address, null, null);
     }
 
     private String resolveUserInfo(final String userInfo) {
@@ -57,14 +61,13 @@ public class HttpServerResolver implements ServerResolver {
     /**
      *
      */
-    private class Instance implements ProxyServer {
-        private final String name;
+    private class HttpServer extends AbstractServer {
         private final SocketAddress address;
         private final String username;
         private final String password;
 
-        public Instance(final String name, final SocketAddress address, final String username, final String password) {
-            this.name = name;
+        public HttpServer(final String name, final SocketAddress address, final String username, final String password) {
+            super(name);
             this.address = address;
             this.username = username;
             this.password = password;
@@ -76,7 +79,7 @@ public class HttpServerResolver implements ServerResolver {
         }
 
         @Override
-        public ChannelHandler newProxyHandler(InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(InetSocketAddress sa) {
             final DefaultHttpHeaders headers = new DefaultHttpHeaders();
             /*-
              * FIXED 499

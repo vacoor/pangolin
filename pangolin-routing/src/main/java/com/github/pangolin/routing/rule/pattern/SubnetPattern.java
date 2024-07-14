@@ -17,7 +17,12 @@ public class SubnetPattern implements DestinationPattern {
 
     public SubnetPattern(final String ipAddress, final int cidrPrefix) {
         try {
-            final InetAddress inetAddress = SocketUtils.addressByName(ipAddress);
+            final byte[] addr = NetUtil.createByteArrayFromIpAddressString(ipAddress);
+            if (null == addr) {
+                throw new UnknownHostException(ipAddress);
+            }
+
+            final InetAddress inetAddress = InetAddress.getByAddress(addr);
             this.ipAddress = inetAddress;
             this.prefixLength = cidrPrefix;
             if (inetAddress instanceof Inet4Address) {

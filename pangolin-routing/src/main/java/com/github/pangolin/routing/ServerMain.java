@@ -17,6 +17,7 @@ import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
+import com.github.pangolin.routing.proxy.AbstractServer;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxySocketChannelFactory;
 import com.github.pangolin.routing.proxy.RuleBasedProxyServer;
@@ -94,14 +95,9 @@ public class ServerMain {
             final String[] segments = value.split("\\s*,\\s*");
             final String proxy = segments[0];
             defaultPort = "DEFAULT".equals(proxy) ? listenPort : defaultPort;
-            final ProxyServer proxyServer = "DEFAULT".equals(proxy) ? defaultProxy : new ProxyServer() {
+            final ProxyServer proxyServer = "DEFAULT".equals(proxy) ? defaultProxy : new AbstractServer(proxy) {
                 @Override
-                public String getName() {
-                    return proxy;
-                }
-
-                @Override
-                public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+                public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
                     ProxyServer server = config.getServer(proxy);
                     return null != server ? server.newProxyHandler(sa) : null;
                 }

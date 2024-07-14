@@ -1,7 +1,9 @@
 package com.github.pangolin.routing.proxy.spi;
 
 import com.github.pangolin.routing.handler.internal.client.SshProxyHandler;
+import com.github.pangolin.routing.proxy.AbstractServer;
 import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.proxy.spi.ServerResolver;
 import freework.codec.Base64;
 import freework.util.Bytes;
 import io.netty.channel.ChannelHandler;
@@ -41,7 +43,7 @@ public class SshServerResolver implements ServerResolver {
         final String[] segments = userInfo.split(":", 2);
         final String username = segments[0];
         final String password = segments.length < 2 ? "" : segments[1];
-        return new SshProxyServer(name, host, port, username, password);
+        return new SshServer(name, host, port, username, password);
     }
 
     private String resolveUserInfo(final String userInfo) {
@@ -54,29 +56,29 @@ public class SshServerResolver implements ServerResolver {
         return userInfo;
     }
 
-    private class SshProxyServer implements ProxyServer {
-        private final String name;
+    class SshServer extends AbstractServer {
         private final String hostname;
         private final int port;
         private final String username;
         private final String password;
 
-        private SshProxyServer(final String name, final String hostname, final int port, final String username, final String password) {
-            this.name = name;
+        SshServer(final String name,
+                  final String hostname, final int port,
+                  final String username, final String password) {
+            super(name);
             this.hostname = hostname;
             this.port = port;
             this.username = username;
             this.password = password;
         }
 
+        /**
+         * {@inheritDoc}
+         */
         @Override
-        public String getName() {
-            return name;
-        }
-
-        @Override
-        public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
             return new SshProxyHandler(hostname, port, username, password);
         }
+
     }
 }

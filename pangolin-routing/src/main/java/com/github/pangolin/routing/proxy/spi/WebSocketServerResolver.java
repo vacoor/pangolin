@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.proxy.spi;
 
 import com.github.pangolin.routing.handler.internal.client.WebSocketProxyHandler;
+import com.github.pangolin.routing.proxy.AbstractServer;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import io.netty.channel.ChannelHandler;
 
@@ -30,18 +31,17 @@ public class WebSocketServerResolver implements ServerResolver {
         final String name = 0 < i ? url.substring(i + 1) : url;
         final String nameToUse = props.getProperty("name", name);
         final URI uri = URI.create(0 < i ? url.substring(0, i) : url);
-        return new Instance(null != nameToUse ? nameToUse : url, uri);
+        return new WebSocketServer(null != nameToUse ? nameToUse : url, uri);
     }
 
     /**
      *
      */
-    private class Instance implements ProxyServer {
-        private final String name;
+    private class WebSocketServer extends AbstractServer {
         private final URI uri;
 
-        public Instance(final String name, final URI uri) {
-            this.name = name;
+        public WebSocketServer(final String name, final URI uri) {
+            super(name);
             this.uri = uri;
         }
 
@@ -51,7 +51,7 @@ public class WebSocketServerResolver implements ServerResolver {
         }
 
         @Override
-        public ChannelHandler newProxyHandler(InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(InetSocketAddress sa) {
             return new WebSocketProxyHandler(uri, null);
         }
 

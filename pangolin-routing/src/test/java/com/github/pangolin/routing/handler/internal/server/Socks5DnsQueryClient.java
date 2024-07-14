@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta;
+package com.github.pangolin.routing.handler.internal.server;
 
 import com.github.pangolin.routing.handler.codec.socks5.Socks5DatagramPacketCodec;
 import io.netty.bootstrap.Bootstrap;

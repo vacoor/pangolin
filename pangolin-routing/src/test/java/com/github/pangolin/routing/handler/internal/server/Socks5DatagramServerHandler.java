@@ -1,6 +1,7 @@
-package com.github.pangolin.routing.beta;
+package com.github.pangolin.routing.handler.internal.server;
 
-import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
+import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
 import io.netty.bootstrap.Bootstrap;
@@ -12,9 +13,9 @@ import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
-import io.netty.handler.codec.socksx.v5.*;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.GenericFutureListener;
+import io.netty.handler.codec.socksx.v5.Socks5AddressDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
+import io.netty.handler.codec.socksx.v5.Socks5AddressType;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
@@ -29,7 +30,16 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 @Slf4j
-public class Socks5UdpServerHandler extends SimpleChannelInboundHandler<DatagramPacket> {
+public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<DatagramPacket> {
+    private final DatagramChannelFactory datagramChannelFactory;
+
+    public Socks5DatagramServerHandler() {
+        this(new StandardDatagramChannelFactory());
+    }
+
+    public Socks5DatagramServerHandler(final DatagramChannelFactory datagramChannelFactory) {
+        this.datagramChannelFactory = datagramChannelFactory;
+    }
 
     void addToWhitelist(InetSocketAddress sender) {
         natServers.computeIfAbsent(sender.getAddress(), a -> {
@@ -148,88 +158,32 @@ public class Socks5UdpServerHandler extends SimpleChannelInboundHandler<Datagram
     }
 
     private ChannelFuture create(final InetSocketAddress callback, final ChannelHandlerContext callbackCtx) {
-        final Bootstrap b = new Bootstrap();
-        b.group(new NioEventLoopGroup());
-        b.channel(NioDatagramChannel.class);
-        b.option(ChannelOption.SO_BROADCAST, true);
-        b.handler(new ChannelInitializer<DatagramChannel>() {
-            @Override
-            protected void initChannel(final DatagramChannel ch) throws Exception {
-                ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramPacket>() {
+        return datagramChannelFactory.open(
+                callbackCtx.channel().config().getConnectTimeoutMillis(),
+                callbackCtx.channel().eventLoop(),
+                new ChannelInitializer<DatagramChannel>() {
                     @Override
-                    protected void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket rawPacket) throws Exception {
-                        final InetSocketAddress sender = rawPacket.sender();
-                        final InetSocketAddress recipient = rawPacket.recipient();
-                        log.info("[UDP] {} -> {} -> {}", sender, recipient, callback);
+                    protected void initChannel(final DatagramChannel ch) throws Exception {
+                        ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramPacket>() {
+                            @Override
+                            protected void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket rawPacket) throws Exception {
+                                final InetSocketAddress sender = rawPacket.sender();
+                                final InetSocketAddress recipient = rawPacket.recipient();
+                                log.info("[UDP] {} -> {} -> {}", sender, recipient, callback);
 
-                        final ByteBuf payloadToReplace = encode(rawPacket.content(), sender);
+                                final ByteBuf payloadToReplace = encode(rawPacket.content(), sender);
 
-                        // final DatagramPacket packet = new DatagramPacket(payload, callback);
-                        final DatagramPacket packet = new DatagramPacket(payloadToReplace, callback, sender);
-                        callbackCtx.writeAndFlush(packet);
+                                // final DatagramPacket packet = new DatagramPacket(payload, callback);
+                                final DatagramPacket packet = new DatagramPacket(payloadToReplace, callback, sender);
+                                callbackCtx.writeAndFlush(packet);
+                            }
+                        });
                     }
                 });
-            }
-        });
-        return b.bind(0);
-    }
-
-    static class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler{
-        private final Socks5UdpServerHandler udpServerHandler;
-
-        Socks5ProxyServerHandler2(final Socks5UdpServerHandler udpServerHandler) {
-            this.udpServerHandler = udpServerHandler;
-        }
-
-        @Override
-        public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-            if (msg instanceof Socks5CommandRequest) {
-                final Socks5CommandRequest request = (Socks5CommandRequest) msg;
-                final Socks5CommandType type = request.type();
-
-                final int port = request.dstPort();
-                final String address = request.dstAddr();
-                final Socks5AddressType addressType = request.dstAddrType();
-
-//                log.info("[SOCKS5] Received {} {} request => {}:{}", clientAddress, type.toString(), address, port);
-
-                if (Socks5CommandType.UDP_ASSOCIATE.equals(type)) {
-                    final InetSocketAddress clientAddress = (InetSocketAddress) ctx.channel().remoteAddress();
-                    InetSocketAddress sa = (InetSocketAddress) ctx.channel().localAddress();
-
-                    ctx.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
-                        @Override
-                        public void operationComplete(final Future<? super Void> future) throws Exception {
-                            udpServerHandler.removeFromWhitelist(clientAddress);
-                        }
-                    });
-
-                    if (sa.isUnresolved()) {
-                        udpServerHandler.addToWhitelist(clientAddress);
-                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.DOMAIN, sa.getHostString(), 1080));
-                        return;
-                    }
-                    InetAddress inetAddress = sa.getAddress();
-                    if (inetAddress instanceof Inet4Address) {
-                        udpServerHandler.addToWhitelist(clientAddress);
-                        Inet4Address a = (Inet4Address) inetAddress;
-                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv4, a.getHostAddress(), 1080));
-                        return;
-                    }
-                    if (inetAddress instanceof Inet6Address) {
-                        udpServerHandler.addToWhitelist(clientAddress);
-                        Inet6Address a = (Inet6Address) inetAddress;
-                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv6, a.getHostAddress(), 1080));
-                        return;
-                    }
-                }
-            }
-            super.channelRead(ctx, msg);
-        }
     }
 
     public static void main(String[] args) throws InterruptedException, CertificateException, SSLException {
-        Socks5UdpServerHandler udpServerHandler = new Socks5UdpServerHandler();
+        Socks5DatagramServerHandler udpServerHandler = new Socks5DatagramServerHandler();
         final Bootstrap udpBootstrap = new Bootstrap();
         udpBootstrap.group(new NioEventLoopGroup());
         udpBootstrap.channel(NioDatagramChannel.class);

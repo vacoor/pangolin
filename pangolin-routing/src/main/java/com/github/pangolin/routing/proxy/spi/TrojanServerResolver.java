@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.proxy.spi;
 
 import com.github.pangolin.routing.handler.internal.client.TrojanProxyHandler;
+import com.github.pangolin.routing.proxy.AbstractServer;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import io.netty.channel.ChannelHandler;
 
@@ -33,7 +34,8 @@ public class TrojanServerResolver implements ServerResolver {
 
             final String host = uri.getHost();
             final int port = 0 < uri.getPort() ? uri.getPort() : DEFAULT_PORT;
-            return new Instance(null != name ? name : host + ":" + port, new InetSocketAddress(host, port), password);
+            final InetSocketAddress address = Utils.toSocketAddress(host, port);
+            return new TrojanServer(null != name ? name : host + ":" + port, address, password);
         }
         throw new UnsupportedOperationException();
     }
@@ -41,13 +43,12 @@ public class TrojanServerResolver implements ServerResolver {
     /**
      *
      */
-    private class Instance implements ProxyServer {
-        private final String name;
+    private class TrojanServer extends AbstractServer  {
         private final SocketAddress address;
         private final String password;
 
-        public Instance(final String name, final SocketAddress address, final String password) {
-            this.name = name;
+        public TrojanServer(final String name, final SocketAddress address, final String password) {
+            super(name);
             this.address = address;
             this.password = password;
         }
@@ -58,7 +59,7 @@ public class TrojanServerResolver implements ServerResolver {
         }
 
         @Override
-        public ChannelHandler newProxyHandler(InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(InetSocketAddress sa) {
             return new TrojanProxyHandler(address, password);
         }
 
