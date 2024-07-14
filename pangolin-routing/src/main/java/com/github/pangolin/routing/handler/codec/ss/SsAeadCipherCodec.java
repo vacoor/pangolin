@@ -2,6 +2,7 @@ package com.github.pangolin.routing.handler.codec.ss;
 
 import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.SsSecretKey;
+import com.github.pangolin.routing.handler.codec.ss.crypto.SsSubKey;
 import freework.util.Bytes;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -52,13 +53,7 @@ public class SsAeadCipherCodec extends CombinedChannelDuplexHandler<ByteToMessag
      * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers#key-derivation">Key Derivation</a>
      */
     private byte[] generateSubkey(final byte[] masterKey, final byte[] salt) {
-        final HKDFBytesGenerator hkdf = new HKDFBytesGenerator(new SHA1Digest());
-        hkdf.init(new HKDFParameters(masterKey, salt, Bytes.toBytes("ss-subkey")));
-
-        final byte[] okm = new byte[masterKey.length];
-        final int written = hkdf.generateBytes(okm, 0, masterKey.length);
-        assert written == masterKey.length;
-        return okm;
+        return SsSubKey.generateSubkey(masterKey, salt);
     }
 
     private int encrypt(final byte[] subkey, final byte[] nonce,

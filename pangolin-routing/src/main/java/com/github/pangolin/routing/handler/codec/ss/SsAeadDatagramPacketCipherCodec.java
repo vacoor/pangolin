@@ -2,6 +2,7 @@ package com.github.pangolin.routing.handler.codec.ss;
 
 import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.SsSecretKey;
+import com.github.pangolin.routing.handler.codec.ss.crypto.SsSubKey;
 import freework.util.Bytes;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -17,16 +18,14 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
+ * UDP AEAD codec.
+ *
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers#udp">UDP</a>
  */
 public class SsAeadDatagramPacketCipherCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
     private final byte[] masterKey;
     private final AeadCipherAlgorithm algorithm;
     private final SecureRandom random;
-
-    private final int saltSize;
-    private final int nonceSize;
-    private final int tagSize;
 
     private final byte[] nonce;
 
@@ -44,12 +43,9 @@ public class SsAeadDatagramPacketCipherCodec extends MessageToMessageCodec<Datag
         }
         this.masterKey = masterKey;
         this.algorithm = algorithm;
-        this.random = random;
 
-        this.saltSize = algorithm.getSaltSize();
-        this.nonceSize = algorithm.getNonceSize();
-        this.tagSize = algorithm.getTagSize();
-        this.nonce = new byte[nonceSize];
+        this.random = random;
+        this.nonce = new byte[algorithm.getNonceSize()];
     }
 
     @Override
@@ -61,9 +57,10 @@ public class SsAeadDatagramPacketCipherCodec extends MessageToMessageCodec<Datag
          */
         final ByteBuf payload = in.content();
         final int len = payload.readableBytes();
-        final byte[] salt = nextBytes(random, new byte[saltSize]);
+        final byte[] salt = nextBytes(random, new byte[algorithm.getSaltSize()]);
         final byte[] subkey = generateSubkey(masterKey, salt);
 
+        final int tagSize = algorithm.getTagSize();
         final byte[] chunk = Arrays.copyOf(salt, salt.length + len + tagSize);
         payload.readBytes(chunk, salt.length, len);
 
@@ -80,6 +77,8 @@ public class SsAeadDatagramPacketCipherCodec extends MessageToMessageCodec<Datag
          +------+-------------------+-----+
          */
         final ByteBuf chunk = in.content();
+        final int saltSize = algorithm.getSaltSize();
+
         if (chunk.hasArray()) {
             final byte[] buf = chunk.array();
             final int offset = chunk.arrayOffset();
@@ -99,17 +98,11 @@ public class SsAeadDatagramPacketCipherCodec extends MessageToMessageCodec<Datag
     /**
      * @param masterKey the master key
      * @param salt      the non-secret encodeSalt
-     * @return the encodeSubkey
+     * @return the subkey
      * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers#key-derivation">Key Derivation</a>
      */
     private byte[] generateSubkey(final byte[] masterKey, final byte[] salt) {
-        final HKDFBytesGenerator hkdf = new HKDFBytesGenerator(new SHA1Digest());
-        hkdf.init(new HKDFParameters(masterKey, salt, Bytes.toBytes("ss-subkey")));
-
-        final byte[] okm = new byte[masterKey.length];
-        final int written = hkdf.generateBytes(okm, 0, masterKey.length);
-        assert written == masterKey.length;
-        return okm;
+        return SsSubKey.generateSubkey(masterKey, salt);
     }
 
     private int encrypt(final byte[] subkey, final byte[] nonce,

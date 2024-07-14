@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.beta;
 
+import com.github.pangolin.routing.handler.codec.socks5.Socks5DatagramPacketCodec;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.ChannelHandlerContext;
@@ -38,7 +39,7 @@ public class Socks5DnsQueryClient {
                 .handler(new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
-                        ch.pipeline().addLast(new Socks5ClientDatagramPacketCodec(proxyAddress));
+                        ch.pipeline().addLast(new Socks5DatagramPacketCodec(proxyAddress));
                         ch.pipeline().addLast(new DatagramDnsResponseDecoder());
                         ch.pipeline().addLast(new DatagramDnsQueryEncoder());
                         ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramDnsResponse>() {

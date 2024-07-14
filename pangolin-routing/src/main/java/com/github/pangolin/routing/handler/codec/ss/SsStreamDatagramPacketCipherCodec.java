@@ -3,6 +3,7 @@ package com.github.pangolin.routing.handler.codec.ss;
 import com.github.pangolin.routing.handler.codec.ss.crypto.SsSecretKey;
 import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.socket.DatagramPacket;

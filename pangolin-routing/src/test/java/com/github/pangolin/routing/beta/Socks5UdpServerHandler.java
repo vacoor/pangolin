@@ -26,7 +26,6 @@ import java.util.concurrent.ConcurrentMap;
 
 @Slf4j
 public class Socks5UdpServerHandler extends SimpleChannelInboundHandler<DatagramPacket> {
-    private final ConcurrentMap<InetAddress, OwnedServer> whitelist = Maps.newConcurrentMap();
 
     void addToWhitelist(InetSocketAddress sender) {
         natServers.computeIfAbsent(sender.getAddress(), a -> {
@@ -110,60 +109,61 @@ public class Socks5UdpServerHandler extends SimpleChannelInboundHandler<Datagram
             });
         }
 
-        private ChannelFuture create(final InetSocketAddress callback, final ChannelHandlerContext callbackCtx) {
-            final Bootstrap b = new Bootstrap();
-            b.group(new NioEventLoopGroup());
-            b.channel(NioDatagramChannel.class);
-            b.option(ChannelOption.SO_BROADCAST, true);
-            b.handler(new ChannelInitializer<DatagramChannel>() {
-                @Override
-                protected void initChannel(final DatagramChannel ch) throws Exception {
-                    ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramPacket>() {
-                        @Override
-                        protected void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket rawPacket) throws Exception {
-                            final InetSocketAddress sender = rawPacket.sender();
-                            final InetSocketAddress recipient = rawPacket.recipient();
+    }
+
+    private ChannelFuture create(final InetSocketAddress callback, final ChannelHandlerContext callbackCtx) {
+        final Bootstrap b = new Bootstrap();
+        b.group(new NioEventLoopGroup());
+        b.channel(NioDatagramChannel.class);
+        b.option(ChannelOption.SO_BROADCAST, true);
+        b.handler(new ChannelInitializer<DatagramChannel>() {
+            @Override
+            protected void initChannel(final DatagramChannel ch) throws Exception {
+                ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramPacket>() {
+                    @Override
+                    protected void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket rawPacket) throws Exception {
+                        final InetSocketAddress sender = rawPacket.sender();
+                        final InetSocketAddress recipient = rawPacket.recipient();
 
 
-                            final ByteBuf rawPayload = rawPacket.content().copy();
+                        final ByteBuf rawPayload = rawPacket.content().copy();
 
-                            log.info("[UDP] {} -> {}", sender, recipient);
+                        log.info("[UDP] {} -> {}", sender, recipient);
 
-                            final ByteBuf payload = ctx.alloc().buffer(3 + rawPayload.readableBytes() + 128);
-                            final Socks5AddressEncoder encoder = Socks5AddressEncoder.DEFAULT;
+                        final ByteBuf payload = ctx.alloc().buffer(3 + rawPayload.readableBytes() + 128);
+                        final Socks5AddressEncoder encoder = Socks5AddressEncoder.DEFAULT;
 
-                            // RSV, FRAG
-                            payload.writeShort(0);
-                            payload.writeByte(0);
-                            if (sender.isUnresolved()) {
-                                payload.writeByte(Socks5AddressType.DOMAIN.byteValue());
-                                encoder.encodeAddress(Socks5AddressType.DOMAIN, sender.getHostString(), payload);
+                        // RSV, FRAG
+                        payload.writeShort(0);
+                        payload.writeByte(0);
+                        if (sender.isUnresolved()) {
+                            payload.writeByte(Socks5AddressType.DOMAIN.byteValue());
+                            encoder.encodeAddress(Socks5AddressType.DOMAIN, sender.getHostString(), payload);
+                        } else {
+                            InetAddress sa = sender.getAddress();
+                            if (sa instanceof Inet4Address) {
+                                payload.writeByte(Socks5AddressType.IPv4.byteValue());
+                                encoder.encodeAddress(Socks5AddressType.IPv4, sa.getHostAddress(), payload);
+                            } else if (sa instanceof Inet6Address) {
+                                payload.writeByte(Socks5AddressType.IPv6.byteValue());
+                                encoder.encodeAddress(Socks5AddressType.IPv6, sa.getHostAddress(), payload);
                             } else {
-                                InetAddress sa = sender.getAddress();
-                                if (sa instanceof Inet4Address) {
-                                    payload.writeByte(Socks5AddressType.IPv4.byteValue());
-                                    encoder.encodeAddress(Socks5AddressType.IPv4, sa.getHostAddress(), payload);
-                                } else if (sa instanceof Inet6Address) {
-                                    payload.writeByte(Socks5AddressType.IPv6.byteValue());
-                                    encoder.encodeAddress(Socks5AddressType.IPv6, sa.getHostAddress(), payload);
-                                } else {
-                                    throw new UnsupportedOperationException();
-                                }
+                                throw new UnsupportedOperationException();
                             }
-                            payload.writeShort(sender.getPort());
-                            payload.writeBytes(rawPayload);
-
-                            log.info("[UDP] {} -> {}", recipient, callback);
-
-                            // final DatagramPacket packet = new DatagramPacket(payload, callback);
-                            final DatagramPacket packet = new DatagramPacket(payload, callback, sender);
-                            callbackCtx.writeAndFlush(packet);
                         }
-                    });
-                }
-            });
-            return b.bind(0);
-        }
+                        payload.writeShort(sender.getPort());
+                        payload.writeBytes(rawPayload);
+
+                        log.info("[UDP] {} -> {}", recipient, callback);
+
+                        // final DatagramPacket packet = new DatagramPacket(payload, callback);
+                        final DatagramPacket packet = new DatagramPacket(payload, callback, sender);
+                        callbackCtx.writeAndFlush(packet);
+                    }
+                });
+            }
+        });
+        return b.bind(0);
     }
 
     static class Socks5ProxyServerHandler2 extends Socks5ProxyServerHandler{

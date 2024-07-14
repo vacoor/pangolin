@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta;
+package com.github.pangolin.routing.handler.codec.socks5;
 
 import freework.codec.Hex;
 import io.netty.buffer.ByteBuf;
@@ -18,13 +18,14 @@ import java.net.InetSocketAddress;
 import java.util.List;
 
 /**
+ * SOCKS5 Client
  * @see <a href="https://www.rfc-editor.org/rfc/rfc1928">SOCKS Protocol Version 5</a>
  */
 @Slf4j
-class Socks5ClientDatagramPacketCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
+public class Socks5DatagramPacketCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
     private final InetSocketAddress proxyAddress;
 
-    Socks5ClientDatagramPacketCodec(final InetSocketAddress proxyAddress) {
+    Socks5DatagramPacketCodec(final InetSocketAddress proxyAddress) {
         this.proxyAddress = proxyAddress;
     }
 
