@@ -1,14 +1,10 @@
 package com.github.pangolin.routing.rule.pattern;
 
-import com.github.pangolin.routing.AddressUtils;
+import io.netty.util.NetUtil;
 import io.netty.util.internal.SocketUtils;
 
 import java.math.BigInteger;
-import java.net.Inet4Address;
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
+import java.net.*;
 
 /**
  *
@@ -103,10 +99,11 @@ public class SubnetPattern implements DestinationPattern {
         @Override
         public boolean matches(final InetSocketAddress destination) {
             try {
-                InetAddress inetAddress;
+                InetAddress inetAddress = null;
                 if (destination.isUnresolved()) {
-                    byte[] bytes = AddressUtils.textToNumericFormatV4(destination.getHostString());
-                    inetAddress = null != bytes ? InetAddress.getByAddress(bytes) : null;
+                    if (NetUtil.isValidIpV4Address(destination.getHostString())) {
+                        inetAddress = InetAddress.getByAddress(NetUtil.createByteArrayFromIpAddressString(destination.getHostString()));
+                    }
                 } else {
                     inetAddress = destination.getAddress();
                 }
@@ -173,22 +170,21 @@ public class SubnetPattern implements DestinationPattern {
 
         @Override
         public boolean matches(final InetSocketAddress destination) {
-            InetAddress inetAddress;
-            try {
-                if (destination.isUnresolved()) {
-                    byte[] bytes = AddressUtils.textToNumericFormatV6(destination.getHostString());
-                    inetAddress = null != bytes ? InetAddress.getByAddress(bytes) : null;
-                } else {
-                    inetAddress = destination.getAddress();
+            InetAddress inetAddress = null;
+            if (destination.isUnresolved()) {
+                if (NetUtil.isValidIpV6Address(destination.getHostString())) {
+//                        byte[] bytes = AddressUtils.textToNumericFormatV6(destination.getHostString());
+//                        inetAddress = null != bytes ? InetAddress.getByAddress(bytes) : null;
+                    inetAddress = NetUtil.getByName(destination.getHostString());
                 }
-                if (inetAddress instanceof Inet6Address) {
-                    final BigInteger ipAddress = ipToInt((Inet6Address) inetAddress);
-                    return ipAddress.and(subnetMask).equals(networkAddress);
-                }
-                return false;
-            } catch (UnknownHostException e) {
-                return false;
+            } else {
+                inetAddress = destination.getAddress();
             }
+            if (inetAddress instanceof Inet6Address) {
+                final BigInteger ipAddress = ipToInt((Inet6Address) inetAddress);
+                return ipAddress.and(subnetMask).equals(networkAddress);
+            }
+            return false;
         }
 
         private static BigInteger ipToInt(Inet6Address ipAddress) {
