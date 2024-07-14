@@ -1,8 +1,7 @@
 package com.github.pangolin.routing.handler.codec.socks5;
 
-import freework.codec.Hex;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.handler.codec.MessageToMessageCodec;
@@ -33,64 +32,78 @@ public class Socks5DatagramPacketCodec extends MessageToMessageCodec<DatagramPac
     protected void encode(final ChannelHandlerContext channelHandlerContext, final DatagramPacket datagramPacket, final List<Object> list) throws Exception {
         final InetSocketAddress recipient = datagramPacket.recipient();
 
+        ByteBuf payloadToReplace = encode(datagramPacket.content(), recipient);
+
+        list.add(new DatagramPacket(payloadToReplace, proxyAddress, datagramPacket.sender()));
+    }
+
+    private ByteBuf encode(final ByteBuf rawPayload, final InetSocketAddress dest) throws Exception {
+        final ByteBuf payloadToReplace = Unpooled.buffer(3 + rawPayload.readableBytes() + 128);
         final Socks5AddressEncoder encoder = Socks5AddressEncoder.DEFAULT;
-        final ByteBuf buf = channelHandlerContext.alloc().buffer(3 + datagramPacket.content().readableBytes() + 128);
 
-        // skip RSV (0x0000), FRAG (0x00)
-        buf.writeBytes(new byte[]{0, 0, 0});
-
-        if (recipient.isUnresolved()) {
-            buf.writeByte(Socks5AddressType.DOMAIN.byteValue());
-            encoder.encodeAddress(Socks5AddressType.DOMAIN, recipient.getHostName(), buf);
+        // RSV, FRAG
+        payloadToReplace.writeShort(0);
+        payloadToReplace.writeByte(0);
+        if (dest.isUnresolved()) {
+            payloadToReplace.writeByte(Socks5AddressType.DOMAIN.byteValue());
+            encoder.encodeAddress(Socks5AddressType.DOMAIN, dest.getHostString(), payloadToReplace);
         } else {
-            final InetAddress address = recipient.getAddress();
-            if (address instanceof Inet4Address) {
-                buf.writeByte(Socks5AddressType.IPv4.byteValue());
-                encoder.encodeAddress(Socks5AddressType.IPv4, address.getHostAddress(), buf);
-            } else if (address instanceof Inet6Address) {
-                buf.writeByte(Socks5AddressType.IPv6.byteValue());
-                encoder.encodeAddress(Socks5AddressType.IPv6, address.getHostAddress(), buf);
+            InetAddress sa = dest.getAddress();
+            if (sa instanceof Inet4Address) {
+                payloadToReplace.writeByte(Socks5AddressType.IPv4.byteValue());
+                encoder.encodeAddress(Socks5AddressType.IPv4, sa.getHostAddress(), payloadToReplace);
+            } else if (sa instanceof Inet6Address) {
+                payloadToReplace.writeByte(Socks5AddressType.IPv6.byteValue());
+                encoder.encodeAddress(Socks5AddressType.IPv6, sa.getHostAddress(), payloadToReplace);
             } else {
-                throw new IllegalStateException();
+                throw new UnsupportedOperationException();
             }
         }
-        buf.writeShort(recipient.getPort());
-        buf.writeBytes(datagramPacket.content());
+        payloadToReplace.writeShort(dest.getPort());
+        payloadToReplace.writeBytes(rawPayload.copy());
 
-        list.add(new DatagramPacket(buf, proxyAddress, datagramPacket.sender()));
+        return payloadToReplace;
     }
 
     @Override
     protected void decode(final ChannelHandlerContext channelHandlerContext, final DatagramPacket datagramPacket, final List<Object> list) throws Exception {
         final InetSocketAddress reply = datagramPacket.sender();
-        final ByteBuf payload = datagramPacket.content();
 
-        log.info("[UDP-C2] {} -> {}: {}", reply, datagramPacket.recipient(), Hex.encode(ByteBufUtil.getBytes(payload.copy())));
+        DatagramPacket payloadToUse = decode(datagramPacket);
 
-        final Socks5AddressDecoder decoder = Socks5AddressDecoder.DEFAULT;
-        //-
-        // +----+------+------+----------+----------+----------+
-        // |RSV | FRAG | ATYP | DST.ADDR | DST.PORT |   DATA   |
-        // +----+------+------+----------+----------+----------+
-        // | 2  |  1   |  1   | Variable |    2     | Variable |
-        // +----+------+------+----------+----------+----------+
-        //
+        list.add(payloadToUse);
+    }
+
+    private DatagramPacket decode(final DatagramPacket packet) throws Exception {
+        final Socks5AddressDecoder addressDecoder = Socks5AddressDecoder.DEFAULT;
+        final InetSocketAddress sender = packet.sender();
+        final InetSocketAddress recipient = packet.recipient();
+        /*-
+         +----+------+------+----------+----------+----------+
+         |RSV | FRAG | ATYP | DST.ADDR | DST.PORT |   DATA   |
+         +----+------+------+----------+----------+----------+
+         | 2  |  1   |  1   | Variable |    2     | Variable |
+         +----+------+------+----------+----------+----------+
+         */
+        final ByteBuf payload = packet.content();
+
         // skip RSV (0x0000), FRAG (0x00)
         final int rsv = payload.readUnsignedShort();
         final byte frag = payload.readByte();
 
         final Socks5AddressType dstAddrType = Socks5AddressType.valueOf(payload.readByte());
-        final String dstAddr = decoder.decodeAddress(dstAddrType, payload);
+        final String dstAddr = addressDecoder.decodeAddress(dstAddrType, payload);
         final int dstPort = payload.readUnsignedShort();
 
-        log.info("[UDP-C] {} -> {}: {}", reply, datagramPacket.recipient(), Hex.encode(ByteBufUtil.getBytes(payload.copy())));
+        log.info("[UDP] {} -- {} --> {}:{}", sender, recipient, dstAddr, dstPort);
+
 
         /*-
          * FIXED #5760 Netty DNS Answer Section not correctly decoded
          * https://github.com/netty/netty/issues/5760
          */
         final ByteBuf payloadToUse = payload.copy();
-        list.add(new DatagramPacket(payloadToUse, datagramPacket.recipient(), new InetSocketAddress(dstAddr, dstPort)));
+        final InetSocketAddress senderToReplace = new InetSocketAddress(dstAddr, dstPort);
+        return new DatagramPacket(payloadToUse, recipient, senderToReplace);
     }
-
 }

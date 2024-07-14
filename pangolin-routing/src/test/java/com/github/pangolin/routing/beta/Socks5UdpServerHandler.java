@@ -5,6 +5,7 @@ import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
@@ -47,10 +48,8 @@ public class Socks5UdpServerHandler extends SimpleChannelInboundHandler<Datagram
 
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket packet) throws Exception {
-        final Socks5AddressDecoder addressDecoder = Socks5AddressDecoder.DEFAULT;
         final InetSocketAddress sender = packet.sender();
         final InetSocketAddress recipient = packet.recipient();
-
         final InetAddress owner = sender.getAddress();
         final OwnedServer ownedServer = natServers.get(owner);
 //        final OwnedServer ownedServer = natServers.computeIfAbsent(owner, OwnedServer::new);
@@ -59,6 +58,14 @@ public class Socks5UdpServerHandler extends SimpleChannelInboundHandler<Datagram
             return;
         }
 
+        DatagramPacket packetToUse = decode(packet);
+        ownedServer.getNatMapChannel(sender, ctx).channel().writeAndFlush(packetToUse);
+    }
+
+    private DatagramPacket decode(final DatagramPacket packet) throws Exception {
+        final Socks5AddressDecoder addressDecoder = Socks5AddressDecoder.DEFAULT;
+        final InetSocketAddress sender = packet.sender();
+        final InetSocketAddress recipient = packet.recipient();
         /*-
          +----+------+------+----------+----------+----------+
          |RSV | FRAG | ATYP | DST.ADDR | DST.PORT |   DATA   |
@@ -84,9 +91,35 @@ public class Socks5UdpServerHandler extends SimpleChannelInboundHandler<Datagram
          */
         final ByteBuf payloadToUse = payload.copy();
         final InetSocketAddress recipientToReplace = new InetSocketAddress(dstAddr, dstPort);
-        final DatagramPacket packetToUse = new DatagramPacket(payloadToUse, recipientToReplace, sender);
+        return new DatagramPacket(payloadToUse, recipientToReplace, sender);
+    }
 
-        ownedServer.getNatMapChannel(sender, ctx).channel().writeAndFlush(packetToUse);
+    public ByteBuf encode(final ByteBuf rawPayload, final InetSocketAddress dest) throws Exception {
+        final ByteBuf payloadToReplace = Unpooled.buffer(3 + rawPayload.readableBytes() + 128);
+        final Socks5AddressEncoder encoder = Socks5AddressEncoder.DEFAULT;
+
+        // RSV, FRAG
+        payloadToReplace.writeShort(0);
+        payloadToReplace.writeByte(0);
+        if (dest.isUnresolved()) {
+            payloadToReplace.writeByte(Socks5AddressType.DOMAIN.byteValue());
+            encoder.encodeAddress(Socks5AddressType.DOMAIN, dest.getHostString(), payloadToReplace);
+        } else {
+            InetAddress sa = dest.getAddress();
+            if (sa instanceof Inet4Address) {
+                payloadToReplace.writeByte(Socks5AddressType.IPv4.byteValue());
+                encoder.encodeAddress(Socks5AddressType.IPv4, sa.getHostAddress(), payloadToReplace);
+            } else if (sa instanceof Inet6Address) {
+                payloadToReplace.writeByte(Socks5AddressType.IPv6.byteValue());
+                encoder.encodeAddress(Socks5AddressType.IPv6, sa.getHostAddress(), payloadToReplace);
+            } else {
+                throw new UnsupportedOperationException();
+            }
+        }
+        payloadToReplace.writeShort(dest.getPort());
+        payloadToReplace.writeBytes(rawPayload.copy());
+
+        return payloadToReplace;
     }
 
     private ConcurrentMap<InetSocketAddress, ChannelFuture> natMap = Maps.newConcurrentMap();
@@ -124,40 +157,12 @@ public class Socks5UdpServerHandler extends SimpleChannelInboundHandler<Datagram
                     protected void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket rawPacket) throws Exception {
                         final InetSocketAddress sender = rawPacket.sender();
                         final InetSocketAddress recipient = rawPacket.recipient();
+                        log.info("[UDP] {} -> {} -> {}", sender, recipient, callback);
 
-
-                        final ByteBuf rawPayload = rawPacket.content().copy();
-
-                        log.info("[UDP] {} -> {}", sender, recipient);
-
-                        final ByteBuf payload = ctx.alloc().buffer(3 + rawPayload.readableBytes() + 128);
-                        final Socks5AddressEncoder encoder = Socks5AddressEncoder.DEFAULT;
-
-                        // RSV, FRAG
-                        payload.writeShort(0);
-                        payload.writeByte(0);
-                        if (sender.isUnresolved()) {
-                            payload.writeByte(Socks5AddressType.DOMAIN.byteValue());
-                            encoder.encodeAddress(Socks5AddressType.DOMAIN, sender.getHostString(), payload);
-                        } else {
-                            InetAddress sa = sender.getAddress();
-                            if (sa instanceof Inet4Address) {
-                                payload.writeByte(Socks5AddressType.IPv4.byteValue());
-                                encoder.encodeAddress(Socks5AddressType.IPv4, sa.getHostAddress(), payload);
-                            } else if (sa instanceof Inet6Address) {
-                                payload.writeByte(Socks5AddressType.IPv6.byteValue());
-                                encoder.encodeAddress(Socks5AddressType.IPv6, sa.getHostAddress(), payload);
-                            } else {
-                                throw new UnsupportedOperationException();
-                            }
-                        }
-                        payload.writeShort(sender.getPort());
-                        payload.writeBytes(rawPayload);
-
-                        log.info("[UDP] {} -> {}", recipient, callback);
+                        final ByteBuf payloadToReplace = encode(rawPacket.content(), sender);
 
                         // final DatagramPacket packet = new DatagramPacket(payload, callback);
-                        final DatagramPacket packet = new DatagramPacket(payload, callback, sender);
+                        final DatagramPacket packet = new DatagramPacket(payloadToReplace, callback, sender);
                         callbackCtx.writeAndFlush(packet);
                     }
                 });

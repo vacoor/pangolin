@@ -24,17 +24,14 @@ import java.net.InetSocketAddress;
 public class Socks5DnsQueryClient {
 
     public static void main(String[] args) throws Exception {
-        final InetSocketAddress proxyAddress = new InetSocketAddress("192.168.1.12", 1080);
+        final InetSocketAddress proxyAddress = new InetSocketAddress(1080);
 
-//        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
         final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
-//        final InetSocketAddress dnsServer = new InetSocketAddress("127.0.0.1", 1080);
-        DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
-//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("iproxyvacoor.io.", DnsRecordType.A));
+        final DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
         query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("www.baidu.com", DnsRecordType.A));
 
-        EventLoopGroup proxyGroup = new NioEventLoopGroup();
-        Bootstrap b = new Bootstrap();
+        final EventLoopGroup proxyGroup = new NioEventLoopGroup();
+        final Bootstrap b = new Bootstrap();
         b.group(proxyGroup).channel(NioDatagramChannel.class)
                 .handler(new ChannelInitializer<DatagramChannel>() {
                     @Override

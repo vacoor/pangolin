@@ -23,11 +23,10 @@ import java.security.SecureRandom;
 public class SsDnsQueryClient {
     public static void main(String[] args) throws Exception {
         final InetSocketAddress proxyAddress = new InetSocketAddress("f0990972.pnd6xm1ljcfpc3b-fbnode.6pzfwf.com", 56001);
-        CipherAlgorithm cipher = CipherAlgorithmSpi.getInstance("chacha20-ietf-poly1305");
+        final CipherAlgorithm cipher = CipherAlgorithmSpi.getInstance("chacha20-ietf-poly1305");
 
         final InetSocketAddress dnsServer = new InetSocketAddress("8.8.8.8", 53);
         DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsServer, 1);
-//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("iproxyvacoor.io.", DnsRecordType.A));
         query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
 
         EventLoopGroup proxyGroup = new NioEventLoopGroup();
@@ -38,6 +37,7 @@ public class SsDnsQueryClient {
                     protected void initChannel(DatagramChannel ch) {
                         ch.pipeline().addLast(new SsAeadDatagramPacketCipherCodec((AeadCipherAlgorithm) cipher, "jASkBs", new SecureRandom()));
                         ch.pipeline().addLast(new SsClientDatagramPacketCodec(proxyAddress));
+
                         ch.pipeline().addLast(new DatagramDnsQueryEncoder());
                         ch.pipeline().addLast(new DatagramDnsResponseDecoder());
                         ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramDnsResponse>() {
