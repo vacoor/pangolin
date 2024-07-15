@@ -3,8 +3,10 @@ package com.github.pangolin.routing.handler.internal.server;
 import com.github.pangolin.routing.handler.codec.socks5.Socks5DatagramPacketCodec;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
+import freework.codec.Hex;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
@@ -12,6 +14,7 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
+import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.handler.codec.dns.*;
 import io.netty.util.NetUtil;
@@ -62,7 +65,13 @@ public class Socks5DnsQueryClient {
                     }
                 })//.option(ChannelOption.SO_BROADCAST, false).bind(0)
                 .sync()
-                .channel().writeAndFlush(query)
+                 .channel().writeAndFlush(query)
+                /*
+                .channel().writeAndFlush(new DatagramPacket(
+                    Unpooled.wrappedBuffer(Hex.decode("0001000000010000000000000377777705626169647503636f6d0000010001")),
+                    dnsAddress
+                ))
+                */
                 .channel().closeFuture().sync()
         ;
 

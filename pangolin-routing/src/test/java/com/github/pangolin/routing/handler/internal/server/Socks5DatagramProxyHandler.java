@@ -51,7 +51,7 @@ public class Socks5DatagramProxyHandler extends ChannelDuplexHandler {
                                     public void operationComplete(final Future<? super Void> future) throws Exception {
                                         if (future.isSuccess()) {
                                             // FIXME 直接移动到当前类处理.
-                                            udpCtx.pipeline().addAfter(udpCtx.name(), null, new Socks5DatagramPacketCodec(new InetSocketAddress(udpServerAddr, udpServerPort)));
+                                            udpCtx.pipeline().addBefore(udpCtx.name(), null, new Socks5DatagramPacketCodec(new InetSocketAddress(udpServerAddr, udpServerPort)));
                                         }
                                     }
                                 });

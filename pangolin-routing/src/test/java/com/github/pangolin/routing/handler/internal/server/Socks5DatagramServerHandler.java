@@ -17,6 +17,7 @@ import io.netty.handler.codec.socksx.v5.Socks5AddressDecoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressType;
 import lombok.extern.slf4j.Slf4j;
+import org.bouncycastle.util.encoders.Hex;
 
 import javax.net.ssl.SSLException;
 import java.net.Inet4Address;
@@ -72,7 +73,10 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         }
 
         DatagramPacket packetToUse = decode(packet);
-        ownedServer.getNatMapChannel(sender, ctx).channel().writeAndFlush(packetToUse);
+        /*-
+         * UDP sync() is required.
+         */
+        ownedServer.getNatMapChannel(sender, ctx).sync().channel().writeAndFlush(packetToUse);
     }
 
     private DatagramPacket decode(final DatagramPacket packet) throws Exception {
@@ -108,7 +112,7 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
 //        return new DatagramPacket(payloadToUse, recipientToReplace, sender);
     }
 
-    public ByteBuf encode(final ByteBuf rawPayload, final InetSocketAddress dest) throws Exception {
+    public static ByteBuf encode(final ByteBuf rawPayload, final InetSocketAddress dest) throws Exception {
         final ByteBuf payloadToReplace = Unpooled.buffer(3 + rawPayload.readableBytes() + 128);
         final Socks5AddressEncoder encoder = Socks5AddressEncoder.DEFAULT;
 
@@ -185,6 +189,40 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
     }
 
     public static void main(String[] args) throws InterruptedException, CertificateException, SSLException {
+        /*
+        byte[] payloadX = Hex.decode("0001000000010000000000000377777705626169647503636f6d0000010001");
+        ByteBuf payload = Unpooled.wrappedBuffer(payloadX);
+        final InetSocketAddress dnsAddress = new InetSocketAddress("10.88.8.8", 53);
+
+        new StandardDatagramChannelFactory().open(
+                0,
+//                callbackCtx.channel().eventLoop(),
+                new NioEventLoopGroup(),
+                new ChannelInitializer<DatagramChannel>() {
+                    @Override
+                    protected void initChannel(final DatagramChannel ch) throws Exception {
+                        ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramPacket>() {
+                            @Override
+                            protected void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket rawPacket) throws Exception {
+                                final InetSocketAddress sender = rawPacket.sender();
+                                final InetSocketAddress recipient = rawPacket.recipient();
+//                                log.info("[UDP] {} -> {} -> {}", sender, recipient, callback);
+
+                                final ByteBuf payloadToReplace = encode(rawPacket.content(), sender);
+
+                                // final DatagramPacket packet = new DatagramPacket(payload, callback);
+//                                final DatagramPacket packet = new DatagramPacket(payloadToReplace, callback, sender);
+//                                callbackCtx.writeAndFlush(packet);
+                                System.out.println(payloadToReplace);
+                            }
+                        });
+                    }
+                }).sync().channel().writeAndFlush(new DatagramPacket(payload, dnsAddress))
+        .channel().closeFuture().sync();
+
+        System.exit(0);
+        */
+
         Socks5DatagramServerHandler udpServerHandler = new Socks5DatagramServerHandler();
         final Bootstrap udpBootstrap = new Bootstrap();
         udpBootstrap.group(new NioEventLoopGroup());
