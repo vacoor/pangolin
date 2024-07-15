@@ -19,11 +19,11 @@ import java.util.List;
  * @since 20240411
  */
 @Slf4j
-public class ProxySocketChannelFactory implements SocketChannelFactory {
+public class ProxyDatagramChannelFactory implements SocketChannelFactory {
     private final ProxyServer server;
     private final List<String> bypass;
 
-    public ProxySocketChannelFactory(final ProxyServer server, final List<String> bypass) {
+    public ProxyDatagramChannelFactory(final ProxyServer server, final List<String> bypass) {
         this.server = server;
         this.bypass = null != bypass ? bypass : Collections.emptyList();
     }
@@ -31,7 +31,7 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
     @Override
     public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
         final ProxyServer proxyServer = choose(remoteAddress);
-        ChannelHandler networkHandler = null != proxyServer ? proxyServer.newSocketProxyHandler((InetSocketAddress) remoteAddress) : null;
+        ChannelHandler networkHandler = null != proxyServer ? proxyServer.newDatagramProxyHandler((InetSocketAddress) remoteAddress) : null;
         final NoopAddressResolverGroup resolverGroup = null != networkHandler ? NoopAddressResolverGroup.INSTANCE : null;
         return Channels.open(remoteAddress, resolverGroup, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
             @Override

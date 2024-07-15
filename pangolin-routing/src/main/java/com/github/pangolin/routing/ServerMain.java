@@ -99,7 +99,7 @@ public class ServerMain {
                 @Override
                 public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
                     ProxyServer server = config.getServer(proxy);
-                    return null != server ? server.newProxyHandler(sa) : null;
+                    return null != server ? server.newSocketProxyHandler(sa) : null;
                 }
             };
 

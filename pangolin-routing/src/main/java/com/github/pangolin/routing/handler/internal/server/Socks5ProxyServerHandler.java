@@ -188,8 +188,8 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
+//        log.error("[SOCKS5] Software caused connection abort: {}", cause.getMessage(), cause);
         log.error("[SOCKS5] Software caused connection abort: {}", cause.getMessage(), cause);
-        ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 
     protected ChannelFuture connect(final ChannelHandlerContext ctx, final Socks5CommandRequest request) throws Exception {

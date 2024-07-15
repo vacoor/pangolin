@@ -126,7 +126,7 @@ public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
 
     protected abstract boolean handshakeRead(final ChannelHandlerContext ctx, final Object msg) throws Exception;
 
-    private void setHandshakeSuccess(final ChannelHandlerContext ctx) throws Exception {
+    protected void setHandshakeSuccess(final ChannelHandlerContext ctx) throws Exception {
         if (!handshakePromise.isDone()) {
             writePendingWrites();
             if (flushedBeforeHandshake) {

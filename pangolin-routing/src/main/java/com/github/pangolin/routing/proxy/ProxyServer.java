@@ -8,6 +8,8 @@ public interface ProxyServer {
 
     String getName();
 
-    ChannelHandler newProxyHandler(InetSocketAddress sa);
+    ChannelHandler newSocketProxyHandler(InetSocketAddress sa);
+
+    ChannelHandler newDatagramProxyHandler(InetSocketAddress sa);
 
 }

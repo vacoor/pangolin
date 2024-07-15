@@ -13,13 +13,12 @@ import java.util.Map;
  * @since 20240411
  */
 @Slf4j
-public class RuleBasedProxyServer implements ProxyServer {
-    private final String name;
+public class RuleBasedProxyServer extends AbstractServer {
     private final RulesProvider rulesProvider;
     private final ServerProvider proxyServerProvider;
 
     public RuleBasedProxyServer(final String name, final RulesProvider rulesProvider, final ServerProvider provider) {
-        this.name = name;
+        super(name);
         this.rulesProvider = rulesProvider;
         this.proxyServerProvider = provider;
     }
@@ -30,13 +29,13 @@ public class RuleBasedProxyServer implements ProxyServer {
     }
 
     @Override
-    public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+    public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
         final ProxyServer proxyServer = select(sa);
         return null != proxyServer ? newProxyHandler(proxyServer, (InetSocketAddress) sa) : null;
     }
 
     protected ChannelHandler newProxyHandler(final ProxyServer server, final InetSocketAddress sa) {
-        return server.newProxyHandler(sa);
+        return server.newSocketProxyHandler(sa);
     }
 
     private ProxyServer select(final SocketAddress destinationAddress) {

@@ -104,7 +104,8 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
          */
         final ByteBuf payloadToUse = payload.copy();
         final InetSocketAddress recipientToReplace = new InetSocketAddress(dstAddr, dstPort);
-        return new DatagramPacket(payloadToUse, recipientToReplace, sender);
+        return new DatagramPacket(payloadToUse, recipientToReplace);
+//        return new DatagramPacket(payloadToUse, recipientToReplace, sender);
     }
 
     public ByteBuf encode(final ByteBuf rawPayload, final InetSocketAddress dest) throws Exception {
@@ -160,7 +161,8 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
     private ChannelFuture create(final InetSocketAddress callback, final ChannelHandlerContext callbackCtx) {
         return datagramChannelFactory.open(
                 callbackCtx.channel().config().getConnectTimeoutMillis(),
-                callbackCtx.channel().eventLoop(),
+//                callbackCtx.channel().eventLoop(),
+                new NioEventLoopGroup(),
                 new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(final DatagramChannel ch) throws Exception {
@@ -195,10 +197,10 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
             }
         });
 //        udpBootstrap.bind("192.168.1.12", 1080).sync();
-        udpBootstrap.bind("192.168.1.12", 1080);
+        udpBootstrap.bind(3080);
         System.out.println("UDP");
 
-        NettyServer server = new NettyServer("192.168.1.12", 1080);
+        NettyServer server = new NettyServer(3080);
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {

@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.config;
 
+import com.github.pangolin.routing.proxy.AbstractServer;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ServerProvider;
 import com.github.pangolin.routing.proxy.spi.ServerResolver;
@@ -133,9 +134,15 @@ public class ServerFactory {
         }
 
         @Override
-        public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+        public ChannelHandler newDatagramProxyHandler(final InetSocketAddress sa) {
+            // FIXME
+            return delegate.newDatagramProxyHandler(sa);
+        }
+
+        @Override
+        public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
             ServerStats serverStats = stats.getSingleServerStat(this);
-            ChannelHandler h = delegate.newProxyHandler(sa);
+            ChannelHandler h = delegate.newSocketProxyHandler(sa);
             if (null == h) {
                 return null;
             }
@@ -178,25 +185,19 @@ public class ServerFactory {
         }
     }
 
-    private class LazyServerChain implements ProxyServer {
-        private final String name;
+    private class LazyServerChain extends AbstractServer {
         private final ServerProvider chain;
 
         private LazyServerChain(final String name, final ServerProvider chain) {
-            this.name = name;
+            super(name);
             this.chain = chain;
         }
 
         @Override
-        public String getName() {
-            return name;
-        }
-
-        @Override
-        public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
             final List<ChannelHandler> handlers = chain.getServers()
                     .stream()
-                    .map(s -> s.newProxyHandler(sa))
+                    .map(s -> s.newSocketProxyHandler(sa))
                     .collect(Collectors.toList());
             if (handlers.isEmpty()) {
                 return null;
@@ -211,22 +212,26 @@ public class ServerFactory {
     }
 
     @Slf4j
-    public static class LoadBalancingProxyServer implements ProxyServer {
-        private final String name;
+    public static class LoadBalancingProxyServer extends AbstractServer {
         private final ILoadBalancer lb;
 
         public LoadBalancingProxyServer(final String name, final ILoadBalancer lb) {
-            this.name = name;
+            super(name);
             this.lb = lb;
         }
 
         @Override
-        public String getName() {
-            return name;
+        public ChannelHandler newDatagramProxyHandler(final InetSocketAddress sa) {
+            final ProxyServer server = choose(sa);
+            if (null != server) {
+                log.info("Choose {} -> {}", server.getName(), sa);
+                return server.newDatagramProxyHandler(sa);
+            }
+            return null;
         }
 
         @Override
-        public ChannelHandler newProxyHandler(final InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
             final ProxyServer server = choose(sa);
             if (null != server) {
                 log.info("Choose {} -> {}", server.getName(), sa);
@@ -236,7 +241,7 @@ public class ServerFactory {
         }
 
         protected ChannelHandler newProxyHandler(final ProxyServer server, final InetSocketAddress sa) {
-            return server.newProxyHandler(sa);
+            return server.newSocketProxyHandler(sa);
         }
 
         protected ProxyServer choose(final InetSocketAddress hint) {

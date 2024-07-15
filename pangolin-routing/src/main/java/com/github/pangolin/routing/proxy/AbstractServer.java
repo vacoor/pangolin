@@ -13,12 +13,16 @@ public abstract class AbstractServer implements ProxyServer {
         this.name = name;
     }
 
-    public ChannelHandler newProxyHandler(final InetSocketAddress destination) {
-        return newSocketProxyHandler(destination);
-    }
-
+    /**
+     * {@inheritDoc}
+     */
+    @Override
     public abstract ChannelHandler newSocketProxyHandler(final InetSocketAddress destination);
 
+    /**
+     * {@inheritDoc}
+     */
+    @Override
     public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
         return null;
     }

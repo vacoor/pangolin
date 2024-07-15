@@ -1,6 +1,8 @@
 package com.github.pangolin.routing.handler.internal.server;
 
 import com.github.pangolin.routing.handler.codec.socks5.Socks5DatagramPacketCodec;
+import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.ChannelHandlerContext;
@@ -24,19 +26,19 @@ import java.net.InetSocketAddress;
 public class Socks5DnsQueryClient {
 
     public static void main(String[] args) throws Exception {
-        final InetSocketAddress proxyAddress = new InetSocketAddress(1080);
+        final InetSocketAddress proxyAddress = new InetSocketAddress(3080);
 
-        final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
+        final InetSocketAddress dnsAddress = new InetSocketAddress("10.88.8.8", 53);
         final DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
         query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("www.baidu.com", DnsRecordType.A));
 
+        DatagramChannelFactory factory = new StandardDatagramChannelFactory();
         final EventLoopGroup proxyGroup = new NioEventLoopGroup();
-        final Bootstrap b = new Bootstrap();
-        b.group(proxyGroup).channel(NioDatagramChannel.class)
-                .handler(new ChannelInitializer<DatagramChannel>() {
+        factory.open(0, proxyGroup, new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
-                        ch.pipeline().addLast(new Socks5DatagramPacketCodec(proxyAddress));
+//                        ch.pipeline().addLast(new Socks5DatagramProxyHandler(proxyAddress));
+//                        ch.pipeline().addLast(new Socks5DatagramPacketCodec(new InetSocketAddress("127.0.0.1", 3080)));
                         ch.pipeline().addLast(new DatagramDnsResponseDecoder());
                         ch.pipeline().addLast(new DatagramDnsQueryEncoder());
                         ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramDnsResponse>() {
@@ -58,7 +60,7 @@ public class Socks5DnsQueryClient {
 
                         });
                     }
-                }).option(ChannelOption.SO_BROADCAST, true).bind(2080)
+                })//.option(ChannelOption.SO_BROADCAST, false).bind(0)
                 .sync()
                 .channel().writeAndFlush(query)
                 .channel().closeFuture().sync()
