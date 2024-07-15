@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.internal.server;
+package com.github.pangolin.routing.handler.internal.server.socks5.client;
 
 import com.github.pangolin.routing.handler.internal.client.AbstractProxyHandler;
 import io.netty.channel.ChannelHandlerContext;

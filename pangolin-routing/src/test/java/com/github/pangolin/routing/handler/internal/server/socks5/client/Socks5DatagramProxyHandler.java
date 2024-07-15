@@ -1,9 +1,11 @@
-package com.github.pangolin.routing.handler.internal.server;
+package com.github.pangolin.routing.handler.internal.server.socks5.client;
 
 import com.github.pangolin.routing.handler.codec.socks5.Socks5DatagramPacketCodec;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
+import com.github.pangolin.routing.proxy.spi.Utils;
 import io.netty.channel.ChannelDuplexHandler;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 import io.netty.handler.codec.socksx.v5.Socks5CommandResponse;
@@ -16,10 +18,13 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 
 /**
+ *
  */
 public class Socks5DatagramProxyHandler extends ChannelDuplexHandler {
     private final InetSocketAddress proxyAddress;
     private final SocketChannelFactory socketChannelFactory;
+
+    private volatile ChannelFuture tcpChannel;
 
     public Socks5DatagramProxyHandler(final InetSocketAddress proxyAddress) {
         this(proxyAddress, new StandardSocketChannelFactory());
@@ -32,10 +37,7 @@ public class Socks5DatagramProxyHandler extends ChannelDuplexHandler {
 
     @Override
     public void bind(final ChannelHandlerContext udpCtx, final SocketAddress localAddress, final ChannelPromise promise) throws Exception {
-//        super.bind(ctx, localAddress, promise);
-        socketChannelFactory.open(
-                proxyAddress,
-                udpCtx.channel().config().getConnectTimeoutMillis(),
+        tcpChannel = socketChannelFactory.open(proxyAddress, udpCtx.channel().config().getConnectTimeoutMillis(),
                 true,
                 udpCtx.channel().eventLoop(),
                 new Socks5ProxyHandler2(proxyAddress) {
@@ -46,15 +48,12 @@ public class Socks5DatagramProxyHandler extends ChannelDuplexHandler {
                             if (Socks5CommandStatus.SUCCESS.equals(socks5CommandResponse.status())) {
                                 final String udpServerAddr = socks5CommandResponse.bndAddr();
                                 final int udpServerPort = socks5CommandResponse.bndPort();
-                                promise.addListener(new GenericFutureListener<Future<? super Void>>() {
-                                    @Override
-                                    public void operationComplete(final Future<? super Void> future) throws Exception {
-                                        if (future.isSuccess()) {
-                                            // FIXME 直接移动到当前类处理.
-                                            udpCtx.pipeline().addBefore(udpCtx.name(), null, new Socks5DatagramPacketCodec(new InetSocketAddress(udpServerAddr, udpServerPort)));
-                                        }
-                                    }
-                                });
+                                // FIXME 直接移动到当前类处理.
+                                final InetSocketAddress address = Utils.toSocketAddress(udpServerAddr, udpServerPort, false);
+                                udpCtx.pipeline().addBefore(udpCtx.name(), null, new Socks5DatagramPacketCodec(address));
+                                Socks5DatagramProxyHandler.super.bind(udpCtx, localAddress, promise);
+                            } else {
+                                promise.tryFailure(new ConnectException("status = " + socks5CommandResponse.status()));
                             }
                         }
                         return super.handshakeRead(tcpCtx, msg);
@@ -65,10 +64,23 @@ public class Socks5DatagramProxyHandler extends ChannelDuplexHandler {
             public void operationComplete(final Future<? super Void> future) throws Exception {
                 if (!future.isSuccess()) {
                     promise.tryFailure(future.cause());
-                } else {
-                    Socks5DatagramProxyHandler.super.bind(udpCtx, localAddress, promise);
+                }
+            }
+        }).channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
+            @Override
+            public void operationComplete(final Future<? super Void> future) throws Exception {
+                if (udpCtx.channel().isOpen()) {
+                    udpCtx.close();
                 }
             }
         });
+    }
+
+    @Override
+    public void close(final ChannelHandlerContext ctx, final ChannelPromise promise) throws Exception {
+        super.close(ctx, promise);
+        if (null != tcpChannel && tcpChannel.channel().isOpen()) {
+            tcpChannel.channel().close();
+        }
     }
 }

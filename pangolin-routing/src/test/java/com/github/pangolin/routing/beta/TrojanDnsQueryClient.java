@@ -1,21 +1,16 @@
 package com.github.pangolin.routing.beta;
 
-import com.github.pangolin.routing.handler.codec.ss.SsAeadDatagramPacketCipherCodec;
-import com.github.pangolin.routing.handler.codec.ss.SsClientDatagramPacketCodec;
-import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
-import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
-import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.handler.internal.client.TrojanProxyHandler;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
-import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.MessageToByteEncoder;
@@ -27,7 +22,6 @@ import io.netty.util.NetUtil;
 
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
-import java.security.SecureRandom;
 import java.util.List;
 
 

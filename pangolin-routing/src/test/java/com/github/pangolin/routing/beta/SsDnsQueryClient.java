@@ -5,6 +5,7 @@ import com.github.pangolin.routing.handler.codec.ss.SsClientDatagramPacketCodec;
 import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
+import com.github.pangolin.routing.handler.internal.client.SsDatagramProxyHandler;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.*;
@@ -24,6 +25,7 @@ public class SsDnsQueryClient {
     public static void main(String[] args) throws Exception {
         final InetSocketAddress proxyAddress = new InetSocketAddress("f0990972.pnd6xm1ljcfpc3b-fbnode.6pzfwf.com", 56001);
         final CipherAlgorithm cipher = CipherAlgorithmSpi.getInstance("chacha20-ietf-poly1305");
+        final String password = "jASkBs";
 
         final InetSocketAddress dnsServer = new InetSocketAddress("8.8.8.8", 53);
         DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsServer, 1);
@@ -35,8 +37,9 @@ public class SsDnsQueryClient {
                 .handler(new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
-                        ch.pipeline().addLast(new SsAeadDatagramPacketCipherCodec((AeadCipherAlgorithm) cipher, "jASkBs", new SecureRandom()));
-                        ch.pipeline().addLast(new SsClientDatagramPacketCodec(proxyAddress));
+//                        ch.pipeline().addLast(new SsAeadDatagramPacketCipherCodec((AeadCipherAlgorithm) cipher, password, new SecureRandom()));
+//                        ch.pipeline().addLast(new SsClientDatagramPacketCodec(proxyAddress));
+                        ch.pipeline().addLast(new SsDatagramProxyHandler(proxyAddress, cipher, password));
 
                         ch.pipeline().addLast(new DatagramDnsQueryEncoder());
                         ch.pipeline().addLast(new DatagramDnsResponseDecoder());

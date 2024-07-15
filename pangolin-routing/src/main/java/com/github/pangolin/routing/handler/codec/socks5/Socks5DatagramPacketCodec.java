@@ -29,12 +29,12 @@ public class Socks5DatagramPacketCodec extends MessageToMessageCodec<DatagramPac
     }
 
     @Override
-    protected void encode(final ChannelHandlerContext channelHandlerContext, final DatagramPacket datagramPacket, final List<Object> list) throws Exception {
-        final InetSocketAddress recipient = datagramPacket.recipient();
+    protected void encode(final ChannelHandlerContext channelHandlerContext, final DatagramPacket packet, final List<Object> list) throws Exception {
+        final InetSocketAddress recipient = packet.recipient();
 
-        ByteBuf payloadToReplace = encode(datagramPacket.content(), recipient);
+        ByteBuf payloadToReplace = encode(packet.content(), recipient);
 
-        list.add(new DatagramPacket(payloadToReplace, proxyAddress, datagramPacket.sender()));
+        list.add(new DatagramPacket(payloadToReplace, proxyAddress, packet.sender()));
     }
 
     private ByteBuf encode(final ByteBuf rawPayload, final InetSocketAddress dest) throws Exception {

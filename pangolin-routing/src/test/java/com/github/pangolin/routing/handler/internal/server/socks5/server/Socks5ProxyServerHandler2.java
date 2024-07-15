@@ -1,5 +1,6 @@
-package com.github.pangolin.routing.handler.internal.server;
+package com.github.pangolin.routing.handler.internal.server.socks5.server;
 
+import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.socksx.v5.*;
 import io.netty.util.concurrent.Future;

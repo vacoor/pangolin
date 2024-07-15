@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.internal.server;
+package com.github.pangolin.routing.handler.internal.server.socks5.server;
 
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
@@ -17,7 +17,6 @@ import io.netty.handler.codec.socksx.v5.Socks5AddressDecoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressType;
 import lombok.extern.slf4j.Slf4j;
-import org.bouncycastle.util.encoders.Hex;
 
 import javax.net.ssl.SSLException;
 import java.net.Inet4Address;

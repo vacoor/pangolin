@@ -1,6 +1,9 @@
-package com.github.pangolin.routing.handler.internal.server;
+package com.github.pangolin.routing.handler.internal.server.socks5.client;
 
 import com.github.pangolin.routing.handler.codec.socks5.Socks5DatagramPacketCodec;
+import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
+import com.github.pangolin.routing.handler.internal.client.SsDatagramProxyHandler;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
 import freework.codec.Hex;
@@ -29,19 +32,24 @@ import java.net.InetSocketAddress;
 public class Socks5DnsQueryClient {
 
     public static void main(String[] args) throws Exception {
-        final InetSocketAddress proxyAddress = new InetSocketAddress(3080);
+        final InetSocketAddress ssProxyAddress = new InetSocketAddress("", 56001);
+        final CipherAlgorithm cipher = CipherAlgorithmSpi.getInstance("chacha20-ietf-poly1305");
+        final String password = "jASkBs";
 
-        final InetSocketAddress dnsAddress = new InetSocketAddress("10.88.8.8", 53);
+        final InetSocketAddress proxyAddress = new InetSocketAddress(3080);
+        final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
+//        final InetSocketAddress dnsAddress = new InetSocketAddress("8.8.8.8", 53);
         final DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
-        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("www.baidu.com", DnsRecordType.A));
+//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
+        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
 
         DatagramChannelFactory factory = new StandardDatagramChannelFactory();
         final EventLoopGroup proxyGroup = new NioEventLoopGroup();
         factory.open(0, proxyGroup, new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
-//                        ch.pipeline().addLast(new Socks5DatagramProxyHandler(proxyAddress));
-//                        ch.pipeline().addLast(new Socks5DatagramPacketCodec(new InetSocketAddress("127.0.0.1", 3080)));
+                        ch.pipeline().addLast(new Socks5DatagramProxyHandler(proxyAddress));
+//                        ch.pipeline().addLast(new SsDatagramProxyHandler(ssProxyAddress, cipher, password));
                         ch.pipeline().addLast(new DatagramDnsResponseDecoder());
                         ch.pipeline().addLast(new DatagramDnsQueryEncoder());
                         ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramDnsResponse>() {
