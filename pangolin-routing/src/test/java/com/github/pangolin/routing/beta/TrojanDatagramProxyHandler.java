@@ -86,6 +86,8 @@ public class TrojanDatagramProxyHandler extends ChannelDuplexHandler {
 
                             @Override
                             public void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket msg) throws Exception {
+                                System.out.println(msg);
+                                // FIXME replace recipt
                                 udpCtx.writeAndFlush(msg.retain());
                             }
                         });

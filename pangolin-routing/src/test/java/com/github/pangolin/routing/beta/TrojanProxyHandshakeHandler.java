@@ -128,4 +128,9 @@ public class TrojanProxyHandshakeHandler extends ChannelDuplexHandler {
         final byte[] hash = MessageDigest.getInstance("SHA-224").digest(bytes);
         return Hex.encode(hash).getBytes(StandardCharsets.UTF_8);
     }
+
+    @Override
+    public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+        super.channelRead(ctx, msg);
+    }
 }
