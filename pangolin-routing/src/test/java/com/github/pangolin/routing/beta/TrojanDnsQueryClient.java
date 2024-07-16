@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.beta;
 
-import com.github.pangolin.routing.handler.internal.client.TrojanProxyHandler;
+import freework.codec.Hex;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
@@ -58,6 +58,7 @@ public class TrojanDnsQueryClient {
             out.writeShort(payload.readableBytes());
             out.writeBytes(CRLF);
             out.writeBytes(payload);
+            System.out.println("ENCODE: " + Hex.encode(ByteBufUtil.getBytes(out)));
         }
 
     }
@@ -83,6 +84,7 @@ public class TrojanDnsQueryClient {
             final int dstPort = packet.readUnsignedShort();
 
             final int length = packet.readUnsignedShort();
+            packet.readBytes(2); // CRLF
             final ByteBuf rawPayload = packet.readBytes(length);
 
             /*-
@@ -98,7 +100,7 @@ public class TrojanDnsQueryClient {
         final InetSocketAddress proxyAddress = new InetSocketAddress("hk4.0de74f06-20d5-b05e-74f5-c75c1e286fc9.66dc3db5.the-best-airport.com", 443);
         final String proxyPassword = "ccccd0e2-1e27-4de4-aeea-3d88fc4887b7";
 
-        final InetSocketAddress dnsServer = new InetSocketAddress("114.114.114.114", 53);
+        final InetSocketAddress dnsServer = new InetSocketAddress("8.8.8.8", 53);
         DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsServer, 1);
         query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
 
@@ -108,15 +110,11 @@ public class TrojanDnsQueryClient {
                 .handler(new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(SocketChannel ch) {
-                        ch.pipeline().addLast(new TrojanProxyHandler(proxyAddress, proxyPassword));
-
-//                        ch.pipeline().addLast(new SsAeadDatagramPacketCipherCodec((AeadCipherAlgorithm) cipher, "jASkBs", new SecureRandom()));
-//                        ch.pipeline().addLast(new SsClientDatagramPacketCodec(proxyAddress));
-
+                        ch.pipeline().addLast(new TrojanProxyHandshakeHandler(proxyAddress, proxyPassword));
                         ch.pipeline().addLast(new DatagramPacketEncoder());
-                        ch.pipeline().addLast(new DatagramDnsQueryEncoder());
-
                         ch.pipeline().addLast(new DatagramPacketDecoder());
+
+                        ch.pipeline().addLast(new DatagramDnsQueryEncoder());
                         ch.pipeline().addLast(new DatagramDnsResponseDecoder());
                         ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramDnsResponse>() {
 
