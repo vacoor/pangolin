@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.proxy;
+package com.github.pangolin.routing.upstream;
 
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.util.Channels;
@@ -20,18 +20,18 @@ import java.util.List;
  */
 @Slf4j
 public class ProxySocketChannelFactory implements SocketChannelFactory {
-    private final ProxyServer server;
+    private final UpstreamServer server;
     private final List<String> bypass;
 
-    public ProxySocketChannelFactory(final ProxyServer server, final List<String> bypass) {
+    public ProxySocketChannelFactory(final UpstreamServer server, final List<String> bypass) {
         this.server = server;
         this.bypass = null != bypass ? bypass : Collections.emptyList();
     }
 
     @Override
     public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
-        final ProxyServer proxyServer = choose(remoteAddress);
-        ChannelHandler networkHandler = null != proxyServer ? proxyServer.newSocketProxyHandler((InetSocketAddress) remoteAddress) : null;
+        final UpstreamServer upstreamServer = choose(remoteAddress);
+        ChannelHandler networkHandler = null != upstreamServer ? upstreamServer.newSocketProxyHandler((InetSocketAddress) remoteAddress) : null;
         final NoopAddressResolverGroup resolverGroup = null != networkHandler ? NoopAddressResolverGroup.INSTANCE : null;
         return Channels.open(remoteAddress, resolverGroup, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
             @Override
@@ -44,16 +44,16 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
         });
     }
 
-    private ProxyServer choose(final SocketAddress destinationAddress) {
+    private UpstreamServer choose(final SocketAddress destinationAddress) {
         if (!(destinationAddress instanceof InetSocketAddress)) {
-            log.info("[ROUTING] will bypass the proxy => {}", destinationAddress);
+            log.info("[ROUTING] will bypass the upstream => {}", destinationAddress);
             return null;
         }
         final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
         if ((sa.isUnresolved() && bypass.contains(sa.getHostString()))
                 || (!sa.isUnresolved() && bypass.contains(sa.getHostName()))
         ) {
-            log.info("[ROUTING] will bypass the proxy => {}:{}", sa.getHostString(), sa.getPort());
+            log.info("[ROUTING] will bypass the upstream => {}:{}", sa.getHostString(), sa.getPort());
             return null;
         }
 

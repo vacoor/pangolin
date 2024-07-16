@@ -1,11 +1,13 @@
-package com.github.pangolin.routing.proxy.spi;
+package com.github.pangolin.routing.upstream.spi;
 
 import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.handler.internal.client.SsDatagramProxyHandler;
 import com.github.pangolin.routing.handler.internal.client.SsProxyHandler;
-import com.github.pangolin.routing.proxy.AbstractServer;
-import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.upstream.AbstractServer;
+import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.upstream.UpstreamServerResolver;
+import com.github.pangolin.routing.util.SocketUtils;
 import freework.codec.Base64;
 import freework.util.Bytes;
 import io.netty.channel.ChannelHandler;
@@ -18,7 +20,7 @@ import java.util.Properties;
 /**
  *
  */
-public class SsServerResolver implements ServerResolver {
+public class SsServerResolver implements UpstreamServerResolver {
     private static final String URL_PREFIX = "ss://";
     private static final int DEFAULT_PORT = 1080;
 
@@ -35,7 +37,7 @@ public class SsServerResolver implements ServerResolver {
      *
      * @see <a href="#">SIP002 URI Scheme</a>
      */
-    public ProxyServer resolve(final String url, final Properties props) {
+    public UpstreamServer resolve(final String url, final Properties props) {
         if (!acceptsUrl(url)) {
             return null;
         }
@@ -51,7 +53,7 @@ public class SsServerResolver implements ServerResolver {
 
         final CipherAlgorithm algorithm = CipherAlgorithmSpi.getInstance(method);
 
-        final InetSocketAddress address = Utils.toSocketAddress(host, port);
+        final InetSocketAddress address = SocketUtils.toSocketAddress(host, port);
         return new SsServer(name, address, algorithm, password);
     }
 

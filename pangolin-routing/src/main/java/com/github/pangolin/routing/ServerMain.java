@@ -5,7 +5,7 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 import com.github.pangolin.routing.config.ConfigurationException;
 import com.github.pangolin.routing.config.DefaultServerReader;
 import com.github.pangolin.routing.config.Ini;
-import com.github.pangolin.routing.config.RefreshableServerRegistry;
+import com.github.pangolin.routing.config.RefreshableUpstreamServerRegistry;
 import com.github.pangolin.routing.handler.extra.ProxyAutoConfigurationServerHandler;
 import com.github.pangolin.routing.handler.extra.SwitchyRuleConfigurationServerHandler;
 import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
@@ -19,11 +19,11 @@ import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
-import com.github.pangolin.routing.proxy.AbstractServer;
-import com.github.pangolin.routing.proxy.ProxyDatagramChannelFactory;
-import com.github.pangolin.routing.proxy.ProxyServer;
-import com.github.pangolin.routing.proxy.ProxySocketChannelFactory;
-import com.github.pangolin.routing.proxy.RuleBasedProxyServer;
+import com.github.pangolin.routing.rule.RuleBasedUpstreamServer;
+import com.github.pangolin.routing.upstream.AbstractServer;
+import com.github.pangolin.routing.upstream.ProxyDatagramChannelFactory;
+import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.upstream.ProxySocketChannelFactory;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Lists;
 import com.netflix.loadbalancer.LoadBalancerStats;
@@ -85,10 +85,10 @@ public class ServerMain {
         }
 
         final LoadBalancerStats stats = new LoadBalancerStats();
-        final RefreshableServerRegistry config = new RefreshableServerRegistry(new DefaultServerReader(stats), url).refresh();
+        final RefreshableUpstreamServerRegistry config = new RefreshableUpstreamServerRegistry(new DefaultServerReader(stats), url).refresh();
 
         final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
-        final RuleBasedProxyServer defaultProxy = new RuleBasedProxyServer("ROUTING-PROXY", config, config);
+        final RuleBasedUpstreamServer defaultProxy = new RuleBasedUpstreamServer("ROUTING-PROXY", config, config);
 
 //        final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(modedRulesProvider, proxyServerProvider, bypass);
 //        final StandardSocketChannelFactory factory = new StandardSocketChannelFactory();
@@ -104,22 +104,22 @@ public class ServerMain {
             final String[] segments = value.split("\\s*,\\s*");
             final String proxy = segments[0];
             defaultPort = "DEFAULT".equals(proxy) ? listenPort : defaultPort;
-            final ProxyServer proxyServer = "DEFAULT".equals(proxy) ? defaultProxy : new AbstractServer(proxy) {
+            final UpstreamServer upstreamServer = "DEFAULT".equals(proxy) ? defaultProxy : new AbstractServer(proxy) {
                 @Override
                 public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
-                    ProxyServer server = config.getServer(proxy);
+                    UpstreamServer server = config.getServer(proxy);
                     return null != server ? server.newSocketProxyHandler(sa) : null;
                 }
 
                 @Override
                 public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
-                    ProxyServer server = config.getServer(proxy);
+                    UpstreamServer server = config.getServer(proxy);
                     return null != server ? server.newDatagramProxyHandler(destination) : null;
                 }
             };
 
-            final SocketChannelFactory socketChannelFactory = new ProxySocketChannelFactory(proxyServer, bypass);
-            final DatagramChannelFactory datagramChannelFactory = new ProxyDatagramChannelFactory(proxyServer, bypass);
+            final SocketChannelFactory socketChannelFactory = new ProxySocketChannelFactory(upstreamServer, bypass);
+            final DatagramChannelFactory datagramChannelFactory = new ProxyDatagramChannelFactory(upstreamServer, bypass);
 
             final NettyServer server = new NettyServer(listenPort);
             final List<String> protocols = Arrays.asList(segments).subList(1, segments.length);
@@ -153,7 +153,7 @@ public class ServerMain {
                 public void operationComplete(final ChannelFuture future) throws Exception {
                     if (future.isSuccess()) {
                         final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                        log.info("Mixed proxy {} started on port {} ({})", proxy, localAddress.getPort(), localAddress);
+                        log.info("Mixed upstream {} started on port {} ({})", proxy, localAddress.getPort(), localAddress);
                     } else {
                         future.cause().printStackTrace();
                     }

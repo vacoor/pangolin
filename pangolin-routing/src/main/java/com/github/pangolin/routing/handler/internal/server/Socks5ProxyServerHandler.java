@@ -3,6 +3,7 @@ package com.github.pangolin.routing.handler.internal.server;
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
+import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelFuture;
@@ -247,8 +248,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         ctx.channel().config().setAutoRead(false);
 
         final ChannelConfig c = ctx.channel().config();
-        // FIXME
-        final InetSocketAddress addr = InetSocketAddress.createUnresolved(address, port);
+        final InetSocketAddress addr = SocketUtils.toSocketAddress(address, port, false);
         return socketChannelFactory.open(addr, c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {

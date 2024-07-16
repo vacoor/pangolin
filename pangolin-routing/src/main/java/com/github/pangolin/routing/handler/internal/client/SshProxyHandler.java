@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.handler.internal.client;
 
+import com.github.pangolin.routing.util.SocketUtils;
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -85,7 +86,7 @@ public class SshProxyHandler extends ChannelDuplexHandler {
 
     @Override
     public void connect(final ChannelHandlerContext ctx, final SocketAddress remoteAddress, final SocketAddress localAddress, final ChannelPromise promise) throws Exception {
-        final InetSocketAddress proxyAddress = new InetSocketAddress(hostname, port);
+        final InetSocketAddress proxyAddress = SocketUtils.toSocketAddress(hostname, port);
 
         final SshClient client = DEFAULT_SSH_CLIENT;
         final NettyIoConnector ioConnector = new NettyIoConnector((NettyIoServiceFactory) client.getIoServiceFactory(), client.getSessionFactory());

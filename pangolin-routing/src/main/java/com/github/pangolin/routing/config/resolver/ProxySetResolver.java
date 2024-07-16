@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.config.resolver;
 
-import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.upstream.UpstreamServer;
 import freework.util.StringUtils2;
 import lombok.extern.slf4j.Slf4j;
 
@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
  *
  */
 @Slf4j
-public class ProxySetResolver extends AbstractPrefixRuleResolver<ProxyServer> {
+public class ProxySetResolver extends AbstractPrefixRuleResolver<UpstreamServer> {
     private static final String PATH_DIV = "/";
     private static final String PROTOCOL_FILE = "file";
 
@@ -31,7 +31,7 @@ public class ProxySetResolver extends AbstractPrefixRuleResolver<ProxyServer> {
      * {@inheritDoc}
      */
     @Override
-    protected List<ProxyServer> doResolve(final String proxy, final URL url) throws IOException {
+    protected List<UpstreamServer> doResolve(final String proxy, final URL url) throws IOException {
         final URL proxySetUrl = resolveUrl(url, proxy);
         return Utils.lines(proxySetUrl, StandardCharsets.UTF_8)
                 .filter(StringUtils2::hasText)
@@ -40,7 +40,7 @@ public class ProxySetResolver extends AbstractPrefixRuleResolver<ProxyServer> {
                 .collect(Collectors.toList());
     }
 
-    protected List<ProxyServer> doResolveInternal(final String line, final URL url) {
+    protected List<UpstreamServer> doResolveInternal(final String line, final URL url) {
         try {
             return resolver.doResolve(line, url);
         } catch (final IOException e) {

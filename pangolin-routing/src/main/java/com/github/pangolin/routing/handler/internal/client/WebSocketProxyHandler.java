@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.handler.internal.client;
 
+import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
@@ -52,7 +53,7 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
                                  final HttpHeaders customHandshakeHttpHeaders,
                                  final boolean allowExtensions, final int maxFramePayloadLength,
                                  final boolean performMasking, final boolean allowMaskMismatch) {
-        super(new InetSocketAddress(webSocketProxyServerEndpoint.getHost(), webSocketProxyServerEndpoint.getPort()));
+        super(SocketUtils.toSocketAddress(webSocketProxyServerEndpoint.getHost(), webSocketProxyServerEndpoint.getPort()));
         this.webSocketProxyServerEndpoint = webSocketProxyServerEndpoint;
         this.webSocketVersion = webSocketVersion;
         this.webSocketProxyServerProtocol = webSocketProxyServerProtocol;

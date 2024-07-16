@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.handler.codec.ss;
 
+import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.socket.DatagramPacket;
@@ -72,7 +73,7 @@ public class SsClientDatagramPacketCodec extends MessageToMessageCodec<DatagramP
         final String dstAddr = decoder.decodeAddress(dstAddrType, payload);
         final int dstPort = payload.readUnsignedShort();
 
-        out.add(new DatagramPacket(payload, in.recipient(), new InetSocketAddress(dstAddr, dstPort)));
+        out.add(new DatagramPacket(payload, in.recipient(), SocketUtils.toSocketAddress(dstAddr, dstPort)));
     }
 
 }

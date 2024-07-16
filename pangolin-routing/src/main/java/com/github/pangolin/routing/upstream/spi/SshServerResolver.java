@@ -1,9 +1,9 @@
-package com.github.pangolin.routing.proxy.spi;
+package com.github.pangolin.routing.upstream.spi;
 
 import com.github.pangolin.routing.handler.internal.client.SshProxyHandler;
-import com.github.pangolin.routing.proxy.AbstractServer;
-import com.github.pangolin.routing.proxy.ProxyServer;
-import com.github.pangolin.routing.proxy.spi.ServerResolver;
+import com.github.pangolin.routing.upstream.AbstractServer;
+import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.upstream.UpstreamServerResolver;
 import freework.codec.Base64;
 import freework.util.Bytes;
 import io.netty.channel.ChannelHandler;
@@ -15,7 +15,7 @@ import java.util.Properties;
 /**
  *
  */
-public class SshServerResolver implements ServerResolver {
+public class SshServerResolver implements UpstreamServerResolver {
     private static final String URL_PREFIX = "ssh://";
     private static final int DEFAULT_PORT = 22;
 
@@ -28,7 +28,7 @@ public class SshServerResolver implements ServerResolver {
      *
      */
     @Override
-    public ProxyServer resolve(final String url, final Properties props) {
+    public UpstreamServer resolve(final String url, final Properties props) {
         if (!acceptsUrl(url)) {
             return null;
         }

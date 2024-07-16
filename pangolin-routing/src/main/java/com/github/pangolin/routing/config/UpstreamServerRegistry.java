@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.proxy.ProxyServer;
-import com.github.pangolin.routing.proxy.ServerProvider;
+import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.upstream.UpstreamServerProvider;
 import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.google.common.collect.Lists;
@@ -10,17 +10,17 @@ import com.netflix.loadbalancer.LoadBalancerStats;
 
 import java.util.*;
 
-public class ServerRegistry extends ServerFactory implements ServerProvider, RulesProvider, RouteletContext {
+public class UpstreamServerRegistry extends ServerFactory implements UpstreamServerProvider, RulesProvider, RouteletContext {
     private final RouteletContext parent;
-    private final Map<String, ProxyServer> proxies = Maps.newLinkedHashMap();
+    private final Map<String, UpstreamServer> proxies = Maps.newLinkedHashMap();
     private final Map<DestinationPattern, String> rules = Maps.newLinkedHashMap();
     private final LoadBalancerStats stats;
 
-    public ServerRegistry(final LoadBalancerStats stats) {
+    public UpstreamServerRegistry(final LoadBalancerStats stats) {
         this(null, stats);
     }
 
-    public ServerRegistry(final RouteletContext parent, final LoadBalancerStats stats) {
+    public UpstreamServerRegistry(final RouteletContext parent, final LoadBalancerStats stats) {
         super(stats);
         this.parent = parent;
         this.stats = stats;
@@ -31,8 +31,8 @@ public class ServerRegistry extends ServerFactory implements ServerProvider, Rul
     }
 
     public void register(final String name, final String type, final List<String> servers) {
-        LazyServerProvider lazyServerProvider = new LazyServerProvider(servers, this);
-        ProxyServer g = createServerGroup(name, type, lazyServerProvider);
+        LazyUpstreamServerProvider lazyServerProvider = new LazyUpstreamServerProvider(servers, this);
+        UpstreamServer g = createServerGroup(name, type, lazyServerProvider);
         proxies.put(name, g);
     }
 
@@ -46,17 +46,17 @@ public class ServerRegistry extends ServerFactory implements ServerProvider, Rul
     }
 
     @Override
-    public ProxyServer getServer(final String name) {
-        ProxyServer proxyServer = proxies.get(name);
-        if (null != proxyServer) {
-            return proxyServer;
+    public UpstreamServer getServer(final String name) {
+        UpstreamServer upstreamServer = proxies.get(name);
+        if (null != upstreamServer) {
+            return upstreamServer;
         }
         return null != parent ? parent.getServer(name) : null;
     }
 
     @Override
-    public List<ProxyServer> getServers() {
-        final List<ProxyServer> a = Lists.newLinkedList();
+    public List<UpstreamServer> getServers() {
+        final List<UpstreamServer> a = Lists.newLinkedList();
         a.addAll(proxies.values());
         if (null != parent) {
             a.addAll(parent.getServers());

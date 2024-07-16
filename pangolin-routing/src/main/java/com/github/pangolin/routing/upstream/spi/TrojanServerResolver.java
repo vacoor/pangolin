@@ -1,8 +1,10 @@
-package com.github.pangolin.routing.proxy.spi;
+package com.github.pangolin.routing.upstream.spi;
 
 import com.github.pangolin.routing.handler.internal.client.TrojanProxyHandler;
-import com.github.pangolin.routing.proxy.AbstractServer;
-import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.upstream.AbstractServer;
+import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.upstream.UpstreamServerResolver;
+import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
@@ -15,7 +17,7 @@ import java.util.Properties;
  *
  * URL format: trojan://{password}@{hostname}:{port}?{parameters}#{name}
  */
-public class TrojanServerResolver implements ServerResolver {
+public class TrojanServerResolver implements UpstreamServerResolver {
     private static final String URL_PREFIX = "trojan://";
     private static final int DEFAULT_PORT = 443;
 
@@ -26,7 +28,7 @@ public class TrojanServerResolver implements ServerResolver {
     /**
      *
      */
-    public ProxyServer resolve(final String url, final Properties props) {
+    public UpstreamServer resolve(final String url, final Properties props) {
         if (this.acceptsUrl(url)) {
             final URI uri = URI.create(url);
             final String name = props.getProperty("name", uri.getFragment());
@@ -34,7 +36,7 @@ public class TrojanServerResolver implements ServerResolver {
 
             final String host = uri.getHost();
             final int port = 0 < uri.getPort() ? uri.getPort() : DEFAULT_PORT;
-            final InetSocketAddress address = Utils.toSocketAddress(host, port);
+            final InetSocketAddress address = SocketUtils.toSocketAddress(host, port);
             return new TrojanServer(null != name ? name : host + ":" + port, address, password);
         }
         throw new UnsupportedOperationException();

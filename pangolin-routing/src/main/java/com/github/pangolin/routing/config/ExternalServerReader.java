@@ -25,8 +25,8 @@ public class ExternalServerReader implements ServerReader {
     }
 
     @Override
-    public ServerRegistry load(final URL url, final RouteletContext parent) throws IOException, ConfigurationException {
-        final ServerRegistry registry = new ServerRegistry(parent, stats);
+    public UpstreamServerRegistry load(final URL url, final RouteletContext parent) throws IOException, ConfigurationException {
+        final UpstreamServerRegistry registry = new UpstreamServerRegistry(parent, stats);
         final ClashConfiguration conf = loadClashConfiguration(url);
 
         final List<ClashConfiguration.ProxyDefinition> proxyDefinitions = nvl(conf.getProxies(), Collections.emptyList());

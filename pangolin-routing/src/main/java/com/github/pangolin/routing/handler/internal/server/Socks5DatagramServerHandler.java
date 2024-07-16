@@ -2,6 +2,7 @@ package com.github.pangolin.routing.handler.internal.server;
 
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
+import com.github.pangolin.routing.util.SocketUtils;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
 import io.netty.bootstrap.Bootstrap;
@@ -106,7 +107,7 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
          * https://github.com/netty/netty/issues/5760
          */
         final ByteBuf payloadToUse = payload.copy();
-        final InetSocketAddress recipientToReplace = new InetSocketAddress(dstAddr, dstPort);
+        final InetSocketAddress recipientToReplace = SocketUtils.toSocketAddress(dstAddr, dstPort);
         return new DatagramPacket(payloadToUse, recipientToReplace);
 //        return new DatagramPacket(payloadToUse, recipientToReplace, sender);
     }

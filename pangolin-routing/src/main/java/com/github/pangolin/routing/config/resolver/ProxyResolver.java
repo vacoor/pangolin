@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.config.resolver;
 
-import com.github.pangolin.routing.proxy.ProxyServer;
-import com.github.pangolin.routing.proxy.spi.ServerResolver;
+import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.upstream.UpstreamServerResolver;
 
 import java.io.IOException;
 import java.net.URL;
@@ -10,14 +10,14 @@ import java.util.List;
 import java.util.Properties;
 import java.util.ServiceLoader;
 
-public class ProxyResolver extends AbstractPrefixRuleResolver<ProxyServer> {
+public class ProxyResolver extends AbstractPrefixRuleResolver<UpstreamServer> {
 
     public ProxyResolver() {
         super("PROXY,");
     }
 
     @Override
-    protected List<ProxyServer> doResolve(final String rule, final URL url) throws IOException {
+    protected List<UpstreamServer> doResolve(final String rule, final URL url) throws IOException {
         final String[] segment = rule.split("\\s*=\\s*", 2);
         final String name = segment.length > 1 ? segment[0] : null;
         final String proxyUrl = segment.length > 1 ? segment[1] : segment[0];
@@ -26,9 +26,9 @@ public class ProxyResolver extends AbstractPrefixRuleResolver<ProxyServer> {
         );
     }
 
-    private static ProxyServer doResolve(final String name, final String url) {
-        final ServiceLoader<ServerResolver> resolvers = ServiceLoader.load(ServerResolver.class);
-        for (final ServerResolver resolver : resolvers) {
+    private static UpstreamServer doResolve(final String name, final String url) {
+        final ServiceLoader<UpstreamServerResolver> resolvers = ServiceLoader.load(UpstreamServerResolver.class);
+        for (final UpstreamServerResolver resolver : resolvers) {
             if (!resolver.acceptsUrl(url)) {
                 continue;
             }
@@ -36,7 +36,7 @@ public class ProxyResolver extends AbstractPrefixRuleResolver<ProxyServer> {
             if (null != name) {
                 props.setProperty("name", name);
             }
-            final ProxyServer resolved = resolver.resolve(url, props);
+            final UpstreamServer resolved = resolver.resolve(url, props);
             if (null != resolved) {
                 return resolved;
             }

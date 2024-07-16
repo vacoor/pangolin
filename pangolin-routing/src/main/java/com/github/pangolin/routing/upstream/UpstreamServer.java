@@ -1,10 +1,10 @@
-package com.github.pangolin.routing.proxy;
+package com.github.pangolin.routing.upstream;
 
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
 
-public interface ProxyServer {
+public interface UpstreamServer {
 
     String getName();
 

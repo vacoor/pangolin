@@ -46,7 +46,7 @@ public class TunTest {
                             super.channelRead(ctx, msg);
                         }
                     });
-            final Channel ch = b.bind(new TunAddress("Pangolin Tun")).sync().channel();
+            final Channel ch = b.bind(new TunAddress("utun99")).sync().channel();
             // send/receive messages of type TunPacket...
             ch.closeFuture().sync();
         } finally {

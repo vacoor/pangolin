@@ -5,6 +5,6 @@ import java.net.URL;
 
 public interface ServerReader {
 
-    ServerRegistry load(final URL url, final RouteletContext parent) throws IOException, ConfigurationException;
+    UpstreamServerRegistry load(final URL url, final RouteletContext parent) throws IOException, ConfigurationException;
 
 }

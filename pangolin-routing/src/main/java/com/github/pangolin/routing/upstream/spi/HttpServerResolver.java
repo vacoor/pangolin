@@ -1,7 +1,9 @@
-package com.github.pangolin.routing.proxy.spi;
+package com.github.pangolin.routing.upstream.spi;
 
-import com.github.pangolin.routing.proxy.AbstractServer;
-import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.upstream.AbstractServer;
+import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.upstream.UpstreamServerResolver;
+import com.github.pangolin.routing.util.SocketUtils;
 import freework.codec.Base64;
 import freework.util.Bytes;
 import io.netty.channel.ChannelHandler;
@@ -16,7 +18,7 @@ import java.util.Properties;
 /**
  *
  */
-public class HttpServerResolver implements ServerResolver {
+public class HttpServerResolver implements UpstreamServerResolver {
     private static final String URL_PREFIX = "http://";
     private static final int DEFAULT_PORT = 80;
 
@@ -26,7 +28,7 @@ public class HttpServerResolver implements ServerResolver {
 
     /**
      */
-    public ProxyServer resolve(final String url, final Properties props) {
+    public UpstreamServer resolve(final String url, final Properties props) {
         if (!acceptsUrl(url)) {
             return null;
         }
@@ -35,7 +37,7 @@ public class HttpServerResolver implements ServerResolver {
         final String host = uri.getHost();
         final int port = 0 < uri.getPort() ? uri.getPort() : DEFAULT_PORT;
 
-        final InetSocketAddress address = Utils.toSocketAddress(host, port);
+        final InetSocketAddress address = SocketUtils.toSocketAddress(host, port);
 
         final String userInfo = resolveUserInfo(uri.getUserInfo());
         if (null != userInfo) {

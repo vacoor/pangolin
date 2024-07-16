@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.proxy.spi;
+package com.github.pangolin.routing.util;
 
 import io.netty.util.NetUtil;
 
@@ -6,7 +6,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 
-public class Utils {
+public class SocketUtils {
 
     public static InetSocketAddress toSocketAddress(final String hostname, final int port) {
         return toSocketAddress(hostname, port, true);

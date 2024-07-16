@@ -9,6 +9,7 @@ import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm
 import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
+import com.github.pangolin.routing.util.SocketUtils;
 import com.github.pangolin.server.NettyServer;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -59,8 +60,7 @@ public class SsProxyServerHandler extends ChannelDuplexHandler {
         ctx.channel().config().setAutoRead(false);
 
         final ChannelConfig c = ctx.channel().config();
-        // FIXME
-        final InetSocketAddress addr = InetSocketAddress.createUnresolved(address, port);
+        final InetSocketAddress addr = SocketUtils.toSocketAddress(address, port, false);
         factory.open(addr, c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelDuplexHandler() {
 
             @Override
@@ -141,7 +141,7 @@ public class SsProxyServerHandler extends ChannelDuplexHandler {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                    System.out.println(String.format("ProxyServer started on %s:%s", localAddress.getHostString(), localAddress.getPort()));
+                    System.out.println(String.format("UpstreamServer started on %s:%s", localAddress.getHostString(), localAddress.getPort()));
                 } else {
                     future.cause().printStackTrace();
                 }

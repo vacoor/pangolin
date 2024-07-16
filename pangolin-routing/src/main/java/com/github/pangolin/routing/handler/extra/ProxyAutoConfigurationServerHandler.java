@@ -4,6 +4,7 @@ import com.github.pangolin.routing.rule.RulesProvider;
 import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 import com.github.pangolin.routing.rule.pattern.DomainPattern;
 import com.github.pangolin.routing.rule.pattern.SubnetPattern;
+import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -104,11 +105,11 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
         if (null != host && !host.isEmpty()) {
             final String[] segments = host.split(":");
             final int port = segments.length > 1 ? Integer.parseInt(segments[1]) : determinePort(0, httpRequest.uri());
-            return new InetSocketAddress(segments[0], port);
+            return SocketUtils.toSocketAddress(segments[0], port);
         } else {
             final URI uri = URI.create(httpRequest.uri());
             final int port = determinePort(uri.getPort(), httpRequest.uri());
-            return new InetSocketAddress(uri.getHost(), port);
+            return SocketUtils.toSocketAddress(uri.getHost(), port);
         }
     }
 

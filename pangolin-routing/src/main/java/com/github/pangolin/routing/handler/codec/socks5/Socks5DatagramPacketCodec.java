@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.handler.codec.socks5;
 
+import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -103,7 +104,7 @@ public class Socks5DatagramPacketCodec extends MessageToMessageCodec<DatagramPac
          * https://github.com/netty/netty/issues/5760
          */
         final ByteBuf payloadToUse = payload.copy();
-        final InetSocketAddress senderToReplace = new InetSocketAddress(dstAddr, dstPort);
+        final InetSocketAddress senderToReplace = SocketUtils.toSocketAddress(dstAddr, dstPort);
         return new DatagramPacket(payloadToUse, recipient, senderToReplace);
     }
 }

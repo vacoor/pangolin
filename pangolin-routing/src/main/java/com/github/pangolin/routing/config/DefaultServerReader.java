@@ -19,7 +19,7 @@ public class DefaultServerReader implements ServerReader {
         this.stats = stats;
     }
 
-    public ServerRegistry load(final URL url, final RouteletContext parent) throws IOException, ConfigurationException {
+    public UpstreamServerRegistry load(final URL url, final RouteletContext parent) throws IOException, ConfigurationException {
         final Ini ini = new Ini();
         ini.load(url.openStream());
 
@@ -31,7 +31,7 @@ public class DefaultServerReader implements ServerReader {
             }
         }
 
-        final ServerRegistry registry = new ServerRegistry(parentToUse, stats);
+        final UpstreamServerRegistry registry = new UpstreamServerRegistry(parentToUse, stats);
         final Ini.Section proxy = ini.getSection("Proxy");
         if (null != proxy) {
             proxy.forEach(registry::register);
@@ -63,7 +63,7 @@ public class DefaultServerReader implements ServerReader {
 
 
     private RouteletContext load(final String url, final RouteletContext parent) throws IOException, ConfigurationException {
-        return new RefreshableServerRegistry(new ExternalServerReader(stats), new URL(url), parent).refresh();
+        return new RefreshableUpstreamServerRegistry(new ExternalServerReader(stats), new URL(url), parent).refresh();
     }
 
 }

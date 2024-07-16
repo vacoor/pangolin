@@ -1,8 +1,9 @@
-package com.github.pangolin.routing.proxy.spi;
+package com.github.pangolin.routing.upstream.spi;
 
 import com.github.pangolin.routing.handler.internal.client.WebSocketProxyHandler;
-import com.github.pangolin.routing.proxy.AbstractServer;
-import com.github.pangolin.routing.proxy.ProxyServer;
+import com.github.pangolin.routing.upstream.AbstractServer;
+import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.upstream.UpstreamServerResolver;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
@@ -12,7 +13,7 @@ import java.util.Properties;
 /**
  *
  */
-public class WebSocketServerResolver implements ServerResolver {
+public class WebSocketServerResolver implements UpstreamServerResolver {
     public boolean acceptsUrl(final String url) {
         if (null == url) {
             return false;
@@ -23,7 +24,7 @@ public class WebSocketServerResolver implements ServerResolver {
     /**
      *
      */
-    public ProxyServer resolve(final String url, final Properties props) {
+    public UpstreamServer resolve(final String url, final Properties props) {
         if (!acceptsUrl(url)) {
             return null;
         }

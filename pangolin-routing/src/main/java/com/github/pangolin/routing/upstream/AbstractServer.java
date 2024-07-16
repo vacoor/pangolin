@@ -1,11 +1,11 @@
-package com.github.pangolin.routing.proxy;
+package com.github.pangolin.routing.upstream;
 
 import io.netty.channel.ChannelHandler;
 import lombok.Getter;
 
 import java.net.InetSocketAddress;
 
-public abstract class AbstractServer implements ProxyServer {
+public abstract class AbstractServer implements UpstreamServer {
     @Getter
     protected final String name;
 

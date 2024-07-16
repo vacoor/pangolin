@@ -5,6 +5,7 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
+import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -141,8 +142,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                     final String address = matcher.group(1);
                     final int port = Integer.parseInt(matcher.group(2));
 
-                    // FIXME
-                    final InetSocketAddress addr = InetSocketAddress.createUnresolved(address, port);
+                    final InetSocketAddress addr = SocketUtils.toSocketAddress(address, port, false);
                     connect(ctx, addr).addListener(new ChannelFutureListener() {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
@@ -226,11 +226,11 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
         if (null != host && !host.isEmpty()) {
             final String[] segments = host.split(":");
             final int port = segments.length > 1 ? Integer.parseInt(segments[1]) : determinePort(0, httpRequest.uri());
-            return new InetSocketAddress(segments[0], port);
+            return SocketUtils.toSocketAddress(segments[0], port);
         } else {
             final URI uri = URI.create(httpRequest.uri());
             final int port = determinePort(uri.getPort(), httpRequest.uri());
-            return new InetSocketAddress(uri.getHost(), port);
+            return SocketUtils.toSocketAddress(uri.getHost(), port);
         }
     }
 

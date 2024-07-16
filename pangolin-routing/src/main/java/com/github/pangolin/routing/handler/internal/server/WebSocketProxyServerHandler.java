@@ -6,6 +6,7 @@ import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.handler.WebSocketServerHandshakeNegotiationHandler;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
+import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelConfig;
@@ -79,8 +80,7 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
          */
         ctx.channel().config().setAutoRead(false);
         ChannelConfig c = ctx.channel().config();
-        // FIXME
-        final InetSocketAddress addr = InetSocketAddress.createUnresolved(hostname, port);
+        final InetSocketAddress addr = SocketUtils.toSocketAddress(hostname, port, false);
         factory.open(addr, c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {
@@ -132,8 +132,7 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
          */
 
         ChannelConfig c = ctx.channel().config();
-        // FIXME
-        final InetSocketAddress addr = InetSocketAddress.createUnresolved(hostname, port);
+        final InetSocketAddress addr = SocketUtils.toSocketAddress(hostname, port, false);
         factory.open(addr, c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext targetCtx) throws Exception {

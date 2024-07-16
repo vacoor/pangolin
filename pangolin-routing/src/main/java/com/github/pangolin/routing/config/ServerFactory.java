@@ -1,9 +1,9 @@
 package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.proxy.AbstractServer;
-import com.github.pangolin.routing.proxy.ProxyServer;
-import com.github.pangolin.routing.proxy.ServerProvider;
-import com.github.pangolin.routing.proxy.spi.ServerResolver;
+import com.github.pangolin.routing.upstream.AbstractServer;
+import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.upstream.UpstreamServerProvider;
+import com.github.pangolin.routing.upstream.UpstreamServerResolver;
 import com.google.common.collect.Lists;
 import com.netflix.client.config.IClientConfig;
 import com.netflix.client.config.PropertyResolver;
@@ -49,13 +49,13 @@ public class ServerFactory {
         this.stats = stats;
     }
 
-    public ProxyServer create(final String name, final String url) {
+    public UpstreamServer create(final String name, final String url) {
         return wrapIfNecessary(doResolve(name, url));
     }
 
-    private static ProxyServer doResolve(final String name, final String url) {
-        final ServiceLoader<ServerResolver> resolvers = ServiceLoader.load(ServerResolver.class);
-        for (final ServerResolver resolver : resolvers) {
+    private static UpstreamServer doResolve(final String name, final String url) {
+        final ServiceLoader<UpstreamServerResolver> resolvers = ServiceLoader.load(UpstreamServerResolver.class);
+        for (final UpstreamServerResolver resolver : resolvers) {
             if (!resolver.acceptsUrl(url)) {
                 continue;
             }
@@ -63,7 +63,7 @@ public class ServerFactory {
             if (null != name) {
                 props.setProperty("name", name);
             }
-            final ProxyServer resolved = resolver.resolve(url, props);
+            final UpstreamServer resolved = resolver.resolve(url, props);
             if (null != resolved) {
                 return resolved;
             }
@@ -71,7 +71,7 @@ public class ServerFactory {
         throw new IllegalStateException("NOT found provider, url: " + url);
     }
 
-    public ProxyServer createServerGroup(final String name, final String type, final ServerProvider servers) {
+    public UpstreamServer createServerGroup(final String name, final String type, final UpstreamServerProvider servers) {
         if ("chain".equals(type)) {
             return wrapIfNecessary(new LazyServerChain(name, servers));
         }
@@ -85,18 +85,18 @@ public class ServerFactory {
 
         final ZoneAwareLoadBalancer<? extends Server> lb = new ZoneAwareLoadBalancer(config, rule, ping, serverList, serverListFilter, serverListUpdater);
         lb.setLoadBalancerStats(stats);
-        return wrapIfNecessary(new LoadBalancingProxyServer(name, lb));
+        return wrapIfNecessary(new LoadBalancingUpstreamServer(name, lb));
     }
 
-    private ProxyServer wrapIfNecessary(final ProxyServer server) {
-        return server instanceof StatsProxyServer ? server : new StatsProxyServer(server);
+    private UpstreamServer wrapIfNecessary(final UpstreamServer server) {
+        return server instanceof StatsUpstreamServer ? server : new StatsUpstreamServer(server);
     }
 
-    static class LazyServerProvider implements ServerProvider {
+    static class LazyUpstreamServerProvider implements UpstreamServerProvider {
         private final List<String> names;
-        private final ServerProvider registry;
+        private final UpstreamServerProvider registry;
 
-        LazyServerProvider(final List<String> names, final ServerProvider registry) {
+        LazyUpstreamServerProvider(final List<String> names, final UpstreamServerProvider registry) {
             this.names = names;
             this.registry = registry;
         }
@@ -107,12 +107,12 @@ public class ServerFactory {
         }
 
         @Override
-        public ProxyServer getServer(final String name) {
+        public UpstreamServer getServer(final String name) {
             return names.contains(name) ? registry.getServer(name) : null;
         }
 
         @Override
-        public List<ProxyServer> getServers() {
+        public List<UpstreamServer> getServers() {
             return names.stream()
                     .map(registry::getServer)
                     .filter(Objects::nonNull)
@@ -120,10 +120,10 @@ public class ServerFactory {
         }
     }
 
-    private class StatsProxyServer extends Server implements ProxyServer {
-        private final ProxyServer delegate;
+    private class StatsUpstreamServer extends Server implements UpstreamServer {
+        private final UpstreamServer delegate;
 
-        private StatsProxyServer(final ProxyServer delegate) {
+        private StatsUpstreamServer(final UpstreamServer delegate) {
             super(delegate.getName());
             this.delegate = delegate;
         }
@@ -186,9 +186,9 @@ public class ServerFactory {
     }
 
     private class LazyServerChain extends AbstractServer {
-        private final ServerProvider chain;
+        private final UpstreamServerProvider chain;
 
-        private LazyServerChain(final String name, final ServerProvider chain) {
+        private LazyServerChain(final String name, final UpstreamServerProvider chain) {
             super(name);
             this.chain = chain;
         }
@@ -212,17 +212,17 @@ public class ServerFactory {
     }
 
     @Slf4j
-    public static class LoadBalancingProxyServer extends AbstractServer {
+    public static class LoadBalancingUpstreamServer extends AbstractServer {
         private final ILoadBalancer lb;
 
-        public LoadBalancingProxyServer(final String name, final ILoadBalancer lb) {
+        public LoadBalancingUpstreamServer(final String name, final ILoadBalancer lb) {
             super(name);
             this.lb = lb;
         }
 
         @Override
         public ChannelHandler newDatagramProxyHandler(final InetSocketAddress sa) {
-            final ProxyServer server = choose(sa);
+            final UpstreamServer server = choose(sa);
             if (null != server) {
                 log.info("Choose {} -> {}", server.getName(), sa);
                 return server.newDatagramProxyHandler(sa);
@@ -232,7 +232,7 @@ public class ServerFactory {
 
         @Override
         public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
-            final ProxyServer server = choose(sa);
+            final UpstreamServer server = choose(sa);
             if (null != server) {
                 log.info("Choose {} -> {}", server.getName(), sa);
                 return newProxyHandler(server, sa);
@@ -240,12 +240,12 @@ public class ServerFactory {
             return null;
         }
 
-        protected ChannelHandler newProxyHandler(final ProxyServer server, final InetSocketAddress sa) {
+        protected ChannelHandler newProxyHandler(final UpstreamServer server, final InetSocketAddress sa) {
             return server.newSocketProxyHandler(sa);
         }
 
-        protected ProxyServer choose(final InetSocketAddress hint) {
-            return (StatsProxyServer) getLoadBalancer().chooseServer(hint);
+        protected UpstreamServer choose(final InetSocketAddress hint) {
+            return (StatsUpstreamServer) getLoadBalancer().chooseServer(hint);
         }
 
         private ILoadBalancer getLoadBalancer() {
@@ -253,10 +253,10 @@ public class ServerFactory {
         }
     }
 
-    private class LazyServerList<T extends Server & ProxyServer> implements ServerList<T> {
-        private final ServerProvider servers;
+    private class LazyServerList<T extends Server & UpstreamServer> implements ServerList<T> {
+        private final UpstreamServerProvider servers;
 
-        private LazyServerList(final ServerProvider servers) {
+        private LazyServerList(final UpstreamServerProvider servers) {
             this.servers = servers;
         }
 

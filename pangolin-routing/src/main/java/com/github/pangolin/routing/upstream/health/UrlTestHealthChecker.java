@@ -1,42 +1,54 @@
-package com.github.pangolin.routing.proxy.health;
+package com.github.pangolin.routing.upstream.health;
 
-import com.github.pangolin.routing.proxy.ProxyServer;
-import com.github.pangolin.routing.proxy.health.HealthChecker;
-import com.netflix.loadbalancer.IPing;
-import com.netflix.loadbalancer.Server;
+import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.*;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.handler.codec.http.*;
+import io.netty.handler.codec.http.DefaultFullHttpRequest;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaderValues;
+import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpResponse;
+import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpVersion;
 import io.netty.resolver.NoopAddressResolverGroup;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.InetSocketAddress;
 import java.net.URI;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
-public class UrlTestChecker {
+public class UrlTestHealthChecker implements HealthChecker {
     private final String url;
     private final int timeoutMillis;
     private final EventLoopGroup group;
 
-    public UrlTestChecker(final EventLoopGroup group) {
+    public UrlTestHealthChecker(final EventLoopGroup group) {
         this("http://www.gstatic.com/generate_204", 3000, group);
     }
 
-
-    public UrlTestChecker(final String url, final int timeoutMillis, final EventLoopGroup group) {
+    public UrlTestHealthChecker(final String url, final int timeoutMillis, final EventLoopGroup group) {
         this.url = url;
         this.timeoutMillis = timeoutMillis;
         this.group = group;
     }
 
-//    @Override
-    public Promise<Long> checkHealth(final ProxyServer server) {
+    @Override
+    public Promise<Long> checkHealth(final UpstreamServer server) {
         final Promise<Long> promise = GlobalEventExecutor.INSTANCE.newPromise();
         final URI uri = URI.create(url);
         String scheme = uri.getScheme() == null ? "http" : uri.getScheme();
@@ -44,8 +56,7 @@ public class UrlTestChecker {
         int port = uri.getPort();
         port = 0 < port ? port : ("http".equals(scheme) ? 80 : "https".equals(scheme) ? 443 : port);
 
-        // FIXME
-        final ChannelHandler transport = server.newSocketProxyHandler(new InetSocketAddress(host, port));
+        final ChannelHandler transport = server.newSocketProxyHandler(SocketUtils.toSocketAddress(host, port, false));
 
         final Bootstrap b = new Bootstrap();
         b.option(ChannelOption.AUTO_READ, true);
