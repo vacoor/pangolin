@@ -4,14 +4,39 @@ import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.ChannelConfig;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.ByteToMessageDecoder;
-import io.netty.handler.codec.socksx.v5.*;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5CommandResponse;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5InitialResponse;
+import io.netty.handler.codec.socksx.v5.DefaultSocks5PasswordAuthResponse;
+import io.netty.handler.codec.socksx.v5.Socks5AddressType;
+import io.netty.handler.codec.socksx.v5.Socks5AuthMethod;
+import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
+import io.netty.handler.codec.socksx.v5.Socks5CommandRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5CommandStatus;
+import io.netty.handler.codec.socksx.v5.Socks5CommandType;
+import io.netty.handler.codec.socksx.v5.Socks5InitialRequest;
+import io.netty.handler.codec.socksx.v5.Socks5InitialRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5Message;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequest;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequestDecoder;
+import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthStatus;
+import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
 import io.netty.util.ReferenceCountUtil;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import java.util.List;
 
 /**
@@ -26,19 +51,30 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     private final String username;
     private final String password;
     private final SocketChannelFactory socketChannelFactory;
+    private final Socks5DatagramServerHandler udpServerHandler;
 
     public Socks5ProxyServerHandler() {
-        this(null, null, new StandardSocketChannelFactory());
+        this(null);
     }
 
-    public Socks5ProxyServerHandler(final String username, final String password) {
-        this(username, password, new StandardSocketChannelFactory());
+    public Socks5ProxyServerHandler(final Socks5DatagramServerHandler datagramServerHandler) {
+        this(null, null, datagramServerHandler);
     }
 
     public Socks5ProxyServerHandler(final String username, final String password, final SocketChannelFactory socketChannelFactory) {
+        this(username, password, socketChannelFactory, null);
+    }
+
+    public Socks5ProxyServerHandler(final String username, final String password, final Socks5DatagramServerHandler datagramServerHandler) {
+        this(username, password, new StandardSocketChannelFactory(), datagramServerHandler);
+    }
+
+    public Socks5ProxyServerHandler(final String username, final String password, final SocketChannelFactory socketChannelFactory,
+                                    final Socks5DatagramServerHandler datagramServerHandler) {
         this.username = username;
         this.password = password;
         this.socketChannelFactory = socketChannelFactory;
+        this.udpServerHandler = datagramServerHandler;
     }
 
 
@@ -83,7 +119,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 return;
             }
 
-            final SocketAddress clientAddress = ctx.channel().remoteAddress();
+            final InetSocketAddress clientAddress = (InetSocketAddress) ctx.channel().remoteAddress();
             if (msg instanceof Socks5InitialRequest) {
                 final List<Socks5AuthMethod> methods = ((Socks5InitialRequest) msg).authMethods();
                 log.debug("[SOCKS5] Received {} INIT request, methods: {}", clientAddress, methods);
@@ -143,26 +179,37 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                         }
                     });
                 } else {
-                    /*
                     if (Socks5CommandType.UDP_ASSOCIATE.equals(type)) {
-                        InetSocketAddress sa = (InetSocketAddress) ctx.channel().localAddress();
-                        if (sa.isUnresolved()) {
-                            ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.DOMAIN, sa.getHostString(), 1080));
-                            return;
-                        }
-                        InetAddress inetAddress = sa.getAddress();
-                        if (inetAddress instanceof Inet4Address) {
-                            Inet4Address a = (Inet4Address) inetAddress;
-                            ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv4, a.getHostAddress(), 1080));
-                            return;
-                        }
-                        if (inetAddress instanceof Inet6Address) {
-                            Inet6Address a = (Inet6Address) inetAddress;
-                            ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv6, a.getHostAddress(), 1080));
-                            return;
+                        final InetSocketAddress serverAddress = (InetSocketAddress) ctx.channel().localAddress();
+                        final String udpServerHost = serverAddress.getHostString();
+                        final int udpServerPort = serverAddress.getPort();
+
+                        if (null != udpServerHandler) {
+                            ctx.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
+                                @Override
+                                public void operationComplete(final Future<? super Void> future) throws Exception {
+                                    udpServerHandler.removeFromWhitelist(clientAddress);
+                                }
+                            });
+
+                            if (serverAddress.isUnresolved()) {
+                                udpServerHandler.addToWhitelist(clientAddress);
+                                ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.DOMAIN, udpServerHost, udpServerPort));
+                                return;
+                            }
+                            InetAddress inetAddress = serverAddress.getAddress();
+                            if (inetAddress instanceof Inet4Address) {
+                                udpServerHandler.addToWhitelist(clientAddress);
+                                ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv4, udpServerHost, udpServerPort));
+                                return;
+                            }
+                            if (inetAddress instanceof Inet6Address) {
+                                udpServerHandler.addToWhitelist(clientAddress);
+                                ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv6, udpServerHost, udpServerPort));
+                                return;
+                            }
                         }
                     }
-                    */
                     log.warn("[SOCKS5] Connection closed: '{}' unsupported => {}:{}", type, address, port);
                     ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
                 }

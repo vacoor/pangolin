@@ -1,12 +1,16 @@
 package com.github.pangolin.routing.proxy;
 
+import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.util.Channels;
+import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.resolver.NoopAddressResolverGroup;
 import lombok.extern.slf4j.Slf4j;
 
@@ -19,7 +23,7 @@ import java.util.List;
  * @since 20240411
  */
 @Slf4j
-public class ProxyDatagramChannelFactory implements SocketChannelFactory {
+public class ProxyDatagramChannelFactory implements DatagramChannelFactory {
     private final ProxyServer server;
     private final List<String> bypass;
 
@@ -29,19 +33,17 @@ public class ProxyDatagramChannelFactory implements SocketChannelFactory {
     }
 
     @Override
-    public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
-        final ProxyServer proxyServer = choose(remoteAddress);
-        ChannelHandler networkHandler = null != proxyServer ? proxyServer.newDatagramProxyHandler((InetSocketAddress) remoteAddress) : null;
+    public ChannelFuture open(final InetSocketAddress destination, final int connTimeoutMs, final EventLoopGroup group, final ChannelHandler handler) {
+        final ProxyServer proxyServer = choose(destination);
+        ChannelHandler networkHandler = null != proxyServer ? proxyServer.newDatagramProxyHandler(destination) : null;
         final NoopAddressResolverGroup resolverGroup = null != networkHandler ? NoopAddressResolverGroup.INSTANCE : null;
-        return Channels.open(remoteAddress, resolverGroup, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel ch) throws Exception {
-                if (null != networkHandler) {
-                    ch.pipeline().addFirst(networkHandler);
-                }
-                ch.pipeline().addLast(handler);
-            }
-        });
+        final Bootstrap b = new Bootstrap()
+                .group(group)
+                .channel(NioDatagramChannel.class)
+                .resolver(resolverGroup)
+                .option(ChannelOption.SO_BROADCAST, false)
+                .handler(handler);
+        return b.bind(0);
     }
 
     private ProxyServer choose(final SocketAddress destinationAddress) {
@@ -59,4 +61,5 @@ public class ProxyDatagramChannelFactory implements SocketChannelFactory {
 
         return server;
     }
+
 }

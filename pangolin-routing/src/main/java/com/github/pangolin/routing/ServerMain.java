@@ -10,7 +10,9 @@ import com.github.pangolin.routing.handler.extra.ProxyAutoConfigurationServerHan
 import com.github.pangolin.routing.handler.extra.SwitchyRuleConfigurationServerHandler;
 import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
+import com.github.pangolin.routing.handler.internal.server.Socks5DatagramServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
+import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
@@ -18,19 +20,25 @@ import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshak
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
 import com.github.pangolin.routing.proxy.AbstractServer;
+import com.github.pangolin.routing.proxy.ProxyDatagramChannelFactory;
 import com.github.pangolin.routing.proxy.ProxyServer;
 import com.github.pangolin.routing.proxy.ProxySocketChannelFactory;
 import com.github.pangolin.routing.proxy.RuleBasedProxyServer;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Lists;
 import com.netflix.loadbalancer.LoadBalancerStats;
+import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import lombok.extern.slf4j.Slf4j;
@@ -50,9 +58,10 @@ import java.util.Map;
 public class ServerMain {
 
     private static MixinServerHandshaker createHandshaker(final String type,
-                                                          final SocketChannelFactory socketChannelFactory) {
+                                                          final SocketChannelFactory socketChannelFactory,
+                                                          final Socks5DatagramServerHandler h) {
         if ("SOCKS5".equalsIgnoreCase(type)) {
-            return Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, socketChannelFactory));
+            return Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, socketChannelFactory, h));
         } else if ("SOCKS4".equalsIgnoreCase(type)) {
             return Socks4MixinServerHandshaker.of(new Socks4ProxyServerHandler(null, socketChannelFactory));
         } else if ("HTTP".equalsIgnoreCase(type)){
@@ -101,17 +110,43 @@ public class ServerMain {
                     ProxyServer server = config.getServer(proxy);
                     return null != server ? server.newSocketProxyHandler(sa) : null;
                 }
+
+                @Override
+                public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
+                    ProxyServer server = config.getServer(proxy);
+                    return null != server ? server.newDatagramProxyHandler(destination) : null;
+                }
             };
 
             final SocketChannelFactory socketChannelFactory = new ProxySocketChannelFactory(proxyServer, bypass);
+            final DatagramChannelFactory datagramChannelFactory = new ProxyDatagramChannelFactory(proxyServer, bypass);
 
             final NettyServer server = new NettyServer(listenPort);
+            final List<String> protocols = Arrays.asList(segments).subList(1, segments.length);
+            Socks5DatagramServerHandler h = null;
+            if (protocols.contains("SOCKS5")) {
+                h = new Socks5DatagramServerHandler(datagramChannelFactory);
+                Socks5DatagramServerHandler udpServerHandler = h;
+                final Bootstrap udpBootstrap = new Bootstrap();
+                udpBootstrap.group(new NioEventLoopGroup());
+                udpBootstrap.channel(NioDatagramChannel.class);
+                udpBootstrap.option(ChannelOption.SO_BROADCAST, false);
+                udpBootstrap.handler(new ChannelInitializer<DatagramChannel>() {
+                    @Override
+                    protected void initChannel(final DatagramChannel ch) throws Exception {
+                        ch.pipeline().addLast(udpServerHandler);
+                    }
+                });
+                udpBootstrap.bind(listenPort);
+            }
+
+            final Socks5DatagramServerHandler socks5UdpServerHandler = h;
             ChannelFuture f = server.start(true, new ChannelInitializer<SocketChannel>() {
                 @Override
                 protected void initChannel(final SocketChannel channel) throws Exception {
-                    channel.pipeline().addLast(new MixinServerInitializer(Arrays.asList(segments).subList(1, segments.length)
+                    channel.pipeline().addLast(new MixinServerInitializer(protocols
                             .stream()
-                            .map(type -> createHandshaker(type, socketChannelFactory)).toArray(MixinServerHandshaker[]::new)));
+                            .map(type -> createHandshaker(type, socketChannelFactory, socks5UdpServerHandler)).toArray(MixinServerHandshaker[]::new)));
                 }
             }).addListener(new ChannelFutureListener() {
                 @Override
@@ -129,7 +164,7 @@ public class ServerMain {
 
 
         final int proxyPort = defaultPort;
-        ChannelFuture pacChannel = new NettyServer(8080).start(true, new ChannelInitializer<SocketChannel>() {
+        ChannelFuture pacChannel = new NettyServer(9080).start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
                 ch.pipeline().addLast(

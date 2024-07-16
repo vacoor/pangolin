@@ -20,8 +20,9 @@ public class Socks5ProxyHandler extends AbstractProxyHandler {
     private static final String NONE = "";
     private static final String SOCKS5_DECODER_NAME = "SOCKS5_DECODER";
 
-    private String username;
-    private String password;
+    private final String username;
+    private final String password;
+    private final Socks5CommandType commandType;
 
     public Socks5ProxyHandler(final SocketAddress proxyServerAddress) {
         this(proxyServerAddress, null, null);
@@ -29,9 +30,15 @@ public class Socks5ProxyHandler extends AbstractProxyHandler {
 
     public Socks5ProxyHandler(final SocketAddress proxyServerAddress,
                               final String username, final String password) {
+        this(proxyServerAddress, username, password, Socks5CommandType.CONNECT);
+    }
+
+    public Socks5ProxyHandler(final SocketAddress proxyServerAddress,
+                              final String username, final String password, final Socks5CommandType commandType) {
         super(proxyServerAddress);
         this.username = username;
         this.password = password;
+        this.commandType = commandType;
     }
 
     @Override
@@ -98,7 +105,7 @@ public class Socks5ProxyHandler extends AbstractProxyHandler {
         return new DefaultSocks5InitialRequest(authMethods);
     }
 
-    private Socks5CommandRequest createConnectRequest(final InetSocketAddress raddr) throws Exception {
+    protected Socks5CommandRequest createConnectRequest(final InetSocketAddress raddr) throws Exception {
         Socks5AddressType addrType;
         String rhost;
         if (raddr.isUnresolved()) {
@@ -114,6 +121,6 @@ public class Socks5ProxyHandler extends AbstractProxyHandler {
                 throw new ConnectException("unknown address type: " + raddr.getClass().getName());
             }
         }
-        return new DefaultSocks5CommandRequest(Socks5CommandType.CONNECT, addrType, rhost, raddr.getPort());
+        return new DefaultSocks5CommandRequest(commandType, addrType, rhost, raddr.getPort());
     }
 }

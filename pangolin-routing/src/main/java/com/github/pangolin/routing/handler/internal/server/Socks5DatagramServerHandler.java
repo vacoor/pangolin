@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.internal.server.socks5.server;
+package com.github.pangolin.routing.handler.internal.server;
 
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
@@ -52,8 +52,8 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         final OwnedServer ownedServer = natServers.remove(sender.getAddress());
         if (null != ownedServer) {
             log.info("Remove White: {}", sender);
-            final Set<InetSocketAddress> natMapKeys = ownedServer.natMapKeys;
-            for (InetSocketAddress natMapKey : natMapKeys) {
+            final Set<Key> natMapKeys = ownedServer.natMapKeys;
+            for (Key natMapKey : natMapKeys) {
                 natMap.get(natMapKey).channel().close();
             }
         }
@@ -61,13 +61,13 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
 
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket packet) throws Exception {
-        final InetSocketAddress sender = packet.sender();
-        final InetSocketAddress recipient = packet.recipient();
-        final InetAddress owner = sender.getAddress();
+        final InetSocketAddress rawSender = packet.sender();
+        final InetSocketAddress rawRecipient = packet.recipient();
+        final InetAddress owner = rawSender.getAddress();
         final OwnedServer ownedServer = natServers.get(owner);
 //        final OwnedServer ownedServer = natServers.computeIfAbsent(owner, OwnedServer::new);
         if (null == ownedServer) {
-            log.warn("SKIP sender: {} -> {}, {}", sender, recipient, natServers);
+            log.warn("SKIP sender: {} -> {}, {}", rawSender, rawRecipient, natServers);
             return;
         }
 
@@ -75,7 +75,7 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         /*-
          * UDP sync() is required.
          */
-        ownedServer.getNatMapChannel(sender, ctx).sync().channel().writeAndFlush(packetToUse);
+        ownedServer.getNatMapChannel(rawSender, packetToUse.recipient(), ctx).sync().channel().writeAndFlush(packetToUse);
     }
 
     private DatagramPacket decode(final DatagramPacket packet) throws Exception {
@@ -139,12 +139,45 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         return payloadToReplace;
     }
 
-    private ConcurrentMap<InetSocketAddress, ChannelFuture> natMap = Maps.newConcurrentMap();
     private ConcurrentMap<InetAddress, OwnedServer> natServers = Maps.newConcurrentMap();
+    private ConcurrentMap<Key, ChannelFuture> natMap = Maps.newConcurrentMap();
 
+    private class Key {
+        private final InetSocketAddress one;
+        private final InetSocketAddress two;
+
+        private Key(final InetSocketAddress one, final InetSocketAddress two) {
+            this.one = one;
+            this.two = two;
+        }
+
+        @Override
+        public boolean equals(final Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            final Key key = (Key) o;
+
+            if (one != null ? !one.equals(key.one) : key.one != null) {
+                return false;
+            }
+            return two != null ? two.equals(key.two) : key.two == null;
+        }
+
+        @Override
+        public int hashCode() {
+            int result = one != null ? one.hashCode() : 0;
+            result = 31 * result + (two != null ? two.hashCode() : 0);
+            return result;
+        }
+    }
     private class OwnedServer {
         private final InetAddress owner;
-        private final Set<InetSocketAddress> natMapKeys = Collections.newSetFromMap(
+        private final Set<Key> natMapKeys = Collections.newSetFromMap(
                 new ConcurrentHashMap<>()
         );
 
@@ -152,17 +185,17 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
             this.owner = owner;
         }
 
-        public ChannelFuture getNatMapChannel(final InetSocketAddress sender, final ChannelHandlerContext context) {
-            return natMap.computeIfAbsent(sender, key -> {
-                natMapKeys.add(sender);
-                return create(sender, context);
+        public ChannelFuture getNatMapChannel(final InetSocketAddress sender, final InetSocketAddress receipt, final ChannelHandlerContext context) {
+            return natMap.computeIfAbsent(new Key(sender, receipt), key -> {
+                return create(sender, receipt, context);
             });
         }
 
     }
 
-    private ChannelFuture create(final InetSocketAddress callback, final ChannelHandlerContext callbackCtx) {
+    private ChannelFuture create(final InetSocketAddress callback, final InetSocketAddress receipt, final ChannelHandlerContext callbackCtx) {
         return datagramChannelFactory.open(
+                receipt,
                 callbackCtx.channel().config().getConnectTimeoutMillis(),
 //                callbackCtx.channel().eventLoop(),
                 new NioEventLoopGroup(),
@@ -188,40 +221,6 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
     }
 
     public static void main(String[] args) throws InterruptedException, CertificateException, SSLException {
-        /*
-        byte[] payloadX = Hex.decode("0001000000010000000000000377777705626169647503636f6d0000010001");
-        ByteBuf payload = Unpooled.wrappedBuffer(payloadX);
-        final InetSocketAddress dnsAddress = new InetSocketAddress("10.88.8.8", 53);
-
-        new StandardDatagramChannelFactory().open(
-                0,
-//                callbackCtx.channel().eventLoop(),
-                new NioEventLoopGroup(),
-                new ChannelInitializer<DatagramChannel>() {
-                    @Override
-                    protected void initChannel(final DatagramChannel ch) throws Exception {
-                        ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramPacket>() {
-                            @Override
-                            protected void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket rawPacket) throws Exception {
-                                final InetSocketAddress sender = rawPacket.sender();
-                                final InetSocketAddress recipient = rawPacket.recipient();
-//                                log.info("[UDP] {} -> {} -> {}", sender, recipient, callback);
-
-                                final ByteBuf payloadToReplace = encode(rawPacket.content(), sender);
-
-                                // final DatagramPacket packet = new DatagramPacket(payload, callback);
-//                                final DatagramPacket packet = new DatagramPacket(payloadToReplace, callback, sender);
-//                                callbackCtx.writeAndFlush(packet);
-                                System.out.println(payloadToReplace);
-                            }
-                        });
-                    }
-                }).sync().channel().writeAndFlush(new DatagramPacket(payload, dnsAddress))
-        .channel().closeFuture().sync();
-
-        System.exit(0);
-        */
-
         Socks5DatagramServerHandler udpServerHandler = new Socks5DatagramServerHandler();
         final Bootstrap udpBootstrap = new Bootstrap();
         udpBootstrap.group(new NioEventLoopGroup());
@@ -241,7 +240,7 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new Socks5ProxyServerHandler2(udpServerHandler));
+                ch.pipeline().addLast(new Socks5ProxyServerHandler(udpServerHandler));
             }
         }).channel().closeFuture().sync();
     }

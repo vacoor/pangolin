@@ -4,6 +4,8 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.EventLoopGroup;
 
+import java.net.InetSocketAddress;
+
 public interface DatagramChannelFactory {
 
     /**
@@ -14,6 +16,6 @@ public interface DatagramChannelFactory {
      * @param handler       channel handler
      * @return channel future
      */
-    ChannelFuture open(final int connTimeoutMs, final EventLoopGroup group, final ChannelHandler handler);
+    ChannelFuture open(final InetSocketAddress destination, final int connTimeoutMs, final EventLoopGroup group, final ChannelHandler handler);
 
 }

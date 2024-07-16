@@ -7,10 +7,12 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 
+import java.net.InetSocketAddress;
+
 public class StandardDatagramChannelFactory implements DatagramChannelFactory {
 
     @Override
-    public ChannelFuture open(final int connTimeoutMs, final EventLoopGroup group, final ChannelHandler handler) {
+    public ChannelFuture open(final InetSocketAddress destination, final int connTimeoutMs, final EventLoopGroup group, final ChannelHandler handler) {
         final Bootstrap b = new Bootstrap()
                 .group(group)
                 .channel(NioDatagramChannel.class)
