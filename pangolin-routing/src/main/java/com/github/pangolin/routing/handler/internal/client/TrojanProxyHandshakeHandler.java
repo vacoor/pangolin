@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta;
+package com.github.pangolin.routing.handler.internal.client;
 
 import com.github.pangolin.util.Channels;
 import freework.codec.Hex;

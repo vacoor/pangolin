@@ -83,7 +83,7 @@ public class SsServerResolver implements UpstreamServerResolver {
         }
 
         @Override
-        public ChannelHandler newSocketProxyHandler(InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(InetSocketAddress destination) {
             return new SsProxyHandler(address, algorithm, password);
         }
 

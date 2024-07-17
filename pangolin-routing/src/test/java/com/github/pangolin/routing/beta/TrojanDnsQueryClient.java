@@ -1,13 +1,11 @@
 package com.github.pangolin.routing.beta;
 
+import com.github.pangolin.routing.handler.internal.client.TrojanDatagramProxyHandler;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.DatagramChannel;
-import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
-import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.dns.*;
 import io.netty.util.NetUtil;
 

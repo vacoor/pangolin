@@ -52,7 +52,7 @@ public class WebSocketServerResolver implements UpstreamServerResolver {
         }
 
         @Override
-        public ChannelHandler newSocketProxyHandler(InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(InetSocketAddress destination) {
             return new WebSocketProxyHandler(uri, null);
         }
 

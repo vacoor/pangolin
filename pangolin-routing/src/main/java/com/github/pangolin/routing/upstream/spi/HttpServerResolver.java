@@ -81,7 +81,7 @@ public class HttpServerResolver implements UpstreamServerResolver {
         }
 
         @Override
-        public ChannelHandler newSocketProxyHandler(InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(InetSocketAddress destination) {
             final DefaultHttpHeaders headers = new DefaultHttpHeaders();
             /*-
              * FIXED 499

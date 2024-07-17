@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.handler.internal.client;
 
-import com.github.pangolin.routing.handler.codec.socks5.Socks5DatagramPacketCodec;
+import com.github.pangolin.routing.handler.codec.socks5.Socks5ClientDatagramPacketCodec;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.util.SocketUtils;
@@ -61,7 +61,7 @@ public class Socks5DatagramProxyHandler extends ChannelDuplexHandler {
                                 final int udpServerPort = socks5CommandResponse.bndPort();
                                 final InetSocketAddress address = SocketUtils.toSocketAddress(udpServerAddr, udpServerPort, false);
 
-                                udpCtx.pipeline().addBefore(udpCtx.name(), null, new Socks5DatagramPacketCodec(address));
+                                udpCtx.pipeline().addBefore(udpCtx.name(), null, new Socks5ClientDatagramPacketCodec(address));
                                 Socks5DatagramProxyHandler.super.bind(udpCtx, localAddress, promise);
                             } else {
                                 promise.tryFailure(new ConnectException("status = " + socks5CommandResponse.status()));

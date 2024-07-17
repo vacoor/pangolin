@@ -8,6 +8,7 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.resolver.NoopAddressResolverGroup;
+import io.netty.util.internal.ObjectUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
@@ -15,48 +16,47 @@ import java.net.SocketAddress;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * @since 20240411
- */
 @Slf4j
 public class ProxySocketChannelFactory implements SocketChannelFactory {
-    private final UpstreamServer server;
+    private final UpstreamServer upstream;
     private final List<String> bypass;
 
-    public ProxySocketChannelFactory(final UpstreamServer server, final List<String> bypass) {
-        this.server = server;
+    public ProxySocketChannelFactory(final UpstreamServer upstream, final List<String> bypass) {
+        this.upstream = ObjectUtil.checkNotNull(upstream, "upstream");
         this.bypass = null != bypass ? bypass : Collections.emptyList();
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
-    public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
-        final UpstreamServer upstreamServer = choose(remoteAddress);
-        ChannelHandler networkHandler = null != upstreamServer ? upstreamServer.newSocketProxyHandler((InetSocketAddress) remoteAddress) : null;
-        final NoopAddressResolverGroup resolverGroup = null != networkHandler ? NoopAddressResolverGroup.INSTANCE : null;
-        return Channels.open(remoteAddress, resolverGroup, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
+    public ChannelFuture open(final SocketAddress destination, final int connTimeoutMs,
+                              final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
+        final ChannelHandler transport = newSocketProxyHandler(destination);
+        final NoopAddressResolverGroup resolverGroup = null != transport ? NoopAddressResolverGroup.INSTANCE : null;
+        return Channels.open(destination, resolverGroup, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
             @Override
-            protected void initChannel(final SocketChannel ch) throws Exception {
-                if (null != networkHandler) {
-                    ch.pipeline().addFirst(networkHandler);
+            protected void initChannel(final SocketChannel ch) {
+                if (null != transport) {
+                    ch.pipeline().addFirst(transport);
                 }
                 ch.pipeline().addLast(handler);
             }
         });
     }
 
-    private UpstreamServer choose(final SocketAddress destinationAddress) {
-        if (!(destinationAddress instanceof InetSocketAddress)) {
-            log.info("[ROUTING] will bypass the upstream => {}", destinationAddress);
-            return null;
+    private ChannelHandler newSocketProxyHandler(final SocketAddress destination) {
+        if (destination instanceof InetSocketAddress) {
+            final InetSocketAddress address = (InetSocketAddress) destination;
+            final String hostname = address.isUnresolved() ? address.getHostString() : address.getHostName();
+            if (!bypass.contains(hostname)) {
+                return upstream.newSocketProxyHandler(address);
+            }
+            log.info("[ROUTING] {}:{} will bypass the upstream", hostname, address.getPort());
+        } else {
+            log.debug("[ROUTING] UNSUPPORTED_ADDRESS {} will bypass the upstream", destination);
         }
-        final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
-        if ((sa.isUnresolved() && bypass.contains(sa.getHostString()))
-                || (!sa.isUnresolved() && bypass.contains(sa.getHostName()))
-        ) {
-            log.info("[ROUTING] will bypass the upstream => {}:{}", sa.getHostString(), sa.getPort());
-            return null;
-        }
-
-        return server;
+        return null;
     }
+
 }

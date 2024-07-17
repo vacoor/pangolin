@@ -8,8 +8,8 @@ public interface UpstreamServer {
 
     String getName();
 
-    ChannelHandler newSocketProxyHandler(InetSocketAddress sa);
+    ChannelHandler newSocketProxyHandler(final InetSocketAddress destination);
 
-    ChannelHandler newDatagramProxyHandler(InetSocketAddress sa);
+    ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination);
 
 }

@@ -8,6 +8,7 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.resolver.NoopAddressResolverGroup;
+import io.netty.util.internal.ObjectUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
@@ -15,47 +16,42 @@ import java.net.SocketAddress;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * @since 20240411
- */
 @Slf4j
 public class ProxyDatagramChannelFactory implements DatagramChannelFactory {
-    private final UpstreamServer server;
+    private final UpstreamServer upstream;
     private final List<String> bypass;
 
-    public ProxyDatagramChannelFactory(final UpstreamServer server, final List<String> bypass) {
-        this.server = server;
+    public ProxyDatagramChannelFactory(final UpstreamServer upstream, final List<String> bypass) {
+        this.upstream = ObjectUtil.checkNotNull(upstream, "upstream");
         this.bypass = null != bypass ? bypass : Collections.emptyList();
     }
 
     @Override
     public ChannelFuture open(final InetSocketAddress destination, final int connTimeoutMs, final EventLoopGroup group, final ChannelHandler handler) {
-        final UpstreamServer upstreamServer = choose(destination);
-        ChannelHandler networkHandler = null != upstreamServer ? upstreamServer.newDatagramProxyHandler(destination) : null;
-        final NoopAddressResolverGroup resolverGroup = null != networkHandler ? NoopAddressResolverGroup.INSTANCE : null;
+        final ChannelHandler transport = newDatagramProxyHandler(destination);
+        final NoopAddressResolverGroup resolverGroup = null != transport ? NoopAddressResolverGroup.INSTANCE : null;
+
+        // FIXME
         final Bootstrap b = new Bootstrap()
-                .group(group)
                 .channel(NioDatagramChannel.class)
-                .resolver(resolverGroup)
                 .option(ChannelOption.SO_BROADCAST, false)
+                .resolver(resolverGroup)
+                .group(group)
                 .handler(handler);
         return b.bind(0);
     }
 
-    private UpstreamServer choose(final SocketAddress destinationAddress) {
-        if (!(destinationAddress instanceof InetSocketAddress)) {
-            log.info("[ROUTING] will bypass the upstream => {}", destinationAddress);
-            return null;
+    private ChannelHandler newDatagramProxyHandler(final SocketAddress destination) {
+        if (destination instanceof InetSocketAddress) {
+            final InetSocketAddress address = (InetSocketAddress) destination;
+            final String hostname = address.isUnresolved() ? address.getHostString() : address.getHostName();
+            if (!bypass.contains(hostname)) {
+                return upstream.newDatagramProxyHandler(address);
+            }
+            log.info("[ROUTING] {}:{} will bypass the upstream", hostname, address.getPort());
+        } else {
+            log.debug("[ROUTING] UNSUPPORTED_ADDRESS {} will bypass the upstream", destination);
         }
-        final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
-        if ((sa.isUnresolved() && bypass.contains(sa.getHostString()))
-                || (!sa.isUnresolved() && bypass.contains(sa.getHostName()))
-        ) {
-            log.info("[ROUTING] will bypass the upstream => {}:{}", sa.getHostString(), sa.getPort());
-            return null;
-        }
-
-        return server;
+        return null;
     }
-
 }

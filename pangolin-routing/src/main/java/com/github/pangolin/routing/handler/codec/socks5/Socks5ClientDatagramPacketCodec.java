@@ -1,10 +1,11 @@
-package com.github.pangolin.routing.handler.codec.ss;
+package com.github.pangolin.routing.handler.codec.socks5;
 
 import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.socket.DatagramPacket;
+import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.MessageToMessageCodec;
 import io.netty.handler.codec.socksx.v5.Socks5AddressDecoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
@@ -19,21 +20,26 @@ import java.net.UnknownHostException;
 import java.util.List;
 
 /**
- * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Protocol#udp">Protocol - UDP</a>
+ * SOCKS5 client datagram packet codec.
+ *
+ * @see <a href="https://www.rfc-editor.org/rfc/rfc1928">SOCKS Protocol Version 5</a>
  */
 @Slf4j
-public class SsClientDatagramPacketCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
+public class Socks5ClientDatagramPacketCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
+    private static final int RSV = 0x0000;
+    private static final byte FRAG = 0x00;
+
     private final InetSocketAddress proxyAddress;
     private final Socks5AddressEncoder addressEncoder;
     private final Socks5AddressDecoder addressDecoder;
 
-    public SsClientDatagramPacketCodec(final InetSocketAddress proxyAddress) {
+    public Socks5ClientDatagramPacketCodec(final InetSocketAddress proxyAddress) {
         this(proxyAddress, Socks5AddressEncoder.DEFAULT, Socks5AddressDecoder.DEFAULT);
     }
 
-    public SsClientDatagramPacketCodec(final InetSocketAddress proxyAddress,
-                                       final Socks5AddressEncoder addressEncoder,
-                                       final Socks5AddressDecoder addressDecoder) {
+    public Socks5ClientDatagramPacketCodec(final InetSocketAddress proxyAddress,
+                                           final Socks5AddressEncoder addressEncoder,
+                                           final Socks5AddressDecoder addressDecoder) {
         this.proxyAddress = proxyAddress;
         this.addressEncoder = addressEncoder;
         this.addressDecoder = addressDecoder;
@@ -47,20 +53,22 @@ public class SsClientDatagramPacketCodec extends MessageToMessageCodec<DatagramP
         final InetSocketAddress recipient = packet.recipient();
         final ByteBuf rawPayload = packet.content();
 
-        log.info("[SS/UDP] {} -> {} -> {}: {}", ctx.channel().localAddress(), proxyAddress, recipient, ByteBufUtil.hexDump(rawPayload));
+        log.info("[SOCKS5/UDP] {} -> {} -> {}: {}", ctx.channel().localAddress(), proxyAddress, recipient, ByteBufUtil.hexDump(rawPayload));
 
         /*-
-         +------+----------+----------+----------+
-         | ATYP | DST.ADDR | DST.PORT |   DATA   |
-         +------+----------+----------+----------+
-         |  1   | Variable |    2     | Variable |
-         +------+----------+----------+----------+
+         +----+------+------+----------+----------+----------+
+         |RSV | FRAG | ATYP | DST.ADDR | DST.PORT |   DATA   |
+         +----+------+------+----------+----------+----------+
+         | 2  |  1   |  1   | Variable |    2     | Variable |
+         +----+------+------+----------+----------+----------+
          */
-        final ByteBuf payloadToReplace = ctx.alloc().buffer(128 + rawPayload.readableBytes());
+        final ByteBuf payloadToReplace = ctx.alloc().buffer(3 + 128 + rawPayload.readableBytes());
+        payloadToReplace.writeShort(RSV);
+        payloadToReplace.writeByte(FRAG);
         writeSocketAddress(payloadToReplace, recipient, addressEncoder);
         payloadToReplace.writeBytes(rawPayload);
 
-        log.info("[SS/UDP] {} -> {}: {}", ctx.channel().localAddress(), proxyAddress, ByteBufUtil.hexDump(payloadToReplace));
+        log.info("[SOCKS5/UDP] {} -> {}: {}", ctx.channel().localAddress(), proxyAddress, ByteBufUtil.hexDump(payloadToReplace));
 
         out.add(new DatagramPacket(payloadToReplace, proxyAddress, packet.sender()));
     }
@@ -92,21 +100,25 @@ public class SsClientDatagramPacketCodec extends MessageToMessageCodec<DatagramP
         final InetSocketAddress recipient = packet.recipient();
         final ByteBuf rawPayload = packet.content();
 
-        log.info("[SS/UDP] {} -> {}: {}", sender, recipient, ByteBufUtil.hexDump(rawPayload));
+        log.info("[SOCKS5/UDP] {} -> {}: {}", sender, recipient, ByteBufUtil.hexDump(rawPayload));
 
         /*-
-         +------+----------+----------+----------+
-         | ATYP | DST.ADDR | DST.PORT |   DATA   |
-         +------+----------+----------+----------+
-         |  1   | Variable |    2     | Variable |
-         +------+----------+----------+----------+
+         +----+------+------+----------+----------+----------+
+         |RSV | FRAG | ATYP | DST.ADDR | DST.PORT |   DATA   |
+         +----+------+------+----------+----------+----------+
+         | 2  |  1   |  1   | Variable |    2     | Variable |
+         +----+------+------+----------+----------+----------+
          */
+
+        // skip RSV (0x0000), FRAG (0x00)
+        assertEquals(RSV, rawPayload.readUnsignedShort(), "RSV");
+        assertEquals(FRAG, rawPayload.readByte(), "multiple fragment not support, FRAG");
 
         final Socks5AddressType dstAddrType = Socks5AddressType.valueOf(rawPayload.readByte());
         final String dstAddr = addressDecoder.decodeAddress(dstAddrType, rawPayload);
         final int dstPort = rawPayload.readUnsignedShort();
 
-        log.info("[SS/UDP] {}:{} -> {} -> {}: {}", dstAddr, dstPort, sender, recipient, ByteBufUtil.hexDump(rawPayload));
+        log.info("[SOCKS5/UDP] {}:{} -> {} -> {}: {}", dstAddr, dstPort, sender, recipient, ByteBufUtil.hexDump(rawPayload));
 
         /*-
          * FIXED #5760 Netty DNS Answer Section not correctly decoded
@@ -115,6 +127,12 @@ public class SsClientDatagramPacketCodec extends MessageToMessageCodec<DatagramP
         final ByteBuf payloadToUse = rawPayload.copy();
         final InetSocketAddress senderToReplace = SocketUtils.toSocketAddress(dstAddr, dstPort);
         out.add(new DatagramPacket(payloadToUse, recipient, senderToReplace));
+    }
+
+    private void assertEquals(final int expected, final int actual, final String name) {
+        if (expected != actual) {
+            throw new DecoderException(String.format("%s expected same:<%s> was not:<%s>", name, expected, actual));
+        }
     }
 
 }

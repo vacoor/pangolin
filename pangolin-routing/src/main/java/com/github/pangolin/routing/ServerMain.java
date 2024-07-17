@@ -106,9 +106,9 @@ public class ServerMain {
             defaultPort = "DEFAULT".equals(proxy) ? listenPort : defaultPort;
             final UpstreamServer upstreamServer = "DEFAULT".equals(proxy) ? defaultProxy : new AbstractServer(proxy) {
                 @Override
-                public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
+                public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
                     UpstreamServer server = config.getServer(proxy);
-                    return null != server ? server.newSocketProxyHandler(sa) : null;
+                    return null != server ? server.newSocketProxyHandler(destination) : null;
                 }
 
                 @Override

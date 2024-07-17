@@ -134,15 +134,15 @@ public class ServerFactory {
         }
 
         @Override
-        public ChannelHandler newDatagramProxyHandler(final InetSocketAddress sa) {
+        public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
             // FIXME
-            return delegate.newDatagramProxyHandler(sa);
+            return delegate.newDatagramProxyHandler(destination);
         }
 
         @Override
-        public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
             ServerStats serverStats = stats.getSingleServerStat(this);
-            ChannelHandler h = delegate.newSocketProxyHandler(sa);
+            ChannelHandler h = delegate.newSocketProxyHandler(destination);
             if (null == h) {
                 return null;
             }
@@ -194,10 +194,10 @@ public class ServerFactory {
         }
 
         @Override
-        public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
             final List<ChannelHandler> handlers = chain.getServers()
                     .stream()
-                    .map(s -> s.newSocketProxyHandler(sa))
+                    .map(s -> s.newSocketProxyHandler(destination))
                     .collect(Collectors.toList());
             if (handlers.isEmpty()) {
                 return null;
@@ -221,21 +221,21 @@ public class ServerFactory {
         }
 
         @Override
-        public ChannelHandler newDatagramProxyHandler(final InetSocketAddress sa) {
-            final UpstreamServer server = choose(sa);
+        public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
+            final UpstreamServer server = choose(destination);
             if (null != server) {
-                log.info("Choose {} -> {}", server.getName(), sa);
-                return server.newDatagramProxyHandler(sa);
+                log.info("Choose {} -> {}", server.getName(), destination);
+                return server.newDatagramProxyHandler(destination);
             }
             return null;
         }
 
         @Override
-        public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
-            final UpstreamServer server = choose(sa);
+        public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
+            final UpstreamServer server = choose(destination);
             if (null != server) {
-                log.info("Choose {} -> {}", server.getName(), sa);
-                return newProxyHandler(server, sa);
+                log.info("Choose {} -> {}", server.getName(), destination);
+                return newProxyHandler(server, destination);
             }
             return null;
         }

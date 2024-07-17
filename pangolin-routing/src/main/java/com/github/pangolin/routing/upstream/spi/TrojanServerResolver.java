@@ -61,7 +61,7 @@ public class TrojanServerResolver implements UpstreamServerResolver {
         }
 
         @Override
-        public ChannelHandler newSocketProxyHandler(InetSocketAddress sa) {
+        public ChannelHandler newSocketProxyHandler(InetSocketAddress destination) {
             return new TrojanProxyHandler(address, password);
         }
 

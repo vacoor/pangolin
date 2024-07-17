@@ -31,9 +31,9 @@ public class RuleBasedUpstreamServer extends AbstractServer {
     }
 
     @Override
-    public ChannelHandler newSocketProxyHandler(final InetSocketAddress sa) {
-        final UpstreamServer upstreamServer = select(sa);
-        return null != upstreamServer ? newProxyHandler(upstreamServer, (InetSocketAddress) sa) : null;
+    public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
+        final UpstreamServer upstreamServer = select(destination);
+        return null != upstreamServer ? newProxyHandler(upstreamServer, (InetSocketAddress) destination) : null;
     }
 
     protected ChannelHandler newProxyHandler(final UpstreamServer server, final InetSocketAddress sa) {

@@ -3,28 +3,24 @@ package com.github.pangolin.routing.handler.internal.server;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
 import com.github.pangolin.routing.util.SocketUtils;
-import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
-import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
-import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.handler.codec.socksx.v5.Socks5AddressDecoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressType;
 import lombok.extern.slf4j.Slf4j;
 
-import javax.net.ssl.SSLException;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.security.cert.CertificateException;
 import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -66,7 +62,6 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         final InetSocketAddress rawRecipient = packet.recipient();
         final InetAddress owner = rawSender.getAddress();
         final OwnedServer ownedServer = natServers.get(owner);
-//        final OwnedServer ownedServer = natServers.computeIfAbsent(owner, OwnedServer::new);
         if (null == ownedServer) {
             log.warn("SKIP sender: {} -> {}, {}", rawSender, rawRecipient, natServers);
             return;
@@ -176,6 +171,7 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
             return result;
         }
     }
+
     private class OwnedServer {
         private final InetAddress owner;
         private final Set<Key> natMapKeys = Collections.newSetFromMap(
@@ -198,8 +194,7 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         return datagramChannelFactory.open(
                 receipt,
                 callbackCtx.channel().config().getConnectTimeoutMillis(),
-//                callbackCtx.channel().eventLoop(),
-                new NioEventLoopGroup(),
+                callbackCtx.channel().eventLoop(),
                 new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(final DatagramChannel ch) throws Exception {
@@ -221,28 +216,4 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
                 });
     }
 
-    public static void main(String[] args) throws InterruptedException, CertificateException, SSLException {
-        Socks5DatagramServerHandler udpServerHandler = new Socks5DatagramServerHandler();
-        final Bootstrap udpBootstrap = new Bootstrap();
-        udpBootstrap.group(new NioEventLoopGroup());
-        udpBootstrap.channel(NioDatagramChannel.class);
-        udpBootstrap.option(ChannelOption.SO_BROADCAST, false);
-        udpBootstrap.handler(new ChannelInitializer<DatagramChannel>() {
-            @Override
-            protected void initChannel(final DatagramChannel ch) throws Exception {
-                ch.pipeline().addLast(udpServerHandler);
-            }
-        });
-//        udpBootstrap.bind("192.168.1.12", 1080).sync();
-        udpBootstrap.bind(3080);
-        System.out.println("UDP");
-
-        NettyServer server = new NettyServer(3080);
-        server.start(true, new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new Socks5ProxyServerHandler(udpServerHandler));
-            }
-        }).channel().closeFuture().sync();
-    }
 }
