@@ -1,9 +1,9 @@
 package com.github.pangolin.routing.route.predicate;
 
-import java.util.function.Predicate;
+public interface RoutePredicateFactory<T, D> {
 
-public interface RoutePredicateFactory<T> {
+    String name();
 
-    Predicate<T> apply(final RoutePredicateDefinition predicate);
+    RoutePredicate<T> apply(final D definition);
 
 }

@@ -27,19 +27,4 @@ public class SocketUtils {
         }
     }
 
-    public static InetAddress toAddress(final String ipAddressString) {
-        try {
-            if (NetUtil.isValidIpV4Address(ipAddressString) || NetUtil.isValidIpV6Address(ipAddressString)) {
-                final byte[] addr = NetUtil.createByteArrayFromIpAddressString(ipAddressString);
-                if (null != addr) {
-                    return InetAddress.getByAddress(addr);
-                }
-            }
-        } catch (final UnknownHostException e) {
-            //
-            return null;
-        }
-        return null;
-    }
-
 }
