@@ -1,7 +1,8 @@
 package com.github.pangolin.routing.handler.internal.client;
 
+import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.util.SocketUtils;
-import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.ChannelDuplexHandler;
@@ -9,11 +10,9 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPromise;
-import io.netty.channel.EventLoopGroup;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.MessageToMessageCodec;
 import io.netty.handler.codec.socksx.v5.Socks5AddressDecoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
@@ -39,19 +38,28 @@ public class TrojanDatagramProxyHandler extends ChannelDuplexHandler {
 
     private final InetSocketAddress proxyAddress;
     private final String proxyPassword;
+    private final SocketChannelFactory socketChannelFactory;
     private final Socks5AddressEncoder addressEncoder;
     private final Socks5AddressDecoder addressDecoder;
 
     private volatile ChannelFuture udpOverTcp;
 
     public TrojanDatagramProxyHandler(final InetSocketAddress proxyAddress, final String proxyPassword) {
-        this(proxyAddress, proxyPassword, Socks5AddressEncoder.DEFAULT, Socks5AddressDecoder.DEFAULT);
+        this(proxyAddress, proxyPassword, new StandardSocketChannelFactory());
     }
 
-    public TrojanDatagramProxyHandler(final InetSocketAddress proxyAddress, final String proxyPassword,
+    public TrojanDatagramProxyHandler(final InetSocketAddress proxyAddress,
+                                      final String proxyPassword,
+                                      final SocketChannelFactory socketChannelFactory) {
+        this(proxyAddress, proxyPassword, socketChannelFactory, Socks5AddressEncoder.DEFAULT, Socks5AddressDecoder.DEFAULT);
+    }
+
+    public TrojanDatagramProxyHandler(final InetSocketAddress proxyAddress,
+                                      final String proxyPassword, final SocketChannelFactory socketChannelFactory,
                                       final Socks5AddressEncoder addressEncoder, final Socks5AddressDecoder addressDecoder) {
         this.proxyAddress = proxyAddress;
         this.proxyPassword = proxyPassword;
+        this.socketChannelFactory = socketChannelFactory;
         this.addressEncoder = addressEncoder;
         this.addressDecoder = addressDecoder;
     }
@@ -72,10 +80,9 @@ public class TrojanDatagramProxyHandler extends ChannelDuplexHandler {
 
     @Override
     public void bind(final ChannelHandlerContext udpCtx, final SocketAddress localAddress, final ChannelPromise promise) throws Exception {
-        EventLoopGroup proxyGroup = udpCtx.channel().eventLoop();
-        Bootstrap b = new Bootstrap();
-        udpOverTcp = b.group(proxyGroup).channel(NioSocketChannel.class)
-                .handler(new ChannelInitializer<SocketChannel>() {
+        udpOverTcp = socketChannelFactory.open(
+                proxyAddress, udpCtx.channel().config().getConnectTimeoutMillis(),
+                true, udpCtx.channel().eventLoop(), new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(SocketChannel ch) {
                         ch.pipeline().addLast(new TrojanProxyHandshakeHandler(proxyAddress, proxyPassword));
@@ -95,7 +102,7 @@ public class TrojanDatagramProxyHandler extends ChannelDuplexHandler {
                             }
                         });
                     }
-                }).connect(proxyAddress);
+                });
     }
 
 
