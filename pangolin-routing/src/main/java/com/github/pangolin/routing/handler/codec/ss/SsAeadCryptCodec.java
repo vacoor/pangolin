@@ -3,7 +3,6 @@ package com.github.pangolin.routing.handler.codec.ss;
 import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.SsSecretKey;
 import com.github.pangolin.routing.handler.codec.ss.crypto.SsSubKey;
-import freework.util.Bytes;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -11,9 +10,6 @@ import io.netty.channel.CombinedChannelDuplexHandler;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.MessageToByteEncoder;
 import io.netty.handler.codec.ReplayingDecoder;
-import org.bouncycastle.crypto.digests.SHA1Digest;
-import org.bouncycastle.crypto.generators.HKDFBytesGenerator;
-import org.bouncycastle.crypto.params.HKDFParameters;
 
 import java.security.SecureRandom;
 import java.util.List;
@@ -21,13 +17,13 @@ import java.util.List;
 /**
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers">AEAD Ciphers</a>
  */
-public class SsAeadCipherCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {
+public class SsAeadCryptCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {
     private static final int LENGTH_SIZE = 2;
     private static final int CHUNK_SIZE_MASK = 0x3FFF;
 
     private final AeadCipherAlgorithm algorithm;
 
-    public SsAeadCipherCodec(final AeadCipherAlgorithm algorithm, final String password, final SecureRandom random) {
+    public SsAeadCryptCodec(final AeadCipherAlgorithm algorithm, final String password, final SecureRandom random) {
         this(generateMasterKey(algorithm, password), algorithm, random);
     }
 
@@ -35,7 +31,7 @@ public class SsAeadCipherCodec extends CombinedChannelDuplexHandler<ByteToMessag
         return SsSecretKey.generateKey(password, algorithm.getKeySize());
     }
 
-    public SsAeadCipherCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
+    public SsAeadCryptCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
         if (masterKey.length != algorithm.getKeySize()) {
             throw new IllegalArgumentException("master key size != crypt.getKeySize()");
         }
@@ -174,7 +170,7 @@ public class SsAeadCipherCodec extends CombinedChannelDuplexHandler<ByteToMessag
         }
 
         private int encrypt(final byte[] inBytes, int inOffset, int inLength, final byte[] outBytes, final int outOffset) throws Exception {
-            return SsAeadCipherCodec.this.encrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
+            return SsAeadCryptCodec.this.encrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
         }
     }
 
@@ -238,7 +234,7 @@ public class SsAeadCipherCodec extends CombinedChannelDuplexHandler<ByteToMessag
         }
 
         private int decrypt(final byte[] inBytes, int inOffset, int inLength, final byte[] outBytes, final int outOffset) throws Exception {
-            return SsAeadCipherCodec.this.decrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
+            return SsAeadCryptCodec.this.decrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
         }
     }
 

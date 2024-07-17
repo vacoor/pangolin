@@ -1,8 +1,5 @@
 package com.github.pangolin.routing.beta;
 
-import com.github.pangolin.routing.handler.codec.ss.SsAeadDatagramPacketCipherCodec;
-import com.github.pangolin.routing.handler.codec.ss.SsClientDatagramPacketCodec;
-import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.handler.internal.client.SsDatagramProxyHandler;
@@ -16,7 +13,6 @@ import io.netty.handler.codec.dns.*;
 import io.netty.util.NetUtil;
 
 import java.net.InetSocketAddress;
-import java.security.SecureRandom;
 
 /**
  *
@@ -37,7 +33,7 @@ public class SsDnsQueryClient {
                 .handler(new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
-//                        ch.pipeline().addLast(new SsAeadDatagramPacketCipherCodec((AeadCipherAlgorithm) cipher, password, new SecureRandom()));
+//                        ch.pipeline().addLast(new SsDatagramPacketAeadCryptCodec((AeadCipherAlgorithm) cipher, password, new SecureRandom()));
 //                        ch.pipeline().addLast(new SsClientDatagramPacketCodec(proxyAddress));
                         ch.pipeline().addLast(new SsDatagramProxyHandler(proxyAddress, cipher, password));
 

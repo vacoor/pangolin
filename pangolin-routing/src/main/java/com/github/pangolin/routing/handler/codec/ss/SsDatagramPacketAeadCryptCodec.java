@@ -3,15 +3,11 @@ package com.github.pangolin.routing.handler.codec.ss;
 import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.SsSecretKey;
 import com.github.pangolin.routing.handler.codec.ss.crypto.SsSubKey;
-import freework.util.Bytes;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.handler.codec.MessageToMessageCodec;
-import org.bouncycastle.crypto.digests.SHA1Digest;
-import org.bouncycastle.crypto.generators.HKDFBytesGenerator;
-import org.bouncycastle.crypto.params.HKDFParameters;
 
 import java.security.SecureRandom;
 import java.util.Arrays;
@@ -22,14 +18,14 @@ import java.util.List;
  *
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers#udp">UDP</a>
  */
-public class SsAeadDatagramPacketCipherCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
+public class SsDatagramPacketAeadCryptCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
     private final byte[] masterKey;
     private final AeadCipherAlgorithm algorithm;
     private final SecureRandom random;
 
     private final byte[] nonce;
 
-    public SsAeadDatagramPacketCipherCodec(final AeadCipherAlgorithm algorithm, final String password, final SecureRandom random) {
+    public SsDatagramPacketAeadCryptCodec(final AeadCipherAlgorithm algorithm, final String password, final SecureRandom random) {
         this(generateMasterKey(algorithm, password), algorithm, random);
     }
 
@@ -37,7 +33,7 @@ public class SsAeadDatagramPacketCipherCodec extends MessageToMessageCodec<Datag
         return SsSecretKey.generateKey(password, algorithm.getKeySize());
     }
 
-    public SsAeadDatagramPacketCipherCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
+    public SsDatagramPacketAeadCryptCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
         if (masterKey.length != algorithm.getKeySize()) {
             throw new IllegalArgumentException("master key size != crypt.getKeySize()");
         }

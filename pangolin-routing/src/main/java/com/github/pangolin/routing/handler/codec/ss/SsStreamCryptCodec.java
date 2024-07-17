@@ -17,13 +17,13 @@ import java.util.List;
 /**
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Stream-Ciphers">Stream Ciphers</a>
  */
-public class SsStreamCipherCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {
+public class SsStreamCryptCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {
     private static final int MAX_BUF_SIZE = 1024;
 
     private final StreamCipherAlgorithm algorithm;
 
 
-    public SsStreamCipherCodec(final StreamCipherAlgorithm algorithm, final String password, final SecureRandom random) {
+    public SsStreamCryptCodec(final StreamCipherAlgorithm algorithm, final String password, final SecureRandom random) {
         this(generateMasterKey(algorithm, password), algorithm, random);
     }
 
@@ -31,7 +31,7 @@ public class SsStreamCipherCodec extends CombinedChannelDuplexHandler<ByteToMess
         return SsSecretKey.generateKey(password, algorithm.getKeySize());
     }
 
-    public SsStreamCipherCodec(final byte[] masterKey, final StreamCipherAlgorithm algorithm, final SecureRandom random) {
+    public SsStreamCryptCodec(final byte[] masterKey, final StreamCipherAlgorithm algorithm, final SecureRandom random) {
         this.algorithm = algorithm;
         this.init(
                 new ShadowsocksStreamDecoder(masterKey, algorithm.getIvSize()),

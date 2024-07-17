@@ -3,7 +3,6 @@ package com.github.pangolin.routing.handler.codec.ss;
 import com.github.pangolin.routing.handler.codec.ss.crypto.SsSecretKey;
 import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.socket.DatagramPacket;
@@ -16,14 +15,14 @@ import java.util.List;
 /**
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Stream-Ciphers#udp">UDP</a>
  */
-public class SsStreamDatagramPacketCipherCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
+public class SsDatagramPacketStreamCryptCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
     private final byte[] masterKey;
     private final StreamCipherAlgorithm algorithm;
     private final SecureRandom random;
 
     private final int ivSize;
 
-    public SsStreamDatagramPacketCipherCodec(final StreamCipherAlgorithm algorithm, final String password, final SecureRandom random) {
+    public SsDatagramPacketStreamCryptCodec(final StreamCipherAlgorithm algorithm, final String password, final SecureRandom random) {
         this(generateMasterKey(algorithm, password), algorithm, random);
     }
 
@@ -31,7 +30,7 @@ public class SsStreamDatagramPacketCipherCodec extends MessageToMessageCodec<Dat
         return SsSecretKey.generateKey(password, algorithm.getKeySize());
     }
 
-    public SsStreamDatagramPacketCipherCodec(final byte[] masterKey, final StreamCipherAlgorithm algorithm, final SecureRandom random) {
+    public SsDatagramPacketStreamCryptCodec(final byte[] masterKey, final StreamCipherAlgorithm algorithm, final SecureRandom random) {
         if (masterKey.length != algorithm.getKeySize()) {
             throw new IllegalArgumentException("master key size != crypt.getKeySize()");
         }

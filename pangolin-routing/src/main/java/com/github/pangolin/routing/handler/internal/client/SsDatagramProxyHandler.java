@@ -34,9 +34,9 @@ public class SsDatagramProxyHandler extends ChannelDuplexHandler {
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         if (null != aeadCipherAlgorithm) {
-            ctx.pipeline().addBefore(ctx.name(), null, new SsAeadDatagramPacketCipherCodec(aeadCipherAlgorithm, password, new SecureRandom()));
+            ctx.pipeline().addBefore(ctx.name(), null, new SsDatagramPacketAeadCryptCodec(aeadCipherAlgorithm, password, new SecureRandom()));
         } else {
-            ctx.pipeline().addBefore(ctx.name(), null, new SsStreamDatagramPacketCipherCodec(streamCipherAlgorithm, password, new SecureRandom()));
+            ctx.pipeline().addBefore(ctx.name(), null, new SsDatagramPacketStreamCryptCodec(streamCipherAlgorithm, password, new SecureRandom()));
         }
         ctx.pipeline().addBefore(ctx.name(), null, new SsClientDatagramPacketCodec(proxyAddress));
     }

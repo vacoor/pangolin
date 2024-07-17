@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.handler.internal.client;
 
-import com.github.pangolin.routing.handler.codec.ss.SsAeadCipherCodec;
-import com.github.pangolin.routing.handler.codec.ss.SsStreamCipherCodec;
+import com.github.pangolin.routing.handler.codec.ss.SsAeadCryptCodec;
+import com.github.pangolin.routing.handler.codec.ss.SsStreamCryptCodec;
 import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm;
@@ -49,9 +49,9 @@ public class SsProxyHandler extends ChannelDuplexHandler {
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         if (null != aeadCipherAlgorithm) {
-            ctx.pipeline().addBefore(ctx.name(), null, new SsAeadCipherCodec(aeadCipherAlgorithm, password, new SecureRandom()));
+            ctx.pipeline().addBefore(ctx.name(), null, new SsAeadCryptCodec(aeadCipherAlgorithm, password, new SecureRandom()));
         } else {
-            ctx.pipeline().addBefore(ctx.name(), null, new SsStreamCipherCodec(streamCipherAlgorithm, password, new SecureRandom()));
+            ctx.pipeline().addBefore(ctx.name(), null, new SsStreamCryptCodec(streamCipherAlgorithm, password, new SecureRandom()));
         }
     }
 
