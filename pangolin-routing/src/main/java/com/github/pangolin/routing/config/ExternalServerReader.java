@@ -26,7 +26,7 @@ public class ExternalServerReader implements ServerReader {
     }
 
     @Override
-    public UpstreamServerRegistry load(final URL url, final RouteletContext parent) throws IOException, ConfigurationException {
+    public UpstreamServerRegistry load(final URL url, final RouteContext parent) throws IOException, ConfigurationException {
         final UpstreamServerRegistry registry = new UpstreamServerRegistry(parent, stats);
         final ClashConfiguration conf = loadClashConfiguration(url);
 

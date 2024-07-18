@@ -20,12 +20,12 @@ public class DefaultServerReader implements ServerReader {
         this.stats = stats;
     }
 
-    public UpstreamServerRegistry load(final URL url, final RouteletContext parent) throws IOException, ConfigurationException {
+    public UpstreamServerRegistry load(final URL url, final RouteContext parent) throws IOException, ConfigurationException {
         final Ini ini = new Ini();
         ini.load(url.openStream());
 
         final Ini.Section external = ini.getSection("External");
-        RouteletContext parentToUse = parent;
+        RouteContext parentToUse = parent;
         if (null != external) {
             for (String urlToUse : external.values()) {
                 parentToUse = load(urlToUse, parentToUse);
@@ -63,8 +63,8 @@ public class DefaultServerReader implements ServerReader {
     }
 
 
-    private RouteletContext load(final String url, final RouteletContext parent) throws IOException, ConfigurationException {
-        return new RefreshableUpstreamServerRegistry(new ExternalServerReader(stats), new URL(url), parent).refresh();
+    private RouteContext load(final String url, final RouteContext parent) throws IOException, ConfigurationException {
+        return new CachingUpstreamServerRegistry(new ExternalServerReader(stats), new URL(url), parent).refresh();
     }
 
 }

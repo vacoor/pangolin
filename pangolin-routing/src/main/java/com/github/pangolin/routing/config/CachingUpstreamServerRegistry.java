@@ -10,24 +10,24 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-public class RefreshableUpstreamServerRegistry implements RouteletContext {
-    private final RouteletContext parent;
+public class CachingUpstreamServerRegistry implements RouteContext {
+    private final RouteContext parent;
     private final ServerReader reader;
     private final URL conf;
 
     private volatile UpstreamServerRegistry snapshot;
 
-    public RefreshableUpstreamServerRegistry(final ServerReader reader, final URL url) {
+    public CachingUpstreamServerRegistry(final ServerReader reader, final URL url) {
         this(reader, url, null);
     }
 
-    public RefreshableUpstreamServerRegistry(final ServerReader reader, final URL url, final RouteletContext parent) {
+    public CachingUpstreamServerRegistry(final ServerReader reader, final URL url, final RouteContext parent) {
         this.reader = reader;
         this.conf = url;
         this.parent = parent;
     }
 
-    public RefreshableUpstreamServerRegistry refresh() throws ConfigurationException, IOException {
+    public CachingUpstreamServerRegistry refresh() throws ConfigurationException, IOException {
         snapshot = reader.load(conf, parent);
         return this;
     }

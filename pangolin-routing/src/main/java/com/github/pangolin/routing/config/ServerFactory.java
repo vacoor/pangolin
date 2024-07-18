@@ -54,16 +54,16 @@ public class ServerFactory {
     }
 
     private static UpstreamServer doResolve(final String name, final String url) {
-        final ServiceLoader<UpstreamServerFactory> resolvers = ServiceLoader.load(UpstreamServerFactory.class);
-        for (final UpstreamServerFactory resolver : resolvers) {
-            if (!resolver.accept(url)) {
+        final ServiceLoader<UpstreamServerFactory> factories = ServiceLoader.load(UpstreamServerFactory.class);
+        for (final UpstreamServerFactory factory : factories) {
+            if (!factory.accept(url)) {
                 continue;
             }
             final Properties props = new Properties();
             if (null != name) {
                 props.setProperty("name", name);
             }
-            final UpstreamServer resolved = resolver.create(url, props);
+            final UpstreamServer resolved = factory.create(url, props);
             if (null != resolved) {
                 return resolved;
             }

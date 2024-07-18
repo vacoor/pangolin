@@ -5,7 +5,7 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 import com.github.pangolin.routing.config.ConfigurationException;
 import com.github.pangolin.routing.config.DefaultServerReader;
 import com.github.pangolin.routing.config.Ini;
-import com.github.pangolin.routing.config.RefreshableUpstreamServerRegistry;
+import com.github.pangolin.routing.config.CachingUpstreamServerRegistry;
 import com.github.pangolin.routing.handler.extra.ProxyAutoConfigurationServerHandler;
 import com.github.pangolin.routing.handler.extra.SwitchyRuleConfigurationServerHandler;
 import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
@@ -85,7 +85,7 @@ public class ServerMain {
         }
 
         final LoadBalancerStats stats = new LoadBalancerStats();
-        final RefreshableUpstreamServerRegistry config = new RefreshableUpstreamServerRegistry(new DefaultServerReader(stats), url).refresh();
+        final CachingUpstreamServerRegistry config = new CachingUpstreamServerRegistry(new DefaultServerReader(stats), url).refresh();
 
         final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
         final RuleBasedUpstreamServer defaultProxy = new RuleBasedUpstreamServer("ROUTING-PROXY", config, config);

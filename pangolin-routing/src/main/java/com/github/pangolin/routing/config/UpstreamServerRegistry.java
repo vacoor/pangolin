@@ -10,8 +10,8 @@ import com.netflix.loadbalancer.LoadBalancerStats;
 
 import java.util.*;
 
-public class UpstreamServerRegistry extends ServerFactory implements UpstreamServerProvider, RouteProvider, RouteletContext {
-    private final RouteletContext parent;
+public class UpstreamServerRegistry extends ServerFactory implements UpstreamServerProvider, RouteProvider, RouteContext {
+    private final RouteContext parent;
     private final Map<String, UpstreamServer> proxies = Maps.newLinkedHashMap();
     private final Map<RoutePredicate, String> rules = Maps.newLinkedHashMap();
     private final LoadBalancerStats stats;
@@ -20,7 +20,7 @@ public class UpstreamServerRegistry extends ServerFactory implements UpstreamSer
         this(null, stats);
     }
 
-    public UpstreamServerRegistry(final RouteletContext parent, final LoadBalancerStats stats) {
+    public UpstreamServerRegistry(final RouteContext parent, final LoadBalancerStats stats) {
         super(stats);
         this.parent = parent;
         this.stats = stats;
