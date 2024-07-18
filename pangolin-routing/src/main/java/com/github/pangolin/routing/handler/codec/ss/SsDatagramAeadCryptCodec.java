@@ -18,14 +18,14 @@ import java.util.List;
  *
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers#udp">UDP</a>
  */
-public class SsDatagramPacketAeadCryptCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
+public class SsDatagramAeadCryptCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
     private final byte[] masterKey;
     private final AeadCipherAlgorithm algorithm;
     private final SecureRandom random;
 
     private final byte[] nonce;
 
-    public SsDatagramPacketAeadCryptCodec(final AeadCipherAlgorithm algorithm, final String password, final SecureRandom random) {
+    public SsDatagramAeadCryptCodec(final AeadCipherAlgorithm algorithm, final String password, final SecureRandom random) {
         this(generateMasterKey(algorithm, password), algorithm, random);
     }
 
@@ -33,7 +33,7 @@ public class SsDatagramPacketAeadCryptCodec extends MessageToMessageCodec<Datagr
         return SsSecretKey.generateKey(password, algorithm.getKeySize());
     }
 
-    public SsDatagramPacketAeadCryptCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
+    public SsDatagramAeadCryptCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
         if (masterKey.length != algorithm.getKeySize()) {
             throw new IllegalArgumentException("master key size != crypt.getKeySize()");
         }

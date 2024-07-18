@@ -3,7 +3,7 @@ package com.github.pangolin.routing.v2.route.predicate;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 
-public abstract class SubnetRoutePredicate<T extends InetAddress> implements RoutePredicate<T> {
+public abstract class SubnetRoutePredicate<T> implements RoutePredicate<T> {
     private final InetAddress ipAddress;
     private final int cidrPrefix;
 

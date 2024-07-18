@@ -1,8 +1,12 @@
 package com.github.pangolin.routing.v2.route.predicate;
 
-import java.net.Inet4Address;
+import com.github.pangolin.routing.util.SocketUtils;
 
-public class Subnet4RoutePredicate extends SubnetRoutePredicate<Inet4Address> {
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+
+public class Subnet4RoutePredicate extends SubnetRoutePredicate<InetSocketAddress> {
     private final int subnetMask;
     private final int networkAddress;
 
@@ -16,9 +20,13 @@ public class Subnet4RoutePredicate extends SubnetRoutePredicate<Inet4Address> {
      * {@inheritDoc}
      */
     @Override
-    public boolean test(final Inet4Address address) {
-        final int ipAddress = ipAddressToInt(address);
-        return (ipAddress & subnetMask) == networkAddress;
+    public boolean test(final InetSocketAddress socketAddress) {
+        final InetAddress address = SocketUtils.getAddress(socketAddress, false);
+        if (address instanceof Inet4Address) {
+            final int ipAddress = ipAddressToInt((Inet4Address) address);
+            return (ipAddress & subnetMask) == networkAddress;
+        }
+        return false;
     }
 
     private int prefixToSubnetMask(final int cidrPrefix) {

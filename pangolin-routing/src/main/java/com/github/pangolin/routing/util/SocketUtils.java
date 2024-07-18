@@ -8,23 +8,35 @@ import java.net.UnknownHostException;
 
 public class SocketUtils {
 
-    public static InetSocketAddress toSocketAddress(final String hostname, final int port) {
-        return toSocketAddress(hostname, port, true);
+    public static InetAddress toAddress(final String host, final boolean resolve) {
+        try {
+            if (resolve) {
+                return InetAddress.getByName(host);
+            }
+            if (NetUtil.isValidIpV4Address(host) || NetUtil.isValidIpV6Address(host)) {
+                final byte[] addr = NetUtil.createByteArrayFromIpAddressString(host);
+                return null != addr ? InetAddress.getByAddress(addr) : null;
+            }
+            return null;
+        } catch (final UnknownHostException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
-    public static InetSocketAddress toSocketAddress(final String hostname, final int port, final boolean resolve) {
-        try {
-            if (NetUtil.isValidIpV4Address(hostname) || NetUtil.isValidIpV6Address(hostname)) {
-                final byte[] addr = NetUtil.createByteArrayFromIpAddressString(hostname);
-                if (null != addr) {
-                    final InetAddress address = InetAddress.getByAddress(addr);
-                    return new InetSocketAddress(address, port);
-                }
-            }
-            return resolve ? new InetSocketAddress(hostname, port) : InetSocketAddress.createUnresolved(hostname, port);
-        } catch (final UnknownHostException e) {
-            throw new RuntimeException(e);
+    public static InetSocketAddress toSocketAddress(final String host, final int port) {
+        return toSocketAddress(host, port, true);
+    }
+
+    public static InetSocketAddress toSocketAddress(final String host, final int port, final boolean resolve) {
+        final InetAddress inetAddress = toAddress(host, resolve);
+        return null != inetAddress ? new InetSocketAddress(inetAddress, port) : InetSocketAddress.createUnresolved(host, port);
+    }
+
+    public static InetAddress getAddress(final InetSocketAddress socketAddress, final boolean resolve) {
+        if (!socketAddress.isUnresolved()) {
+            return socketAddress.getAddress();
         }
+        return toAddress(socketAddress.getHostString(), resolve);
     }
 
 }

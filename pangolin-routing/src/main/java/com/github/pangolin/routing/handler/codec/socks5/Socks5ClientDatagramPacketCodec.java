@@ -12,11 +12,7 @@ import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressType;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.Inet4Address;
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
+import java.net.*;
 import java.util.List;
 
 /**
@@ -53,7 +49,9 @@ public class Socks5ClientDatagramPacketCodec extends MessageToMessageCodec<Datag
         final InetSocketAddress recipient = packet.recipient();
         final ByteBuf rawPayload = packet.content();
 
-        log.info("[SOCKS5/UDP] {} -> {} -> {}: {}", ctx.channel().localAddress(), proxyAddress, recipient, ByteBufUtil.hexDump(rawPayload));
+        if (log.isDebugEnabled()) {
+            log.debug("[SOCKS5/UDP] {} -> {} -> {}: {}", ctx.channel().localAddress(), proxyAddress, recipient, ByteBufUtil.hexDump(rawPayload));
+        }
 
         /*-
          +----+------+------+----------+----------+----------+
@@ -68,7 +66,9 @@ public class Socks5ClientDatagramPacketCodec extends MessageToMessageCodec<Datag
         writeSocketAddress(payloadToReplace, recipient, addressEncoder);
         payloadToReplace.writeBytes(rawPayload);
 
-        log.info("[SOCKS5/UDP] {} -> {}: {}", ctx.channel().localAddress(), proxyAddress, ByteBufUtil.hexDump(payloadToReplace));
+        if (log.isDebugEnabled()) {
+            log.debug("[SOCKS5/UDP] {} -> {}: {}", ctx.channel().localAddress(), proxyAddress, ByteBufUtil.hexDump(payloadToReplace));
+        }
 
         out.add(new DatagramPacket(payloadToReplace, proxyAddress, packet.sender()));
     }
@@ -100,7 +100,9 @@ public class Socks5ClientDatagramPacketCodec extends MessageToMessageCodec<Datag
         final InetSocketAddress recipient = packet.recipient();
         final ByteBuf rawPayload = packet.content();
 
-        log.info("[SOCKS5/UDP] {} -> {}: {}", sender, recipient, ByteBufUtil.hexDump(rawPayload));
+        if (log.isDebugEnabled()) {
+            log.debug("[SOCKS5/UDP] {} -> {}: {}", sender, recipient, ByteBufUtil.hexDump(rawPayload));
+        }
 
         /*-
          +----+------+------+----------+----------+----------+
@@ -118,7 +120,9 @@ public class Socks5ClientDatagramPacketCodec extends MessageToMessageCodec<Datag
         final String dstAddr = addressDecoder.decodeAddress(dstAddrType, rawPayload);
         final int dstPort = rawPayload.readUnsignedShort();
 
-        log.info("[SOCKS5/UDP] {}:{} -> {} -> {}: {}", dstAddr, dstPort, sender, recipient, ByteBufUtil.hexDump(rawPayload));
+        if (log.isDebugEnabled()) {
+            log.debug("[SOCKS5/UDP] {}:{} -> {} -> {}: {}", dstAddr, dstPort, sender, recipient, ByteBufUtil.hexDump(rawPayload));
+        }
 
         /*-
          * FIXED #5760 Netty DNS Answer Section not correctly decoded

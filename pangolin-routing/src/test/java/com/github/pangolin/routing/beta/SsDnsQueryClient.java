@@ -33,8 +33,8 @@ public class SsDnsQueryClient {
                 .handler(new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
-//                        ch.pipeline().addLast(new SsDatagramPacketAeadCryptCodec((AeadCipherAlgorithm) cipher, password, new SecureRandom()));
-//                        ch.pipeline().addLast(new SsClientDatagramPacketCodec(proxyAddress));
+//                        ch.pipeline().addLast(new SsDatagramAeadCryptCodec((AeadCipherAlgorithm) cipher, password, new SecureRandom()));
+//                        ch.pipeline().addLast(new SsClientDatagramCodec(proxyAddress));
                         ch.pipeline().addLast(new SsDatagramProxyHandler(proxyAddress, cipher, password));
 
                         ch.pipeline().addLast(new DatagramDnsQueryEncoder());

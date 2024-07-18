@@ -20,7 +20,7 @@ public class DefaultServerReader implements ServerReader {
         this.stats = stats;
     }
 
-    public UpstreamServerRegistry load(final URL url, final RouteContext parent) throws IOException, ConfigurationException {
+    public SimpleRouteRegistry load(final URL url, final RouteContext parent) throws IOException, ConfigurationException {
         final Ini ini = new Ini();
         ini.load(url.openStream());
 
@@ -32,7 +32,7 @@ public class DefaultServerReader implements ServerReader {
             }
         }
 
-        final UpstreamServerRegistry registry = new UpstreamServerRegistry(parentToUse, stats);
+        final SimpleRouteRegistry registry = new SimpleRouteRegistry(parentToUse, stats);
         final Ini.Section proxy = ini.getSection("Proxy");
         if (null != proxy) {
             proxy.forEach(registry::register);

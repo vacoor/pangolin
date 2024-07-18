@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.handler.internal.server;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
-import com.github.pangolin.routing.handler.codec.ss.SsAeadCryptCodec;
-import com.github.pangolin.routing.handler.codec.ss.SsStreamCryptCodec;
+import com.github.pangolin.routing.handler.codec.ss.SsSocketAeadCryptCodec;
+import com.github.pangolin.routing.handler.codec.ss.SsSocketStreamCryptCodec;
 import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm;
@@ -40,10 +40,10 @@ public class SsProxyServerHandler extends ChannelDuplexHandler {
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         if (algorithm instanceof StreamCipherAlgorithm) {
             StreamCipherAlgorithm sca = (StreamCipherAlgorithm) algorithm;
-            ctx.pipeline().addBefore(ctx.name(), null, new SsStreamCryptCodec(sca, password, new SecureRandom()));
+            ctx.pipeline().addBefore(ctx.name(), null, new SsSocketStreamCryptCodec(sca, password, new SecureRandom()));
         } else if (algorithm instanceof AeadCipherAlgorithm) {
             AeadCipherAlgorithm aca = (AeadCipherAlgorithm) algorithm;
-            ctx.pipeline().addBefore(ctx.name(), null, new SsAeadCryptCodec(aca, password, new SecureRandom()));
+            ctx.pipeline().addBefore(ctx.name(), null, new SsSocketAeadCryptCodec(aca, password, new SecureRandom()));
         } else {
             throw new UnsupportedOperationException("algorithm not supported: " + algorithm.getName());
         }

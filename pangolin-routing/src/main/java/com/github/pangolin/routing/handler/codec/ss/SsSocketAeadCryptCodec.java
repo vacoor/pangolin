@@ -17,13 +17,13 @@ import java.util.List;
 /**
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers">AEAD Ciphers</a>
  */
-public class SsAeadCryptCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {
+public class SsSocketAeadCryptCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {
     private static final int LENGTH_SIZE = 2;
     private static final int CHUNK_SIZE_MASK = 0x3FFF;
 
     private final AeadCipherAlgorithm algorithm;
 
-    public SsAeadCryptCodec(final AeadCipherAlgorithm algorithm, final String password, final SecureRandom random) {
+    public SsSocketAeadCryptCodec(final AeadCipherAlgorithm algorithm, final String password, final SecureRandom random) {
         this(generateMasterKey(algorithm, password), algorithm, random);
     }
 
@@ -31,7 +31,7 @@ public class SsAeadCryptCodec extends CombinedChannelDuplexHandler<ByteToMessage
         return SsSecretKey.generateKey(password, algorithm.getKeySize());
     }
 
-    public SsAeadCryptCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
+    public SsSocketAeadCryptCodec(final byte[] masterKey, final AeadCipherAlgorithm algorithm, final SecureRandom random) {
         if (masterKey.length != algorithm.getKeySize()) {
             throw new IllegalArgumentException("master key size != crypt.getKeySize()");
         }
@@ -170,7 +170,7 @@ public class SsAeadCryptCodec extends CombinedChannelDuplexHandler<ByteToMessage
         }
 
         private int encrypt(final byte[] inBytes, int inOffset, int inLength, final byte[] outBytes, final int outOffset) throws Exception {
-            return SsAeadCryptCodec.this.encrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
+            return SsSocketAeadCryptCodec.this.encrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
         }
     }
 
@@ -234,7 +234,7 @@ public class SsAeadCryptCodec extends CombinedChannelDuplexHandler<ByteToMessage
         }
 
         private int decrypt(final byte[] inBytes, int inOffset, int inLength, final byte[] outBytes, final int outOffset) throws Exception {
-            return SsAeadCryptCodec.this.decrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
+            return SsSocketAeadCryptCodec.this.decrypt(subkey, nonce, inBytes, inOffset, inLength, outBytes, outOffset);
         }
     }
 

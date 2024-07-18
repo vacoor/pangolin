@@ -37,8 +37,8 @@ public class SubnetRoutePredicate implements RoutePredicate {
     }
 
     @Override
-    public boolean matches(final InetSocketAddress destination) {
-        return delegate.matches(destination);
+    public boolean test(final InetSocketAddress destination) {
+        return delegate.test(destination);
     }
 
     /**
@@ -101,7 +101,7 @@ public class SubnetRoutePredicate implements RoutePredicate {
         }
 
         @Override
-        public boolean matches(final InetSocketAddress destination) {
+        public boolean test(final InetSocketAddress destination) {
             try {
                 InetAddress inetAddress = null;
                 if (destination.isUnresolved()) {
@@ -173,7 +173,7 @@ public class SubnetRoutePredicate implements RoutePredicate {
         }
 
         @Override
-        public boolean matches(final InetSocketAddress destination) {
+        public boolean test(final InetSocketAddress destination) {
             InetAddress inetAddress = null;
             if (destination.isUnresolved()) {
                 if (NetUtil.isValidIpV6Address(destination.getHostString())) {

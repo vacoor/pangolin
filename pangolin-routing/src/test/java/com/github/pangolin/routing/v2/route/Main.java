@@ -1,5 +1,7 @@
-package com.github.pangolin.routing.v2.route.predicate;
+package com.github.pangolin.routing.v2.route;
 
+import com.github.pangolin.routing.v2.route.predicate.RoutePredicate;
+import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
 import com.google.common.collect.Maps;
 
 import java.io.IOException;

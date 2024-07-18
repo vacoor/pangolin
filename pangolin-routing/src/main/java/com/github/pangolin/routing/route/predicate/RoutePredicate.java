@@ -7,6 +7,6 @@ import java.net.InetSocketAddress;
  */
 public interface RoutePredicate {
 
-    boolean matches(final InetSocketAddress destination);
+    boolean test(final InetSocketAddress destination);
 
 }

@@ -15,7 +15,7 @@ public class DomainRoutePredicate implements RoutePredicate {
     }
 
     @Override
-    public boolean matches(final InetSocketAddress destination) {
+    public boolean test(final InetSocketAddress destination) {
         if (destination.isUnresolved()) {
             return MATCHER.matches(pattern, destination.getHostString());
         } else {

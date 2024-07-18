@@ -5,9 +5,11 @@ import java.util.Collection;
 /**
  *
  */
-public interface UpstreamServerProvider {
+public interface UpstreamServerRegistry {
 
     Collection<String> names();
+
+//    void registerServer(final UpstreamServer upstream);
 
     UpstreamServer getServer(final String name);
 

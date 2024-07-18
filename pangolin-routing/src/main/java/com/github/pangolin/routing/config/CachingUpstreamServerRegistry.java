@@ -15,7 +15,7 @@ public class CachingUpstreamServerRegistry implements RouteContext {
     private final ServerReader reader;
     private final URL conf;
 
-    private volatile UpstreamServerRegistry snapshot;
+    private volatile SimpleRouteRegistry snapshot;
 
     public CachingUpstreamServerRegistry(final ServerReader reader, final URL url) {
         this(reader, url, null);

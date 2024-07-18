@@ -22,18 +22,18 @@ import java.util.List;
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Protocol#udp">Protocol - UDP</a>
  */
 @Slf4j
-public class SsClientDatagramPacketCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
+public class SsClientDatagramCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
     private final InetSocketAddress proxyAddress;
     private final Socks5AddressEncoder addressEncoder;
     private final Socks5AddressDecoder addressDecoder;
 
-    public SsClientDatagramPacketCodec(final InetSocketAddress proxyAddress) {
+    public SsClientDatagramCodec(final InetSocketAddress proxyAddress) {
         this(proxyAddress, Socks5AddressEncoder.DEFAULT, Socks5AddressDecoder.DEFAULT);
     }
 
-    public SsClientDatagramPacketCodec(final InetSocketAddress proxyAddress,
-                                       final Socks5AddressEncoder addressEncoder,
-                                       final Socks5AddressDecoder addressDecoder) {
+    public SsClientDatagramCodec(final InetSocketAddress proxyAddress,
+                                 final Socks5AddressEncoder addressEncoder,
+                                 final Socks5AddressDecoder addressDecoder) {
         this.proxyAddress = proxyAddress;
         this.addressEncoder = addressEncoder;
         this.addressDecoder = addressDecoder;

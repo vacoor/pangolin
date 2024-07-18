@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.handler.extra;
 
-import com.github.pangolin.routing.route.RouteProvider;
+import com.github.pangolin.routing.route.RouteRegistry;
 import com.github.pangolin.routing.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.route.predicate.DomainRoutePredicate;
 import com.github.pangolin.routing.route.predicate.SubnetRoutePredicate;
@@ -41,16 +41,16 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
     private static final int MAX_HTTP_CONTENT_LENGTH = 8 * 1024 * 1024;
 
     private final String pacPath;
-    private final RouteProvider routeProvider;
+    private final RouteRegistry routeRegistry;
     private final int proxyPort;
 
-    public ProxyAutoConfigurationServerHandler(final RouteProvider routeProvider, final int proxyPort) {
-        this(DEFAULT_PAC_PATH, routeProvider, proxyPort);
+    public ProxyAutoConfigurationServerHandler(final RouteRegistry routeRegistry, final int proxyPort) {
+        this(DEFAULT_PAC_PATH, routeRegistry, proxyPort);
     }
 
-    public ProxyAutoConfigurationServerHandler(final String pacPath, final RouteProvider routeProvider, final int proxyPort) {
+    public ProxyAutoConfigurationServerHandler(final String pacPath, final RouteRegistry routeRegistry, final int proxyPort) {
         this.pacPath = pacPath;
-        this.routeProvider = routeProvider;
+        this.routeRegistry = routeRegistry;
         this.proxyPort = proxyPort;
     }
 
@@ -82,7 +82,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
                 final String requestPath = decoder.path();
                 if (requestPath.equals(this.pacPath)) {
                     final String addr = getHttpRequestAddress(httpRequest).getHostString() + ":" + proxyPort;
-                    final String pac = toPac(routeProvider.getRoutes(), addr, decoder.parameters().containsKey("http"));
+                    final String pac = toPac(routeRegistry.getRoutes(), addr, decoder.parameters().containsKey("http"));
 
                     final ByteBuf body = Unpooled.copiedBuffer(pac, StandardCharsets.UTF_8);
                     final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);

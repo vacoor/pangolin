@@ -2,7 +2,7 @@ package com.github.pangolin.routing.config;
 
 import com.github.pangolin.routing.upstream.AbstractUpstreamServer;
 import com.github.pangolin.routing.upstream.UpstreamServer;
-import com.github.pangolin.routing.upstream.UpstreamServerProvider;
+import com.github.pangolin.routing.upstream.UpstreamServerRegistry;
 import com.github.pangolin.routing.upstream.UpstreamServerFactory;
 import com.google.common.collect.Lists;
 import com.netflix.client.config.IClientConfig;
@@ -71,7 +71,7 @@ public class ServerFactory {
         throw new IllegalStateException("NOT found provider, url: " + url);
     }
 
-    public UpstreamServer createServerGroup(final String name, final String type, final UpstreamServerProvider servers) {
+    public UpstreamServer createServerGroup(final String name, final String type, final UpstreamServerRegistry servers) {
         if ("chain".equals(type)) {
             return wrapIfNecessary(new LazyServerChain(name, servers));
         }
@@ -92,11 +92,11 @@ public class ServerFactory {
         return server instanceof StatsUpstreamServer ? server : new StatsUpstreamServer(server);
     }
 
-    static class LazyUpstreamServerProvider implements UpstreamServerProvider {
+    static class LazyUpstreamServerRegistry implements UpstreamServerRegistry {
         private final List<String> names;
-        private final UpstreamServerProvider registry;
+        private final UpstreamServerRegistry registry;
 
-        LazyUpstreamServerProvider(final List<String> names, final UpstreamServerProvider registry) {
+        LazyUpstreamServerRegistry(final List<String> names, final UpstreamServerRegistry registry) {
             this.names = names;
             this.registry = registry;
         }
@@ -186,9 +186,9 @@ public class ServerFactory {
     }
 
     private class LazyServerChain extends AbstractUpstreamServer {
-        private final UpstreamServerProvider chain;
+        private final UpstreamServerRegistry chain;
 
-        private LazyServerChain(final String name, final UpstreamServerProvider chain) {
+        private LazyServerChain(final String name, final UpstreamServerRegistry chain) {
             super(name);
             this.chain = chain;
         }
@@ -254,9 +254,9 @@ public class ServerFactory {
     }
 
     private class LazyServerList<T extends Server & UpstreamServer> implements ServerList<T> {
-        private final UpstreamServerProvider servers;
+        private final UpstreamServerRegistry servers;
 
-        private LazyServerList(final UpstreamServerProvider servers) {
+        private LazyServerList(final UpstreamServerRegistry servers) {
             this.servers = servers;
         }
 

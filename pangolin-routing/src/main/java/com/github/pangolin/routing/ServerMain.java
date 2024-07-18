@@ -19,7 +19,7 @@ import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
-import com.github.pangolin.routing.route.RuleBasedUpstreamServer;
+import com.github.pangolin.routing.upstream.RouteUpstreamServer;
 import com.github.pangolin.routing.upstream.AbstractUpstreamServer;
 import com.github.pangolin.routing.upstream.ProxyDatagramChannelFactory;
 import com.github.pangolin.routing.upstream.UpstreamServer;
@@ -88,7 +88,7 @@ public class ServerMain {
         final CachingUpstreamServerRegistry config = new CachingUpstreamServerRegistry(new DefaultServerReader(stats), url).refresh();
 
         final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
-        final RuleBasedUpstreamServer defaultProxy = new RuleBasedUpstreamServer("ROUTING-PROXY", config, config);
+        final RouteUpstreamServer defaultProxy = new RouteUpstreamServer("ROUTING-PROXY", config, config);
 
 //        final SmartProxySocketChannelFactory factory = new SmartProxySocketChannelFactory(modedRulesProvider, proxyServerProvider, bypass);
 //        final StandardSocketChannelFactory factory = new StandardSocketChannelFactory();

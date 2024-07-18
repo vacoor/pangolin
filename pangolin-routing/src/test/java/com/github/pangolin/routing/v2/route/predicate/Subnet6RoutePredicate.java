@@ -1,9 +1,13 @@
 package com.github.pangolin.routing.v2.route.predicate;
 
+import com.github.pangolin.routing.util.SocketUtils;
+
 import java.math.BigInteger;
 import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 
-public class Subnet6RoutePredicate extends SubnetRoutePredicate<Inet6Address> {
+public class Subnet6RoutePredicate extends SubnetRoutePredicate<InetSocketAddress> {
     private static final BigInteger MINUS_ONE = BigInteger.valueOf(-1);
 
     private final BigInteger subnetMask;
@@ -19,9 +23,13 @@ public class Subnet6RoutePredicate extends SubnetRoutePredicate<Inet6Address> {
      * {@inheritDoc}
      */
     @Override
-    public boolean test(final Inet6Address address) {
-        final BigInteger ipAddress = ipAddressToInt(address);
-        return ipAddress.add(subnetMask).equals(networkAddress);
+    public boolean test(final InetSocketAddress socketAddress) {
+        final InetAddress address = SocketUtils.getAddress(socketAddress, false);
+        if (address instanceof Inet6Address) {
+            final BigInteger ipAddress = ipAddressToInt((Inet6Address) address);
+            return ipAddress.add(subnetMask).equals(networkAddress);
+        }
+        return false;
     }
 
     private BigInteger prefixToSubnetMask(final int cidrPrefix) {

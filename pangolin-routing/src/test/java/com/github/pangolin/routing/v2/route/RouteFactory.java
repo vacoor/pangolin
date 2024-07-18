@@ -12,14 +12,14 @@ import java.util.ServiceLoader;
 /**
  */
 @Slf4j
-public class RouteSupplier {
+public class RouteFactory {
     private final Map<String, RoutePredicateFactory> predicates = Maps.newLinkedHashMap();
 
-    public RouteSupplier() {
+    public RouteFactory() {
         this(ServiceLoader.load(RoutePredicateFactory.class));
     }
 
-    public RouteSupplier(final Iterable<RoutePredicateFactory> predicates) {
+    public RouteFactory(final Iterable<RoutePredicateFactory> predicates) {
         predicates.forEach(factory -> {
             final String key = factory.name();
             if (this.predicates.containsKey(key)) {

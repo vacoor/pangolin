@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.handler.extra;
 
-import com.github.pangolin.routing.route.RouteProvider;
+import com.github.pangolin.routing.route.RouteRegistry;
 import com.github.pangolin.routing.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.route.predicate.DomainRoutePredicate;
 import com.github.pangolin.routing.route.predicate.SubnetRoutePredicate;
@@ -34,15 +34,15 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
     private static final String DEFAULT_SWITCHY_SORL_PATH = "/switchy.sorl";
 
     private final String switchySorlPath;
-    private final RouteProvider routeProvider;
+    private final RouteRegistry routeRegistry;
 
-    public SwitchyRuleConfigurationServerHandler(final RouteProvider routeProvider) {
-        this(DEFAULT_SWITCHY_SORL_PATH, routeProvider);
+    public SwitchyRuleConfigurationServerHandler(final RouteRegistry routeRegistry) {
+        this(DEFAULT_SWITCHY_SORL_PATH, routeRegistry);
     }
 
-    public SwitchyRuleConfigurationServerHandler(final String switchySorlPath, final RouteProvider routeProvider) {
+    public SwitchyRuleConfigurationServerHandler(final String switchySorlPath, final RouteRegistry routeRegistry) {
         this.switchySorlPath = switchySorlPath;
-        this.routeProvider = routeProvider;
+        this.routeRegistry = routeRegistry;
     }
 
     /**
@@ -82,7 +82,7 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
                             .append("; Date: ").append(generatedDate).append("\r\n")
                             .append("; Usage: https://github.com/FelisCatus/SwitchyOmega/wiki/RuleListUsage\r\n\r\n");
 
-                    final Map<RoutePredicate, String> rules = routeProvider.getRoutes();
+                    final Map<RoutePredicate, String> rules = routeRegistry.getRoutes();
                     for (Map.Entry<RoutePredicate, String> entry : rules.entrySet()) {
                         final RoutePredicate predicate = entry.getKey();
                         if (!"DIRECT".equalsIgnoreCase(entry.getValue())) {
