@@ -1,19 +1,19 @@
 package com.github.pangolin.routing.config;
 
+import com.github.pangolin.routing.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.upstream.UpstreamServer;
 import com.github.pangolin.routing.upstream.UpstreamServerProvider;
-import com.github.pangolin.routing.rule.RulesProvider;
-import com.github.pangolin.routing.rule.pattern.DestinationPattern;
+import com.github.pangolin.routing.route.RouteProvider;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
 
 import java.util.*;
 
-public class UpstreamServerRegistry extends ServerFactory implements UpstreamServerProvider, RulesProvider, RouteletContext {
+public class UpstreamServerRegistry extends ServerFactory implements UpstreamServerProvider, RouteProvider, RouteletContext {
     private final RouteletContext parent;
     private final Map<String, UpstreamServer> proxies = Maps.newLinkedHashMap();
-    private final Map<DestinationPattern, String> rules = Maps.newLinkedHashMap();
+    private final Map<RoutePredicate, String> rules = Maps.newLinkedHashMap();
     private final LoadBalancerStats stats;
 
     public UpstreamServerRegistry(final LoadBalancerStats stats) {
@@ -64,16 +64,16 @@ public class UpstreamServerRegistry extends ServerFactory implements UpstreamSer
         return a;
     }
 
-    public void register(final DestinationPattern pattern, final String server) {
+    public void register(final RoutePredicate pattern, final String server) {
         rules.put(pattern, server);
     }
 
     @Override
-    public Map<DestinationPattern, String> getRules() {
-        Map<DestinationPattern, String> x = Maps.newLinkedHashMap();
+    public Map<RoutePredicate, String> getRoutes() {
+        Map<RoutePredicate, String> x = Maps.newLinkedHashMap();
         x.putAll(rules);
         if (null != parent) {
-            x.putAll(parent.getRules());
+            x.putAll(parent.getRoutes());
         }
         return x;
     }

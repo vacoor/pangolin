@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.config.resolver;
 
-import com.github.pangolin.routing.rule.pattern.DestinationPattern;
-import com.github.pangolin.routing.rule.pattern.SubnetPattern;
+import com.github.pangolin.routing.route.predicate.RoutePredicate;
+import com.github.pangolin.routing.route.predicate.SubnetRoutePredicate;
 import io.netty.util.NetUtil;
 
 import java.io.IOException;
@@ -12,7 +12,7 @@ import java.util.List;
 /**
  *
  */
-public class IpCidrRuleResolver extends AbstractPrefixRuleResolver<DestinationPattern> {
+public class IpCidrRuleResolver extends AbstractPrefixRuleResolver<RoutePredicate> {
 
     public IpCidrRuleResolver() {
         super("IP-CIDR,");
@@ -28,11 +28,11 @@ public class IpCidrRuleResolver extends AbstractPrefixRuleResolver<DestinationPa
     }
 
     @Override
-    protected List<DestinationPattern> doResolve(final String rule, final URL url) throws IOException {
+    protected List<RoutePredicate> doResolve(final String rule, final URL url) throws IOException {
         final String[] segments = rule.split("/", 2);
         final int cidrPrefix = Integer.parseInt(segments[1]);
         return Collections.singletonList(
-                new SubnetPattern(segments[0], cidrPrefix)
+                new SubnetRoutePredicate(segments[0], cidrPrefix)
         );
     }
 

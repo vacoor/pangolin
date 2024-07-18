@@ -1,9 +1,9 @@
 package com.github.pangolin.routing.handler.extra;
 
-import com.github.pangolin.routing.rule.RulesProvider;
-import com.github.pangolin.routing.rule.pattern.DestinationPattern;
-import com.github.pangolin.routing.rule.pattern.DomainPattern;
-import com.github.pangolin.routing.rule.pattern.SubnetPattern;
+import com.github.pangolin.routing.route.RouteProvider;
+import com.github.pangolin.routing.route.predicate.RoutePredicate;
+import com.github.pangolin.routing.route.predicate.DomainRoutePredicate;
+import com.github.pangolin.routing.route.predicate.SubnetRoutePredicate;
 import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -41,16 +41,16 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
     private static final int MAX_HTTP_CONTENT_LENGTH = 8 * 1024 * 1024;
 
     private final String pacPath;
-    private final RulesProvider rulesProvider;
+    private final RouteProvider routeProvider;
     private final int proxyPort;
 
-    public ProxyAutoConfigurationServerHandler(final RulesProvider rulesProvider, final int proxyPort) {
-        this(DEFAULT_PAC_PATH, rulesProvider, proxyPort);
+    public ProxyAutoConfigurationServerHandler(final RouteProvider routeProvider, final int proxyPort) {
+        this(DEFAULT_PAC_PATH, routeProvider, proxyPort);
     }
 
-    public ProxyAutoConfigurationServerHandler(final String pacPath, final RulesProvider rulesProvider, final int proxyPort) {
+    public ProxyAutoConfigurationServerHandler(final String pacPath, final RouteProvider routeProvider, final int proxyPort) {
         this.pacPath = pacPath;
-        this.rulesProvider = rulesProvider;
+        this.routeProvider = routeProvider;
         this.proxyPort = proxyPort;
     }
 
@@ -82,7 +82,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
                 final String requestPath = decoder.path();
                 if (requestPath.equals(this.pacPath)) {
                     final String addr = getHttpRequestAddress(httpRequest).getHostString() + ":" + proxyPort;
-                    final String pac = toPac(rulesProvider.getRules(), addr, decoder.parameters().containsKey("http"));
+                    final String pac = toPac(routeProvider.getRoutes(), addr, decoder.parameters().containsKey("http"));
 
                     final ByteBuf body = Unpooled.copiedBuffer(pac, StandardCharsets.UTF_8);
                     final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);
@@ -117,7 +117,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
         return port > 0 ? port : uri.toLowerCase().startsWith("https://") ? 443 : 80;
     }
 
-    private static String toPac(final Map<DestinationPattern, String> rules, final String addr, final boolean onlyHttp) {
+    private static String toPac(final Map<RoutePredicate, String> rules, final String addr, final boolean onlyHttp) {
         final StringBuilder buff = new StringBuilder();
         final String now = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
         buff.append("/**\r\n")
@@ -137,10 +137,10 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
             buff.append(String.format("SOCKS5 %s; SOCKS %s; PROXY %s", addr, addr, addr));
         }
         buff.append("';\r\n");
-        for (final Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
+        for (final Map.Entry<RoutePredicate, String> entry : rules.entrySet()) {
             if (!"DIRECT".equalsIgnoreCase(entry.getValue())) {
-                DestinationPattern destinationPattern = entry.getKey();
-                String s = toPacStatement(destinationPattern);
+                RoutePredicate predicate = entry.getKey();
+                String s = toPacStatement(predicate);
                 buff.append("  ").append(s).append("\r\n");
             }
         }
@@ -151,11 +151,11 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
         return buff.toString();
     }
 
-    private static String toPacStatement(final DestinationPattern pattern) {
-        if (pattern instanceof DomainPattern) {
+    private static String toPacStatement(final RoutePredicate pattern) {
+        if (pattern instanceof DomainRoutePredicate) {
             final String prefixWildcard = "**.";
             final String suffixWildcard = ".**";
-            final DomainPattern dp = (DomainPattern) pattern;
+            final DomainRoutePredicate dp = (DomainRoutePredicate) pattern;
             String s1 = dp.toString();
             final boolean isPrefixWildcard = s1.startsWith(prefixWildcard);
             final boolean isSuffixWildcard = s1.endsWith(suffixWildcard);
@@ -172,11 +172,11 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
             } else {
                 return String.format("if (shExpMatch(host, '%s')) return $PROXY;", s1);
             }
-        } else if (pattern instanceof SubnetPattern) {
-            final SubnetPattern p = (SubnetPattern) pattern;
-            DestinationPattern delegate = p.getDelegate();
-            if (delegate instanceof SubnetPattern.Inet4SubnetPattern) {
-                SubnetPattern.Inet4SubnetPattern i4sn = (SubnetPattern.Inet4SubnetPattern) delegate;
+        } else if (pattern instanceof SubnetRoutePredicate) {
+            final SubnetRoutePredicate p = (SubnetRoutePredicate) pattern;
+            RoutePredicate delegate = p.getDelegate();
+            if (delegate instanceof SubnetRoutePredicate.Inet4SubnetPattern) {
+                SubnetRoutePredicate.Inet4SubnetPattern i4sn = (SubnetRoutePredicate.Inet4SubnetPattern) delegate;
                 String networkAddress = i4sn.getNetworkAddress();
                 String subnetMask = i4sn.getSubnetMask();
                 return String.format("if (isInNet(host, '%s', '%s')) return $PROXY;", networkAddress, subnetMask);

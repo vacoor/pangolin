@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.config.resolver;
 
 import com.github.pangolin.routing.upstream.UpstreamServer;
-import com.github.pangolin.routing.upstream.UpstreamServerResolver;
+import com.github.pangolin.routing.upstream.UpstreamServerFactory;
 
 import java.io.IOException;
 import java.net.URL;
@@ -27,16 +27,16 @@ public class ProxyResolver extends AbstractPrefixRuleResolver<UpstreamServer> {
     }
 
     private static UpstreamServer doResolve(final String name, final String url) {
-        final ServiceLoader<UpstreamServerResolver> resolvers = ServiceLoader.load(UpstreamServerResolver.class);
-        for (final UpstreamServerResolver resolver : resolvers) {
-            if (!resolver.acceptsUrl(url)) {
+        final ServiceLoader<UpstreamServerFactory> resolvers = ServiceLoader.load(UpstreamServerFactory.class);
+        for (final UpstreamServerFactory resolver : resolvers) {
+            if (!resolver.accept(url)) {
                 continue;
             }
             final Properties props = new Properties();
             if (null != name) {
                 props.setProperty("name", name);
             }
-            final UpstreamServer resolved = resolver.resolve(url, props);
+            final UpstreamServer resolved = resolver.create(url, props);
             if (null != resolved) {
                 return resolved;
             }

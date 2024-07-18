@@ -1,0 +1,95 @@
+package com.github.pangolin.routing.upstream.spi;
+
+import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
+import com.github.pangolin.routing.handler.internal.client.SsDatagramProxyHandler;
+import com.github.pangolin.routing.handler.internal.client.SsProxyHandler;
+import com.github.pangolin.routing.upstream.AbstractUpstreamServer;
+import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.upstream.UpstreamServerFactory;
+import com.github.pangolin.routing.util.SocketUtils;
+import freework.codec.Base64;
+import freework.util.Bytes;
+import io.netty.channel.ChannelHandler;
+
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.net.URI;
+import java.util.Properties;
+
+/**
+ *
+ */
+public class SsUpstreamServerFactory implements UpstreamServerFactory {
+    private static final String URL_PREFIX = "ss://";
+    private static final int DEFAULT_PORT = 1080;
+
+    public boolean accept(final String url) {
+        return null != url && url.startsWith(URL_PREFIX);
+    }
+
+    /**
+     * <pre>
+     * SS-URI = "ss://" userinfo "@" hostname ":" port [ "/" ] [ "?" plugin ] [ "#" tag ]
+     * userinfo = websafe-base64-encode-utf8(method  ":" password)
+     *            method ":" password
+     * </pre>
+     *
+     * @see <a href="#">SIP002 URI Scheme</a>
+     */
+    public UpstreamServer create(final String url, final Properties props) {
+        if (!accept(url)) {
+            return null;
+        }
+        final URI uri = URI.create(url);
+        final String name = props.getProperty("name", uri.getFragment());
+        final String host = uri.getHost();
+        final int port = 0 < uri.getPort() ? uri.getPort() : DEFAULT_PORT;
+        final String userInfo = resolveUserInfo(uri.getUserInfo());
+        final String[] segments = userInfo.split(":", 2);
+
+        final String method = segments[0];
+        final String password = segments.length < 2 ? "" : segments[1];
+
+        final CipherAlgorithm algorithm = CipherAlgorithmSpi.getInstance(method);
+
+        final InetSocketAddress address = SocketUtils.toSocketAddress(host, port);
+        return new SsServer(name, address, algorithm, password);
+    }
+
+    private String resolveUserInfo(final String userInfo) {
+        /*-
+         * With user info encoded with Base64URL.
+         */
+        if (null != userInfo && !userInfo.contains(":")) {
+            return Bytes.toString(Base64.decode(userInfo, true));
+        }
+        return userInfo;
+    }
+
+    /**
+     *
+     */
+    private class SsServer extends AbstractUpstreamServer {
+        private final SocketAddress address;
+        private final CipherAlgorithm algorithm;
+        private final String password;
+
+        public SsServer(final String name, final SocketAddress address, final CipherAlgorithm algorithm, final String password) {
+            super(name);
+            this.address = address;
+            this.algorithm = algorithm;
+            this.password = password;
+        }
+
+        @Override
+        public ChannelHandler newSocketProxyHandler(InetSocketAddress destination) {
+            return new SsProxyHandler(address, algorithm, password);
+        }
+
+        @Override
+        public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
+            return new SsDatagramProxyHandler((InetSocketAddress) address, algorithm, password);
+        }
+    }
+}

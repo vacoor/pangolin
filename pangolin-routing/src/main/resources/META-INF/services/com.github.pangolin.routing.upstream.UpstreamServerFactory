@@ -1,0 +1,5 @@
+com.github.pangolin.routing.upstream.spi.HttpUpstreamServerFactory
+com.github.pangolin.routing.upstream.spi.WebSocketUpstreamServerFactory
+com.github.pangolin.routing.upstream.spi.SshUpstreamServerFactory
+com.github.pangolin.routing.upstream.spi.SsUpstreamServerFactory
+com.github.pangolin.routing.upstream.spi.TrojanUpstreamServerFactory

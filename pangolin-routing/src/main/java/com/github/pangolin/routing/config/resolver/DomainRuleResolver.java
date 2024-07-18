@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.config.resolver;
 
-import com.github.pangolin.routing.rule.pattern.DestinationPattern;
-import com.github.pangolin.routing.rule.pattern.DomainPattern;
+import com.github.pangolin.routing.route.predicate.RoutePredicate;
+import com.github.pangolin.routing.route.predicate.DomainRoutePredicate;
 
 import java.io.IOException;
 import java.net.URL;
@@ -11,7 +11,7 @@ import java.util.List;
 /**
  *
  */
-public class DomainRuleResolver extends AbstractPrefixRuleResolver<DestinationPattern> {
+public class DomainRuleResolver extends AbstractPrefixRuleResolver<RoutePredicate> {
 
     public DomainRuleResolver() {
         super("DOMAIN,");
@@ -21,9 +21,9 @@ public class DomainRuleResolver extends AbstractPrefixRuleResolver<DestinationPa
      * {@inheritDoc}
      */
     @Override
-    protected List<DestinationPattern> doResolve(final String rule, final URL url) throws IOException {
+    protected List<RoutePredicate> doResolve(final String rule, final URL url) throws IOException {
         return Collections.singletonList(
-                new DomainPattern(rule)
+                new DomainRoutePredicate(rule)
         );
     }
 

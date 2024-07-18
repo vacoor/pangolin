@@ -1,9 +1,9 @@
 package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.upstream.AbstractServer;
+import com.github.pangolin.routing.upstream.AbstractUpstreamServer;
 import com.github.pangolin.routing.upstream.UpstreamServer;
 import com.github.pangolin.routing.upstream.UpstreamServerProvider;
-import com.github.pangolin.routing.upstream.UpstreamServerResolver;
+import com.github.pangolin.routing.upstream.UpstreamServerFactory;
 import com.google.common.collect.Lists;
 import com.netflix.client.config.IClientConfig;
 import com.netflix.client.config.PropertyResolver;
@@ -54,16 +54,16 @@ public class ServerFactory {
     }
 
     private static UpstreamServer doResolve(final String name, final String url) {
-        final ServiceLoader<UpstreamServerResolver> resolvers = ServiceLoader.load(UpstreamServerResolver.class);
-        for (final UpstreamServerResolver resolver : resolvers) {
-            if (!resolver.acceptsUrl(url)) {
+        final ServiceLoader<UpstreamServerFactory> resolvers = ServiceLoader.load(UpstreamServerFactory.class);
+        for (final UpstreamServerFactory resolver : resolvers) {
+            if (!resolver.accept(url)) {
                 continue;
             }
             final Properties props = new Properties();
             if (null != name) {
                 props.setProperty("name", name);
             }
-            final UpstreamServer resolved = resolver.resolve(url, props);
+            final UpstreamServer resolved = resolver.create(url, props);
             if (null != resolved) {
                 return resolved;
             }
@@ -185,7 +185,7 @@ public class ServerFactory {
         }
     }
 
-    private class LazyServerChain extends AbstractServer {
+    private class LazyServerChain extends AbstractUpstreamServer {
         private final UpstreamServerProvider chain;
 
         private LazyServerChain(final String name, final UpstreamServerProvider chain) {
@@ -212,7 +212,7 @@ public class ServerFactory {
     }
 
     @Slf4j
-    public static class LoadBalancingUpstreamServer extends AbstractServer {
+    public static class LoadBalancingUpstreamServer extends AbstractUpstreamServer {
         private final ILoadBalancer lb;
 
         public LoadBalancingUpstreamServer(final String name, final ILoadBalancer lb) {

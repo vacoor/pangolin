@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.config;
 
-import com.github.pangolin.routing.rule.pattern.DestinationPattern;
+import com.github.pangolin.routing.config.resolver.RouteParser;
+import com.github.pangolin.routing.route.predicate.RoutePredicate;
 import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
 import lombok.extern.slf4j.Slf4j;
@@ -50,11 +51,11 @@ public class DefaultServerReader implements ServerReader {
             }
         }
 
-        Map<DestinationPattern, String> rules = Maps.newLinkedHashMap();
+        Map<RoutePredicate, String> rules = Maps.newLinkedHashMap();
         Ini.Section rule = ini.getSection("Rule");
         if (null != rule) {
-            rules = RulesParser.parseRules(rule.keySet(), url);
-            for (Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
+            rules = RouteParser.parseRoutes(rule.keySet(), url);
+            for (Map.Entry<RoutePredicate, String> entry : rules.entrySet()) {
                 registry.register(entry.getKey(), entry.getValue());
             }
         }

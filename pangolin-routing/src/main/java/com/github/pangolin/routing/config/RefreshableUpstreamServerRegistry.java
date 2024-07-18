@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.config;
 
+import com.github.pangolin.routing.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.upstream.UpstreamServer;
-import com.github.pangolin.routing.rule.pattern.DestinationPattern;
 
 import java.io.IOException;
 import java.net.URL;
@@ -48,8 +48,8 @@ public class RefreshableUpstreamServerRegistry implements RouteletContext {
     }
 
     @Override
-    public Map<DestinationPattern, String> getRules() {
-        return null != snapshot? snapshot.getRules() : Collections.emptyMap();
+    public Map<RoutePredicate, String> getRoutes() {
+        return null != snapshot? snapshot.getRoutes() : Collections.emptyMap();
     }
 
 }

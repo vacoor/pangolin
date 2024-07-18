@@ -1,7 +1,8 @@
 package com.github.pangolin.routing.config;
 
 import com.github.pangolin.routing.config.clash.ClashConfiguration;
-import com.github.pangolin.routing.rule.pattern.DestinationPattern;
+import com.github.pangolin.routing.config.resolver.RouteParser;
+import com.github.pangolin.routing.route.predicate.RoutePredicate;
 import com.google.common.base.Preconditions;
 import com.netflix.loadbalancer.LoadBalancerStats;
 import freework.net.Http;
@@ -40,7 +41,7 @@ public class ExternalServerReader implements ServerReader {
         proxyGroupDefinitions.stream()
                 .forEach(g -> registry.register(g.getName(), g.getType(), g.getProxies()));
 
-        Map<DestinationPattern, String> ruleMap = RulesParser.parseRules(rules, url);
+        Map<RoutePredicate, String> ruleMap = RouteParser.parseRoutes(rules, url);
         ruleMap.forEach(registry::register);
         return registry;
     }

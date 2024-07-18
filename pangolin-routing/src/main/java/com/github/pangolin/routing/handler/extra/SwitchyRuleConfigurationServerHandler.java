@@ -1,9 +1,9 @@
 package com.github.pangolin.routing.handler.extra;
 
-import com.github.pangolin.routing.rule.RulesProvider;
-import com.github.pangolin.routing.rule.pattern.DestinationPattern;
-import com.github.pangolin.routing.rule.pattern.DomainPattern;
-import com.github.pangolin.routing.rule.pattern.SubnetPattern;
+import com.github.pangolin.routing.route.RouteProvider;
+import com.github.pangolin.routing.route.predicate.RoutePredicate;
+import com.github.pangolin.routing.route.predicate.DomainRoutePredicate;
+import com.github.pangolin.routing.route.predicate.SubnetRoutePredicate;
 import com.sun.net.httpserver.HttpServer;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -34,15 +34,15 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
     private static final String DEFAULT_SWITCHY_SORL_PATH = "/switchy.sorl";
 
     private final String switchySorlPath;
-    private final RulesProvider rulesProvider;
+    private final RouteProvider routeProvider;
 
-    public SwitchyRuleConfigurationServerHandler(final RulesProvider rulesProvider) {
-        this(DEFAULT_SWITCHY_SORL_PATH, rulesProvider);
+    public SwitchyRuleConfigurationServerHandler(final RouteProvider routeProvider) {
+        this(DEFAULT_SWITCHY_SORL_PATH, routeProvider);
     }
 
-    public SwitchyRuleConfigurationServerHandler(final String switchySorlPath, final RulesProvider rulesProvider) {
+    public SwitchyRuleConfigurationServerHandler(final String switchySorlPath, final RouteProvider routeProvider) {
         this.switchySorlPath = switchySorlPath;
-        this.rulesProvider = rulesProvider;
+        this.routeProvider = routeProvider;
     }
 
     /**
@@ -82,11 +82,11 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
                             .append("; Date: ").append(generatedDate).append("\r\n")
                             .append("; Usage: https://github.com/FelisCatus/SwitchyOmega/wiki/RuleListUsage\r\n\r\n");
 
-                    final Map<DestinationPattern, String> rules = rulesProvider.getRules();
-                    for (Map.Entry<DestinationPattern, String> entry : rules.entrySet()) {
-                        final DestinationPattern destinationPattern = entry.getKey();
+                    final Map<RoutePredicate, String> rules = routeProvider.getRoutes();
+                    for (Map.Entry<RoutePredicate, String> entry : rules.entrySet()) {
+                        final RoutePredicate predicate = entry.getKey();
                         if (!"DIRECT".equalsIgnoreCase(entry.getValue())) {
-                            buff.append(toSwitchyRule(destinationPattern)).append("\r\n");
+                            buff.append(toSwitchyRule(predicate)).append("\r\n");
                         }
                     }
 
@@ -104,11 +104,11 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
     }
 
 
-    private static String toSwitchyRule(final DestinationPattern pattern) {
-        if (pattern instanceof DomainPattern) {
+    private static String toSwitchyRule(final RoutePredicate pattern) {
+        if (pattern instanceof DomainRoutePredicate) {
             final String prefixWildcard = "**.";
             final String suffixWildcard = ".**";
-            final DomainPattern dp = (DomainPattern) pattern;
+            final DomainRoutePredicate dp = (DomainRoutePredicate) pattern;
 
             String patternStr = dp.toString();
             final boolean isPrefixWildcard = patternStr.startsWith(prefixWildcard);
@@ -125,15 +125,15 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
             } else {
                 return patternStr;
             }
-        } else if (pattern instanceof SubnetPattern) {
-            final SubnetPattern p = (SubnetPattern) pattern;
+        } else if (pattern instanceof SubnetRoutePredicate) {
+            final SubnetRoutePredicate p = (SubnetRoutePredicate) pattern;
             final int prefixLength = p.getPrefixLength();
             final InetAddress sa = p.getNetworkAddress();
             return String.format("Ip: %s/%s", sa.getHostAddress(), prefixLength);
             /*
-            DestinationPattern delegate = p.getDelegate();
-            if (delegate instanceof SubnetPattern.Inet4SubnetPattern) {
-                SubnetPattern.Inet4SubnetPattern i4sn = (SubnetPattern.Inet4SubnetPattern) delegate;
+            RoutePredicate delegate = p.getDelegate();
+            if (delegate instanceof SubnetRoutePredicate.Inet4SubnetPattern) {
+                SubnetRoutePredicate.Inet4SubnetPattern i4sn = (SubnetRoutePredicate.Inet4SubnetPattern) delegate;
                 String networkAddress = i4sn.getNetworkAddress();
                 String subnetMask = i4sn.getSubnetMask();
                 return String.format("%s/%s", networkAddress, subnetMask);
