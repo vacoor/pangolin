@@ -1,0 +1,62 @@
+package com.github.pangolin.routing.v2.upstream;
+
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelInitializer;
+
+import java.net.InetSocketAddress;
+import java.util.stream.StreamSupport;
+
+public class UpstreamServerChainFactory implements UpstreamServerCombiner {
+
+    @Override
+    public String name() {
+        return "chain";
+    }
+
+    @Override
+    public UpstreamServer combine(final String name, final Iterable<String> names, final UpstreamRegistry registry) {
+        return new AbstractUpstreamServer(name) {
+            @Override
+            public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
+                final ChannelHandler[] handlers = StreamSupport.stream(names.spliterator(), false)
+                        .map(name -> lookupRequired(name, registry))
+                        .map(upstream -> upstream.newSocketProxyHandler(destination))
+                        .toArray(ChannelHandler[]::new);
+                return createInitializer(handlers);
+            }
+
+            @Override
+            public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
+                final ChannelHandler[] handlers = StreamSupport.stream(names.spliterator(), false)
+                        .map(name -> lookupRequired(name, registry))
+                        .map(upstream -> upstream.newDatagramProxyHandler(destination))
+                        .toArray(ChannelHandler[]::new);
+                return createInitializer(handlers);
+            }
+
+            @Override
+            public String toString() {
+                return name + "/chain," + names;
+            }
+        };
+    }
+
+    private UpstreamServer lookupRequired(final String name, final UpstreamRegistry registry) {
+        final UpstreamServer upstream = registry.getUpstream(name);
+        if (null == upstream) {
+            throw new IllegalStateException(String.format("Upstream '%s' not found", name));
+        }
+        return upstream;
+    }
+
+    private <C extends Channel> ChannelInitializer<C> createInitializer(final ChannelHandler... handlers) {
+        return new ChannelInitializer<C>() {
+            @Override
+            protected void initChannel(final C ch) throws Exception {
+                ch.pipeline().addLast(handlers);
+            }
+        };
+    }
+
+}

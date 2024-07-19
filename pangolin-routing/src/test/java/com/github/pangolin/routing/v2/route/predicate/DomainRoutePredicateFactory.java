@@ -1,6 +1,8 @@
 package com.github.pangolin.routing.v2.route.predicate;
 
 import java.net.InetSocketAddress;
+import java.net.URL;
+import java.util.Collections;
 
 public class DomainRoutePredicateFactory implements RoutePredicateFactory<InetSocketAddress, String> {
 
@@ -16,8 +18,8 @@ public class DomainRoutePredicateFactory implements RoutePredicateFactory<InetSo
      * {@inheritDoc}
      */
     @Override
-    public RoutePredicate<InetSocketAddress> apply(final String definition) {
-        return new DomainRoutePredicate(definition);
+    public Iterable<RoutePredicate<InetSocketAddress>> apply(final String definition, final URL location) {
+        return Collections.singletonList(new DomainRoutePredicate(definition));
     }
 
 }

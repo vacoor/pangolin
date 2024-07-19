@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.v2.route;
 
-public interface RouteRegistry {
+public interface RouteRegistry<T> {
 
-    void addRoute(final Route route);
+    void addRoute(final Route<T> route);
 
 
 

@@ -4,9 +4,12 @@ import io.netty.util.NetUtil;
 
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URL;
 import java.net.UnknownHostException;
+import java.util.Collections;
 
-public class Subnet6RoutePredicateFactory implements RoutePredicateFactory<Inet6Address, String> {
+public class Subnet6RoutePredicateFactory implements RoutePredicateFactory<InetSocketAddress, String> {
     private static final String DIV = "/";
 
     /**
@@ -21,7 +24,7 @@ public class Subnet6RoutePredicateFactory implements RoutePredicateFactory<Inet6
      * {@inheritDoc}
      */
     @Override
-    public RoutePredicate<Inet6Address> apply(final String definition) {
+    public Iterable<RoutePredicate<InetSocketAddress>> apply(final String definition, final URL location) {
         final int index = definition.indexOf(DIV);
         final String address = 0 < index ? definition.substring(0, index) : definition;
 
@@ -32,7 +35,7 @@ public class Subnet6RoutePredicateFactory implements RoutePredicateFactory<Inet6
         } else {
             cidrPrefix = ipAddress.getAddress().length * Byte.SIZE;
         }
-        return new Subnet6RoutePredicate(ipAddress, cidrPrefix);
+        return Collections.singletonList(new Subnet6RoutePredicate(ipAddress, cidrPrefix));
     }
 
     private static Inet6Address checkIpAddress(final String ipAddress) {

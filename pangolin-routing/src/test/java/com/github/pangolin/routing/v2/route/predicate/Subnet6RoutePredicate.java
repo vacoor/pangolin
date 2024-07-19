@@ -16,7 +16,7 @@ public class Subnet6RoutePredicate extends SubnetRoutePredicate<InetSocketAddres
     public Subnet6RoutePredicate(final Inet6Address ipAddress, final int cidrPrefix) {
         super(ipAddress, checkPrefix(cidrPrefix));
         this.subnetMask = prefixToSubnetMask(cidrPrefix);
-        this.networkAddress = ipAddressToInt(ipAddress);
+        this.networkAddress = ipAddressToInt(ipAddress).and(subnetMask);
     }
 
     /**

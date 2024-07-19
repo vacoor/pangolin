@@ -13,7 +13,7 @@ public class Subnet4RoutePredicate extends SubnetRoutePredicate<InetSocketAddres
     public Subnet4RoutePredicate(final Inet4Address ipAddress, final int cidrPrefix) {
         super(ipAddress, checkPrefix(cidrPrefix));
         this.subnetMask = prefixToSubnetMask(cidrPrefix);
-        this.networkAddress = ipAddressToInt(ipAddress);
+        this.networkAddress = ipAddressToInt(ipAddress) & subnetMask;
     }
 
     /**

@@ -2,14 +2,21 @@ package com.github.pangolin.routing.v2.route.predicate.spi;
 
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
-import com.maxmind.db.*;
+import com.maxmind.db.CHMCache;
+import com.maxmind.db.MaxMindDbConstructor;
+import com.maxmind.db.MaxMindDbParameter;
+import com.maxmind.db.NodeCache;
+import com.maxmind.db.Reader;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URL;
+import java.util.Collections;
 import java.util.zip.GZIPInputStream;
 
-public class GeoIpRoutePredicateFactory implements RoutePredicateFactory<InetAddress, String> {
+public class GeoIpRoutePredicateFactory implements RoutePredicateFactory<InetSocketAddress, String> {
     private static final String DEFAULT_DB_PATH = "/Country.mmdb.gz";
     private static final NodeCache DEFAULT_CACHE = new CHMCache();
 
@@ -24,8 +31,8 @@ public class GeoIpRoutePredicateFactory implements RoutePredicateFactory<InetAdd
      * {@inheritDoc}
      */
     @Override
-    public RoutePredicate<InetAddress> apply(final String definition) {
-        return new GeoIpRoutePredicate(definition, this);
+    public Iterable<RoutePredicate<InetSocketAddress>> apply(final String definition, final URL location) {
+        return Collections.singletonList(new GeoIpRoutePredicate(definition, this));
     }
 
     public String lookupCountry(final InetAddress address) {

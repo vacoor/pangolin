@@ -1,5 +1,9 @@
 package com.github.pangolin.routing.v2.route.predicate;
 
-public interface RoutePredicateDefinition {
-    String name();
+public class RoutePredicateDefinition {
+
+    public String name() {
+        return null;
+    }
+
 }
