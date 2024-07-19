@@ -21,9 +21,9 @@ import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandsh
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
 import com.github.pangolin.routing.upstream.RouteUpstreamServer;
 import com.github.pangolin.routing.upstream.AbstractUpstreamServer;
-import com.github.pangolin.routing.upstream.ProxyDatagramChannelFactory;
+import com.github.pangolin.routing.support.ProxyDatagramChannelFactory;
 import com.github.pangolin.routing.upstream.UpstreamServer;
-import com.github.pangolin.routing.upstream.ProxySocketChannelFactory;
+import com.github.pangolin.routing.support.ProxySocketChannelFactory;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Lists;
 import com.netflix.loadbalancer.LoadBalancerStats;

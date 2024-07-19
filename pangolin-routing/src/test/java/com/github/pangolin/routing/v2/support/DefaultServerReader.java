@@ -2,10 +2,12 @@ package com.github.pangolin.routing.v2.support;
 
 import com.github.pangolin.routing.config.ConfigurationException;
 import com.github.pangolin.routing.config.Ini;
+import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.v2.context.RouteContext;
 import com.github.pangolin.routing.v2.context.SimpleRouteContext;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
+import com.github.pangolin.routing.v2.server.MixinServerHandshakerFactory;
 import com.github.pangolin.routing.v2.upstream.UpstreamServerCombiner;
 import com.github.pangolin.routing.v2.upstream.UpstreamServerFactory;
 import com.google.common.collect.Maps;
@@ -18,6 +20,7 @@ import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.ServiceLoader;
 
 @Slf4j
 public class DefaultServerReader extends ReaderSupport {
@@ -65,13 +68,20 @@ public class DefaultServerReader extends ReaderSupport {
         if (null != rule) {
             rule.keySet().stream().map(route -> apply(route, url)).forEach(registry::addRoute);
         }
+
         return registry;
     }
+
+//    public MixinServerHandshaker apply(final String type) {
+//        final ServiceLoader<MixinServerHandshakerFactory> factories = ServiceLoader.load(MixinServerHandshakerFactory.class);
+//        for (MixinServerHandshakerFactory factory : factories) {
+//            factory.createHandshaker()
+//        }
+//    }
 
 
     private RouteContext load(final String url, final RouteContext parent) throws IOException, ConfigurationException {
         return new ExternalServerReader(stats, factories, combiners.values(), predicates.values()).load(new URL(url), parent);
-//        return new CachingUpstreamServerRegistry(new ExternalServerReader(stats), new URL(url), parent).refresh();
     }
 
 }

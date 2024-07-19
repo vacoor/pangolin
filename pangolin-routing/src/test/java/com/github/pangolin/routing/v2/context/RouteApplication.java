@@ -29,13 +29,16 @@ public class RouteApplication {
     public static void main(String[] args) throws Exception {
         new RouteApplication().run();
 
+        final LoadBalancerStats stats = new LoadBalancerStats();
+
         final ServiceLoader<UpstreamServerFactory> upstreamFactories = ServiceLoader.load(UpstreamServerFactory.class);
         final ServiceLoader<UpstreamServerCombiner> upstreamCombiners = ServiceLoader.load(UpstreamServerCombiner.class);
         final ServiceLoader<RoutePredicateFactory<InetSocketAddress, String>> predicates = (ServiceLoader) ServiceLoader.load(RoutePredicateFactory.class);
-        final LoadBalancerStats stats = new LoadBalancerStats();
+
 //        RouteContext context = new ExternalServerReader(stats, upstreamFactories, upstreamCombiners, predicates).load(new URL("http://fbapiv2.fbsublink.com/flydsubal/qcexzkf6b6w2ziwl?clash=1&extend=1"), null);
-        URL url = RouteApplication.class.getResource("/conf/default.conf");
-        RouteContext context = new DefaultServerReader(stats, upstreamFactories, upstreamCombiners, predicates).load(url, null);
+        final URL configLocation = RouteApplication.class.getResource("/conf/default.conf");
+        final RouteContext context = new DefaultServerReader(stats, upstreamFactories, upstreamCombiners, predicates).load(configLocation, null);
+
         System.out.println(context);
         System.out.println(context.choose(InetSocketAddress.createUnresolved("8.8.8.8", 53)));
     }

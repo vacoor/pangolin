@@ -1,6 +1,7 @@
-package com.github.pangolin.routing.upstream;
+package com.github.pangolin.routing.support;
 
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
+import com.github.pangolin.routing.upstream.UpstreamServer;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;

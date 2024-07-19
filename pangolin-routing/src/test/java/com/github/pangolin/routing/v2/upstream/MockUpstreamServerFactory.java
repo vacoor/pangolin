@@ -22,7 +22,7 @@ public class MockUpstreamServerFactory implements UpstreamServerFactory {
 
             @Override
             public String toString() {
-                return name + "/" + url;
+                return name + "@" + url;
             }
         };
     }

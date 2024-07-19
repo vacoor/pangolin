@@ -41,16 +41,16 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
     void addToWhitelist(InetSocketAddress sender) {
         natServers.computeIfAbsent(sender.getAddress(), a -> {
             log.info("Add White: {} , {}", sender, a);
-            return new OwnedServer(a);
+            return new OwnableServer(a);
         });
     }
 
     void removeFromWhitelist(InetSocketAddress sender) {
-        final OwnedServer ownedServer = natServers.remove(sender.getAddress());
-        if (null != ownedServer) {
+        final OwnableServer ownableServer = natServers.remove(sender.getAddress());
+        if (null != ownableServer) {
             log.info("Remove White: {}", sender);
-            final Set<Key> natMapKeys = ownedServer.natMapKeys;
-            for (Key natMapKey : natMapKeys) {
+            final Set<Link> natMapKeys = ownableServer.natMapKeys;
+            for (Link natMapKey : natMapKeys) {
                 natMap.get(natMapKey).channel().close();
             }
         }
@@ -61,8 +61,8 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         final InetSocketAddress rawSender = packet.sender();
         final InetSocketAddress rawRecipient = packet.recipient();
         final InetAddress owner = rawSender.getAddress();
-        final OwnedServer ownedServer = natServers.get(owner);
-        if (null == ownedServer) {
+        final OwnableServer ownableServer = natServers.get(owner);
+        if (null == ownableServer) {
             log.warn("SKIP sender: {} -> {}, {}", rawSender, rawRecipient, natServers);
             return;
         }
@@ -71,7 +71,7 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         /*-
          * UDP sync() is required.
          */
-        ownedServer.getNatMapChannel(rawSender, packetToUse.recipient(), ctx).sync().channel().writeAndFlush(packetToUse);
+        ownableServer.getNatMapChannel(rawSender, packetToUse.recipient(), ctx).sync().channel().writeAndFlush(packetToUse);
     }
 
     private DatagramPacket decode(final DatagramPacket packet) throws Exception {
@@ -135,16 +135,16 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         return payloadToReplace;
     }
 
-    private ConcurrentMap<InetAddress, OwnedServer> natServers = Maps.newConcurrentMap();
-    private ConcurrentMap<Key, ChannelFuture> natMap = Maps.newConcurrentMap();
+    private ConcurrentMap<InetAddress, OwnableServer> natServers = Maps.newConcurrentMap();
+    private ConcurrentMap<Link, ChannelFuture> natMap = Maps.newConcurrentMap();
 
-    private class Key {
-        private final InetSocketAddress one;
-        private final InetSocketAddress two;
+    private class Link {
+        private final InetSocketAddress sender;
+        private final InetSocketAddress recipient;
 
-        private Key(final InetSocketAddress one, final InetSocketAddress two) {
-            this.one = one;
-            this.two = two;
+        private Link(final InetSocketAddress sender, final InetSocketAddress recipient) {
+            this.sender = sender;
+            this.recipient = recipient;
         }
 
         @Override
@@ -156,43 +156,43 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
                 return false;
             }
 
-            final Key key = (Key) o;
+            final Link key = (Link) o;
 
-            if (one != null ? !one.equals(key.one) : key.one != null) {
+            if (sender != null ? !sender.equals(key.sender) : key.sender != null) {
                 return false;
             }
-            return two != null ? two.equals(key.two) : key.two == null;
+            return recipient != null ? recipient.equals(key.recipient) : key.recipient == null;
         }
 
         @Override
         public int hashCode() {
-            int result = one != null ? one.hashCode() : 0;
-            result = 31 * result + (two != null ? two.hashCode() : 0);
+            int result = sender != null ? sender.hashCode() : 0;
+            result = 31 * result + (recipient != null ? recipient.hashCode() : 0);
             return result;
         }
     }
 
-    private class OwnedServer {
+    private class OwnableServer {
         private final InetAddress owner;
-        private final Set<Key> natMapKeys = Collections.newSetFromMap(
+        private final Set<Link> natMapKeys = Collections.newSetFromMap(
                 new ConcurrentHashMap<>()
         );
 
-        private OwnedServer(final InetAddress owner) {
+        private OwnableServer(final InetAddress owner) {
             this.owner = owner;
         }
 
         public ChannelFuture getNatMapChannel(final InetSocketAddress sender, final InetSocketAddress receipt, final ChannelHandlerContext context) {
-            return natMap.computeIfAbsent(new Key(sender, receipt), key -> {
+            return natMap.computeIfAbsent(new Link(sender, receipt), key -> {
                 return create(sender, receipt, context);
             });
         }
 
     }
 
-    private ChannelFuture create(final InetSocketAddress callback, final InetSocketAddress receipt, final ChannelHandlerContext callbackCtx) {
+    private ChannelFuture create(final InetSocketAddress callback, final InetSocketAddress recipient, final ChannelHandlerContext callbackCtx) {
         return datagramChannelFactory.open(
-                receipt,
+                recipient,
                 callbackCtx.channel().config().getConnectTimeoutMillis(),
                 callbackCtx.channel().eventLoop(),
                 new ChannelInitializer<DatagramChannel>() {
@@ -207,7 +207,6 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
 
                                 final ByteBuf payloadToReplace = encode(rawPacket.content(), sender);
 
-                                // final DatagramPacket packet = new DatagramPacket(payload, callback);
                                 final DatagramPacket packet = new DatagramPacket(payloadToReplace, callback, sender);
                                 callbackCtx.writeAndFlush(packet);
                             }

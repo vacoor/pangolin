@@ -20,8 +20,6 @@ public interface OwnableDatagramServerFactory {
 
     }
 
-    OwnableDatagramServer bind(final int port, final InetAddress owner);
-
-    OwnableDatagramServer bind(final String host, final int port, final InetAddress owner);
+    OwnableDatagramServer bind(final InetAddress owner) throws InterruptedException;
 
 }
