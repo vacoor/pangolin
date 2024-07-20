@@ -14,6 +14,7 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
+import io.netty.handler.codec.MessageToMessageCodec;
 import io.netty.handler.codec.socksx.v5.Socks5AddressDecoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressType;
@@ -23,6 +24,7 @@ import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 
@@ -54,6 +56,11 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
     }
 
     @Override
+    public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
+        ctx.pipeline().addBefore(ctx.name(), null, new Socks5ServerDatagramPacketCodec());
+    }
+
+    @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket packet) throws Exception {
         final InetSocketAddress rawSender = packet.sender();
         final InetSocketAddress rawRecipient = packet.recipient();
@@ -64,20 +71,53 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
             return;
         }
 
-        DatagramPacket packetToUse = decode(packet);
+//        DatagramPacket packetToUse = decode(packet);
+        DatagramPacket packetToUse = packet;
         /*-
          * UDP sync() is required.
          */
 //        ownableServer.getNatMapChannel(rawSender, packetToUse.recipient(), ctx).sync().channel().writeAndFlush(packetToUse);
-        ownableServer.writeAndFlush(packetToUse, ctx);
+        ownableServer.writeAndFlush(packetToUse.retain(), ctx);
     }
 
+    public class Socks5ServerDatagramPacketCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
 
+        @Override
+        protected void encode(final ChannelHandlerContext ctx, final DatagramPacket packet, final List<Object> out) throws Exception {
+            final InetSocketAddress sender = packet.sender();
+            final ByteBuf rawPayload = packet.content();
+            final ByteBuf payloadToReplace = Unpooled.buffer(3 + rawPayload.readableBytes() + 128);
+            final Socks5AddressEncoder encoder = Socks5AddressEncoder.DEFAULT;
 
-    private DatagramPacket decode(final DatagramPacket packet) throws Exception {
-        final Socks5AddressDecoder addressDecoder = Socks5AddressDecoder.DEFAULT;
-        final InetSocketAddress sender = packet.sender();
-        final InetSocketAddress recipient = packet.recipient();
+            // RSV, FRAG
+            payloadToReplace.writeShort(0);
+            payloadToReplace.writeByte(0);
+            if (sender.isUnresolved()) {
+                payloadToReplace.writeByte(Socks5AddressType.DOMAIN.byteValue());
+                encoder.encodeAddress(Socks5AddressType.DOMAIN, sender.getHostString(), payloadToReplace);
+            } else {
+                InetAddress sa = sender.getAddress();
+                if (sa instanceof Inet4Address) {
+                    payloadToReplace.writeByte(Socks5AddressType.IPv4.byteValue());
+                    encoder.encodeAddress(Socks5AddressType.IPv4, sa.getHostAddress(), payloadToReplace);
+                } else if (sa instanceof Inet6Address) {
+                    payloadToReplace.writeByte(Socks5AddressType.IPv6.byteValue());
+                    encoder.encodeAddress(Socks5AddressType.IPv6, sa.getHostAddress(), payloadToReplace);
+                } else {
+                    throw new UnsupportedOperationException();
+                }
+            }
+            payloadToReplace.writeShort(sender.getPort());
+            payloadToReplace.writeBytes(rawPayload.copy());
+
+            out.add(packet.replace(payloadToReplace));
+        }
+
+        @Override
+        protected void decode(final ChannelHandlerContext ctx, final DatagramPacket packet, final List<Object> out) throws Exception {
+            final Socks5AddressDecoder addressDecoder = Socks5AddressDecoder.DEFAULT;
+            final InetSocketAddress sender = packet.sender();
+            final InetSocketAddress recipient = packet.recipient();
         /*-
          +----+------+------+----------+----------+----------+
          |RSV | FRAG | ATYP | DST.ADDR | DST.PORT |   DATA   |
@@ -85,57 +125,26 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
          | 2  |  1   |  1   | Variable |    2     | Variable |
          +----+------+------+----------+----------+----------+
          */
-        final ByteBuf payload = packet.content();
+            final ByteBuf payload = packet.content();
 
-        // skip RSV (0x0000), FRAG (0x00)
-        final int rsv = payload.readUnsignedShort();
-        final byte frag = payload.readByte();
+            // skip RSV (0x0000), FRAG (0x00)
+            final int rsv = payload.readUnsignedShort();
+            final byte frag = payload.readByte();
 
-        final Socks5AddressType dstAddrType = Socks5AddressType.valueOf(payload.readByte());
-        final String dstAddr = addressDecoder.decodeAddress(dstAddrType, payload);
-        final int dstPort = payload.readUnsignedShort();
+            final Socks5AddressType dstAddrType = Socks5AddressType.valueOf(payload.readByte());
+            final String dstAddr = addressDecoder.decodeAddress(dstAddrType, payload);
+            final int dstPort = payload.readUnsignedShort();
 
-        log.info("[UDP] {} -- {} --> {}:{}", sender, recipient, dstAddr, dstPort);
+            log.info("[UDP] {} -- {} --> {}:{}", sender, recipient, dstAddr, dstPort);
 
-        /*-
-         * FIXED #5760 Netty DNS Answer Section not correctly decoded
-         * https://github.com/netty/netty/issues/5760
-         */
-        final ByteBuf payloadToUse = payload.copy();
-        final InetSocketAddress recipientToReplace = SocketUtils.toSocketAddress(dstAddr, dstPort);
-        return new DatagramPacket(payloadToUse, recipientToReplace, sender);
-    }
-
-    public static DatagramPacket encode(final DatagramPacket packet) throws Exception {
-        return packet.replace(encode(packet.content(), packet.sender()));
-    }
-
-    public static ByteBuf encode(final ByteBuf rawPayload, final InetSocketAddress dest) throws Exception {
-        final ByteBuf payloadToReplace = Unpooled.buffer(3 + rawPayload.readableBytes() + 128);
-        final Socks5AddressEncoder encoder = Socks5AddressEncoder.DEFAULT;
-
-        // RSV, FRAG
-        payloadToReplace.writeShort(0);
-        payloadToReplace.writeByte(0);
-        if (dest.isUnresolved()) {
-            payloadToReplace.writeByte(Socks5AddressType.DOMAIN.byteValue());
-            encoder.encodeAddress(Socks5AddressType.DOMAIN, dest.getHostString(), payloadToReplace);
-        } else {
-            InetAddress sa = dest.getAddress();
-            if (sa instanceof Inet4Address) {
-                payloadToReplace.writeByte(Socks5AddressType.IPv4.byteValue());
-                encoder.encodeAddress(Socks5AddressType.IPv4, sa.getHostAddress(), payloadToReplace);
-            } else if (sa instanceof Inet6Address) {
-                payloadToReplace.writeByte(Socks5AddressType.IPv6.byteValue());
-                encoder.encodeAddress(Socks5AddressType.IPv6, sa.getHostAddress(), payloadToReplace);
-            } else {
-                throw new UnsupportedOperationException();
-            }
+            /*-
+             * FIXED #5760 Netty DNS Answer Section not correctly decoded
+             * https://github.com/netty/netty/issues/5760
+             */
+            final ByteBuf payloadToUse = payload.copy();
+            final InetSocketAddress recipientToReplace = SocketUtils.toSocketAddress(dstAddr, dstPort);
+            out.add(new DatagramPacket(payloadToUse, recipientToReplace, sender));
         }
-        payloadToReplace.writeShort(dest.getPort());
-        payloadToReplace.writeBytes(rawPayload.copy());
-
-        return payloadToReplace;
     }
 
     private ConcurrentMap<InetAddress, OwnableServer> natServers = Maps.newConcurrentMap();
@@ -225,8 +234,9 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
 
                                 final DatagramPacket packet = new DatagramPacket(payloadToReplace, callback, sender);
                                 */
-                                DatagramPacket packet = encode(new DatagramPacket(rawPacket.content(), callback, sender));
-                                callbackCtx.writeAndFlush(packet);
+//                                DatagramPacket packet = encode(new DatagramPacket(rawPacket.content(), callback, sender));
+//                                callbackCtx.writeAndFlush(packet);
+                                callbackCtx.writeAndFlush(new DatagramPacket(rawPacket.content().retain(), callback, sender));
                             }
                         });
                     }
