@@ -72,12 +72,12 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         }
 
 //        DatagramPacket packetToUse = decode(packet);
-        DatagramPacket packetToUse = packet;
+        DatagramPacket packetToUse = packet.retain();
         /*-
          * UDP sync() is required.
          */
 //        ownableServer.getNatMapChannel(rawSender, packetToUse.recipient(), ctx).sync().channel().writeAndFlush(packetToUse);
-        ownableServer.writeAndFlush(packetToUse.retain(), ctx);
+        ownableServer.writeAndFlush(packetToUse, ctx);
     }
 
     public class Socks5ServerDatagramPacketCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {
