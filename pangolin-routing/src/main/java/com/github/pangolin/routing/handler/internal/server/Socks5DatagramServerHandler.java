@@ -23,9 +23,7 @@ import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.Collections;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 
 @Slf4j
@@ -51,10 +49,7 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         final OwnableServer ownableServer = natServers.remove(sender.getAddress());
         if (null != ownableServer) {
             log.info("Remove White: {}", sender);
-            final Set<Link> natMapKeys = ownableServer.natMapKeys;
-            for (Link natMapKey : natMapKeys) {
-                natMap.get(natMapKey).channel().close();
-            }
+            ownableServer.shutdown();
         }
     }
 
@@ -73,7 +68,8 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         /*-
          * UDP sync() is required.
          */
-        ownableServer.getNatMapChannel(rawSender, packetToUse.recipient(), ctx).sync().channel().writeAndFlush(packetToUse);
+//        ownableServer.getNatMapChannel(rawSender, packetToUse.recipient(), ctx).sync().channel().writeAndFlush(packetToUse);
+        ownableServer.writeAndFlush(packetToUse, ctx);
     }
 
 
@@ -107,8 +103,7 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
          */
         final ByteBuf payloadToUse = payload.copy();
         final InetSocketAddress recipientToReplace = SocketUtils.toSocketAddress(dstAddr, dstPort);
-        return new DatagramPacket(payloadToUse, recipientToReplace);
-//        return new DatagramPacket(payloadToUse, recipientToReplace, sender);
+        return new DatagramPacket(payloadToUse, recipientToReplace, sender);
     }
 
     public static DatagramPacket encode(final DatagramPacket packet) throws Exception {
@@ -144,47 +139,11 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
     }
 
     private ConcurrentMap<InetAddress, OwnableServer> natServers = Maps.newConcurrentMap();
-    private ConcurrentMap<Link, ChannelFuture> natMap = Maps.newConcurrentMap();
 
-    private class Link {
-        private final InetSocketAddress sender;
-        private final InetSocketAddress recipient;
-
-        private Link(final InetSocketAddress sender, final InetSocketAddress recipient) {
-            this.sender = sender;
-            this.recipient = recipient;
-        }
-
-        @Override
-        public boolean equals(final Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-
-            final Link key = (Link) o;
-
-            if (sender != null ? !sender.equals(key.sender) : key.sender != null) {
-                return false;
-            }
-            return recipient != null ? recipient.equals(key.recipient) : key.recipient == null;
-        }
-
-        @Override
-        public int hashCode() {
-            int result = sender != null ? sender.hashCode() : 0;
-            result = 31 * result + (recipient != null ? recipient.hashCode() : 0);
-            return result;
-        }
-    }
 
     private class OwnableServer {
         private final InetAddress owner;
-        private final Set<Link> natMapKeys = Collections.newSetFromMap(
-                new ConcurrentHashMap<>()
-        );
+        private final Map<Link, ChannelFuture> natMap = Maps.newLinkedHashMap();
 
         private OwnableServer(final InetAddress owner) {
             this.owner = owner;
@@ -196,6 +155,51 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
             });
         }
 
+        public void writeAndFlush(final DatagramPacket packet, final ChannelHandlerContext callback) throws InterruptedException {
+            getNatMapChannel(packet.sender(), packet.recipient(), callback).sync().channel().writeAndFlush(packet);
+//            ownableServer.getNatMapChannel(rawSender, packetToUse.recipient(), ctx).sync().channel().writeAndFlush(packetToUse);
+        }
+
+        public void shutdown() {
+            for (OwnableServer.Link link : natMap.keySet()) {
+                ChannelFuture channel = natMap.remove(link);
+                channel.channel().close();
+            }
+        }
+
+        private class Link {
+            private final InetSocketAddress sender;
+            private final InetSocketAddress recipient;
+
+            private Link(final InetSocketAddress sender, final InetSocketAddress recipient) {
+                this.sender = sender;
+                this.recipient = recipient;
+            }
+
+            @Override
+            public boolean equals(final Object o) {
+                if (this == o) {
+                    return true;
+                }
+                if (o == null || getClass() != o.getClass()) {
+                    return false;
+                }
+
+                final Link key = (Link) o;
+
+                if (sender != null ? !sender.equals(key.sender) : key.sender != null) {
+                    return false;
+                }
+                return recipient != null ? recipient.equals(key.recipient) : key.recipient == null;
+            }
+
+            @Override
+            public int hashCode() {
+                int result = sender != null ? sender.hashCode() : 0;
+                result = 31 * result + (recipient != null ? recipient.hashCode() : 0);
+                return result;
+            }
+        }
     }
 
     private ChannelFuture create(final InetSocketAddress callback, final InetSocketAddress recipient, final ChannelHandlerContext callbackCtx) {
