@@ -5,11 +5,13 @@ import com.github.pangolin.routing.handler.internal.server.support.StandardDatag
 import com.github.pangolin.routing.util.SocketUtils;
 import com.google.common.collect.Maps;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.handler.codec.socksx.v5.Socks5AddressDecoder;
@@ -74,6 +76,8 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         ownableServer.getNatMapChannel(rawSender, packetToUse.recipient(), ctx).sync().channel().writeAndFlush(packetToUse);
     }
 
+
+
     private DatagramPacket decode(final DatagramPacket packet) throws Exception {
         final Socks5AddressDecoder addressDecoder = Socks5AddressDecoder.DEFAULT;
         final InetSocketAddress sender = packet.sender();
@@ -105,6 +109,10 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         final InetSocketAddress recipientToReplace = SocketUtils.toSocketAddress(dstAddr, dstPort);
         return new DatagramPacket(payloadToUse, recipientToReplace);
 //        return new DatagramPacket(payloadToUse, recipientToReplace, sender);
+    }
+
+    public static DatagramPacket encode(final DatagramPacket packet) throws Exception {
+        return packet.replace(encode(packet.content(), packet.sender()));
     }
 
     public static ByteBuf encode(final ByteBuf rawPayload, final InetSocketAddress dest) throws Exception {
@@ -194,7 +202,8 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
         return datagramChannelFactory.open(
                 recipient,
                 callbackCtx.channel().config().getConnectTimeoutMillis(),
-                callbackCtx.channel().eventLoop(),
+//                callbackCtx.channel().eventLoop(),
+                new NioEventLoopGroup(),
                 new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(final DatagramChannel ch) throws Exception {
@@ -203,11 +212,16 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
                             protected void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket rawPacket) throws Exception {
                                 final InetSocketAddress sender = rawPacket.sender();
                                 final InetSocketAddress recipient = rawPacket.recipient();
-                                log.info("[UDP] {} -> {} -> {}", sender, recipient, callback);
+                                log.info("[UDP] {} -> {} -> {}: {}", sender, recipient, callback, ByteBufUtil.hexDump(rawPacket.content()));
 
+                                /*
                                 final ByteBuf payloadToReplace = encode(rawPacket.content(), sender);
 
+                                log.info("[UDP] {} -> {} -> {}: {}", sender, recipient, callback, ByteBufUtil.hexDump(payloadToReplace));
+
                                 final DatagramPacket packet = new DatagramPacket(payloadToReplace, callback, sender);
+                                */
+                                DatagramPacket packet = encode(new DatagramPacket(rawPacket.content(), callback, sender));
                                 callbackCtx.writeAndFlush(packet);
                             }
                         });

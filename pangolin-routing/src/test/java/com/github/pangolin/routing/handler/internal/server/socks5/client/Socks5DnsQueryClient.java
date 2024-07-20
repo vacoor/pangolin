@@ -25,16 +25,14 @@ import java.net.InetSocketAddress;
 public class Socks5DnsQueryClient {
 
     public static void main(String[] args) throws Exception {
-//        final InetSocketAddress ssProxyAddress = new InetSocketAddress("", 56001);
-        final CipherAlgorithm cipher = CipherAlgorithmSpi.getInstance("chacha20-ietf-poly1305");
-        final String password = "jASkBs";
 
-        final InetSocketAddress proxyAddress = new InetSocketAddress(3080);
-//        final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
-        final InetSocketAddress dnsAddress = new InetSocketAddress("8.8.8.8", 53);
+        final InetSocketAddress proxyAddress = new InetSocketAddress(1080);
+        final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
+//        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
+//        final InetSocketAddress dnsAddress = new InetSocketAddress("8.8.8.8", 53);
         final DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
-        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
-//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
+//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
+        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
 
         DatagramChannelFactory factory = new StandardDatagramChannelFactory();
         final EventLoopGroup proxyGroup = new NioEventLoopGroup();
