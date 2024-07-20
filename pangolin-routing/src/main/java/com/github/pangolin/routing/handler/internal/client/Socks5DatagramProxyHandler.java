@@ -8,6 +8,7 @@ import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
+import io.netty.channel.socket.DatagramPacket;
 import io.netty.handler.codec.socksx.v5.Socks5CommandResponse;
 import io.netty.handler.codec.socksx.v5.Socks5CommandStatus;
 import io.netty.handler.codec.socksx.v5.Socks5CommandType;
@@ -44,6 +45,18 @@ public class Socks5DatagramProxyHandler extends ChannelDuplexHandler {
         this.username = username;
         this.password = password;
         this.socketChannelFactory = socketChannelFactory;
+    }
+
+    @Override
+    public void write(final ChannelHandlerContext ctx, final Object msg, final ChannelPromise promise) throws Exception {
+        /*
+        if (msg instanceof DatagramPacket) {
+            DatagramPacket packet = (DatagramPacket) msg;
+            super.write(ctx, new DatagramPacket(packet.content(), proxyAddress, packet.sender()), promise);
+        } else {
+        */
+            super.write(ctx, msg, promise);
+//        }
     }
 
     @Override
