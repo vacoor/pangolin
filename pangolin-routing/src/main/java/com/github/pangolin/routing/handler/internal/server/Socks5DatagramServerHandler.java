@@ -13,6 +13,7 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
+import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.MessageToMessageCodec;
 import io.netty.handler.codec.socksx.v5.Socks5AddressDecoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
@@ -258,8 +259,8 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
              */
 
             // skip RSV (0x0000), FRAG (0x00)
-            final int rsv = rawPayload.readUnsignedShort();
-            final byte frag = rawPayload.readByte();
+            assertEquals(RSV, rawPayload.readUnsignedShort(), "RSV");
+            assertEquals(FRAG, rawPayload.readByte(), "multiple fragment not support, FRAG");
 
             final Socks5AddressType dstAddrType = Socks5AddressType.valueOf(rawPayload.readByte());
             final String dstAddr = addressDecoder.decodeAddress(dstAddrType, rawPayload);
@@ -276,6 +277,12 @@ public class Socks5DatagramServerHandler extends SimpleChannelInboundHandler<Dat
             final ByteBuf payloadToUse = rawPayload.copy();
             final InetSocketAddress recipientToReplace = SocketUtils.toSocketAddress(dstAddr, dstPort);
             out.add(new DatagramPacket(payloadToUse, recipientToReplace, sender));
+        }
+
+        private void assertEquals(final int expected, final int actual, final String name) {
+            if (expected != actual) {
+                throw new DecoderException(String.format("%s expected same:<%s> was not:<%s>", name, expected, actual));
+            }
         }
     }
 }
