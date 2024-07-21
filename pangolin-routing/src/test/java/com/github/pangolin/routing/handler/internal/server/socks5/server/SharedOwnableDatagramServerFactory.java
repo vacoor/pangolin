@@ -5,11 +5,12 @@ import com.github.pangolin.routing.handler.internal.server.support.DatagramChann
 import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
 import com.google.common.collect.Maps;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
+import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
@@ -24,7 +25,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public class SharedOwnableDatagramServerFactory implements OwnableDatagramServerFactory {
     private final ReentrantLock lock = new ReentrantLock();
 
-//    private final int listenPort;
+    private final int listenPort = 0;
     private volatile ChannelFuture sharedDatagram;
     private final ConcurrentMap<InetAddress, OwnableDatagramServer> ownableDatagrams = Maps.newConcurrentMap();
     private final DatagramChannelFactory factory = new StandardDatagramChannelFactory();
@@ -76,7 +77,7 @@ public class SharedOwnableDatagramServerFactory implements OwnableDatagramServer
         lock.lockInterruptibly();
         try {
             if (null == sharedDatagram) {
-                sharedDatagram = bind(0).sync();
+                sharedDatagram = bind(listenPort).sync();
             }
         } finally {
             lock.unlock();
@@ -94,10 +95,22 @@ public class SharedOwnableDatagramServerFactory implements OwnableDatagramServer
             @Override
             protected void initChannel(final DatagramChannel ch) throws Exception {
 //                ch.pipeline().addLast(udpServerHandler);
+                ch.pipeline().addLast(new SharedChannelCloseHandler());
                 ch.pipeline().addLast(new Socks5DatagramServerHandler(factory));
             }
         });
         return udpBootstrap.bind(listenPort);
+    }
+
+    private class SharedChannelCloseHandler extends ChannelDuplexHandler {
+
+        @Override
+        public void close(final ChannelHandlerContext ctx, final ChannelPromise promise) throws Exception {
+//            if (false) {
+                super.close(ctx, promise);
+//            }
+        }
+
     }
 
     public static void main(String[] args) throws UnknownHostException, InterruptedException {
