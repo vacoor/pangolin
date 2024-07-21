@@ -24,6 +24,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public class SharedOwnableDatagramServerFactory implements OwnableDatagramServerFactory {
     private final ReentrantLock lock = new ReentrantLock();
 
+//    private final int listenPort;
     private volatile ChannelFuture sharedDatagram;
     private final ConcurrentMap<InetAddress, OwnableDatagramServer> ownableDatagrams = Maps.newConcurrentMap();
     private final DatagramChannelFactory factory = new StandardDatagramChannelFactory();

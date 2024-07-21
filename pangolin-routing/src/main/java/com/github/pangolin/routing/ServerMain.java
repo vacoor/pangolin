@@ -50,6 +50,7 @@ import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  *
@@ -59,7 +60,7 @@ public class ServerMain {
 
     private static MixinServerHandshaker createHandshaker(final String type,
                                                           final SocketChannelFactory socketChannelFactory,
-                                                          final Socks5DatagramServerHandler h) {
+                                                          final Supplier<Socks5DatagramServerHandler> h) {
         if ("SOCKS5".equalsIgnoreCase(type)) {
             return Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, socketChannelFactory, h));
         } else if ("SOCKS4".equalsIgnoreCase(type)) {
@@ -146,7 +147,7 @@ public class ServerMain {
                 protected void initChannel(final SocketChannel channel) throws Exception {
                     channel.pipeline().addLast(new MixinServerInitializer(protocols
                             .stream()
-                            .map(type -> createHandshaker(type, socketChannelFactory, socks5UdpServerHandler)).toArray(MixinServerHandshaker[]::new)));
+                            .map(type -> createHandshaker(type, socketChannelFactory, () -> socks5UdpServerHandler)).toArray(MixinServerHandshaker[]::new)));
                 }
             }).addListener(new ChannelFutureListener() {
                 @Override

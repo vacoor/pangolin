@@ -39,6 +39,7 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  *
@@ -52,30 +53,30 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     private final String username;
     private final String password;
     private final SocketChannelFactory socketChannelFactory;
-    private final Socks5DatagramServerHandler udpServerHandler;
+    private final Supplier<Socks5DatagramServerHandler> udpServerFactory;
 
     public Socks5ProxyServerHandler() {
         this(null);
     }
 
-    public Socks5ProxyServerHandler(final Socks5DatagramServerHandler datagramServerHandler) {
-        this(null, null, datagramServerHandler);
+    public Socks5ProxyServerHandler(final Supplier<Socks5DatagramServerHandler> datagramServerFactory) {
+        this(null, null, datagramServerFactory);
     }
 
     public Socks5ProxyServerHandler(final String username, final String password, final SocketChannelFactory socketChannelFactory) {
         this(username, password, socketChannelFactory, null);
     }
 
-    public Socks5ProxyServerHandler(final String username, final String password, final Socks5DatagramServerHandler datagramServerHandler) {
-        this(username, password, new StandardSocketChannelFactory(), datagramServerHandler);
+    public Socks5ProxyServerHandler(final String username, final String password, final Supplier<Socks5DatagramServerHandler> udpServerFactory) {
+        this(username, password, new StandardSocketChannelFactory(), udpServerFactory);
     }
 
     public Socks5ProxyServerHandler(final String username, final String password, final SocketChannelFactory socketChannelFactory,
-                                    final Socks5DatagramServerHandler datagramServerHandler) {
+                                    final Supplier<Socks5DatagramServerHandler> udpServerFactory) {
         this.username = username;
         this.password = password;
         this.socketChannelFactory = socketChannelFactory;
-        this.udpServerHandler = datagramServerHandler;
+        this.udpServerFactory = udpServerFactory;
     }
 
 
@@ -185,7 +186,8 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                         final String udpServerHost = serverAddress.getHostString();
                         final int udpServerPort = serverAddress.getPort();
 
-                        if (null != udpServerHandler) {
+                        if (null != udpServerFactory) {
+                            final Socks5DatagramServerHandler udpServerHandler = udpServerFactory.get();
                             ctx.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
                                 @Override
                                 public void operationComplete(final Future<? super Void> future) throws Exception {

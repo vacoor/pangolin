@@ -33,7 +33,7 @@ public class SocksServerTest {
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new Socks5ProxyServerHandler(h));
+                ch.pipeline().addLast(new Socks5ProxyServerHandler(() -> h));
             }
         }).channel().closeFuture().sync();
 
