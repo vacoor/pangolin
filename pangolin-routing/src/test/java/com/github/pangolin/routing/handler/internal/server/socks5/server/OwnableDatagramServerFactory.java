@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.handler.internal.server.socks5.server;
 
+import io.netty.channel.Channel;
 import io.netty.util.concurrent.Promise;
 
 import java.net.InetAddress;

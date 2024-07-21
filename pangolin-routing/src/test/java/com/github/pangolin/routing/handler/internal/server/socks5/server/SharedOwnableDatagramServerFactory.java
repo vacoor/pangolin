@@ -24,17 +24,17 @@ import java.util.concurrent.locks.ReentrantLock;
 public class SharedOwnableDatagramServerFactory implements OwnableDatagramServerFactory {
     private final ReentrantLock lock = new ReentrantLock();
 
-    private volatile ChannelFuture global;
-    private final ConcurrentMap<InetAddress, OwnableDatagramServer> datagrams = Maps.newConcurrentMap();
+    private volatile ChannelFuture sharedDatagram;
+    private final ConcurrentMap<InetAddress, OwnableDatagramServer> ownableDatagrams = Maps.newConcurrentMap();
     private final DatagramChannelFactory factory = new StandardDatagramChannelFactory();
 
     @Override
     public OwnableDatagramServer bind(final InetAddress owner) throws InterruptedException {
-        if (null == global) {
+        if (null == sharedDatagram) {
             waitStarted();
         }
 
-        return datagrams.computeIfAbsent(owner, own -> new OwnableDatagramServer() {
+        return ownableDatagrams.computeIfAbsent(owner, own -> new OwnableDatagramServer() {
             @Override
             public InetAddress owner() {
                 return own;
@@ -42,26 +42,26 @@ public class SharedOwnableDatagramServerFactory implements OwnableDatagramServer
 
             @Override
             public InetSocketAddress localAddress() {
-                return (InetSocketAddress) global.channel().localAddress();
+                return (InetSocketAddress) sharedDatagram.channel().localAddress();
             }
 
             @Override
             public Promise<Void> shutdownGracefully() {
-                datagrams.remove(own);
-                if (!datagrams.isEmpty()) {
+                ownableDatagrams.remove(own);
+                if (!ownableDatagrams.isEmpty()) {
                     return null;
                 }
                 lock.lock();
                 try {
-                    if (datagrams.isEmpty()) {
-                        ChannelFuture me = global;
+                    if (ownableDatagrams.isEmpty()) {
+                        ChannelFuture me = sharedDatagram;
                         me.channel().close().addListener(new GenericFutureListener<Future<? super Void>>() {
                             @Override
                             public void operationComplete(final Future<? super Void> future) throws Exception {
                                 me.channel().eventLoop().shutdownGracefully();
                             }
                         });
-                        global = null;
+                        sharedDatagram = null;
                     }
                 } finally {
                     lock.unlock();
@@ -74,8 +74,8 @@ public class SharedOwnableDatagramServerFactory implements OwnableDatagramServer
     private void waitStarted() throws InterruptedException {
         lock.lockInterruptibly();
         try {
-            if (null == global) {
-                global = bind(0).sync();
+            if (null == sharedDatagram) {
+                sharedDatagram = bind(0).sync();
             }
         } finally {
             lock.unlock();
