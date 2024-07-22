@@ -179,7 +179,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                                 final int udpServerPort = ((InetSocketAddress) datagramServer.channel().localAddress()).getPort();
                                 if (future.isSuccess()) {
                                     ctx.pipeline().remove(ctx.handler());
-                                    log.info("[SOCKS5] UDP server open at {}", datagramServer.channel().localAddress());
+                                    log.info("[SOCKS5] UDP server started on port {}, {}@{}", udpServerPort, clientAddress, datagramServer.channel().localAddress());
                                     if (serverAddress.isUnresolved()) {
                                         ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.DOMAIN, udpServerHost, udpServerPort));
                                         return;

@@ -27,13 +27,13 @@ public class Socks5DnsQueryClient {
 
     public static void main(String[] args) throws Exception {
 
-        final InetSocketAddress proxyAddress = new InetSocketAddress("127.0.0.1", 1080);
+        final InetSocketAddress proxyAddress = new InetSocketAddress("127.0.0.1", 1082);
         final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
 //        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
 //        final InetSocketAddress dnsAddress = new InetSocketAddress("8.8.8.8", 53);
         final DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
-//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
-        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
+        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
+//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
 
         DatagramChannelFactory factory = new StandardDatagramChannelFactory();
         final EventLoopGroup proxyGroup = new NioEventLoopGroup();
