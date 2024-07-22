@@ -5,30 +5,9 @@ import com.github.pangolin.routing.handler.internal.server.support.SocketChannel
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelConfig;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelPipeline;
+import io.netty.channel.*;
 import io.netty.handler.codec.ByteToMessageDecoder;
-import io.netty.handler.codec.socksx.v5.DefaultSocks5CommandResponse;
-import io.netty.handler.codec.socksx.v5.DefaultSocks5InitialResponse;
-import io.netty.handler.codec.socksx.v5.DefaultSocks5PasswordAuthResponse;
-import io.netty.handler.codec.socksx.v5.Socks5AddressType;
-import io.netty.handler.codec.socksx.v5.Socks5AuthMethod;
-import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
-import io.netty.handler.codec.socksx.v5.Socks5CommandRequestDecoder;
-import io.netty.handler.codec.socksx.v5.Socks5CommandStatus;
-import io.netty.handler.codec.socksx.v5.Socks5CommandType;
-import io.netty.handler.codec.socksx.v5.Socks5InitialRequest;
-import io.netty.handler.codec.socksx.v5.Socks5InitialRequestDecoder;
-import io.netty.handler.codec.socksx.v5.Socks5Message;
-import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequest;
-import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequestDecoder;
-import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthStatus;
-import io.netty.handler.codec.socksx.v5.Socks5ServerEncoder;
+import io.netty.handler.codec.socksx.v5.*;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
@@ -39,7 +18,6 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.List;
-import java.util.function.Supplier;
 
 /**
  *
@@ -53,30 +31,33 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     private final String username;
     private final String password;
     private final SocketChannelFactory socketChannelFactory;
-    private final Supplier<Socks5DatagramServerHandler> udpServerFactory;
+    private final Socks5DatagramServerFactory datagramServerFactory;
 
     public Socks5ProxyServerHandler() {
         this(null);
     }
 
-    public Socks5ProxyServerHandler(final Supplier<Socks5DatagramServerHandler> datagramServerFactory) {
+    public Socks5ProxyServerHandler(final Socks5DatagramServerFactory datagramServerFactory) {
         this(null, null, datagramServerFactory);
     }
 
-    public Socks5ProxyServerHandler(final String username, final String password, final SocketChannelFactory socketChannelFactory) {
+    public Socks5ProxyServerHandler(final String username, final String password,
+                                    final SocketChannelFactory socketChannelFactory) {
         this(username, password, socketChannelFactory, null);
     }
 
-    public Socks5ProxyServerHandler(final String username, final String password, final Supplier<Socks5DatagramServerHandler> udpServerFactory) {
-        this(username, password, new StandardSocketChannelFactory(), udpServerFactory);
+    public Socks5ProxyServerHandler(final String username, final String password,
+                                    final Socks5DatagramServerFactory datagramServerFactory) {
+        this(username, password, new StandardSocketChannelFactory(), datagramServerFactory);
     }
 
-    public Socks5ProxyServerHandler(final String username, final String password, final SocketChannelFactory socketChannelFactory,
-                                    final Supplier<Socks5DatagramServerHandler> udpServerFactory) {
+    public Socks5ProxyServerHandler(final String username, final String password,
+                                    final SocketChannelFactory socketChannelFactory,
+                                    final Socks5DatagramServerFactory datagramServerFactory) {
         this.username = username;
         this.password = password;
         this.socketChannelFactory = socketChannelFactory;
-        this.udpServerFactory = udpServerFactory;
+        this.datagramServerFactory = datagramServerFactory;
     }
 
 
@@ -181,37 +162,43 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                         }
                     });
                 } else {
-                    if (Socks5CommandType.UDP_ASSOCIATE.equals(type)) {
+                    if (Socks5CommandType.UDP_ASSOCIATE.equals(type) && null != datagramServerFactory) {
                         final InetSocketAddress serverAddress = (InetSocketAddress) ctx.channel().localAddress();
                         final String udpServerHost = serverAddress.getHostString();
-                        final int udpServerPort = serverAddress.getPort();
 
-                        if (null != udpServerFactory) {
-                            final Socks5DatagramServerHandler udpServerHandler = udpServerFactory.get();
-                            ctx.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
-                                @Override
-                                public void operationComplete(final Future<? super Void> future) throws Exception {
-                                    udpServerHandler.removeFromWhitelist(clientAddress);
+                        final ChannelFuture datagramServer = datagramServerFactory.createServer(ctx.channel(), clientAddress);
+                        ctx.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
+                            @Override
+                            public void operationComplete(final Future<? super Void> future) throws Exception {
+                                datagramServer.channel().close();
+                            }
+                        });
+                        datagramServer.addListener(new GenericFutureListener<Future<? super Void>>() {
+                            @Override
+                            public void operationComplete(final Future<? super Void> future) throws Exception {
+                                final int udpServerPort = ((InetSocketAddress) datagramServer.channel().localAddress()).getPort();
+                                if (future.isSuccess()) {
+                                    ctx.pipeline().remove(ctx.handler());
+                                    log.info("[SOCKS5] UDP server open at {}", datagramServer.channel().localAddress());
+                                    if (serverAddress.isUnresolved()) {
+                                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.DOMAIN, udpServerHost, udpServerPort));
+                                        return;
+                                    }
+                                    InetAddress inetAddress = serverAddress.getAddress();
+                                    if (inetAddress instanceof Inet4Address) {
+                                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv4, udpServerHost, udpServerPort));
+                                        return;
+                                    }
+                                    if (inetAddress instanceof Inet6Address) {
+                                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv6, udpServerHost, udpServerPort));
+                                        return;
+                                    }
+                                } else {
+                                    ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.FAILURE, addressType));
                                 }
-                            });
-
-                            if (serverAddress.isUnresolved()) {
-                                udpServerHandler.addToWhitelist(clientAddress);
-                                ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.DOMAIN, udpServerHost, udpServerPort));
-                                return;
                             }
-                            InetAddress inetAddress = serverAddress.getAddress();
-                            if (inetAddress instanceof Inet4Address) {
-                                udpServerHandler.addToWhitelist(clientAddress);
-                                ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv4, udpServerHost, udpServerPort));
-                                return;
-                            }
-                            if (inetAddress instanceof Inet6Address) {
-                                udpServerHandler.addToWhitelist(clientAddress);
-                                ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv6, udpServerHost, udpServerPort));
-                                return;
-                            }
-                        }
+                        });
+                        return;
                     }
                     log.warn("[SOCKS5] Connection closed: '{}' unsupported => {}:{}", type, address, port);
                     ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
@@ -224,6 +211,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
             ReferenceCountUtil.release(msg);
         }
     }
+
 
     private ChannelFutureListener removeOnComplete(final ChannelHandlerContext ctx, final ChannelHandler h) {
         return new ChannelFutureListener() {

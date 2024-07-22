@@ -40,8 +40,8 @@ public class Socks5DnsQueryClient {
         factory.open(proxyAddress, 0, proxyGroup, new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
-//                        ch.pipeline().addLast(new Socks5DatagramProxyHandler(proxyAddress));
-                        ch.pipeline().addLast(new Socks5ClientDatagramPacketCodec(proxyAddress));
+                        ch.pipeline().addLast(new Socks5DatagramProxyHandler(proxyAddress));
+//                        ch.pipeline().addLast(new Socks5ClientDatagramPacketCodec(proxyAddress));
 //                        ch.pipeline().addLast(new SsDatagramProxyHandler(ssProxyAddress, cipher, password));
                         ch.pipeline().addLast(new DatagramDnsResponseDecoder());
                         ch.pipeline().addLast(new DatagramDnsQueryEncoder());

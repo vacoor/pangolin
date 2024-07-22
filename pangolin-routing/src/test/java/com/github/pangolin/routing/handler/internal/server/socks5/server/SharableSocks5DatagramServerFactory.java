@@ -1,5 +1,7 @@
 package com.github.pangolin.routing.handler.internal.server.socks5.server;
 
+import com.github.pangolin.routing.handler.internal.server.Socks5DatagramServerFactory;
+import com.github.pangolin.routing.handler.internal.server.Socks5DatagramServerHandler;
 import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
 import com.google.common.collect.Maps;
 import io.netty.bootstrap.Bootstrap;
@@ -34,11 +36,11 @@ import java.util.concurrent.ConcurrentMap;
 
 /**
  */
-public class RouteDatagramServerFactory {
+public class SharableSocks5DatagramServerFactory implements Socks5DatagramServerFactory {
     private ChannelFuture channel;
     private ConcurrentMap<InetSocketAddress, ChannelFuture> childChannels = Maps.newConcurrentMap();
 
-    public RouteDatagramServerFactory() {
+    public SharableSocks5DatagramServerFactory() {
         channel = new Bootstrap().group(new NioEventLoopGroup())
                 .channel(NioDatagramChannel.class)
                 .handler(new ChannelInitializer<Channel>() {
@@ -55,12 +57,13 @@ public class RouteDatagramServerFactory {
                 }).bind(1080);
     }
 
-    public final ChannelFuture createServer(final InetSocketAddress owner) {
+    @Override
+    public final ChannelFuture createServer(final Channel parent, final InetSocketAddress owner) {
         return childChannels.computeIfAbsent(owner, own -> {
             SharedDatagramChannel c = new SharedDatagramChannel((DatagramChannel) channel.channel(), own);
             DefaultChannelPromise p = new DefaultChannelPromise(c, channel.channel().eventLoop());
             ChannelPipeline cp = channel.channel().pipeline();
-            cp.addLast(c.id().toString(), new Socks5DatagramServerHandler2(owner, new StandardDatagramChannelFactory()));
+            cp.addLast(c.id().toString(), new Socks5DatagramServerHandler(owner, new StandardDatagramChannelFactory()));
             channel.addListener(new GenericFutureListener<Future<? super Void>>() {
                 @Override
                 public void operationComplete(final Future<? super Void> future) throws Exception {
@@ -207,8 +210,8 @@ public class RouteDatagramServerFactory {
     }
 
     public static void main(String[] args) throws InterruptedException, UnknownHostException {
-        RouteDatagramServerFactory f = new RouteDatagramServerFactory();
-        ChannelFuture cf = f.createServer(new InetSocketAddress("127.0.0.1", 0));
+        SharableSocks5DatagramServerFactory f = new SharableSocks5DatagramServerFactory();
+        ChannelFuture cf = f.createServer(null, new InetSocketAddress("127.0.0.1", 0));
         System.out.println(cf.sync().channel());
     }
 }

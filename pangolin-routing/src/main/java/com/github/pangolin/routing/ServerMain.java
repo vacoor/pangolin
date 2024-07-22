@@ -1,17 +1,12 @@
 package com.github.pangolin.routing;
 
-import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
-
+import com.github.pangolin.routing.config.CachingUpstreamServerRegistry;
 import com.github.pangolin.routing.config.ConfigurationException;
 import com.github.pangolin.routing.config.DefaultServerReader;
 import com.github.pangolin.routing.config.Ini;
-import com.github.pangolin.routing.config.CachingUpstreamServerRegistry;
 import com.github.pangolin.routing.handler.extra.ProxyAutoConfigurationServerHandler;
 import com.github.pangolin.routing.handler.extra.SwitchyRuleConfigurationServerHandler;
-import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
-import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
-import com.github.pangolin.routing.handler.internal.server.Socks5DatagramServerHandler;
-import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
+import com.github.pangolin.routing.handler.internal.server.*;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
@@ -19,26 +14,16 @@ import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks5MixinServerHandshaker;
-import com.github.pangolin.routing.upstream.RouteUpstreamServer;
-import com.github.pangolin.routing.upstream.AbstractUpstreamServer;
 import com.github.pangolin.routing.support.ProxyDatagramChannelFactory;
-import com.github.pangolin.routing.upstream.UpstreamServer;
 import com.github.pangolin.routing.support.ProxySocketChannelFactory;
+import com.github.pangolin.routing.upstream.AbstractUpstreamServer;
+import com.github.pangolin.routing.upstream.RouteUpstreamServer;
+import com.github.pangolin.routing.upstream.UpstreamServer;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Lists;
 import com.netflix.loadbalancer.LoadBalancerStats;
-import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.DatagramChannel;
+import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import lombok.extern.slf4j.Slf4j;
@@ -50,7 +35,8 @@ import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
+
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 /**
  *
@@ -60,12 +46,13 @@ public class ServerMain {
 
     private static MixinServerHandshaker createHandshaker(final String type,
                                                           final SocketChannelFactory socketChannelFactory,
-                                                          final Supplier<Socks5DatagramServerHandler> h) {
+                                                          final DatagramChannelFactory datagramChannelFactory) {
         if ("SOCKS5".equalsIgnoreCase(type)) {
-            return Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, socketChannelFactory, h));
+            final Socks5DatagramServerFactory factory = new DefaultSocks5DatagramServerFactory(datagramChannelFactory);
+            return Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, socketChannelFactory, factory));
         } else if ("SOCKS4".equalsIgnoreCase(type)) {
             return Socks4MixinServerHandshaker.of(new Socks4ProxyServerHandler(null, socketChannelFactory));
-        } else if ("HTTP".equalsIgnoreCase(type)){
+        } else if ("HTTP".equalsIgnoreCase(type)) {
             return HttpMixinServerHandshaker.of(new HttpProxyServerHandler(null, null, socketChannelFactory));
         }
         throw new IllegalStateException(String.format("ILLEGAL_TYPE: %s", type));
@@ -124,30 +111,13 @@ public class ServerMain {
 
             final NettyServer server = new NettyServer(listenPort);
             final List<String> protocols = Arrays.asList(segments).subList(1, segments.length);
-            Socks5DatagramServerHandler h = null;
-            if (protocols.contains("SOCKS5")) {
-                h = new Socks5DatagramServerHandler(datagramChannelFactory);
-                Socks5DatagramServerHandler udpServerHandler = h;
-                final Bootstrap udpBootstrap = new Bootstrap();
-                udpBootstrap.group(new NioEventLoopGroup());
-                udpBootstrap.channel(NioDatagramChannel.class);
-                udpBootstrap.option(ChannelOption.SO_BROADCAST, false);
-                udpBootstrap.handler(new ChannelInitializer<DatagramChannel>() {
-                    @Override
-                    protected void initChannel(final DatagramChannel ch) throws Exception {
-                        ch.pipeline().addLast(udpServerHandler);
-                    }
-                });
-                udpBootstrap.bind(listenPort);
-            }
 
-            final Socks5DatagramServerHandler socks5UdpServerHandler = h;
             ChannelFuture f = server.start(true, new ChannelInitializer<SocketChannel>() {
                 @Override
                 protected void initChannel(final SocketChannel channel) throws Exception {
                     channel.pipeline().addLast(new MixinServerInitializer(protocols
                             .stream()
-                            .map(type -> createHandshaker(type, socketChannelFactory, () -> socks5UdpServerHandler)).toArray(MixinServerHandshaker[]::new)));
+                            .map(type -> createHandshaker(type, socketChannelFactory, datagramChannelFactory)).toArray(MixinServerHandshaker[]::new)));
                 }
             }).addListener(new ChannelFutureListener() {
                 @Override
