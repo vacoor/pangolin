@@ -2,21 +2,35 @@ package com.github.pangolin.routing.v2.support;
 
 import com.github.pangolin.routing.config.ConfigurationException;
 import com.github.pangolin.routing.config.Ini;
+import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
-import com.github.pangolin.routing.route.predicate.RoutePredicate;
+import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
+import com.github.pangolin.routing.support.ProxyDatagramChannelFactory;
+import com.github.pangolin.routing.support.ProxySocketChannelFactory;
 import com.github.pangolin.routing.v2.context.RouteContext;
 import com.github.pangolin.routing.v2.context.SimpleRouteContext;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.v2.server.MixinServerHandshakerFactory;
+import com.github.pangolin.routing.v2.upstream.AbstractUpstreamServer;
 import com.github.pangolin.routing.v2.upstream.UpstreamServerCombiner;
 import com.github.pangolin.routing.v2.upstream.UpstreamServerFactory;
+import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.socket.SocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URL;
+import java.security.cert.CertificateException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -30,9 +44,10 @@ public class DefaultServerReader extends ReaderSupport {
                                final Iterable<UpstreamServerCombiner> combiners,
                                final Iterable<RoutePredicateFactory<InetSocketAddress, String>> predicates) {
         super(stats, factories, combiners, predicates);
+        this.initMixinServerHandshakerFactories();
     }
 
-    public RouteContext load(final URL url, final RouteContext parent) throws IOException, ConfigurationException {
+    public RouteContext load(final URL url, final RouteContext parent) throws IOException, ConfigurationException, CertificateException, InterruptedException {
         final Ini ini = new Ini();
         ini.load(url.openStream());
 
@@ -63,21 +78,84 @@ public class DefaultServerReader extends ReaderSupport {
             }
         }
 
-        Map<RoutePredicate, String> rules = Maps.newLinkedHashMap();
         Ini.Section rule = ini.getSection("Rule");
         if (null != rule) {
             rule.keySet().stream().map(route -> apply(route, url)).forEach(registry::addRoute);
         }
 
+
+        // TODO
+        final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
+        final SocketChannelFactory routeSocketFactory = new StandardSocketChannelFactory();
+        final DatagramChannelFactory routeDatagramFactory = new StandardDatagramChannelFactory();
+        Ini.Section listen = ini.getSection("Listen");
+        if (null == listen) {
+            listen = ini.addSection("Listen");
+            listen.put("1080", "DEFAULT, SOCKS5, SOCKS4, HTTP");
+        }
+
+        for (final Map.Entry<String, String> entry : listen.entrySet()) {
+            final String port = entry.getKey();
+            final String definition = entry.getValue();
+            final int listenPort = Integer.parseInt(port);
+            final String[] segments = definition.split("\\s*,\\s*");
+            if (segments.length < 2) {
+                throw new IllegalArgumentException("Unable to create Connector with definition " + definition);
+            }
+
+            final NettyServer server = new NettyServer(listenPort);
+            final String proxyName = segments[0];
+            final List<String> protocols = Arrays.asList(segments).subList(1, segments.length);
+
+            ChannelFuture f = server.start(true, new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(final SocketChannel channel) throws Exception {
+                    final MixinServerHandshaker[] handshakers = protocols
+                            .stream()
+                            .map(type -> applyHandshaker(type, routeSocketFactory, routeDatagramFactory))
+                            .toArray(MixinServerHandshaker[]::new);
+                    channel.pipeline().addLast(new MixinServerInitializer(handshakers));
+                }
+            }).addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(final ChannelFuture future) throws Exception {
+                    if (future.isSuccess()) {
+                        final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
+                        log.info("Mixed upstream {} started on port {} ({})", proxyName, localAddress.getPort(), localAddress);
+                    } else {
+                        future.cause().printStackTrace();
+                    }
+                }
+            });
+        };
+
         return registry;
     }
 
-//    public MixinServerHandshaker apply(final String type) {
-//        final ServiceLoader<MixinServerHandshakerFactory> factories = ServiceLoader.load(MixinServerHandshakerFactory.class);
-//        for (MixinServerHandshakerFactory factory : factories) {
-//            factory.createHandshaker()
-//        }
-//    }
+    private final Map<String, MixinServerHandshakerFactory> handshakers = Maps.newLinkedHashMap();
+    private void initMixinServerHandshakerFactories() {
+        final ServiceLoader<MixinServerHandshakerFactory> candidates = ServiceLoader.load(MixinServerHandshakerFactory.class);
+        for (final MixinServerHandshakerFactory factory : candidates) {
+            final String key = factory.name();
+            if (handshakers.containsKey(key)) {
+                System.err.println("A MixinServerHandshakerFactory named " + key
+                        + " already exists, class: " + handshakers.get(key)
+                        + ". It will be overwritten.");
+            }
+            handshakers.put(key, factory);
+            System.out.println("Loaded MixinServerHandshakerFactory [" + key + "]");
+        }
+    }
+
+    public MixinServerHandshaker applyHandshaker(final String type,
+                                                 final SocketChannelFactory socketFactory,
+                                                 final DatagramChannelFactory datagramFactory) {
+        final MixinServerHandshakerFactory factory = handshakers.get(type);
+        if (factory == null) {
+             throw new IllegalArgumentException( "Unable to find MixinServerHandshakerFactory with name " + type);
+        }
+        return factory.createHandshaker(socketFactory, datagramFactory);
+    }
 
 
     private RouteContext load(final String url, final RouteContext parent) throws IOException, ConfigurationException {

@@ -1,1 +1,3 @@
 com.github.pangolin.routing.v2.server.HttpServerHandshakerFactory
+com.github.pangolin.routing.v2.server.Socks4ServerHandshakerFactory
+com.github.pangolin.routing.v2.server.Socks5ServerHandshakerFactory
