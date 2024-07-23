@@ -1,20 +1,37 @@
 package com.github.pangolin.routing.v2.context;
 
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
+import com.github.pangolin.routing.v2.server.ServerChannelFactory;
 import com.github.pangolin.routing.v2.support.DefaultServerReader;
-import com.github.pangolin.routing.v2.support.ExternalServerReader;
 import com.github.pangolin.routing.v2.upstream.UpstreamServerCombiner;
 import com.github.pangolin.routing.v2.upstream.UpstreamServerFactory;
+import com.google.common.collect.Lists;
 import com.netflix.loadbalancer.LoadBalancerStats;
 
 import java.net.InetSocketAddress;
 import java.net.URL;
+import java.util.List;
 import java.util.ServiceLoader;
 
 public class RouteApplication {
+    private List<ServerChannelFactory> connectors = Lists.newLinkedList();
 
     public RouteContext run() {
-        return createContext();
+        final RouteContext context = createContext();
+        connectors.stream()
+                .map(ServerChannelFactory::start)
+                .forEach(cf -> {
+                    try {
+                        cf.sync();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                });
+        return context;
+    }
+
+    public void addConnector(final ServerChannelFactory connector) {
+        connectors.add(connector);
     }
 
     private RouteContext createContext() {
@@ -22,6 +39,9 @@ public class RouteApplication {
         RouteContext parent = null;
         for (final RouteContextFactory factory : factories) {
             parent = factory.createContext(parent);
+            if (parent instanceof ApplicationInitializer) {
+                ((ApplicationInitializer) parent).initialize(this);
+            }
         }
         return new SimpleRouteContext(parent);
     }
