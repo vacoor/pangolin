@@ -5,6 +5,6 @@ import com.github.pangolin.routing.handler.internal.server.support.SocketChannel
 
 public interface AcceptorFactory {
 
-    Acceptor apply(final SocketChannelFactory socketFactory, final DatagramChannelFactory datagramFactory, final String... args);
+    Acceptor apply(final int listenPort, final String... args);
 
 }

@@ -11,6 +11,8 @@ import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.routing.v2.context.RouteContext;
 import com.github.pangolin.routing.v2.context.DefaultRouteContext;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
+import com.github.pangolin.routing.v2.server.AcceptorFactory;
+import com.github.pangolin.routing.v2.server.MixinAcceptorFactory;
 import com.github.pangolin.routing.v2.server.MixinAcceptorHandshakerFactory;
 import com.github.pangolin.routing.v2.server.Acceptor;
 import com.github.pangolin.routing.v2.upstream.AbstractUpstream;
@@ -37,6 +39,7 @@ import java.util.ServiceLoader;
 
 @Slf4j
 public class DefaultServerReader extends ReaderSupport {
+    private final AcceptorFactory acceptorFactory = new MixinAcceptorFactory();
 
     public DefaultServerReader(final LoadBalancerStats stats,
                                final Iterable<UpstreamFactory> factories,
@@ -96,56 +99,11 @@ public class DefaultServerReader extends ReaderSupport {
             final int listenPort = Integer.parseInt(port);
             final String[] segments = definition.split("\\s*,\\s*");
             if (segments.length < 2) {
-                throw new IllegalArgumentException("Unable to create Connector with definition " + definition);
+                throw new IllegalArgumentException("Unable to create Acceptor with definition " + definition);
             }
 
-            final String proxyName = segments[0];
-            final List<String> protocols = Arrays.asList(segments).subList(1, segments.length);
-            final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
-            new Acceptor() {
-                @Override
-                public ChannelFuture start(final RouteContext context) throws Exception {
-                    final Upstream upstream = "DEFAULT".equals(proxyName) ? new AbstractUpstream("DEFAULT") {
-                        @Override
-                        public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
-                            final Upstream upstream = context.choose(destination);
-                            return null != upstream ? upstream.newSocketProxyHandler(destination) : null;
-                        }
-
-                        @Override
-                        public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
-                            final Upstream upstream = context.choose(destination);
-                            return null != upstream ? upstream.newDatagramProxyHandler(destination) : null;
-                        }
-                    } : context.getUpstream(proxyName);
-
-                    final SocketChannelFactory routeSocketFactory = new StandardSocketChannelFactory();
-                    final DatagramChannelFactory routeDatagramFactory = new StandardDatagramChannelFactory();
-
-                    final NettyServer server = new NettyServer(listenPort);
-                    return server.start(true, new ChannelInitializer<SocketChannel>() {
-                        @Override
-                        protected void initChannel(final SocketChannel channel) throws Exception {
-                            final MixinServerHandshaker[] handshakers = protocols
-                                    .stream()
-                                    .map(type -> applyHandshaker(type, routeSocketFactory, routeDatagramFactory))
-                                    .toArray(MixinServerHandshaker[]::new);
-                            channel.pipeline().addLast(new MixinServerInitializer(handshakers));
-                        }
-                    }).addListener(new ChannelFutureListener() {
-                        @Override
-                        public void operationComplete(final ChannelFuture future) throws Exception {
-                            if (future.isSuccess()) {
-                                final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                                log.info("Mixed upstream {} started on port {} ({})", proxyName, localAddress.getPort(), localAddress);
-                            } else {
-                                future.cause().printStackTrace();
-                            }
-                        }
-                    });
-                }
-            }.start(registry);
-
+            final Acceptor acceptor = acceptorFactory.apply(listenPort, segments);
+            acceptor.start(registry);
         };
 
         return registry;
