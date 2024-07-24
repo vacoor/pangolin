@@ -4,7 +4,7 @@ import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
 
-public interface UpstreamServer {
+public interface Upstream {
 
     String getName();
 

@@ -5,11 +5,11 @@ import lombok.Getter;
 
 import java.net.InetSocketAddress;
 
-public abstract class AbstractUpstreamServer implements UpstreamServer {
+public abstract class AbstractUpstream implements Upstream {
     @Getter
     protected final String name;
 
-    protected AbstractUpstreamServer(final String name) {
+    protected AbstractUpstream(final String name) {
         this.name = name;
     }
 
@@ -23,9 +23,7 @@ public abstract class AbstractUpstreamServer implements UpstreamServer {
      * {@inheritDoc}
      */
     @Override
-    public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
-        return null;
-    }
+    public abstract ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination);
 
     @Override
     public String toString() {

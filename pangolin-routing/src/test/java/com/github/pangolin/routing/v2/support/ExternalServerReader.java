@@ -5,8 +5,8 @@ import com.github.pangolin.routing.config.clash.ClashConfiguration;
 import com.github.pangolin.routing.v2.context.RouteContext;
 import com.github.pangolin.routing.v2.context.SimpleRouteContext;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
-import com.github.pangolin.routing.v2.upstream.UpstreamServerCombiner;
-import com.github.pangolin.routing.v2.upstream.UpstreamServerFactory;
+import com.github.pangolin.routing.v2.upstream.UpstreamCombiner;
+import com.github.pangolin.routing.v2.upstream.UpstreamFactory;
 import com.google.common.base.Preconditions;
 import com.netflix.loadbalancer.LoadBalancerStats;
 import freework.net.Http;
@@ -26,8 +26,8 @@ import java.util.Objects;
 public class ExternalServerReader extends ReaderSupport {
 
     public ExternalServerReader(final LoadBalancerStats stats,
-                                final Iterable<UpstreamServerFactory> factories,
-                                final Iterable<UpstreamServerCombiner> combiners,
+                                final Iterable<UpstreamFactory> factories,
+                                final Iterable<UpstreamCombiner> combiners,
                                 final Iterable<RoutePredicateFactory<InetSocketAddress, String>> predicates) {
         super(stats, factories, combiners, predicates);
     }

@@ -1,10 +1,11 @@
-package com.github.pangolin.routing.v2.server;
+package com.github.pangolin.routing.v2.server.spi;
 
 import com.github.pangolin.routing.handler.internal.server.Socks4ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.Socks4MixinServerHandshaker;
+import com.github.pangolin.routing.v2.server.MixinServerHandshakerFactory;
 
 public class Socks4ServerHandshakerFactory implements MixinServerHandshakerFactory {
 

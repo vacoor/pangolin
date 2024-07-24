@@ -4,7 +4,7 @@ import com.github.pangolin.routing.v2.route.Route;
 import com.github.pangolin.routing.v2.route.RouteRegistry;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.v2.upstream.UpstreamRegistry;
-import com.github.pangolin.routing.v2.upstream.UpstreamServer;
+import com.github.pangolin.routing.v2.upstream.Upstream;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
@@ -15,7 +15,7 @@ import java.util.Map;
 public abstract class AbstractRouteContext implements RouteContext, RouteRegistry<InetSocketAddress>, UpstreamRegistry {
     private final RouteContext parent;
     private final List<Route<InetSocketAddress>> routes = Lists.newLinkedList();
-    private final Map<String, UpstreamServer> upstreams = Maps.newLinkedHashMap();
+    private final Map<String, Upstream> upstreams = Maps.newLinkedHashMap();
 
     public AbstractRouteContext(final RouteContext parent) {
         this.parent = parent;
@@ -39,13 +39,13 @@ public abstract class AbstractRouteContext implements RouteContext, RouteRegistr
     }
 
     @Override
-    public void addUpstream(final String name, final UpstreamServer upstream) {
+    public void addUpstream(final String name, final Upstream upstream) {
         upstreams.put(name, upstream);
     }
 
     @Override
-    public UpstreamServer getUpstream(final String name) {
-        final UpstreamServer upstream = upstreams.get(name);
+    public Upstream getUpstream(final String name) {
+        final Upstream upstream = upstreams.get(name);
         if (null != upstream || null == parent) {
             return upstream;
         }
@@ -53,7 +53,7 @@ public abstract class AbstractRouteContext implements RouteContext, RouteRegistr
     }
 
     @Override
-    public UpstreamServer choose(final InetSocketAddress destination) {
+    public Upstream choose(final InetSocketAddress destination) {
         final Route route = getRoute(destination);
         return null != route ? getUpstream(route.getUpstream()) : null;
     }

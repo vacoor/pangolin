@@ -1,5 +1,9 @@
-package com.github.pangolin.routing.v2.upstream;
+package com.github.pangolin.routing.v2.upstream.spi;
 
+import com.github.pangolin.routing.v2.upstream.AbstractUpstream;
+import com.github.pangolin.routing.v2.upstream.Upstream;
+import com.github.pangolin.routing.v2.upstream.UpstreamCombiner;
+import com.github.pangolin.routing.v2.upstream.UpstreamRegistry;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
@@ -7,7 +11,7 @@ import io.netty.channel.ChannelInitializer;
 import java.net.InetSocketAddress;
 import java.util.stream.StreamSupport;
 
-public class UpstreamServerChainFactory implements UpstreamServerCombiner {
+public class UpstreamChainFactory implements UpstreamCombiner {
 
     @Override
     public String name() {
@@ -15,8 +19,8 @@ public class UpstreamServerChainFactory implements UpstreamServerCombiner {
     }
 
     @Override
-    public UpstreamServer combine(final String name, final Iterable<String> names, final UpstreamRegistry registry) {
-        return new AbstractUpstreamServer(name) {
+    public Upstream combine(final String name, final Iterable<String> names, final UpstreamRegistry registry) {
+        return new AbstractUpstream(name) {
             @Override
             public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
                 final ChannelHandler[] handlers = StreamSupport.stream(names.spliterator(), false)
@@ -42,8 +46,8 @@ public class UpstreamServerChainFactory implements UpstreamServerCombiner {
         };
     }
 
-    private UpstreamServer lookupRequired(final String name, final UpstreamRegistry registry) {
-        final UpstreamServer upstream = registry.getUpstream(name);
+    private Upstream lookupRequired(final String name, final UpstreamRegistry registry) {
+        final Upstream upstream = registry.getUpstream(name);
         if (null == upstream) {
             throw new IllegalStateException(String.format("Upstream '%s' not found", name));
         }

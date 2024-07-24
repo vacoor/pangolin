@@ -2,8 +2,8 @@ package com.github.pangolin.routing.v2.upstream;
 
 public interface UpstreamRegistry {
 
-    UpstreamServer getUpstream(final String name);
+    Upstream getUpstream(final String name);
 
-    void addUpstream(final String name, final UpstreamServer upstream);
+    void addUpstream(final String name, final Upstream upstream);
 
 }

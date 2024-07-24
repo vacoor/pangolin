@@ -8,21 +8,17 @@ import com.github.pangolin.routing.handler.internal.server.support.StandardDatag
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
-import com.github.pangolin.routing.support.ProxyDatagramChannelFactory;
-import com.github.pangolin.routing.support.ProxySocketChannelFactory;
 import com.github.pangolin.routing.v2.context.RouteContext;
 import com.github.pangolin.routing.v2.context.SimpleRouteContext;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.v2.server.MixinServerHandshakerFactory;
-import com.github.pangolin.routing.v2.upstream.AbstractUpstreamServer;
-import com.github.pangolin.routing.v2.upstream.UpstreamServerCombiner;
-import com.github.pangolin.routing.v2.upstream.UpstreamServerFactory;
+import com.github.pangolin.routing.v2.upstream.UpstreamCombiner;
+import com.github.pangolin.routing.v2.upstream.UpstreamFactory;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
 import lombok.extern.slf4j.Slf4j;
@@ -40,8 +36,8 @@ import java.util.ServiceLoader;
 public class DefaultServerReader extends ReaderSupport {
 
     public DefaultServerReader(final LoadBalancerStats stats,
-                               final Iterable<UpstreamServerFactory> factories,
-                               final Iterable<UpstreamServerCombiner> combiners,
+                               final Iterable<UpstreamFactory> factories,
+                               final Iterable<UpstreamCombiner> combiners,
                                final Iterable<RoutePredicateFactory<InetSocketAddress, String>> predicates) {
         super(stats, factories, combiners, predicates);
         this.initMixinServerHandshakerFactories();

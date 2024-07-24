@@ -1,45 +1,33 @@
 package com.github.pangolin.routing.v2.support;
 
-import com.github.pangolin.routing.config.ConfigurationException;
-import com.github.pangolin.routing.config.clash.ClashConfiguration;
-import com.github.pangolin.routing.v2.context.RouteContext;
-import com.github.pangolin.routing.v2.context.SimpleRouteContext;
 import com.github.pangolin.routing.v2.route.Route;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateSetFactory;
 import com.github.pangolin.routing.v2.route.predicate.UnknownRoutePredicate;
+import com.github.pangolin.routing.v2.upstream.UpstreamCombiner;
+import com.github.pangolin.routing.v2.upstream.UpstreamFactory;
 import com.github.pangolin.routing.v2.upstream.UpstreamRegistry;
-import com.github.pangolin.routing.v2.upstream.UpstreamServer;
-import com.github.pangolin.routing.v2.upstream.UpstreamServerCombiner;
-import com.github.pangolin.routing.v2.upstream.UpstreamServerFactory;
-import com.google.common.base.Preconditions;
+import com.github.pangolin.routing.v2.upstream.Upstream;
 import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
-import freework.net.Http;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.util.StringUtils;
 
-import java.io.IOException;
-import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 @Slf4j
 public class ReaderSupport {
     protected final LoadBalancerStats stats;
-    protected final Iterable<UpstreamServerFactory> factories;
-    protected final Map<String, UpstreamServerCombiner> combiners = Maps.newLinkedHashMap();
+    protected final Iterable<UpstreamFactory> factories;
+    protected final Map<String, UpstreamCombiner> combiners = Maps.newLinkedHashMap();
     protected final Map<String, RoutePredicateFactory<InetSocketAddress, String>> predicates = Maps.newLinkedHashMap();
 
     public ReaderSupport(final LoadBalancerStats stats,
-                         final Iterable<UpstreamServerFactory> factories,
-                         final Iterable<UpstreamServerCombiner> combiners,
+                         final Iterable<UpstreamFactory> factories,
+                         final Iterable<UpstreamCombiner> combiners,
                          final Iterable<RoutePredicateFactory<InetSocketAddress, String>> predicates) {
         this.stats = stats;
         this.factories = factories;
@@ -47,16 +35,16 @@ public class ReaderSupport {
         this.initPredicateFactories(predicates);
     }
 
-    private void initUpstreamCombiners(final Iterable<UpstreamServerCombiner> factories) {
-        for (final UpstreamServerCombiner factory : factories) {
+    private void initUpstreamCombiners(final Iterable<UpstreamCombiner> factories) {
+        for (final UpstreamCombiner factory : factories) {
             final String key = factory.name();
             if (combiners.containsKey(key)) {
-                System.err.println("A UpstreamServerCombiner named " + key
+                System.err.println("A UpstreamCombiner named " + key
                         + " already exists, class: " + combiners.get(key)
                         + ". It will be overwritten.");
             }
             combiners.put(key, factory);
-            System.out.println("Loaded UpstreamServerCombiner [" + key + "]");
+            System.out.println("Loaded UpstreamCombiner [" + key + "]");
         }
     }
 
@@ -74,19 +62,19 @@ public class ReaderSupport {
         predicates.put("RULE-SET", new RoutePredicateSetFactory("RULE-SET", factories));
     }
 
-    protected UpstreamServer apply(final String name, final String url) {
-        for (final UpstreamServerFactory factory : factories) {
+    protected Upstream apply(final String name, final String url) {
+        for (final UpstreamFactory factory : factories) {
             if (factory.accept(url)) {
                 return factory.apply(name, url);
             }
         }
-        throw new IllegalArgumentException("Unable to find UpstreamServerFactory with url " + name);
+        throw new IllegalArgumentException("Unable to find UpstreamFactory with url " + name);
     }
 
-    protected UpstreamServer apply(final String name, final String type, final Iterable<String> names, final UpstreamRegistry registry) {
-        final UpstreamServerCombiner combiner = combiners.get(type);
+    protected Upstream apply(final String name, final String type, final Iterable<String> names, final UpstreamRegistry registry) {
+        final UpstreamCombiner combiner = combiners.get(type);
         if (null == combiner) {
-            throw new IllegalArgumentException("Unable to find UpstreamServerCombiner with name " + type);
+            throw new IllegalArgumentException("Unable to find UpstreamCombiner with name " + type);
         }
         return combiner.combine(name, names, registry);
     }
