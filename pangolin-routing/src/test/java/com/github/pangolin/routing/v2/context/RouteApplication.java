@@ -2,20 +2,24 @@ package com.github.pangolin.routing.v2.context;
 
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateSetFactory;
-import com.github.pangolin.routing.v2.server.ServerChannelFactory;
+import com.github.pangolin.routing.v2.server.Acceptor;
 import com.github.pangolin.routing.v2.support.DefaultServerReader;
 import com.github.pangolin.routing.v2.upstream.UpstreamCombiner;
 import com.github.pangolin.routing.v2.upstream.UpstreamFactory;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.URL;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
@@ -27,8 +31,8 @@ public class RouteApplication {
     private final Map<String, RoutePredicateFactory> predicateFactories = Maps.newLinkedHashMap();
 
     private RouteContext context;
-    private List<ServerChannelFactory> connectorFactories = Lists.newLinkedList();
-    private ChannelGroup connectors = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
+    private final List<Acceptor> acceptors = Lists.newLinkedList();
+    private final ChannelGroup channelGroup = new DefaultChannelGroup("acceptor-channels", GlobalEventExecutor.INSTANCE);
 
 
     public RouteApplication() {
@@ -90,20 +94,30 @@ public class RouteApplication {
         this.context = context;
     }
 
-    public void addConnectors(ServerChannelFactory channelFactory) {
-        connectorFactories.add(channelFactory);
+    public void addAcceptors(final Acceptor... acceptors) {
+        this.acceptors.addAll(Arrays.asList(acceptors));
     }
+
 
     public RouteContext run() throws Exception {
         context = createContext();
-        for (final ServerChannelFactory factory : connectorFactories) {
-            connectors.add(factory.start(this.context).channel());
+
+        for (final Acceptor acceptor : acceptors) {
+            final ChannelFuture start = acceptor.start(context);
+            final Channel channel = start.channel();
+            channelGroup.add(channel);
+            start.sync();
+            final SocketAddress bound = channel.localAddress();
+
+            log.info("bound to {}", bound);
         }
+
         return this.context;
     }
 
+
     public void await() throws InterruptedException {
-        connectors.newCloseFuture().sync();
+        channelGroup.newCloseFuture().sync();
     }
 
 
@@ -116,7 +130,7 @@ public class RouteApplication {
                 ((ApplicationInitializer) parent).initialize(this);
             }
         }
-        return new SimpleRouteContext(parent);
+        return new DefaultRouteContext(parent);
     }
 
     public static void main(String[] args) throws Exception {

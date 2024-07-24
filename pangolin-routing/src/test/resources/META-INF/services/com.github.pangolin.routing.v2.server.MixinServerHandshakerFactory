@@ -1,3 +1,0 @@
-com.github.pangolin.routing.v2.server.spi.HttpServerHandshakerFactory
-com.github.pangolin.routing.v2.server.spi.Socks4ServerHandshakerFactory
-com.github.pangolin.routing.v2.server.spi.Socks5ServerHandshakerFactory

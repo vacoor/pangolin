@@ -3,7 +3,7 @@ package com.github.pangolin.routing.v2.support;
 import com.github.pangolin.routing.config.ConfigurationException;
 import com.github.pangolin.routing.config.clash.ClashConfiguration;
 import com.github.pangolin.routing.v2.context.RouteContext;
-import com.github.pangolin.routing.v2.context.SimpleRouteContext;
+import com.github.pangolin.routing.v2.context.DefaultRouteContext;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.v2.upstream.UpstreamCombiner;
 import com.github.pangolin.routing.v2.upstream.UpstreamFactory;
@@ -39,7 +39,7 @@ public class ExternalServerReader extends ReaderSupport {
         final List<ClashConfiguration.ProxyGroupDefinition> proxyGroupDefinitions = nvl(conf.getProxyGroups(), Collections.emptyList());
         final List<String> rules = nvl(conf.getRules(), Collections.emptyList());
 
-        final SimpleRouteContext context = new SimpleRouteContext(parent);
+        final DefaultRouteContext context = new DefaultRouteContext(parent);
 
         proxyDefinitions.stream()
                 .filter(d -> !"0.0.0.0".equals(d.getServer()))

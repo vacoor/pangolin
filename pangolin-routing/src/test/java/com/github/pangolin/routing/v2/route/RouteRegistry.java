@@ -4,6 +4,4 @@ public interface RouteRegistry<T> {
 
     void addRoute(final Route<T> route);
 
-
-
 }

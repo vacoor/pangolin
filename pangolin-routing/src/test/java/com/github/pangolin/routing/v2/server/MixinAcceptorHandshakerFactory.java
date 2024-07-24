@@ -4,7 +4,7 @@ import com.github.pangolin.routing.handler.internal.server.support.DatagramChann
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 
-public interface MixinServerHandshakerFactory {
+public interface MixinAcceptorHandshakerFactory {
 
     String name();
 

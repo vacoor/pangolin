@@ -5,9 +5,9 @@ import com.github.pangolin.routing.handler.internal.server.support.DatagramChann
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.support.HttpMixinServerHandshaker;
-import com.github.pangolin.routing.v2.server.MixinServerHandshakerFactory;
+import com.github.pangolin.routing.v2.server.MixinAcceptorHandshakerFactory;
 
-public class HttpServerHandshakerFactory implements MixinServerHandshakerFactory {
+public class HttpAcceptorHandshakerFactory implements MixinAcceptorHandshakerFactory {
 
     @Override
     public String name() {
