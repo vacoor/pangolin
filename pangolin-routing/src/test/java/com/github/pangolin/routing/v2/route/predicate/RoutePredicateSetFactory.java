@@ -2,7 +2,7 @@ package com.github.pangolin.routing.v2.route.predicate;
 
 import com.github.pangolin.routing.config.resolver.Utils;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Maps;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
@@ -14,13 +14,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Map;
 
+@Slf4j
 public class RoutePredicateSetFactory<T, D> implements RoutePredicateFactory<InetSocketAddress, String> {
     private final String name;
-    private final Iterable<RoutePredicateFactory<InetSocketAddress, String>> factories;
+    private final Map<String, RoutePredicateFactory<InetSocketAddress, String>> predicates;
 
-    public RoutePredicateSetFactory(final String name, final Iterable<RoutePredicateFactory<InetSocketAddress, String>> factories) {
+    public RoutePredicateSetFactory(final String name, final Map<String, RoutePredicateFactory<InetSocketAddress, String>> predicates) {
         this.name = name;
-        this.factories = factories;
+        this.predicates = predicates;
     }
 
     @Override
@@ -30,7 +31,7 @@ public class RoutePredicateSetFactory<T, D> implements RoutePredicateFactory<Ine
 
     @Override
     public Iterable<RoutePredicate<InetSocketAddress>> apply(final String definition, final URL location) {
-        if (null == factories) {
+        if (null == predicates) {
             return null;
         }
 
@@ -59,18 +60,6 @@ public class RoutePredicateSetFactory<T, D> implements RoutePredicateFactory<Ine
     }
 
     private Iterable<RoutePredicate<InetSocketAddress>> apply0(final String definition, final URL location) {
-        final Map<String, RoutePredicateFactory<InetSocketAddress, String>> predicates = Maps.newHashMap();
-        for (final RoutePredicateFactory<InetSocketAddress, String> factory : factories) {
-            final String key = factory.name();
-            if (predicates.containsKey(key)) {
-                System.err.println("A RoutePredicateFactory named " + key
-                        + " already exists, class: " + predicates.get(key)
-                        + ". It will be overwritten.");
-            }
-            predicates.put(key, factory);
-            System.out.println("Loaded RoutePredicateFactory [" + key + "]");
-        }
-
         final int idx = definition.indexOf(",");
         if (idx <= 0) {
             throw new IllegalStateException("Unable to parse PredicateDefinition text '"

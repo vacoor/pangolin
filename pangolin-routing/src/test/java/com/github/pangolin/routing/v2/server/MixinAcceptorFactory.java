@@ -6,8 +6,10 @@ import com.github.pangolin.routing.handler.internal.server.support.StandardDatag
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
-import com.github.pangolin.routing.v2.context.DefaultRouteContext;
+import com.github.pangolin.routing.v2.context.InMemoryRouteContext;
 import com.github.pangolin.routing.v2.context.RouteContext;
+import com.github.pangolin.routing.v2.support.ProxyDatagramChannelFactory;
+import com.github.pangolin.routing.v2.support.ProxySocketChannelFactory;
 import com.github.pangolin.routing.v2.upstream.AbstractUpstream;
 import com.github.pangolin.routing.v2.upstream.Upstream;
 import com.github.pangolin.server.NettyServer;
@@ -82,8 +84,8 @@ public class MixinAcceptorFactory implements AcceptorFactory {
                 } : context.getUpstream(proxyName);
 
                 // FIXME
-                final SocketChannelFactory routeSocketFactory = new StandardSocketChannelFactory();
-                final DatagramChannelFactory routeDatagramFactory = new StandardDatagramChannelFactory();
+                final SocketChannelFactory routeSocketFactory = null != upstream ? new ProxySocketChannelFactory(upstream, bypass) : new StandardSocketChannelFactory();
+                final DatagramChannelFactory routeDatagramFactory = null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass) : new StandardDatagramChannelFactory();
 
                 final NettyServer server = new NettyServer(listenPort);
                 return server.start(true, new ChannelInitializer<SocketChannel>() {
@@ -112,7 +114,7 @@ public class MixinAcceptorFactory implements AcceptorFactory {
 
     public static void main(String[] args) throws Exception {
         final Acceptor acceptor = new MixinAcceptorFactory().apply(1089);
-        acceptor.start(new DefaultRouteContext(null)).sync().channel().closeFuture().sync();
+        acceptor.start(new InMemoryRouteContext(null)).sync().channel().closeFuture().sync();
     }
 
 }

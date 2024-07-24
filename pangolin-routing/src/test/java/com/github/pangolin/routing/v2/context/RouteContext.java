@@ -7,11 +7,13 @@ import com.github.pangolin.routing.v2.upstream.Upstream;
 
 import java.net.InetSocketAddress;
 
-public interface RouteContext extends UpstreamRegistry, RouteRegistry<InetSocketAddress> {
+public interface RouteContext {
 
-    Upstream getUpstream(final String name);
+    RouteContext parent();
 
     Route getRoute(final InetSocketAddress destination);
+
+    Upstream getUpstream(final String name);
 
     Upstream choose(final InetSocketAddress destination);
 

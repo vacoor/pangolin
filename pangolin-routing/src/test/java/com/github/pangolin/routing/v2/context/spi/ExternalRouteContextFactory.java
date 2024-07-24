@@ -1,21 +1,17 @@
-package com.github.pangolin.routing.v2.support;
+package com.github.pangolin.routing.v2.context.spi;
 
 import com.github.pangolin.routing.config.ConfigurationException;
 import com.github.pangolin.routing.config.clash.ClashConfiguration;
+import com.github.pangolin.routing.v2.context.AbstractRouteContextFactory;
+import com.github.pangolin.routing.v2.context.InMemoryRouteContext;
 import com.github.pangolin.routing.v2.context.RouteContext;
-import com.github.pangolin.routing.v2.context.DefaultRouteContext;
-import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
-import com.github.pangolin.routing.v2.upstream.UpstreamCombiner;
-import com.github.pangolin.routing.v2.upstream.UpstreamFactory;
 import com.google.common.base.Preconditions;
-import com.netflix.loadbalancer.LoadBalancerStats;
 import freework.net.Http;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.InetSocketAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -23,13 +19,11 @@ import java.util.List;
 import java.util.Objects;
 
 @Slf4j
-public class ExternalServerReader extends ReaderSupport {
+public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
 
-    public ExternalServerReader(final LoadBalancerStats stats,
-                                final Iterable<UpstreamFactory> factories,
-                                final Iterable<UpstreamCombiner> combiners,
-                                final Iterable<RoutePredicateFactory<InetSocketAddress, String>> predicates) {
-        super(stats, factories, combiners, predicates);
+    @Override
+    public RouteContext createContext(final URL url, final RouteContext parent) throws Exception {
+        return load(url, parent);
     }
 
     public RouteContext load(final URL url, final RouteContext parent) throws IOException, ConfigurationException {
@@ -39,7 +33,7 @@ public class ExternalServerReader extends ReaderSupport {
         final List<ClashConfiguration.ProxyGroupDefinition> proxyGroupDefinitions = nvl(conf.getProxyGroups(), Collections.emptyList());
         final List<String> rules = nvl(conf.getRules(), Collections.emptyList());
 
-        final DefaultRouteContext context = new DefaultRouteContext(parent);
+        final InMemoryRouteContext context = new InMemoryRouteContext(parent);
 
         proxyDefinitions.stream()
                 .filter(d -> !"0.0.0.0".equals(d.getServer()))
