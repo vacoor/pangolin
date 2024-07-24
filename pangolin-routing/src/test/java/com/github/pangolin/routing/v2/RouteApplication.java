@@ -5,9 +5,13 @@ import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateSetFactory;
 import com.github.pangolin.routing.v2.server.Acceptor;
 import com.github.pangolin.routing.v2.server.Server;
-import com.github.pangolin.routing.v2.context.spi.DefaultRouteContextFactory;
+import com.github.pangolin.routing.v2.stats.StatsAware;
+import com.github.pangolin.routing.v2.stats.StatsUpstreamCombiner;
+import com.github.pangolin.routing.v2.stats.StatsUpstreamFactory;
 import com.github.pangolin.routing.v2.upstream.UpstreamCombiner;
 import com.github.pangolin.routing.v2.upstream.UpstreamFactory;
+import com.google.common.base.Function;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
 import io.netty.channel.Channel;
@@ -17,7 +21,6 @@ import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URL;
 import java.util.List;
@@ -26,11 +29,12 @@ import java.util.ServiceLoader;
 
 @Slf4j
 public class RouteApplication {
+    private final LoadBalancerStats stats = new LoadBalancerStats();
     private final Iterable<UpstreamFactory> upstreamFactories;
     private final Map<String, UpstreamCombiner> upstreamCombiners = Maps.newLinkedHashMap();
     private final Map<String, RoutePredicateFactory> predicateFactories = Maps.newLinkedHashMap();
 
-//    private final List<Acceptor> acceptors = Lists.newLinkedList();
+    //    private final List<Acceptor> acceptors = Lists.newLinkedList();
     private final ChannelGroup channelGroup = new DefaultChannelGroup("acceptor-channels", GlobalEventExecutor.INSTANCE);
 
 
@@ -45,9 +49,18 @@ public class RouteApplication {
     public RouteApplication(final Iterable<UpstreamFactory> upstreamFactories,
                             final Iterable<UpstreamCombiner> upstreamCombiners,
                             final Iterable<RoutePredicateFactory> predicateFactories) {
-        this.upstreamFactories = upstreamFactories;
+        this.upstreamFactories = this.initUpstreamFactories(upstreamFactories);
         this.initUpstreamCombiners(upstreamCombiners);
         this.initPredicateFactories(predicateFactories);
+    }
+
+    private Iterable<UpstreamFactory> initUpstreamFactories(final Iterable<UpstreamFactory> factories) {
+        return Iterables.transform(factories, new Function<UpstreamFactory, UpstreamFactory>() {
+            @Override
+            public UpstreamFactory apply(final UpstreamFactory upstreamFactory) {
+                return new StatsUpstreamFactory(upstreamFactory, stats);
+            }
+        });
     }
 
     private void initUpstreamCombiners(final Iterable<UpstreamCombiner> factories) {
@@ -56,7 +69,10 @@ public class RouteApplication {
             if (upstreamCombiners.containsKey(key)) {
                 log.warn("A UpstreamCombiner named " + key + " already exists, class: " + upstreamCombiners.get(key) + ". It will be overwritten.");
             }
-            upstreamCombiners.put(key, factory);
+            if (factory instanceof StatsAware) {
+                ((StatsAware) factory).setStats(stats);
+            }
+            upstreamCombiners.put(key, new StatsUpstreamCombiner(factory, stats));
             log.info("Loaded UpstreamCombiner [" + key + "]");
         }
     }
