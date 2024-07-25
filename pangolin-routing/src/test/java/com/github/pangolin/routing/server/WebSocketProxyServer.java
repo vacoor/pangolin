@@ -1,5 +1,6 @@
-package com.github.pangolin.routing.handler.internal.server;
+package com.github.pangolin.routing.server;
 
+import com.github.pangolin.routing.handler.internal.server.HttpProxyServerHandler;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;

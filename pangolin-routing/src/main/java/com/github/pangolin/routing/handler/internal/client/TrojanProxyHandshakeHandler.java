@@ -1,6 +1,5 @@
 package com.github.pangolin.routing.handler.internal.client;
 
-import com.github.pangolin.util.Channels;
 import freework.codec.Hex;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -10,6 +9,9 @@ import io.netty.channel.ChannelPromise;
 import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressType;
 import io.netty.handler.codec.socksx.v5.Socks5CommandType;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.NetUtil;
 import io.netty.util.internal.ObjectUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -41,7 +43,10 @@ public class TrojanProxyHandshakeHandler extends ChannelDuplexHandler {
 
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
-        ctx.pipeline().addBefore(ctx.name(), null, Channels.createClientSslContext().newHandler(ctx.alloc()));
+        final SslContext sslContext = SslContextBuilder.forClient()
+                .trustManager(InsecureTrustManagerFactory.INSTANCE)
+                .build();
+        ctx.pipeline().addBefore(ctx.name(), null, sslContext.newHandler(ctx.alloc()));
     }
 
     @Override

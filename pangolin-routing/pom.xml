@@ -49,6 +49,7 @@
             <groupId>com.github.nomou.pangolin</groupId>
             <artifactId>pangolin-common</artifactId>
             <optional>true</optional>
+            <!--<scope>test</scope>-->
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

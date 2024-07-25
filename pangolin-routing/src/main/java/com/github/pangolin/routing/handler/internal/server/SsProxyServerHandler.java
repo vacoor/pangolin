@@ -6,15 +6,11 @@ import com.github.pangolin.routing.handler.codec.ss.SsSocketStreamCryptCodec;
 import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm;
-import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.util.SocketUtils;
-import com.github.pangolin.server.NettyServer;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
-import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.socksx.v5.Socks5AddressDecoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressType;
 import lombok.extern.slf4j.Slf4j;
@@ -126,26 +122,4 @@ public class SsProxyServerHandler extends ChannelDuplexHandler {
         };
     }
 
-    public static void main(String[] args) throws Exception {
-//        final String method = "rc4-md5";
-        final String method = "chacha20-ietf-poly1305";
-        final CipherAlgorithm instance = (CipherAlgorithm) CipherAlgorithmSpi.getInstance(method);
-        final NettyServer server = new NettyServer(56001);
-        server.start(true, new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new SsProxyServerHandler("jASkBs", instance, new StandardSocketChannelFactory()));
-            }
-        }).addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture future) throws Exception {
-                if (future.isSuccess()) {
-                    final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                    System.out.println(String.format("UpstreamServer started on %s:%s", localAddress.getHostString(), localAddress.getPort()));
-                } else {
-                    future.cause().printStackTrace();
-                }
-            }
-        }).sync().channel().closeFuture().sync();
-    }
 }
