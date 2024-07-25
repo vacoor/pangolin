@@ -1,9 +1,10 @@
 package com.github.pangolin.routing.handler.extra;
 
+import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.route.RouteRegistry;
+import com.github.pangolin.routing.route.predicate.DomainPatternRoutePredicate;
 import com.github.pangolin.routing.route.predicate.RoutePredicate;
-import com.github.pangolin.routing.route.predicate.DomainRoutePredicate;
-import com.github.pangolin.routing.route.predicate.SubnetRoutePredicate;
+import com.github.pangolin.routing.route.predicate.Subnet4RoutePredicate;
 import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -19,6 +20,7 @@ import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.QueryStringDecoder;
+import io.netty.util.NetUtil;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -27,7 +29,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.Map;
 
 /**
  * Proxy Auto-Configuration File Server Handler.
@@ -82,7 +83,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
                 final String requestPath = decoder.path();
                 if (requestPath.equals(this.pacPath)) {
                     final String addr = getHttpRequestAddress(httpRequest).getHostString() + ":" + proxyPort;
-                    final String pac = toPac(routeRegistry.getRoutes(), addr, decoder.parameters().containsKey("http"));
+                    final String pac = toPac(routeRegistry.routes(), addr, decoder.parameters().containsKey("http"));
 
                     final ByteBuf body = Unpooled.copiedBuffer(pac, StandardCharsets.UTF_8);
                     final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);
@@ -117,7 +118,7 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
         return port > 0 ? port : uri.toLowerCase().startsWith("https://") ? 443 : 80;
     }
 
-    private static String toPac(final Map<RoutePredicate, String> rules, final String addr, final boolean onlyHttp) {
+    private static String toPac(final Iterable<Route> routes, final String addr, final boolean onlyHttp) {
         final StringBuilder buff = new StringBuilder();
         final String now = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
         buff.append("/**\r\n")
@@ -137,11 +138,13 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
             buff.append(String.format("SOCKS5 %s; SOCKS %s; PROXY %s", addr, addr, addr));
         }
         buff.append("';\r\n");
-        for (final Map.Entry<RoutePredicate, String> entry : rules.entrySet()) {
-            if (!"DIRECT".equalsIgnoreCase(entry.getValue())) {
-                RoutePredicate predicate = entry.getKey();
-                String s = toPacStatement(predicate);
-                buff.append("  ").append(s).append("\r\n");
+        for (final Route route : routes) {
+            if (!"DIRECT".equalsIgnoreCase(route.getUpstream())) {
+                final Iterable<RoutePredicate> predicates = route.getPredicates();
+                for (final RoutePredicate predicate : predicates) {
+                    String s = toPacStatement(predicate);
+                    buff.append("  ").append(s).append("\r\n");
+                }
             }
         }
         buff.append("  if (!isResolvable(host)) return $PROXY + '; DIRECT';\r\n");
@@ -152,10 +155,10 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
     }
 
     private static String toPacStatement(final RoutePredicate pattern) {
-        if (pattern instanceof DomainRoutePredicate) {
+        if (pattern instanceof DomainPatternRoutePredicate) {
             final String prefixWildcard = "**.";
             final String suffixWildcard = ".**";
-            final DomainRoutePredicate dp = (DomainRoutePredicate) pattern;
+            final DomainPatternRoutePredicate dp = (DomainPatternRoutePredicate) pattern;
             String s1 = dp.toString();
             final boolean isPrefixWildcard = s1.startsWith(prefixWildcard);
             final boolean isSuffixWildcard = s1.endsWith(suffixWildcard);
@@ -163,8 +166,6 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
                 s1 = s1.replace("**.", "").replace(".**", "");
                 if (s1.startsWith("*") && s1.endsWith("*")) {
                     return String.format("if (shExpMatch(host, '%s')) return $PROXY;", s1);
-                } else {
-                    System.out.println("Unsupported");
                 }
             } else if (isPrefixWildcard) {
                 s1 = s1.replace("**.", "");
@@ -172,15 +173,11 @@ public class ProxyAutoConfigurationServerHandler extends ChannelInboundHandlerAd
             } else {
                 return String.format("if (shExpMatch(host, '%s')) return $PROXY;", s1);
             }
-        } else if (pattern instanceof SubnetRoutePredicate) {
-            final SubnetRoutePredicate p = (SubnetRoutePredicate) pattern;
-            RoutePredicate delegate = p.getDelegate();
-            if (delegate instanceof SubnetRoutePredicate.Inet4SubnetPattern) {
-                SubnetRoutePredicate.Inet4SubnetPattern i4sn = (SubnetRoutePredicate.Inet4SubnetPattern) delegate;
-                String networkAddress = i4sn.getNetworkAddress();
-                String subnetMask = i4sn.getSubnetMask();
-                return String.format("if (isInNet(host, '%s', '%s')) return $PROXY;", networkAddress, subnetMask);
-            }
+        } else if (pattern instanceof Subnet4RoutePredicate) {
+            final Subnet4RoutePredicate p = (Subnet4RoutePredicate) pattern;
+            final String networkAddress = NetUtil.toAddressString(p.getNetworkAddress());
+            final String subnetMask = NetUtil.intToIpAddress(p.getSubnetMask());
+            return String.format("if (isInNet(host, '%s', '%s')) return $PROXY;", networkAddress, subnetMask);
         }
         return String.format("/* NOT SUPPORTED: %s */", pattern);
     }

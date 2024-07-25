@@ -1,31 +1,9 @@
 package com.github.pangolin.routing.route.predicate;
 
-import java.net.InetSocketAddress;
+public class DomainRoutePredicate extends DomainPatternRoutePredicate {
 
-/**
- *
- */
-public class DomainRoutePredicate implements RoutePredicate {
-    private static final AntPathMatcher MATCHER = new AntPathMatcher(".");
-
-    private final String pattern;
-
-    public DomainRoutePredicate(final String pattern) {
-        this.pattern = pattern;
+    public DomainRoutePredicate(final String domain) {
+        super(domain);
     }
 
-    @Override
-    public boolean test(final InetSocketAddress destination) {
-        if (destination.isUnresolved()) {
-            return MATCHER.matches(pattern, destination.getHostString());
-        } else {
-            final String hostname = destination.getAddress().getHostName();
-            return MATCHER.matches(pattern, hostname);
-        }
-    }
-
-    @Override
-    public String toString() {
-        return pattern;
-    }
 }

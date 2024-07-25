@@ -1,8 +1,9 @@
 package com.github.pangolin.routing.handler.extra;
 
+import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.route.RouteRegistry;
+import com.github.pangolin.routing.route.predicate.DomainPatternRoutePredicate;
 import com.github.pangolin.routing.route.predicate.RoutePredicate;
-import com.github.pangolin.routing.route.predicate.DomainRoutePredicate;
 import com.github.pangolin.routing.route.predicate.SubnetRoutePredicate;
 import com.sun.net.httpserver.HttpServer;
 import io.netty.buffer.ByteBuf;
@@ -23,7 +24,6 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.Map;
 
 /**
  * Chrome Switchy/SwitchyOmega rule list handler.
@@ -82,6 +82,16 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
                             .append("; Date: ").append(generatedDate).append("\r\n")
                             .append("; Usage: https://github.com/FelisCatus/SwitchyOmega/wiki/RuleListUsage\r\n\r\n");
 
+                    final Iterable<Route> routes = routeRegistry.routes();
+                    for (final Route route : routes) {
+                        if (!"DIRECT".equalsIgnoreCase(route.getUpstream())) {
+                            final Iterable<RoutePredicate> predicates = route.getPredicates();
+                            for (RoutePredicate predicate : predicates) {
+                                buff.append(toSwitchyRule(predicate)).append("\r\n");
+                            }
+                        }
+                    }
+                    /*
                     final Map<RoutePredicate, String> rules = routeRegistry.getRoutes();
                     for (Map.Entry<RoutePredicate, String> entry : rules.entrySet()) {
                         final RoutePredicate predicate = entry.getKey();
@@ -89,6 +99,7 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
                             buff.append(toSwitchyRule(predicate)).append("\r\n");
                         }
                     }
+                    */
 
                     final ByteBuf body = Unpooled.copiedBuffer(buff.toString(), StandardCharsets.UTF_8);
                     final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);
@@ -105,10 +116,10 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
 
 
     private static String toSwitchyRule(final RoutePredicate pattern) {
-        if (pattern instanceof DomainRoutePredicate) {
+        if (pattern instanceof DomainPatternRoutePredicate) {
             final String prefixWildcard = "**.";
             final String suffixWildcard = ".**";
-            final DomainRoutePredicate dp = (DomainRoutePredicate) pattern;
+            final DomainPatternRoutePredicate dp = (DomainPatternRoutePredicate) pattern;
 
             String patternStr = dp.toString();
             final boolean isPrefixWildcard = patternStr.startsWith(prefixWildcard);
@@ -127,7 +138,7 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
             }
         } else if (pattern instanceof SubnetRoutePredicate) {
             final SubnetRoutePredicate p = (SubnetRoutePredicate) pattern;
-            final int prefixLength = p.getPrefixLength();
+            final int prefixLength = p.getCidrPrefix();
             final InetAddress sa = p.getNetworkAddress();
             return String.format("Ip: %s/%s", sa.getHostAddress(), prefixLength);
             /*

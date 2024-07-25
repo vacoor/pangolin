@@ -1,9 +1,0 @@
-com.github.pangolin.routing.v2.route.predicate.Subnet4RoutePredicateFactory
-com.github.pangolin.routing.v2.route.predicate.Subnet6RoutePredicateFactory
-
-com.github.pangolin.routing.v2.route.predicate.DomainRoutePredicateFactory
-com.github.pangolin.routing.v2.route.predicate.DomainSuffixRoutePredicateFactory
-com.github.pangolin.routing.v2.route.predicate.DomainKeywordRoutePredicateFactory
-
-com.github.pangolin.routing.v2.route.predicate.spi.GeoIpRoutePredicateFactory
-

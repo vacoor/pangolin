@@ -6,7 +6,9 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 
-public class SocketUtils {
+public abstract class SocketUtils {
+    private SocketUtils() {
+    }
 
     public static InetAddress toAddress(final String host, final boolean resolve) {
         try {

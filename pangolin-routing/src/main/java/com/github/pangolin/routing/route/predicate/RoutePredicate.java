@@ -1,12 +1,7 @@
 package com.github.pangolin.routing.route.predicate;
 
-import java.net.InetSocketAddress;
+public interface RoutePredicate<T> {
 
-/**
- *
- */
-public interface RoutePredicate {
-
-    boolean test(final InetSocketAddress destination);
+    boolean test(final T t);
 
 }

@@ -1,11 +1,9 @@
 package com.github.pangolin.routing.route;
 
-import com.github.pangolin.routing.route.predicate.RoutePredicate;
+public interface RouteRegistry<T> {
 
-import java.util.Map;
+    Iterable<Route> routes();
 
-public interface RouteRegistry {
-
-    Map<RoutePredicate, String> getRoutes();
+    void addRoute(final Route<T> route);
 
 }

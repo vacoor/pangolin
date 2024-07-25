@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.support;
 
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
-import com.github.pangolin.routing.upstream.UpstreamServer;
+import com.github.pangolin.routing.upstream.Upstream;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
@@ -19,10 +19,10 @@ import java.util.List;
 
 @Slf4j
 public class ProxyDatagramChannelFactory implements DatagramChannelFactory {
-    private final UpstreamServer upstream;
+    private final Upstream upstream;
     private final List<String> bypass;
 
-    public ProxyDatagramChannelFactory(final UpstreamServer upstream, final List<String> bypass) {
+    public ProxyDatagramChannelFactory(final Upstream upstream, final List<String> bypass) {
         this.upstream = ObjectUtil.checkNotNull(upstream, "upstream");
         this.bypass = null != bypass ? bypass : Collections.emptyList();
     }
