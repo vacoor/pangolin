@@ -4,7 +4,7 @@ import com.github.pangolin.routing.v2.context.*;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicateSetFactory;
 import com.github.pangolin.routing.v2.server.Acceptor;
-import com.github.pangolin.routing.v2.server.Server;
+import com.github.pangolin.routing.v2.server.AcceptorProvider;
 import com.github.pangolin.routing.v2.stats.StatsAware;
 import com.github.pangolin.routing.v2.stats.StatsUpstreamCombiner;
 import com.github.pangolin.routing.v2.stats.StatsUpstreamFactory;
@@ -106,10 +106,10 @@ public class RouteApplication {
         RouteContext context = createContext(configLocation);
 
         for (RouteContext ctx = context; null != ctx; ctx = ctx.parent()) {
-            if (!(ctx instanceof Server)) {
+            if (!(ctx instanceof AcceptorProvider)) {
                 continue;
             }
-            final List<Acceptor> acceptors = ((Server) ctx).getAcceptors();
+            final List<Acceptor> acceptors = ((AcceptorProvider) ctx).getAcceptors();
             for (final Acceptor acceptor : acceptors) {
                 final ChannelFuture start = acceptor.start(context);
                 final Channel channel = start.channel();

@@ -4,7 +4,7 @@ import com.github.pangolin.routing.v2.route.Route;
 import com.github.pangolin.routing.v2.route.RouteRegistry;
 import com.github.pangolin.routing.v2.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.v2.server.Acceptor;
-import com.github.pangolin.routing.v2.server.Server;
+import com.github.pangolin.routing.v2.server.AcceptorProvider;
 import com.github.pangolin.routing.v2.upstream.UpstreamRegistry;
 import com.github.pangolin.routing.v2.upstream.Upstream;
 import com.google.common.collect.Lists;
@@ -15,7 +15,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
-public abstract class AbstractRouteContext implements RouteContext, RouteRegistry<InetSocketAddress>, UpstreamRegistry, Server {
+public abstract class AbstractRouteContext implements RouteContext, RouteRegistry<InetSocketAddress>, UpstreamRegistry, AcceptorProvider {
     private final RouteContext parent;
     private final List<Route<InetSocketAddress>> routes = Lists.newLinkedList();
     private final Map<String, Upstream> upstreams = Maps.newLinkedHashMap();
