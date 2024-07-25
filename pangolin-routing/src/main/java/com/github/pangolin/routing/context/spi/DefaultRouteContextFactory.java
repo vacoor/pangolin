@@ -2,10 +2,11 @@ package com.github.pangolin.routing.context.spi;
 
 import com.github.pangolin.routing.context.AbstractRouteContextFactory;
 import com.github.pangolin.routing.context.InMemoryRouteContext;
-import com.github.pangolin.routing.server.AcceptorFactory;
-import com.github.pangolin.routing.server.MixinAcceptorFactory;
 import com.github.pangolin.routing.context.Ini;
 import com.github.pangolin.routing.context.RouteContext;
+import com.github.pangolin.routing.server.AcceptorFactory;
+import com.github.pangolin.routing.server.MixinAcceptorFactory;
+import com.google.common.collect.Maps;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URL;
@@ -41,6 +42,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
         }
 
         final Ini.Section proxyGroups = ini.getSection("Proxy Group");
+        final Map<String, String> nameMapping = Maps.newLinkedHashMap();
         if (null != proxyGroups) {
             for (final Map.Entry<String, String> entry : proxyGroups.entrySet()) {
                 final String name = entry.getKey();
@@ -49,13 +51,16 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
                 final String type = segments[0];
                 final List<String> proxies = Arrays.asList(Arrays.copyOfRange(segments, 1, segments.length));
 
+                if (proxies.isEmpty() || (1 == proxies.size() && proxies.contains("DIRECT"))) {
+                    nameMapping.put(name, "DIRECT");
+                }
                 registry.addUpstream(name, apply(name, type, proxies, registry));
             }
         }
 
         Ini.Section rule = ini.getSection("Rule");
         if (null != rule) {
-            rule.keySet().stream().map(route -> apply(route, url)).forEach(registry::addRoute);
+            rule.keySet().stream().map(route -> apply(route, url, nameMapping)).forEach(registry::addRoute);
         }
 
 
@@ -76,7 +81,8 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
             }
 
             registry.addAcceptors(acceptorFactory.apply(listenPort, segments));
-        };
+        }
+        ;
 
         return registry;
     }

@@ -4,6 +4,7 @@ import com.github.pangolin.routing.context.AbstractRouteContextFactory;
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Maps;
 import freework.net.Http;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
@@ -14,6 +15,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 @Slf4j
@@ -38,11 +40,21 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
                 .map(d -> apply(d.getName(), asServerUrl(d)))
                 .forEach(d -> context.addUpstream(d.getName(), d));
 
+        /*
         proxyGroupDefinitions.stream()
                 .map(g -> apply(g.getName(), g.getType(), g.getProxies(), context))
                 .forEach(g -> context.addUpstream(g.getName(), g));
+                */
+        final Map<String, String> nameMapping = Maps.newLinkedHashMap();
+        for (ClashConfiguration.ProxyGroupDefinition g : proxyGroupDefinitions) {
+            final List<String> proxies = g.getProxies();
+            if (proxies.isEmpty() || (1 == proxies.size() && proxies.contains("DIRECT"))) {
+                nameMapping.put(g.getName(), "DIRECT");
+            }
+            context.addUpstream(g.getName(), apply(g.getName(), g.getType(), g.getProxies(), context));
+        }
 
-        rules.stream().map(r -> apply(r, url)).filter(Objects::nonNull).forEach(context::addRoute);
+        rules.stream().map(r -> apply(r, url, nameMapping)).filter(Objects::nonNull).forEach(context::addRoute);
 
         return context;
     }

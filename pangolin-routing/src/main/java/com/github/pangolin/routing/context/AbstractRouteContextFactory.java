@@ -58,10 +58,15 @@ public abstract class AbstractRouteContextFactory implements RouteContextFactory
         return combiner.combine(name, names, registry);
     }
 
-    protected Route<InetSocketAddress> apply(final String definition, final URL location) {
+    protected Route<InetSocketAddress> apply(final String definition, final URL location, final Map<String, String> nameMapping) {
         final String[] segments = definition.split(",");
         final Iterable<RoutePredicate<InetSocketAddress>> predicates = apply(segments[0], segments[1], location);
-        return segments.length > 2 ? Route.of(predicates, segments[2]) : null;
+        if (segments.length > 2) {
+            String nameToUse = nameMapping.get(segments[2]);
+            nameToUse = null != nameToUse ? nameToUse : segments[2];
+            return Route.of(predicates, nameToUse);
+        }
+        return null;
     }
 
     protected Iterable<RoutePredicate<InetSocketAddress>> apply(final String name, final String predicate, final URL location) {
