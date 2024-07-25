@@ -10,7 +10,7 @@ public class ApplicationLauncher {
 
     public static void main(String[] args) throws Exception {
         SpringApplication.run(ApplicationLauncher.class, args);
-        ApplicationLauncher.main(args);
+        RouteApplication.main(args);
     }
 
 }
