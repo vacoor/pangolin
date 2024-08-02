@@ -4,6 +4,7 @@ import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.route.predicate.UnknownRoutePredicate;
+import com.github.pangolin.routing.support.AliasRegistry;
 import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.upstream.UpstreamCombiner;
 import com.github.pangolin.routing.upstream.UpstreamFactory;
@@ -58,11 +59,11 @@ public abstract class AbstractRouteContextFactory implements RouteContextFactory
         return combiner.combine(name, names, registry);
     }
 
-    protected Route<InetSocketAddress> apply(final String definition, final URL location, final Map<String, String> nameMapping) {
+    protected Route<InetSocketAddress> apply(final String definition, final URL location, final AliasRegistry aliasRegistry) {
         final String[] segments = definition.split(",");
         final Iterable<RoutePredicate<InetSocketAddress>> predicates = apply(segments[0], segments[1], location);
         if (segments.length > 2) {
-            String nameToUse = nameMapping.get(segments[2]);
+            String nameToUse = aliasRegistry.canonicalName(segments[2]);
             nameToUse = null != nameToUse ? nameToUse : segments[2];
             return Route.of(predicates, nameToUse);
         }

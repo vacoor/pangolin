@@ -3,6 +3,8 @@ package com.github.pangolin.routing.context.spi;
 import com.github.pangolin.routing.context.AbstractRouteContextFactory;
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
+import com.github.pangolin.routing.support.AliasRegistry;
+import com.github.pangolin.routing.support.SimpleAliasRegistry;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 import freework.net.Http;
@@ -17,6 +19,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Slf4j
 public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
@@ -45,16 +48,23 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
                 .map(g -> apply(g.getName(), g.getType(), g.getProxies(), context))
                 .forEach(g -> context.addUpstream(g.getName(), g));
                 */
-        final Map<String, String> nameMapping = Maps.newLinkedHashMap();
+        final AliasRegistry aliasRegistry = context;
         for (ClashConfiguration.ProxyGroupDefinition g : proxyGroupDefinitions) {
-            final List<String> proxies = g.getProxies();
-            if (proxies.isEmpty() || (1 == proxies.size() && proxies.contains("DIRECT"))) {
-                nameMapping.put(g.getName(), "DIRECT");
+            List<String> proxies = g.getProxies().stream()
+                    .map(aliasRegistry::canonicalName)
+                    .collect(Collectors.toList());
+
+            proxies.remove("DIRECT");
+            if (proxies.isEmpty()) {
+                aliasRegistry.registerAlias("DIRECT", g.getName());;
+            } else if (1 == proxies.size()) {
+                aliasRegistry.registerAlias(proxies.iterator().next(), g.getName());
+            } else {
+                context.addUpstream(g.getName(), apply(g.getName(), g.getType(), proxies, context));
             }
-            context.addUpstream(g.getName(), apply(g.getName(), g.getType(), g.getProxies(), context));
         }
 
-        rules.stream().map(r -> apply(r, url, nameMapping)).filter(Objects::nonNull).forEach(context::addRoute);
+        rules.stream().map(r -> apply(r, url, aliasRegistry)).filter(Objects::nonNull).forEach(context::addRoute);
 
         return context;
     }

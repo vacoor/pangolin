@@ -2,12 +2,10 @@ package com.github.pangolin.routing.support;
 
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.upstream.Upstream;
-import com.github.pangolin.util.Channels;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.EventLoopGroup;
+import io.netty.bootstrap.Bootstrap;
+import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.resolver.NoopAddressResolverGroup;
 import io.netty.util.internal.ObjectUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -35,15 +33,26 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
                               final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
         final ChannelHandler transport = newSocketProxyHandler(destination);
         final NoopAddressResolverGroup resolverGroup = null != transport ? NoopAddressResolverGroup.INSTANCE : null;
-        return Channels.open(destination, resolverGroup, connTimeoutMs, autoRead, group, new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel ch) {
-                if (null != transport) {
-                    ch.pipeline().addFirst(transport);
-                }
-                ch.pipeline().addLast(handler);
-            }
-        });
+
+        final Bootstrap b = new Bootstrap();
+        b.option(ChannelOption.AUTO_READ, autoRead);
+        b.option(ChannelOption.TCP_NODELAY, true);
+        b.option(ChannelOption.SO_KEEPALIVE, true);
+        b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connTimeoutMs);
+        b.option(ChannelOption.SO_RCVBUF, 32 * 1024);// 读缓冲区为32k
+        b.resolver(resolverGroup)
+                .group(group)
+                .channel(NioSocketChannel.class)
+                .handler(new ChannelInitializer<SocketChannel>() {
+                    @Override
+                    protected void initChannel(final SocketChannel ch) {
+                        if (null != transport) {
+                            ch.pipeline().addFirst(transport);
+                        }
+                        ch.pipeline().addLast(handler);
+                    }
+                });
+        return b.connect(destination);
     }
 
     private ChannelHandler newSocketProxyHandler(final SocketAddress destination) {

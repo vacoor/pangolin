@@ -1,12 +1,12 @@
 package com.github.pangolin.routing.handler.internal.client;
 
 import com.github.pangolin.routing.util.SocketUtils;
-import com.github.pangolin.util.Channels;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.ChannelDuplexHandler;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelPromise;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
@@ -45,7 +45,6 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -373,38 +372,6 @@ public class SshProxyHandler extends ChannelDuplexHandler {
                 ctx.fireChannelRead(Unpooled.wrappedBuffer(data, off, (int) len));
             }
         }
-    }
-
-
-    public static void main(String[] args) throws InterruptedException {
-        String hostname = "";
-        int port = 22;
-        String username = "root";
-        String password = "";
-
-        Channel channel = Channels.open("www.baidu.com", 80, true, new NioEventLoopGroup(), new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(final SocketChannel channel) throws Exception {
-                channel.pipeline().addLast(new SshProxyHandler(hostname, port, username, password));
-                channel.pipeline().addLast(new ChannelInboundHandlerAdapter() {
-                    @Override
-                    public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-                        ByteBuf buf = (ByteBuf) msg;
-                        final byte[] bytes = new byte[buf.readableBytes()];
-                        buf.readBytes(bytes);
-                        System.out.println(new String(bytes, StandardCharsets.UTF_8));
-                    }
-                });
-            }
-        }).sync().channel();
-
-
-//    Thread.sleep(5 * 1000);
-
-        byte[] bytes = "GET / HTTP/1.1\r\n\r\n".getBytes(StandardCharsets.UTF_8);
-        ByteBuf msg = Unpooled.wrappedBuffer(bytes);
-        channel.writeAndFlush(msg);
-        channel.closeFuture().sync();
     }
 
 }

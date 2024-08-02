@@ -14,6 +14,26 @@ import java.util.stream.Stream;
  */
 public class Utils {
 
+    public static String assertNotBlank(final String text, final String message, final Object... args) {
+        if (!hasText(text)) {
+            throw new IllegalArgumentException(String.format(message, args));
+        }
+        return text;
+    }
+
+    public static boolean hasText(final String text) {
+        if (null == text || text.isEmpty()) {
+            return false;
+        }
+        final int strLen = text.length();
+        for (int i = 0; i < strLen; i++) {
+            if (!Character.isWhitespace(text.charAt(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static Stream<String> lines(final URL url, final Charset charset) throws IOException {
         final BufferedReader reader = Resources.asCharSource(url, charset)
                 .openBufferedStream();

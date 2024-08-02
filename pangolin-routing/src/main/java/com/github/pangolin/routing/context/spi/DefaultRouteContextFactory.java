@@ -6,6 +6,8 @@ import com.github.pangolin.routing.context.Ini;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.server.AcceptorFactory;
 import com.github.pangolin.routing.server.MixinAcceptorFactory;
+import com.github.pangolin.routing.support.AliasRegistry;
+import com.github.pangolin.routing.support.SimpleAliasRegistry;
 import com.google.common.collect.Maps;
 import lombok.extern.slf4j.Slf4j;
 
@@ -13,6 +15,7 @@ import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
@@ -36,31 +39,38 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
         }
 
         final InMemoryRouteContext registry = new InMemoryRouteContext(parentToUse);
+        final AliasRegistry aliasRegistry = registry;
+
         final Ini.Section proxy = ini.getSection("Proxy");
         if (null != proxy) {
             proxy.forEach((k, v) -> registry.addUpstream(k, apply(k, v)));
         }
 
         final Ini.Section proxyGroups = ini.getSection("Proxy Group");
-        final Map<String, String> nameMapping = Maps.newLinkedHashMap();
         if (null != proxyGroups) {
             for (final Map.Entry<String, String> entry : proxyGroups.entrySet()) {
                 final String name = entry.getKey();
                 final String value = entry.getValue();
                 final String[] segments = value.split("\\s*,\\s*");
                 final String type = segments[0];
-                final List<String> proxies = Arrays.asList(Arrays.copyOfRange(segments, 1, segments.length));
+                final List<String> proxies = Arrays.stream(Arrays.copyOfRange(segments, 1, segments.length))
+                        .map(aliasRegistry::canonicalName).collect(Collectors.toList());
 
-                if (proxies.isEmpty() || (1 == proxies.size() && proxies.contains("DIRECT"))) {
-                    nameMapping.put(name, "DIRECT");
+                proxies.remove("DIRECT");
+
+                if (proxies.isEmpty()) {
+                    aliasRegistry.registerAlias("DIRECT", name);
+                } else if (1 == proxies.size()) {
+                    aliasRegistry.registerAlias(proxies.iterator().next(), name);
+                } else {
+                    registry.addUpstream(name, apply(name, type, proxies, registry));
                 }
-                registry.addUpstream(name, apply(name, type, proxies, registry));
             }
         }
 
         Ini.Section rule = ini.getSection("Rule");
         if (null != rule) {
-            rule.keySet().stream().map(route -> apply(route, url, nameMapping)).forEach(registry::addRoute);
+            rule.keySet().stream().map(route -> apply(route, url, aliasRegistry)).forEach(registry::addRoute);
         }
 
 

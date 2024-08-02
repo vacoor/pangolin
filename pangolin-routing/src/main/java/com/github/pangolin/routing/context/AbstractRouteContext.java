@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.context;
 
 import com.github.pangolin.routing.route.RouteRegistry;
+import com.github.pangolin.routing.support.SimpleAliasRegistry;
 import com.github.pangolin.routing.upstream.UpstreamRegistry;
 import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.route.predicate.RoutePredicate;
@@ -17,7 +18,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-public abstract class AbstractRouteContext implements RouteContext, RouteRegistry<InetSocketAddress>, UpstreamRegistry, AcceptorProvider {
+public abstract class AbstractRouteContext extends SimpleAliasRegistry implements RouteContext, RouteRegistry<InetSocketAddress>, UpstreamRegistry, AcceptorProvider {
     private final RouteContext parent;
     private final List<Route<InetSocketAddress>> routes = Lists.newLinkedList();
     private final Map<String, Upstream> upstreams = Maps.newLinkedHashMap();
@@ -63,7 +64,8 @@ public abstract class AbstractRouteContext implements RouteContext, RouteRegistr
 
     @Override
     public Upstream getUpstream(final String name) {
-        final Upstream upstream = upstreams.get(name);
+        final String nameToUse = canonicalName(name);
+        final Upstream upstream = upstreams.get(nameToUse);
         if (null != upstream || null == parent) {
             return upstream;
         }
