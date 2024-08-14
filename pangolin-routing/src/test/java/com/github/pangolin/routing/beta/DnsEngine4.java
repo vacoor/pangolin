@@ -1,0 +1,139 @@
+package com.github.pangolin.routing.beta;
+
+import com.github.pangolin.routing.beta.dns.DnsQueryServerHandler;
+import com.github.pangolin.routing.util.SocketUtils;
+import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.DatagramChannel;
+import io.netty.channel.socket.nio.NioDatagramChannel;
+import io.netty.handler.codec.dns.DatagramDnsQuery;
+import io.netty.handler.codec.dns.DatagramDnsResponse;
+import io.netty.handler.codec.dns.DefaultDnsRawRecord;
+import io.netty.handler.codec.dns.DnsQuestion;
+import io.netty.handler.codec.dns.DnsRecordType;
+import io.netty.handler.codec.dns.DnsSection;
+import io.netty.util.NetUtil;
+
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+
+public class DnsEngine4 implements DnsEngine {
+    private final long ttl;
+    private final LeaseAllocator4 allocator;
+
+    public DnsEngine4(final long ttl, final LeaseAllocator4 allocator) {
+        this.ttl = ttl;
+        this.allocator = allocator;
+    }
+
+    final Map<String, LeaseAllocator4.Lease> domainToLeaseMap = new ConcurrentHashMap<>();
+    final Map<String, Binding> nsIpToLeaseMap = new ConcurrentHashMap<>();
+
+    private class Binding {
+        private final String domain;
+        private final LeaseAllocator4.Lease lease;
+
+        private Binding(final String domain, final LeaseAllocator4.Lease lease) {
+            this.domain = domain;
+            this.lease = lease;
+        }
+    }
+
+    public byte[] lookup(final String domain) {
+        int value = domainToLeaseMap.compute(domain, (k, v) -> {
+            // TODO v.value == null
+            if (null == v || System.currentTimeMillis() - v.timestamp >= 2 * ttl) {
+                LeaseAllocator4.Lease l = allocator.acquire();
+                String ipToUse = NetUtil.intToIpAddress(l.value);
+                System.out.println(String.format("%s -> %s", domain, ipToUse));
+                nsIpToLeaseMap.put(NetUtil.intToIpAddress(l.value), new Binding(domain, l));
+                return l;
+            }
+            return v;
+        }).value;
+        return 0 != value ? SocketUtils.toAddress(NetUtil.intToIpAddress(value), false).getAddress() : null;
+    }
+
+    @Override
+    public String nslookup(final byte[] ip) {
+        String ipToUse = NetUtil.intToIpAddress(ipAddressToInt(ip));
+        Binding compute = nsIpToLeaseMap.compute(ipToUse, (k, v) -> {
+            if (null == v || System.currentTimeMillis() - v.lease.timestamp >= 2 * ttl) {
+                return null;
+            }
+            return v;
+        });
+        return null != compute ? compute.domain : null;
+    }
+
+    private static int ipAddressToInt(final byte[] ipBytes) {
+        assert ipBytes.length == 4;
+        return (ipBytes[0] & 0xff) << 24 | (ipBytes[1] & 0xff) << 16 | (ipBytes[2] & 0xff) << 8 | ipBytes[3] & 0xff;
+    }
+
+    public DatagramDnsResponse lookup(DatagramDnsQuery query) {
+        final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
+        final String domain = dnsQuestion.name();
+        final int ttl = 90;
+        byte[] bytes = this.lookup(domain);
+        if (null != bytes) {
+            // final byte[] bytes = NetUtil.createByteArrayFromIpAddressString("10.188.71.3");
+            final ByteBuf buf = Unpooled.wrappedBuffer(bytes);
+            final DefaultDnsRawRecord dnsQuestionAnswer = new DefaultDnsRawRecord(dnsQuestion.name(), DnsRecordType.A, ttl, buf);
+
+            final DatagramDnsResponse response = new DatagramDnsResponse(query.recipient(), query.sender(), query.id());
+            response.addRecord(DnsSection.QUESTION, dnsQuestion);
+            response.addRecord(DnsSection.ANSWER, dnsQuestionAnswer);
+            return response;
+        }
+        return null;
+    }
+
+    public static DnsEngine4 create() {
+        final byte[] address = SocketUtils.toAddress("192.168.1.1", false).getAddress();
+        final byte[] mask = SocketUtils.toAddress("255.255.255.000", false).getAddress();
+
+        final int maskInt = ipAddressToInt(mask);
+        final int size = 0xFFFFFFFF - maskInt;
+        final int subnetAddress = ipAddressToInt(address) & maskInt;
+
+//        System.out.println(size);
+
+//        System.out.println(NetUtil.intToIpAddress(subnetAddress));
+        LeaseAllocator4 allocator = new LeaseAllocator4(subnetAddress + 2, subnetAddress + size - 1, 100);
+        return new DnsEngine4(100, allocator);
+    }
+
+    public static void main(String[] args) throws UnknownHostException, InterruptedException {
+
+        /*
+        for (int i = 0; i < 10; i++) {
+//            final int index = allocator.acquire().value;
+//            System.out.println((index) + ": " + NetUtil.intToIpAddress(index));
+            final String domain = "www.baidu.com" + i;
+            InetAddress a = Inet4Address.getByAddress(dns.lookup(domain));
+            String lookup = a.getHostAddress();
+            System.out.println(lookup + " -> " + dns.nslookup(a.getAddress()));
+        }
+        */
+        final DnsEngine4 dns = create();
+        EventLoopGroup proxyGroup = new NioEventLoopGroup();
+        Bootstrap b = new Bootstrap();
+        b.group(proxyGroup).channel(NioDatagramChannel.class)
+                .handler(new ChannelInitializer<DatagramChannel>() {
+                    @Override
+                    protected void initChannel(DatagramChannel ch) {
+                        ch.pipeline().addLast(new DnsQueryServerHandler(dns::lookup));
+                    }
+                }).option(ChannelOption.SO_BROADCAST, true).bind(53).sync();
+    }
+}

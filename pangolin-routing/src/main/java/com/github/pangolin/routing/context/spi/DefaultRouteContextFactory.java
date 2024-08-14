@@ -19,7 +19,11 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
-    private final AcceptorFactory acceptorFactory = new MixinAcceptorFactory();
+    private final AcceptorFactory acceptorFactory = createAcceptorFactory();
+
+    protected AcceptorFactory createAcceptorFactory() {
+        return new MixinAcceptorFactory();
+    }
 
     @Override
     public RouteContext createContext(final URL url, final RouteContext parent) throws Exception {

@@ -39,7 +39,7 @@ public class ProxyDatagramChannelFactory implements DatagramChannelFactory {
                 .resolver(resolverGroup)
                 .group(group)
                 .handler(handler);
-        return b.bind(0);
+        return b.bind("10.188.71.3", 0);
     }
 
     private ChannelHandler newDatagramProxyHandler(final SocketAddress destination) {

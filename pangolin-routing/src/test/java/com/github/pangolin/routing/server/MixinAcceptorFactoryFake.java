@@ -1,27 +1,40 @@
 package com.github.pangolin.routing.server;
 
+import com.github.pangolin.routing.beta.DnsEngine4;
+import com.github.pangolin.routing.beta.dns.DnsQueryServerHandler;
+import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
-import com.github.pangolin.routing.context.InMemoryRouteContext;
-import com.github.pangolin.routing.context.RouteContext;
+import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.support.ProxyDatagramChannelFactory;
 import com.github.pangolin.routing.support.ProxySocketChannelFactory;
 import com.github.pangolin.routing.upstream.AbstractUpstream;
 import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
+import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioDatagramChannel;
+import io.netty.handler.codec.dns.DnsQuestion;
+import io.netty.handler.codec.dns.DnsSection;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -30,14 +43,14 @@ import java.util.ServiceLoader;
 import java.util.stream.Collectors;
 
 @Slf4j
-public class MixinAcceptorFactory implements AcceptorFactory {
+public class MixinAcceptorFactoryFake implements AcceptorFactory {
     private final Map<String, MixinAcceptorHandshakerFactory> handshakers = Maps.newLinkedHashMap();
 
-    public MixinAcceptorFactory() {
+    public MixinAcceptorFactoryFake() {
         this(ServiceLoader.load(MixinAcceptorHandshakerFactory.class));
     }
 
-    public MixinAcceptorFactory(final Iterable<MixinAcceptorHandshakerFactory> handshakers) {
+    public MixinAcceptorFactoryFake(final Iterable<MixinAcceptorHandshakerFactory> handshakers) {
         this.initHandshakerFactories(handshakers);
     }
 
@@ -66,9 +79,35 @@ public class MixinAcceptorFactory implements AcceptorFactory {
         }).collect(Collectors.toList()) : Collections.emptyList();
 
         final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
+
+
         return new Acceptor() {
             @Override
             public ChannelFuture start(final RouteContext context) throws Exception {
+                final DnsEngine4 engine4 = DnsEngine4.create();
+                EventLoopGroup proxyGroup = new NioEventLoopGroup();
+                Bootstrap b = new Bootstrap();
+                b.group(proxyGroup).channel(NioDatagramChannel.class)
+                        .handler(new ChannelInitializer<DatagramChannel>() {
+                            @Override
+                            protected void initChannel(DatagramChannel ch) {
+                                ch.pipeline().addLast(new DnsQueryServerHandler(q -> {
+                                    final DnsQuestion dnsQuestion = q.recordAt(DnsSection.QUESTION);
+                                    final String domain = dnsQuestion.name();
+                                    final Route route = context.getRoute(InetSocketAddress.createUnresolved(domain, 0));
+                                    if (null == route || "DIRECT".equalsIgnoreCase(route.getUpstream())) {
+                                        return null;
+                                    }
+                                    return engine4.lookup(q);
+                                }));
+                            }
+                        }).option(ChannelOption.SO_BROADCAST, true).bind(53).addListener(new GenericFutureListener<Future<? super Void>>() {
+                    @Override
+                    public void operationComplete(final Future<? super Void> future) throws Exception {
+                        System.out.println("DNS: " + future.isSuccess());
+                    }
+                });
+
                 final Upstream upstream = "DEFAULT".equals(proxyName) ? new AbstractUpstream("DEFAULT") {
                     @Override
                     public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
@@ -84,10 +123,32 @@ public class MixinAcceptorFactory implements AcceptorFactory {
                 } : context.getUpstream(proxyName);
 
                 // FIXME
-                final SocketChannelFactory routeSocketFactory = null != upstream ? new ProxySocketChannelFactory(upstream, bypass) : new StandardSocketChannelFactory();
-                final DatagramChannelFactory routeDatagramFactory = null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass) : new StandardDatagramChannelFactory();
+                final SocketChannelFactory routeSocketFactory = null != upstream ? new ProxySocketChannelFactory(upstream, bypass) {
+                    @Override
+                    public ChannelFuture open(SocketAddress destination, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
+                        if (destination instanceof InetSocketAddress) {
+                            final String domain = engine4.nslookup(((InetSocketAddress) destination).getAddress().getAddress());
+                            if (null != domain) {
+                                destination = InetSocketAddress.createUnresolved(domain, ((InetSocketAddress) destination).getPort());
+                            }
+                        }
+                        return super.open(destination, connTimeoutMs, autoRead, group, handler);
+                    }
+                } : new StandardSocketChannelFactory();
+                final DatagramChannelFactory routeDatagramFactory = null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass) {
+                    @Override
+                    public ChannelFuture open(InetSocketAddress destination, final int connTimeoutMs, final EventLoopGroup group, final ChannelHandler handler) {
+                        if (destination instanceof InetSocketAddress) {
+                            final String domain = engine4.nslookup(((InetSocketAddress) destination).getAddress().getAddress());
+                            if (null != domain) {
+                                destination = InetSocketAddress.createUnresolved(domain, ((InetSocketAddress) destination).getPort());
+                            }
+                        }
+                        return super.open(destination, connTimeoutMs, group, handler);
+                    }
+                } : new StandardDatagramChannelFactory();
 
-                final NettyServer server = new NettyServer(listenPort);
+                final NettyServer server = new NettyServer("10.188.71.3", listenPort);
                 return server.start(true, new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(final SocketChannel channel) throws Exception {
@@ -111,12 +172,5 @@ public class MixinAcceptorFactory implements AcceptorFactory {
             }
         };
     }
-
-    /*
-    public static void main(String[] args) throws Exception {
-        final Acceptor acceptor = new MixinAcceptorFactory().apply(1089);
-        acceptor.start(new InMemoryRouteContext(null)).sync().channel().closeFuture().sync();
-    }
-    */
 
 }
