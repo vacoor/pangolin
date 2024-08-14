@@ -4,6 +4,7 @@ import com.github.pangolin.routing.util.SocketUtils;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import io.netty.util.NetUtil;
+import lombok.val;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,7 +35,6 @@ public class LeaseAllocator {
     private final AtomicReference<Node> head = new AtomicReference<>();
     private final AtomicReference<Node> tail = new AtomicReference<>();
 
-    private final Map<String, Lease> leaseMap = new ConcurrentHashMap<>();
 
     private final int min;
     private final int max;
@@ -78,17 +78,20 @@ public class LeaseAllocator {
         Lease lease = poll(2 * ttl);
         if (null == lease) {
             lease = acquire0();
-        } else {
-            lease = new Lease(lease.value);
+//        } else {
+//            Lease o = lease;
+//            lease = new Lease(o.value);
         }
         if (null == lease) {
             lease = poll(ttl);
-        } else {
-            lease = new Lease(lease.value);
+//        } else {
+//            lease = new Lease(lease.value);
         }
+
         if (null == lease) {
             throw new IllegalStateException("No more");
         }
+        lease = new Lease(lease.value);
         offer(lease);
         return lease;
     }
@@ -152,8 +155,20 @@ public class LeaseAllocator {
         return (ipBytes[0] & 0xff) << 24 | (ipBytes[1] & 0xff) << 16 | (ipBytes[2] & 0xff) << 8 | ipBytes[3] & 0xff;
     }
 
+    final Map<String, Lease> leaseMap = new ConcurrentHashMap<>();
+
+    protected String lookup(final String domain) {
+        int value = leaseMap.compute(domain, (k, v) -> {
+            //
+            if (null == v || System.currentTimeMillis() - v.timestamp >= 2 * ttl) {
+                return acquire();
+            }
+            return v;
+        }).value;
+        return 0 != value ? NetUtil.intToIpAddress(value) : null;
+    }
+
     public static void main(String[] args) {
-//    NetUtil.intToIpAddress()
         final byte[] address = SocketUtils.toAddress("192.168.1.1", false).getAddress();
         final byte[] mask = SocketUtils.toAddress("255.255.255.000", false).getAddress();
         final int addressInt = ipAddressToInt(address);
@@ -168,6 +183,7 @@ public class LeaseAllocator {
         for (int i = 0; i < 10; i++) {
             final int index = allocator.acquire().value;
             System.out.println((index) + ": " + NetUtil.intToIpAddress(index));
+            System.out.println(allocator.lookup("www.baidu.com"));
         }
     }
 
