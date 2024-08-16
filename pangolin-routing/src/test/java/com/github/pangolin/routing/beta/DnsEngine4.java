@@ -105,12 +105,13 @@ public class DnsEngine4 implements DnsEngine {
         final int maskInt = ipAddressToInt(mask);
         final int size = 0xFFFFFFFF - maskInt;
         final int subnetAddress = ipAddressToInt(address) & maskInt;
+        final long ttl = 1000 * 10;
 
 //        System.out.println(size);
 
 //        System.out.println(NetUtil.intToIpAddress(subnetAddress));
-        LeaseAllocator4 allocator = new LeaseAllocator4(subnetAddress + 3, subnetAddress + size - 1, 100);
-        return new DnsEngine4(100, allocator);
+        LeaseAllocator4 allocator = new LeaseAllocator4(subnetAddress + 3, subnetAddress + size - 1, ttl);
+        return new DnsEngine4(ttl, allocator);
     }
 
     public static void main(String[] args) throws UnknownHostException, InterruptedException {

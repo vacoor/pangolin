@@ -47,7 +47,7 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
                     @Override
                     protected void initChannel(final SocketChannel ch) {
                         if (null != transport) {
-                            ch.pipeline().addFirst(transport);
+                            ch.pipeline().addLast(transport);
                         }
                         ch.pipeline().addLast(handler);
                     }

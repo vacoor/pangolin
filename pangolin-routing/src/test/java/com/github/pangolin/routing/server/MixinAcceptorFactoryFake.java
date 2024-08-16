@@ -20,11 +20,15 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelOutboundHandlerAdapter;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
+import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.handler.codec.dns.DnsQuestion;
@@ -125,28 +129,17 @@ public class MixinAcceptorFactoryFake implements AcceptorFactory {
                 // FIXME
                 final SocketChannelFactory routeSocketFactory = null != upstream ? new ProxySocketChannelFactory(upstream, bypass) {
                     @Override
-                    public ChannelFuture open(SocketAddress destination, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
-                        if (destination instanceof InetSocketAddress) {
-                            final String domain = engine4.nslookup(((InetSocketAddress) destination).getAddress().getAddress());
-                            if (null != domain) {
-                                destination = InetSocketAddress.createUnresolved(domain, ((InetSocketAddress) destination).getPort());
-                            }
+                    public ChannelFuture open(final SocketAddress destination, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
+                        final InetSocketAddress destination2 = (InetSocketAddress) destination;
+                        String domain = engine4.nslookup(destination2.getAddress().getAddress());
+                        if (null != domain) {
+                            return super.open(InetSocketAddress.createUnresolved(domain, destination2.getPort()), connTimeoutMs, autoRead, group, handler);
                         }
-                        return super.open(destination, connTimeoutMs, autoRead, group, handler);
+                        return null;
                     }
+
                 } : new StandardSocketChannelFactory();
-                final DatagramChannelFactory routeDatagramFactory = null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass) {
-                    @Override
-                    public ChannelFuture open(InetSocketAddress destination, final int connTimeoutMs, final EventLoopGroup group, final ChannelHandler handler) {
-                        if (destination instanceof InetSocketAddress) {
-                            final String domain = engine4.nslookup(((InetSocketAddress) destination).getAddress().getAddress());
-                            if (null != domain) {
-                                destination = InetSocketAddress.createUnresolved(domain, ((InetSocketAddress) destination).getPort());
-                            }
-                        }
-                        return super.open(destination, connTimeoutMs, group, handler);
-                    }
-                } : new StandardDatagramChannelFactory();
+                final DatagramChannelFactory routeDatagramFactory = null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass) : new StandardDatagramChannelFactory();
 
                 final NettyServer server = new NettyServer("10.188.71.3", listenPort);
                 return server.start(true, new ChannelInitializer<SocketChannel>() {

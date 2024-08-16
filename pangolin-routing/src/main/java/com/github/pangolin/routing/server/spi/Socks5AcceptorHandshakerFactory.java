@@ -18,8 +18,8 @@ public class Socks5AcceptorHandshakerFactory implements MixinAcceptorHandshakerF
 
     @Override
     public MixinServerHandshaker createHandshaker(final SocketChannelFactory socketFactory, final DatagramChannelFactory datagramFactory) {
-        final Socks5DatagramServerFactory datagramServerFactory = new DefaultSocks5DatagramServerFactory(datagramFactory);
-        return Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, socketFactory, datagramServerFactory));
+//        final Socks5DatagramServerFactory datagramServerFactory = new DefaultSocks5DatagramServerFactory(datagramFactory);
+        return Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, socketFactory, null));
     }
 
 }
