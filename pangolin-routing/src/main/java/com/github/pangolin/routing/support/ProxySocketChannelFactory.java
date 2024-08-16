@@ -52,7 +52,7 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
                         ch.pipeline().addLast(handler);
                     }
                 });
-        return b.connect(destination, new InetSocketAddress("10.188.71.3", 0));
+        return b.connect(destination);
     }
 
     private ChannelHandler newSocketProxyHandler(final SocketAddress destination) {

@@ -85,7 +85,6 @@ public class FakeDnsEngine4 implements DnsEngine {
         final int ttl = 90;
         byte[] bytes = this.lookup(domain);
         if (null != bytes) {
-            // final byte[] bytes = NetUtil.createByteArrayFromIpAddressString("10.188.71.3");
             final ByteBuf buf = Unpooled.wrappedBuffer(bytes);
             final DefaultDnsRawRecord dnsQuestionAnswer = new DefaultDnsRawRecord(dnsQuestion.name(), DnsRecordType.A, ttl, buf);
 

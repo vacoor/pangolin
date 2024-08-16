@@ -140,7 +140,7 @@ public class MixinAcceptorFactoryFake implements AcceptorFactory {
                 } : new StandardSocketChannelFactory();
                 final DatagramChannelFactory routeDatagramFactory = null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass) : new StandardDatagramChannelFactory();
 
-                final NettyServer server = new NettyServer("10.188.71.3", listenPort);
+                final NettyServer server = new NettyServer(listenPort);
                 return server.start(true, new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(final SocketChannel channel) throws Exception {
