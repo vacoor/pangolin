@@ -112,6 +112,14 @@ public class TunTest {
                 Packet payload = tcpPacket.getPayload();
                 System.out.println(payload);
 
+                TcpPacket.Builder outTcpPayload = ack(tcpHeader, srcAddr, dstAddr).ack(true);
+                if (ipPacket instanceof IpV4Packet) {
+                    IpV4Packet out = (IpV4Packet) ack(ipHeader).payloadBuilder(outTcpPayload).build();
+                    log(((TcpPacket)out.getPayload()).getHeader(), out.getHeader(), false);
+                    ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(out.getRawData())));
+                }
+
+
             } else if (!tcpHeader.getUrg() && tcpHeader.getAck()
                     && !tcpHeader.getPsh() && !tcpHeader.getRst()
                     && !tcpHeader.getSyn() && tcpHeader.getFin()) {
