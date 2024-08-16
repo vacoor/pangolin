@@ -2,25 +2,32 @@ package com.github.pangolin.routing;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
+import lombok.extern.slf4j.Slf4j;
+import org.drasyl.channel.tun.Tun4Packet;
 import org.drasyl.channel.tun.TunAddress;
 import org.drasyl.channel.tun.TunChannel;
 import org.drasyl.channel.tun.TunPacket;
 import org.pcap4j.packet.*;
 import org.pcap4j.packet.namednumber.IpNumber;
+import org.pcap4j.packet.namednumber.IpV4TosPrecedence;
+import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.TcpPort;
+import org.pcap4j.util.ByteArrays;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.util.Arrays;
 
 /**
  *
  */
+@Slf4j
 public class TunTest {
     private static final int INET4 = 4;
     private static final int INET6 = 6;
-
 
     static IpPacket parsePacket(final TunPacket packet) throws IllegalRawDataException {
         final byte[] bytes = ByteBufUtil.getBytes(packet.content());
@@ -38,21 +45,53 @@ public class TunTest {
         if (IpNumber.TCP.equals(protocol)) {
             final TcpPacket tcpPacket = (TcpPacket) ipPacket.getPayload();
             final TcpPacket.TcpHeader tcpHeader = tcpPacket.getHeader();
+            final int acknowledgmentNumber = tcpHeader.getAcknowledgmentNumber();
             final TcpPort tcpSrcPort = tcpHeader.getSrcPort();
+            final TcpPort tcpDstPort = tcpHeader.getDstPort();
+            // ONLY SYN
             if (tcpHeader.getSyn()) {
+                log.info("[SYN] {}:{} -> {}:{}", srcAddr, tcpSrcPort, dstAddr, tcpDstPort);
+//                tcpHeader.getAcknowledgmentNumber()
+                TcpPacket.Builder build = new TcpPacket.Builder()
+                        .srcAddr(dstAddr)
+                        .dstAddr(srcAddr)
+                        .srcPort(tcpDstPort)
+                        .dstPort(tcpSrcPort)
+                        .options(Arrays.asList()) // FIXME
+                        .acknowledgmentNumber(acknowledgmentNumber)
+                        .ack(true)
+                        .syn(true)
+                        .paddingAtBuild(true)
+                        .correctLengthAtBuild(true)
+                        .correctChecksumAtBuild(true);
+                if (ipPacket instanceof IpV4Packet) {
+                    IpV4Packet.Builder builders = new IpV4Packet.Builder()
+                            .version(IpVersion.IPV4)
+                            .tos(((IpV4Packet.IpV4Header) ipHeader).getTos())
+                            .srcAddr((Inet4Address) dstAddr)
+                            .dstAddr((Inet4Address) srcAddr)
+                            .protocol(IpNumber.TCP)
+                            .payloadBuilder(build)
+                            .paddingAtBuild(true)
+                            .correctLengthAtBuild(true)
+                            .correctChecksumAtBuild(true);
+                    IpV4Packet build1 = builders.build();
+                    ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(build1.getRawData())));
+                }
 
             } else if (tcpHeader.getFin()){
-
+                log.info("[FIN] {}:{} -> {}:{}", srcAddr, tcpSrcPort, dstAddr, tcpDstPort);
+            } else {
+                System.out.println("TCP: " + srcAddr + " -> " + dstAddr);
             }
-            System.out.println("TCP: " + srcAddr + " -> " + dstAddr);
         } else if (IpNumber.UDP.equals(protocol)) {
             final UdpPacket udpPacket = (UdpPacket) ipPacket.getPayload();
-            System.out.println("UDP: " + srcAddr + " -> " + dstAddr);
+//            System.out.println("UDP: " + srcAddr + " -> " + dstAddr);
         } else if (IpNumber.ICMPV6.equals(protocol)) {
             IcmpV6CommonPacket payload = (IcmpV6CommonPacket) ipPacket.getPayload();
-            System.out.println("ICMPv6: " + srcAddr + " -> " + dstAddr);
+//            System.out.println("ICMPv6: " + srcAddr + " -> " + dstAddr);
         } else {
-            System.out.println(protocol.valueAsString());
+//            System.out.println(protocol.valueAsString());
         }
     }
 
