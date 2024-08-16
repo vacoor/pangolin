@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.server;
 
-import com.github.pangolin.routing.beta.DnsEngine4;
+import com.github.pangolin.routing.beta.FakeDnsEngine4;
 import com.github.pangolin.routing.beta.dns.DnsQueryServerHandler;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
@@ -20,15 +20,11 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelOutboundHandlerAdapter;
-import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
-import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.handler.codec.dns.DnsQuestion;
@@ -88,7 +84,7 @@ public class MixinAcceptorFactoryFake implements AcceptorFactory {
         return new Acceptor() {
             @Override
             public ChannelFuture start(final RouteContext context) throws Exception {
-                final DnsEngine4 engine4 = DnsEngine4.create();
+                final FakeDnsEngine4 engine4 = FakeDnsEngine4.create();
                 EventLoopGroup proxyGroup = new NioEventLoopGroup();
                 Bootstrap b = new Bootstrap();
                 b.group(proxyGroup).channel(NioDatagramChannel.class)

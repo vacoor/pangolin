@@ -89,7 +89,7 @@ public class DnsQueryServerHandler extends SimpleChannelInboundHandler<DatagramD
                     }
                 }
                 */
-                ctx.writeAndFlush(response.retain());
+                ctx.writeAndFlush(response);
             }
         }).bind(0).addListener(new ChannelFutureListener() {
             @Override

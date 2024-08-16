@@ -19,18 +19,16 @@ import io.netty.handler.codec.dns.DnsRecordType;
 import io.netty.handler.codec.dns.DnsSection;
 import io.netty.util.NetUtil;
 
-import java.net.Inet4Address;
-import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Function;
+import java.util.concurrent.TimeUnit;
 
-public class DnsEngine4 implements DnsEngine {
+public class FakeDnsEngine4 implements DnsEngine {
     private final long ttl;
     private final LeaseAllocator4 allocator;
 
-    public DnsEngine4(final long ttl, final LeaseAllocator4 allocator) {
+    public FakeDnsEngine4(final long ttl, final LeaseAllocator4 allocator) {
         this.ttl = ttl;
         this.allocator = allocator;
     }
@@ -49,6 +47,7 @@ public class DnsEngine4 implements DnsEngine {
     }
 
     public byte[] lookup(final String domain) {
+        // FIXME 如果不需要代理的不返回 fake-ip.
         int value = domainToLeaseMap.compute(domain, (k, v) -> {
             // TODO v.value == null
             if (null == v || System.currentTimeMillis() - v.timestamp >= 2 * ttl) {
@@ -98,20 +97,20 @@ public class DnsEngine4 implements DnsEngine {
         return null;
     }
 
-    public static DnsEngine4 create() {
+    public static FakeDnsEngine4 create() {
         final byte[] address = SocketUtils.toAddress("198.18.0.15", false).getAddress();
         final byte[] mask = SocketUtils.toAddress("255.255.0.0", false).getAddress();
 
         final int maskInt = ipAddressToInt(mask);
         final int size = 0xFFFFFFFF - maskInt;
         final int subnetAddress = ipAddressToInt(address) & maskInt;
-        final long ttl = 1000 * 10;
+        final long ttl = TimeUnit.MINUTES.toMillis(10);
 
 //        System.out.println(size);
 
 //        System.out.println(NetUtil.intToIpAddress(subnetAddress));
         LeaseAllocator4 allocator = new LeaseAllocator4(subnetAddress + 3, subnetAddress + size - 1, ttl);
-        return new DnsEngine4(ttl, allocator);
+        return new FakeDnsEngine4(ttl, allocator);
     }
 
     public static void main(String[] args) throws UnknownHostException, InterruptedException {
@@ -126,7 +125,7 @@ public class DnsEngine4 implements DnsEngine {
             System.out.println(lookup + " -> " + dns.nslookup(a.getAddress()));
         }
         */
-        final DnsEngine4 dns = create();
+        final FakeDnsEngine4 dns = create();
         EventLoopGroup proxyGroup = new NioEventLoopGroup();
         Bootstrap b = new Bootstrap();
         b.group(proxyGroup).channel(NioDatagramChannel.class)
