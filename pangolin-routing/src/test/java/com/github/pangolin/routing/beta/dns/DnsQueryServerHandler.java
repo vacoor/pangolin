@@ -77,7 +77,7 @@ public class DnsQueryServerHandler extends SimpleChannelInboundHandler<DatagramD
             @Override
             protected void channelRead0(final ChannelHandlerContext upstream, final DatagramDnsResponse upstreamResponse) throws Exception {
                 final DatagramDnsResponse response = new DatagramDnsResponse(query.recipient(), query.sender(), query.id());
-                response.retain();
+//                response.retain();
                 /*
                 for (int i = 0; i < upstreamResponse.count(DnsSection.ANSWER); i++) {
                     final DnsRawRecord dnsRecord = upstreamResponse.recordAt(DnsSection.ANSWER, i);
@@ -89,7 +89,7 @@ public class DnsQueryServerHandler extends SimpleChannelInboundHandler<DatagramD
                     }
                 }
                 */
-                ctx.writeAndFlush(response);
+                ctx.writeAndFlush(response.retain());
             }
         }).bind(0).addListener(new ChannelFutureListener() {
             @Override

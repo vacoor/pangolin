@@ -18,7 +18,7 @@ public class StandardDatagramChannelFactory implements DatagramChannelFactory {
                 .channel(NioDatagramChannel.class)
                 .option(ChannelOption.SO_BROADCAST, false)
                 .handler(handler);
-        return b.bind("10.188.71.3", 0);
+        return b.bind(0);
     }
 
 }

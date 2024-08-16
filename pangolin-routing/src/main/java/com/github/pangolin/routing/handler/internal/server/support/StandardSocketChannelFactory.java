@@ -8,6 +8,7 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.resolver.NoopAddressResolverGroup;
 
+import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 
 public class StandardSocketChannelFactory implements SocketChannelFactory {
@@ -22,7 +23,7 @@ public class StandardSocketChannelFactory implements SocketChannelFactory {
         b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connTimeoutMs);
         b.option(ChannelOption.SO_RCVBUF, 32 * 1024);// 读缓冲区为32k
         b.group(group).channel(NioSocketChannel.class).handler(handler);
-        return b.localAddress("10.188.71.3", 0).connect(remoteAddress);
+        return b.connect(remoteAddress, new InetSocketAddress("10.188.71.3", 0));
     }
 
 }

@@ -99,8 +99,8 @@ public class DnsEngine4 implements DnsEngine {
     }
 
     public static DnsEngine4 create() {
-        final byte[] address = SocketUtils.toAddress("192.168.1.1", false).getAddress();
-        final byte[] mask = SocketUtils.toAddress("255.255.255.000", false).getAddress();
+        final byte[] address = SocketUtils.toAddress("198.18.0.15", false).getAddress();
+        final byte[] mask = SocketUtils.toAddress("255.255.0.0", false).getAddress();
 
         final int maskInt = ipAddressToInt(mask);
         final int size = 0xFFFFFFFF - maskInt;
@@ -109,7 +109,7 @@ public class DnsEngine4 implements DnsEngine {
 //        System.out.println(size);
 
 //        System.out.println(NetUtil.intToIpAddress(subnetAddress));
-        LeaseAllocator4 allocator = new LeaseAllocator4(subnetAddress + 2, subnetAddress + size - 1, 100);
+        LeaseAllocator4 allocator = new LeaseAllocator4(subnetAddress + 3, subnetAddress + size - 1, 100);
         return new DnsEngine4(100, allocator);
     }
 
