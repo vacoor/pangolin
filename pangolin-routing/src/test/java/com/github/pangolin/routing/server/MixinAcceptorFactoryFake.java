@@ -131,11 +131,14 @@ public class MixinAcceptorFactoryFake implements AcceptorFactory {
                     @Override
                     public ChannelFuture open(final SocketAddress destination, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
                         final InetSocketAddress destination2 = (InetSocketAddress) destination;
-                        String domain = engine4.nslookup(destination2.getAddress().getAddress());
-                        if (null != domain) {
-                            return super.open(InetSocketAddress.createUnresolved(domain, destination2.getPort()), connTimeoutMs, autoRead, group, handler);
+                        if (!destination2.isUnresolved()) {
+                            String domain = engine4.nslookup(destination2.getAddress().getAddress());
+                            if (null != domain) {
+                                return super.open(InetSocketAddress.createUnresolved(domain, destination2.getPort()), connTimeoutMs, autoRead, group, handler);
+                            }
+                            return null;
                         }
-                        return null;
+                        return super.open(destination, connTimeoutMs, autoRead, group, handler);
                     }
 
                 } : new StandardSocketChannelFactory();
