@@ -15,6 +15,7 @@ import java.security.SecureRandom;
 import java.util.List;
 
 /**
+ * @see <a href="https://shadowsocks.org/doc/aead.html">AEAD ciphers</a>
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers">AEAD Ciphers</a>
  */
 public class SsSocketAeadCryptCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {

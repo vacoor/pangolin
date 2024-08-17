@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
+ * @see <a href="https://shadowsocks.org/doc/stream.html">Stream ciphers</a>
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Stream-Ciphers#udp">UDP</a>
  */
 public class SsDatagramStreamCryptCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {

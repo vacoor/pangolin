@@ -132,7 +132,7 @@ public class MixinAcceptorFactoryFake implements AcceptorFactory {
                             if (null != domain) {
                                 return super.open(InetSocketAddress.createUnresolved(domain, destination2.getPort()), connTimeoutMs, autoRead, group, handler);
                             }
-                            return null;
+//                            return null;
                         }
                         return super.open(destination, connTimeoutMs, autoRead, group, handler);
                     }

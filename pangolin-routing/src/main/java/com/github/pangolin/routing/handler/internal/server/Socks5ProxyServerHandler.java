@@ -20,7 +20,7 @@ import java.net.InetSocketAddress;
 import java.util.List;
 
 /**
- *
+ * @see <a href="https://datatracker.ietf.org/doc/html/rfc1928">RFC 1928</a>
  */
 @Slf4j
 public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {

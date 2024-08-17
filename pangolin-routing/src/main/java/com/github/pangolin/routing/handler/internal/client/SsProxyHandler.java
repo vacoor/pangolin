@@ -22,6 +22,7 @@ import java.nio.channels.ConnectionPendingException;
 import java.security.SecureRandom;
 
 /**
+ * @see <a href="https://shadowsocks.org/doc/what-is-shadowsocks.html">What is Shadowsocks?</a>
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Protocol">Protocol</a>
  */
 public class SsProxyHandler extends ChannelDuplexHandler {

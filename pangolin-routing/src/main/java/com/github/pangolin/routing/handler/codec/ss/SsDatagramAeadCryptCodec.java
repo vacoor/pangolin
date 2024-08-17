@@ -16,6 +16,7 @@ import java.util.List;
 /**
  * UDP AEAD codec.
  *
+ * @see <a href="https://shadowsocks.org/doc/aead.html">AEAD ciphers</a>
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/AEAD-Ciphers#udp">UDP</a>
  */
 public class SsDatagramAeadCryptCodec extends MessageToMessageCodec<DatagramPacket, DatagramPacket> {

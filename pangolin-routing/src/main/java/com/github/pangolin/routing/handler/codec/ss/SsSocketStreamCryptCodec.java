@@ -15,6 +15,7 @@ import java.util.List;
 
 
 /**
+ * @see <a href="https://shadowsocks.org/doc/stream.html">Stream ciphers</a>
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Stream-Ciphers">Stream Ciphers</a>
  */
 public class SsSocketStreamCryptCodec extends CombinedChannelDuplexHandler<ByteToMessageDecoder, MessageToByteEncoder<ByteBuf>> {

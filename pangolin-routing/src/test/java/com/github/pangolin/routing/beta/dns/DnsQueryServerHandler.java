@@ -95,7 +95,7 @@ public class DnsQueryServerHandler extends SimpleChannelInboundHandler<DatagramD
             @Override
             public void operationComplete(final ChannelFuture channelFuture) throws Exception {
                 if (channelFuture.isSuccess()) {
-                    final DatagramDnsQuery delegateQuery = new DatagramDnsQuery(null, new InetSocketAddress("114.114.114.114", 53), query.id());
+                    final DatagramDnsQuery delegateQuery = new DatagramDnsQuery(null, new InetSocketAddress("192.168.1.1", 53), query.id());
                     delegateQuery.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion(domain, DnsRecordType.A));
                     channelFuture.channel().writeAndFlush(delegateQuery);
                 } else {

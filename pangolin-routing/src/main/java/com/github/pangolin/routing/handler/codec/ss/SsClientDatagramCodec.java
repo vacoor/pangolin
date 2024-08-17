@@ -19,6 +19,7 @@ import java.net.UnknownHostException;
 import java.util.List;
 
 /**
+ * @see <a href="https://shadowsocks.org/doc/what-is-shadowsocks.html">What is Shadowsocks?</a>
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Protocol#udp">Protocol - UDP</a>
  */
 @Slf4j
