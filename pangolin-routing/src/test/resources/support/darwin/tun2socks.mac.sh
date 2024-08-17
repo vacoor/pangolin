@@ -48,7 +48,7 @@ function tun_cleanup_route() {
    # sudo route delete -net 32.0.0.0/3
    # sudo route delete -net 64.0.0.0/2
    # sudo route delete -net 128.0.0.0/1
-   sudo route add -net 198.18.0.0/15 198.18.0.1
+   sudo route delete -net 198.18.0.0/15 198.18.0.1
 
    # Mode 2: Restore default routes
    # sudo route delete -inet default
