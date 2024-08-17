@@ -1,7 +1,8 @@
 package com.github.pangolin.routing.server;
 
 import com.github.pangolin.routing.beta.FakeDnsEngine4;
-import com.github.pangolin.routing.beta.dns.DnsQueryServerHandler;
+import com.github.pangolin.routing.beta.dns.DatagramDnsProxyServerHandler;
+import com.github.pangolin.routing.beta.dns.DatagramFakeDnsServerHandler;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
@@ -29,6 +30,9 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.handler.codec.dns.DnsQuestion;
 import io.netty.handler.codec.dns.DnsSection;
+import io.netty.resolver.dns.DnsNameResolver;
+import io.netty.resolver.dns.DnsNameResolverBuilder;
+import io.netty.resolver.dns.SequentialDnsServerAddressStreamProvider;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
@@ -85,21 +89,27 @@ public class MixinAcceptorFactoryFake implements AcceptorFactory {
             @Override
             public ChannelFuture start(final RouteContext context) throws Exception {
                 final FakeDnsEngine4 engine4 = FakeDnsEngine4.create();
-                EventLoopGroup proxyGroup = new NioEventLoopGroup();
-                Bootstrap b = new Bootstrap();
-                b.group(proxyGroup).channel(NioDatagramChannel.class)
+                final EventLoopGroup loop = new NioEventLoopGroup();
+
+                final List<InetSocketAddress> addresses = Arrays.asList(
+                        new InetSocketAddress("192.168.1.1", 53)
+                );
+                final DnsNameResolver resolver =
+                        new DnsNameResolverBuilder()
+                                .nameServerProvider(new SequentialDnsServerAddressStreamProvider(addresses))
+                                .channelFactory(NioDatagramChannel::new)
+                                .eventLoop(loop.next())
+//                .ttl()
+                                .recursionDesired(true)
+                                .build();
+
+                final Bootstrap b = new Bootstrap();
+                b.group(loop).channel(NioDatagramChannel.class)
                         .handler(new ChannelInitializer<DatagramChannel>() {
                             @Override
                             protected void initChannel(DatagramChannel ch) {
-                                ch.pipeline().addLast(new DnsQueryServerHandler(q -> {
-                                    final DnsQuestion dnsQuestion = q.recordAt(DnsSection.QUESTION);
-                                    final String domain = dnsQuestion.name();
-                                    final Route route = context.getRoute(InetSocketAddress.createUnresolved(domain, 0));
-                                    if (null == route || "DIRECT".equalsIgnoreCase(route.getUpstream())) {
-                                        return null;
-                                    }
-                                    return engine4.lookup(q);
-                                }));
+                                ch.pipeline().addLast(new DatagramFakeDnsServerHandler(engine4, context));
+                                ch.pipeline().addLast(new DatagramDnsProxyServerHandler(resolver));
                             }
                         }).option(ChannelOption.SO_BROADCAST, true).bind(53).addListener(new GenericFutureListener<Future<? super Void>>() {
                     @Override
