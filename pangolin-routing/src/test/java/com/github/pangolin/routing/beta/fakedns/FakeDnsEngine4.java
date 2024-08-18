@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta;
+package com.github.pangolin.routing.beta.fakedns;
 
 import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
@@ -54,7 +54,7 @@ public class FakeDnsEngine4 implements DnsEngine {
     }
 
     @Override
-    public String nslookup(final byte[] ip) {
+    public String lookupX(final byte[] ip) {
         String ipToUse = NetUtil.intToIpAddress(ipAddressToInt(ip));
         Binding compute = nsIpToLeaseMap.compute(ipToUse, (k, v) -> {
             if (null == v || System.currentTimeMillis() - v.lease.timestamp >= 2 * ttl) {

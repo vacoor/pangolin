@@ -22,6 +22,7 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
     private final RouteContext parent;
     private final List<Route<InetSocketAddress>> routes = Lists.newLinkedList();
     private final Map<String, Upstream> upstreams = Maps.newLinkedHashMap();
+    private final Map<String, Object> attributes = Maps.newLinkedHashMap();
 
     private final List<Acceptor> acceptors = Lists.newLinkedList();
 
@@ -86,4 +87,18 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
     public List<Acceptor> getAcceptors() {
         return acceptors;
     }
+
+    @Override
+    public <T> T attr(final String key) {
+        if (attributes.containsKey(key)) {
+            return (T) attributes.get(key);
+        }
+        return null != parent ? parent.attr(key) : null;
+    }
+
+    @Override
+    public void attr(final String key, final Object value) {
+        attributes.put(key, value);
+    }
+
 }

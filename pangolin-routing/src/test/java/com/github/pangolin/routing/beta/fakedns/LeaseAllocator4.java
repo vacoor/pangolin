@@ -1,12 +1,6 @@
-package com.github.pangolin.routing.beta;
+package com.github.pangolin.routing.beta.fakedns;
 
-import com.github.pangolin.routing.util.SocketUtils;
-import io.netty.util.NetUtil;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 public class LeaseAllocator4 extends LeaseAllocator<LeaseAllocator4.Lease> {
 

@@ -1,8 +1,6 @@
 package com.github.pangolin.routing.server;
 
-import com.github.pangolin.routing.beta.FakeDnsEngine4;
-import com.github.pangolin.routing.beta.dns.DatagramDnsProxyServerHandler;
-import com.github.pangolin.routing.beta.dns.DatagramFakeDnsServerHandler;
+import com.github.pangolin.routing.beta.fakedns.*;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
@@ -10,7 +8,6 @@ import com.github.pangolin.routing.handler.internal.server.support.StandardDatag
 import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
-import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.support.ProxyDatagramChannelFactory;
 import com.github.pangolin.routing.support.ProxySocketChannelFactory;
 import com.github.pangolin.routing.upstream.AbstractUpstream;
@@ -28,8 +25,6 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
-import io.netty.handler.codec.dns.DnsQuestion;
-import io.netty.handler.codec.dns.DnsSection;
 import io.netty.resolver.dns.DnsNameResolver;
 import io.netty.resolver.dns.DnsNameResolverBuilder;
 import io.netty.resolver.dns.SequentialDnsServerAddressStreamProvider;
@@ -88,35 +83,6 @@ public class MixinAcceptorFactoryFake implements AcceptorFactory {
         return new Acceptor() {
             @Override
             public ChannelFuture start(final RouteContext context) throws Exception {
-                final FakeDnsEngine4 engine4 = FakeDnsEngine4.create("198.18.0.0", "255.255.0.0");
-                final EventLoopGroup loop = new NioEventLoopGroup();
-
-                final List<InetSocketAddress> addresses = Arrays.asList(
-                        new InetSocketAddress("192.168.1.1", 53)
-                );
-                final DnsNameResolver resolver =
-                        new DnsNameResolverBuilder()
-                                .nameServerProvider(new SequentialDnsServerAddressStreamProvider(addresses))
-                                .channelFactory(NioDatagramChannel::new)
-                                .eventLoop(loop.next())
-//                .ttl()
-                                .recursionDesired(true)
-                                .build();
-
-                final Bootstrap b = new Bootstrap();
-                b.group(loop).channel(NioDatagramChannel.class)
-                        .handler(new ChannelInitializer<DatagramChannel>() {
-                            @Override
-                            protected void initChannel(DatagramChannel ch) {
-                                ch.pipeline().addLast(new DatagramFakeDnsServerHandler(engine4, context));
-                                ch.pipeline().addLast(new DatagramDnsProxyServerHandler(resolver));
-                            }
-                        }).option(ChannelOption.SO_BROADCAST, true).bind(53).addListener(new GenericFutureListener<Future<? super Void>>() {
-                    @Override
-                    public void operationComplete(final Future<? super Void> future) throws Exception {
-                        System.out.println("DNS: " + future.isSuccess());
-                    }
-                });
 
                 final Upstream upstream = "DEFAULT".equals(proxyName) ? new AbstractUpstream("DEFAULT") {
                     @Override
@@ -132,23 +98,14 @@ public class MixinAcceptorFactoryFake implements AcceptorFactory {
                     }
                 } : context.getUpstream(proxyName);
 
+                final DnsEngine fakeDns = context.attr(DnsEngine.class.getName());
                 // FIXME
-                final SocketChannelFactory routeSocketFactory = null != upstream ? new ProxySocketChannelFactory(upstream, bypass) {
-                    @Override
-                    public ChannelFuture open(final SocketAddress destination, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
-                        final InetSocketAddress destination2 = (InetSocketAddress) destination;
-                        if (!destination2.isUnresolved()) {
-                            String domain = engine4.nslookup(destination2.getAddress().getAddress());
-                            if (null != domain) {
-                                return super.open(InetSocketAddress.createUnresolved(domain, destination2.getPort()), connTimeoutMs, autoRead, group, handler);
-                            }
-//                            return null;
-                        }
-                        return super.open(destination, connTimeoutMs, autoRead, group, handler);
-                    }
-
-                } : new StandardSocketChannelFactory();
-                final DatagramChannelFactory routeDatagramFactory = null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass) : new StandardDatagramChannelFactory();
+                final SocketChannelFactory routeSocketFactory = null != upstream
+                        ? new FakeDnsSocketChannelFactory(fakeDns, new ProxySocketChannelFactory(upstream, bypass))
+                        : new StandardSocketChannelFactory();
+                final DatagramChannelFactory routeDatagramFactory = null != upstream
+                        ? new FakeDnsDatagramChannelFactory(fakeDns, new ProxyDatagramChannelFactory(upstream, bypass))
+                        : new StandardDatagramChannelFactory();
 
                 final NettyServer server = new NettyServer(listenPort);
                 return server.start(true, new ChannelInitializer<SocketChannel>() {

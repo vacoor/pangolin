@@ -159,7 +159,7 @@ public class RouteApplication {
     }
 
 
-    private RouteContext createParentContext(final URL configLocation) throws Exception {
+    protected RouteContext createParentContext(final URL configLocation) throws Exception {
         final ServiceLoader<RouteContextFactory> factories = ServiceLoader.load(RouteContextFactory.class);
         RouteContext context = null;
         for (final RouteContextFactory factory : factories) {

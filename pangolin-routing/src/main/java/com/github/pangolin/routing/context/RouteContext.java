@@ -17,5 +17,8 @@ public interface RouteContext {
 
     Upstream choose(final InetSocketAddress destination);
 
+    <T> T attr(final String key);
+
+    void attr(final String key, final Object value);
 
 }

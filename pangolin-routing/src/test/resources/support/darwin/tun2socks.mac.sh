@@ -71,3 +71,5 @@ function tun_init() {
 # sudo sysctl -n net.inet.ip.forwarding
 # sudo sysctl -w net.inet.ip.forwarding=1
 # sudo sysctl -w net.inet.ip.forwarding=0
+
+# sudo killall -HUP mDNSResponder;

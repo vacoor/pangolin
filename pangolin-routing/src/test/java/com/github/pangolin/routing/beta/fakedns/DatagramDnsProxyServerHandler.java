@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.dns;
+package com.github.pangolin.routing.beta.fakedns;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
@@ -9,7 +9,6 @@ import io.netty.handler.codec.dns.*;
 import io.netty.resolver.dns.DnsNameResolver;
 import io.netty.resolver.dns.DnsNameResolverBuilder;
 import io.netty.resolver.dns.SequentialDnsServerAddressStreamProvider;
-import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 

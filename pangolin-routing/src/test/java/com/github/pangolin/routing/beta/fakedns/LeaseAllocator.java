@@ -1,6 +1,5 @@
-package com.github.pangolin.routing.beta;
+package com.github.pangolin.routing.beta.fakedns;
 
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 public abstract class LeaseAllocator<E> {

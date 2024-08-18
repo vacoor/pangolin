@@ -1,6 +1,5 @@
-package com.github.pangolin.routing.beta.dns;
+package com.github.pangolin.routing.beta.fakedns;
 
-import com.github.pangolin.routing.beta.FakeDnsEngine4;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.route.Route;
 import io.netty.channel.ChannelHandlerContext;
@@ -46,4 +45,5 @@ public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<Da
             }
         }
     }
+
 }
