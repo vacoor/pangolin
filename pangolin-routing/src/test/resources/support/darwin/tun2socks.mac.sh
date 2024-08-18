@@ -66,3 +66,8 @@ function tun_init() {
 # networksetup -setdnsservers "Wi-Fi" 127.0.0.1 192.168.1.1
 # networksetup -setdnsservers "Wi-Fi" 127.0.0.1
 # networksetup -setdnsservers "Wi-Fi" 192.168.1.1
+
+# Gateway mode
+# sudo sysctl -n net.inet.ip.forwarding
+# sudo sysctl -w net.inet.ip.forwarding=1
+# sudo sysctl -w net.inet.ip.forwarding=0
