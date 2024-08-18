@@ -11,17 +11,39 @@ import io.netty.handler.codec.dns.DnsRecordType;
 import io.netty.handler.codec.dns.DnsSection;
 import io.netty.util.NetUtil;
 
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 public class FakeDnsEngine4 implements DnsEngine {
+    private final InetAddress ipAddress;
+
+    private final int subnetMask;
+    private final int networkAddress;
     private final long ttl;
     private final LeaseAllocator4 allocator;
 
-    public FakeDnsEngine4(final long ttl, final LeaseAllocator4 allocator) {
+    public FakeDnsEngine4(final Inet4Address ipAddress, final int cidrPrefix, final long ttl) {
+        this.ipAddress = ipAddress;
+        this.subnetMask = prefixToSubnetMask(checkPrefix(cidrPrefix));
+        this.networkAddress = ipAddressToInt(ipAddress) & subnetMask;
         this.ttl = ttl;
-        this.allocator = allocator;
+        this.allocator = createAllocator(ttl);
+    }
+
+    public FakeDnsEngine4(final Inet4Address ipAddress, final Inet4Address subnetMask, final long ttl) {
+        this.ipAddress = ipAddress;
+        this.subnetMask = ipAddressToInt(subnetMask);
+        this.networkAddress = ipAddressToInt(ipAddress) & this.subnetMask;
+        this.ttl = ttl;
+        this.allocator = createAllocator(ttl);
+    }
+
+    private LeaseAllocator4 createAllocator(final long ttl) {
+        final int size = 0xFFFFFFFF - subnetMask;
+        return new LeaseAllocator4(networkAddress + 3, networkAddress + size - 1, ttl);
     }
 
     final Map<String, LeaseAllocator4.Lease> domainToLeaseMap = new ConcurrentHashMap<>();
@@ -37,8 +59,7 @@ public class FakeDnsEngine4 implements DnsEngine {
         }
     }
 
-    public byte[] lookup(final String domain) {
-        // FIXME 如果不需要代理的不返回 fake-ip.
+    public byte[] resolve(final String domain) {
         int value = domainToLeaseMap.compute(domain, (k, v) -> {
             // TODO v.value == null
             if (null == v || System.currentTimeMillis() - v.timestamp >= 2 * ttl) {
@@ -54,7 +75,7 @@ public class FakeDnsEngine4 implements DnsEngine {
     }
 
     @Override
-    public String lookupX(final byte[] ip) {
+    public String resolve(final byte[] ip) {
         String ipToUse = NetUtil.intToIpAddress(ipAddressToInt(ip));
         Binding compute = nsIpToLeaseMap.compute(ipToUse, (k, v) -> {
             if (null == v || System.currentTimeMillis() - v.lease.timestamp >= 2 * ttl) {
@@ -65,16 +86,17 @@ public class FakeDnsEngine4 implements DnsEngine {
         return null != compute ? compute.domain : null;
     }
 
-    private static int ipAddressToInt(final byte[] ipBytes) {
-        assert ipBytes.length == 4;
-        return (ipBytes[0] & 0xff) << 24 | (ipBytes[1] & 0xff) << 16 | (ipBytes[2] & 0xff) << 8 | ipBytes[3] & 0xff;
+    @Override
+    public boolean isFake(final byte[] address) {
+        return (ipAddressToInt(address) & subnetMask) == networkAddress;
     }
+
 
     public DatagramDnsResponse lookup(DatagramDnsQuery query) {
         final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
         final String domain = dnsQuestion.name();
         final long ttl = this.ttl;
-        byte[] bytes = this.lookup(domain);
+        byte[] bytes = this.resolve(domain);
         if (null != bytes) {
             final ByteBuf buf = Unpooled.wrappedBuffer(bytes);
             final DefaultDnsRawRecord dnsQuestionAnswer = new DefaultDnsRawRecord(dnsQuestion.name(), DnsRecordType.A, ttl, buf);
@@ -88,19 +110,44 @@ public class FakeDnsEngine4 implements DnsEngine {
     }
 
     public static FakeDnsEngine4 create(final String ip, final String subnetMask) {
-        final byte[] address = SocketUtils.toAddress(ip, false).getAddress();
-        final byte[] mask = SocketUtils.toAddress(subnetMask, false).getAddress();
+        Inet4Address ipAddress = (Inet4Address) SocketUtils.toAddress(ip, false);
+        Inet4Address subnetMaskAddress = (Inet4Address) SocketUtils.toAddress(subnetMask, false);
 
-        final int maskInt = ipAddressToInt(mask);
-        final int size = 0xFFFFFFFF - maskInt;
-        final int subnetAddress = ipAddressToInt(address) & maskInt;
         final long ttl = TimeUnit.MINUTES.toMillis(10);
-
-//        System.out.println(size);
-
-//        System.out.println(NetUtil.intToIpAddress(subnetAddress));
-        LeaseAllocator4 allocator = new LeaseAllocator4(subnetAddress + 3, subnetAddress + size - 1, ttl);
-        return new FakeDnsEngine4(ttl, allocator);
+        return new FakeDnsEngine4(ipAddress, subnetMaskAddress, ttl);
     }
 
+
+
+    private int prefixToSubnetMask(final int cidrPrefix) {
+        /*-
+         * Perform the shift on a long and downcast it to int afterwards.
+         * This is necessary to handle a cidrPrefix of zero correctly.
+         * The left shift operator on an int only uses the five least
+         * significant bits of the right-hand operand. Thus -1 << 32 evaluates
+         * to -1 instead of 0. The left shift operator applied on a long
+         * uses the six least significant bits.
+         *
+         * Also see https://github.com/netty/netty/issues/2767
+         */
+        return (int) ((-1L << 32 - cidrPrefix) & 0xffffffff);
+    }
+
+    private static int ipAddressToInt(final Inet4Address ipAddress) {
+        final byte[] ipBytes = ipAddress.getAddress();
+        assert ipBytes.length == 4;
+        return (ipBytes[0] & 0xff) << 24 | (ipBytes[1] & 0xff) << 16 | (ipBytes[2] & 0xff) << 8 | ipBytes[3] & 0xff;
+    }
+
+    static int checkPrefix(final int cidrPrefix) {
+        if (0 > cidrPrefix || cidrPrefix > 32) {
+            throw new IllegalArgumentException(String.format("IPv4 requires the subnet prefix to be in range of [0,32]. The prefix was: %d", cidrPrefix));
+        }
+        return cidrPrefix;
+    }
+
+    private static int ipAddressToInt(final byte[] ipBytes) {
+        assert ipBytes.length == 4;
+        return (ipBytes[0] & 0xff) << 24 | (ipBytes[1] & 0xff) << 16 | (ipBytes[2] & 0xff) << 8 | ipBytes[3] & 0xff;
+    }
 }

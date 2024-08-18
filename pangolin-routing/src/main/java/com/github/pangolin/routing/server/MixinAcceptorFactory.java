@@ -84,8 +84,8 @@ public class MixinAcceptorFactory implements AcceptorFactory {
                 } : context.getUpstream(proxyName);
 
                 // FIXME
-                final SocketChannelFactory routeSocketFactory = null != upstream ? new ProxySocketChannelFactory(upstream, bypass) : new StandardSocketChannelFactory();
-                final DatagramChannelFactory routeDatagramFactory = null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass) : new StandardDatagramChannelFactory();
+                final SocketChannelFactory routeSocketFactory = createSocketChannelFactory(upstream, bypass, context);
+                final DatagramChannelFactory routeDatagramFactory = createDatagramChannelFactory(upstream, bypass, context);
 
                 final NettyServer server = new NettyServer(listenPort);
                 return server.start(true, new ChannelInitializer<SocketChannel>() {
@@ -110,6 +110,16 @@ public class MixinAcceptorFactory implements AcceptorFactory {
                 });
             }
         };
+    }
+
+    private SocketChannelFactory createSocketChannelFactory(final Upstream upstream, final List<String> bypass, final RouteContext context) {
+        final SocketChannelFactory routeSocketFactory = null != upstream ? new ProxySocketChannelFactory(upstream, bypass) : new StandardSocketChannelFactory();
+        return routeSocketFactory;
+    }
+
+    private DatagramChannelFactory createDatagramChannelFactory(final Upstream upstream, final List<String> bypass, final RouteContext context) {
+        final DatagramChannelFactory routeDatagramFactory = null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass) : new StandardDatagramChannelFactory();
+        return routeDatagramFactory;
     }
 
     /*

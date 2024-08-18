@@ -98,14 +98,9 @@ public class MixinAcceptorFactoryFake implements AcceptorFactory {
                     }
                 } : context.getUpstream(proxyName);
 
-                final DnsEngine fakeDns = context.attr(DnsEngine.class.getName());
                 // FIXME
-                final SocketChannelFactory routeSocketFactory = null != upstream
-                        ? new FakeDnsSocketChannelFactory(fakeDns, new ProxySocketChannelFactory(upstream, bypass))
-                        : new StandardSocketChannelFactory();
-                final DatagramChannelFactory routeDatagramFactory = null != upstream
-                        ? new FakeDnsDatagramChannelFactory(fakeDns, new ProxyDatagramChannelFactory(upstream, bypass))
-                        : new StandardDatagramChannelFactory();
+                final SocketChannelFactory routeSocketFactory = createSocketChannelFactory(upstream, bypass, context);
+                final DatagramChannelFactory routeDatagramFactory = createDatagramChannelFactory(upstream, bypass, context);
 
                 final NettyServer server = new NettyServer(listenPort);
                 return server.start(true, new ChannelInitializer<SocketChannel>() {
@@ -132,4 +127,21 @@ public class MixinAcceptorFactoryFake implements AcceptorFactory {
         };
     }
 
+    private SocketChannelFactory createSocketChannelFactory(final Upstream upstream, final List<String> bypass, final RouteContext context) {
+        final SocketChannelFactory routeSocketFactory = null != upstream ? new ProxySocketChannelFactory(upstream, bypass) : new StandardSocketChannelFactory();
+        final DnsEngine fakeDns = context.attr(DnsEngine.class.getName());
+        if (null != fakeDns) {
+            return new FakeDnsSocketChannelFactory(fakeDns, routeSocketFactory);
+        }
+        return routeSocketFactory;
+    }
+
+    private DatagramChannelFactory createDatagramChannelFactory(final Upstream upstream, final List<String> bypass, final RouteContext context) {
+        final DatagramChannelFactory routeDatagramFactory = null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass) : new StandardDatagramChannelFactory();
+        final DnsEngine fakeDns = context.attr(DnsEngine.class.getName());
+        if (null != fakeDns) {
+            return new FakeDnsDatagramChannelFactory(fakeDns, routeDatagramFactory);
+        }
+        return routeDatagramFactory;
+    }
 }

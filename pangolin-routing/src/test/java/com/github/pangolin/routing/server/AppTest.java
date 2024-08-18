@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.server;
 
 import com.github.pangolin.routing.RouteApplication;
-import com.github.pangolin.routing.beta.fakedns.DatagramDnsProxyServerHandler;
-import com.github.pangolin.routing.beta.fakedns.DatagramFakeDnsServerHandler;
+import com.github.pangolin.routing.beta.fakedns.handler.DatagramDnsProxyServerHandler;
+import com.github.pangolin.routing.beta.fakedns.handler.DatagramFakeDnsServerHandler;
 import com.github.pangolin.routing.beta.fakedns.DnsEngine;
 import com.github.pangolin.routing.beta.fakedns.FakeDnsEngine4;
 import com.github.pangolin.routing.context.RouteContext;
@@ -27,7 +27,6 @@ import org.junit.Test;
 import org.springframework.boot.system.ApplicationHome;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.net.InetSocketAddress;
 import java.net.URL;

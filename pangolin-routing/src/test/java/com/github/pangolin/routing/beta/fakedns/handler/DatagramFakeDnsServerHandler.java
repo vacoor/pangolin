@@ -1,5 +1,6 @@
-package com.github.pangolin.routing.beta.fakedns;
+package com.github.pangolin.routing.beta.fakedns.handler;
 
+import com.github.pangolin.routing.beta.fakedns.FakeDnsEngine4;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.route.Route;
 import io.netty.channel.ChannelHandlerContext;
