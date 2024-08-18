@@ -73,7 +73,7 @@ public class FakeDnsEngine4 implements DnsEngine {
     public DatagramDnsResponse lookup(DatagramDnsQuery query) {
         final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
         final String domain = dnsQuestion.name();
-        final int ttl = 90;
+        final long ttl = this.ttl;
         byte[] bytes = this.lookup(domain);
         if (null != bytes) {
             final ByteBuf buf = Unpooled.wrappedBuffer(bytes);
@@ -87,9 +87,9 @@ public class FakeDnsEngine4 implements DnsEngine {
         return null;
     }
 
-    public static FakeDnsEngine4 create() {
-        final byte[] address = SocketUtils.toAddress("198.18.0.15", false).getAddress();
-        final byte[] mask = SocketUtils.toAddress("255.255.0.0", false).getAddress();
+    public static FakeDnsEngine4 create(final String ip, final String subnetMask) {
+        final byte[] address = SocketUtils.toAddress(ip, false).getAddress();
+        final byte[] mask = SocketUtils.toAddress(subnetMask, false).getAddress();
 
         final int maskInt = ipAddressToInt(mask);
         final int size = 0xFFFFFFFF - maskInt;

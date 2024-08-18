@@ -41,6 +41,9 @@ public class SharableSocks5DatagramServerFactory implements Socks5DatagramServer
     private ConcurrentMap<InetSocketAddress, ChannelFuture> childChannels = Maps.newConcurrentMap();
 
     public SharableSocks5DatagramServerFactory() {
+    }
+
+    public void start(final InetSocketAddress localAddress) {
         channel = new Bootstrap().group(new NioEventLoopGroup())
                 .channel(NioDatagramChannel.class)
                 .handler(new ChannelInitializer<Channel>() {
@@ -54,7 +57,7 @@ public class SharableSocks5DatagramServerFactory implements Socks5DatagramServer
                             }
                         });
                     }
-                }).bind(1080);
+                }).bind(localAddress);
     }
 
     @Override
@@ -156,6 +159,7 @@ public class SharableSocks5DatagramServerFactory implements Socks5DatagramServer
 
         @Override
         protected void doWrite(ChannelOutboundBuffer buffer) throws Exception {
+            /*
             final RecyclableArrayList list = RecyclableArrayList.newInstance();
             boolean freeList = true;
             try {
@@ -173,8 +177,10 @@ public class SharableSocks5DatagramServerFactory implements Socks5DatagramServer
                     list.recycle();
                 }
             }
+            */
             // FIXME
-            // parent().doWrite(list, owner);
+            parent().write(buffer.current()).sync();
+//            ((AbstractChannel)parent()).doWrite(buffer);
         }
 
         @Override
@@ -194,7 +200,6 @@ public class SharableSocks5DatagramServerFactory implements Socks5DatagramServer
 
         @Override
         protected SocketAddress localAddress0() {
-//            return parent().localAddress0();
             return parent().localAddress();
         }
 
@@ -211,7 +216,9 @@ public class SharableSocks5DatagramServerFactory implements Socks5DatagramServer
 
     public static void main(String[] args) throws InterruptedException, UnknownHostException {
         SharableSocks5DatagramServerFactory f = new SharableSocks5DatagramServerFactory();
+        f.start(new InetSocketAddress(1080));
         ChannelFuture cf = f.createServer(null, new InetSocketAddress("127.0.0.1", 0));
+
         System.out.println(cf.sync().channel());
     }
 }

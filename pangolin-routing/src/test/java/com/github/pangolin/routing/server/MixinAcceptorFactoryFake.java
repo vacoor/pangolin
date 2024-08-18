@@ -88,7 +88,7 @@ public class MixinAcceptorFactoryFake implements AcceptorFactory {
         return new Acceptor() {
             @Override
             public ChannelFuture start(final RouteContext context) throws Exception {
-                final FakeDnsEngine4 engine4 = FakeDnsEngine4.create();
+                final FakeDnsEngine4 engine4 = FakeDnsEngine4.create("198.18.0.0", "255.255.0.0");
                 final EventLoopGroup loop = new NioEventLoopGroup();
 
                 final List<InetSocketAddress> addresses = Arrays.asList(
