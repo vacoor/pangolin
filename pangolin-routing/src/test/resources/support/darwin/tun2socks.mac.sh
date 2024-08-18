@@ -63,4 +63,6 @@ function tun_init() {
 
 # macOS
 # networksetup -listnetworkserviceorder | grep 'Hardware Port'
-# networksetup -setdnsservers "Wi-Fi" 127.0.0.1 192.168.1.1 
+# networksetup -setdnsservers "Wi-Fi" 127.0.0.1 192.168.1.1
+# networksetup -setdnsservers "Wi-Fi" 127.0.0.1
+# networksetup -setdnsservers "Wi-Fi" 192.168.1.1

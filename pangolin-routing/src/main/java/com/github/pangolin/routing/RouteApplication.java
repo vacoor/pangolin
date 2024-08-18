@@ -10,9 +10,12 @@ import com.github.pangolin.routing.context.UpstreamCombinersAware;
 import com.github.pangolin.routing.context.UpstreamFactoriesAware;
 import com.github.pangolin.routing.handler.extra.ProxyAutoConfigurationServerHandler;
 import com.github.pangolin.routing.handler.extra.SwitchyRuleConfigurationServerHandler;
+import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.route.RouteRegistry;
+import com.github.pangolin.routing.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.route.predicate.RoutePredicateSetFactory;
+import com.github.pangolin.routing.route.predicate.SubnetRoutePredicate;
 import com.github.pangolin.routing.server.Acceptor;
 import com.github.pangolin.routing.server.AcceptorProvider;
 import com.github.pangolin.routing.stats.StatsAware;
@@ -213,7 +216,16 @@ public class RouteApplication {
         final ApplicationHome home = new ApplicationHome(RouteApplication.class);
         final URL conf = new File(home.getDir(), "conf/default.conf").toURI().toURL();
         final RouteApplication app = new RouteApplication();
-        app.run(conf);
+        RouteContext context = app.run(conf);
+        for (Route<InetSocketAddress> route : context.routes()) {
+            for (RoutePredicate predicate : route.getPredicates()) {
+                if (predicate instanceof SubnetRoutePredicate) {
+                    SubnetRoutePredicate p = (SubnetRoutePredicate) predicate;
+                    String s = p.getNetworkAddress().getHostAddress() + "/" + p.getCidrPrefix();
+                    System.out.println(String.format("sudo route add -net %s 198.18.0.1", s));
+                }
+            }
+        }
         app.await();
     }
 }
