@@ -1,50 +1,54 @@
-package com.github.pangolin.routing.beta.fakedns;
+package com.github.pangolin.routing.dns;
 
-import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
+import com.github.pangolin.routing.handler.codec.socks5.Socks5ClientDatagramPacketCodec;
+import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
+import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
+import com.github.pangolin.routing.handler.internal.client.Socks5DatagramProxyHandler;
+import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
+import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
 import io.netty.buffer.ByteBufUtil;
-import io.netty.channel.*;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.DatagramChannel;
 import io.netty.handler.codec.dns.*;
 import io.netty.util.NetUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
-import java.security.SecureRandom;
 
 /**
  *
  */
 @Slf4j
-public class TcpDnsQueryClient {
+public class Socks5DnsQueryClient {
 
     public static void main(String[] args) throws Exception {
 
-//        final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
-        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
+        final InetSocketAddress proxyAddress = new InetSocketAddress("127.0.0.1", 1082);
+        final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
+//        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
 //        final InetSocketAddress dnsAddress = new InetSocketAddress("8.8.8.8", 53);
-//        final DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
-        final DefaultDnsQuery query = new DefaultDnsQuery(new SecureRandom().nextInt(), DnsOpCode.QUERY);
-        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
-        query.setRecursionDesired(true);
-//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.AAAA));
-//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.NS));
+        final DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
+        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
+//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
 
-
-        SocketChannelFactory factory = new StandardSocketChannelFactory();
+        DatagramChannelFactory factory = new StandardDatagramChannelFactory();
         final EventLoopGroup proxyGroup = new NioEventLoopGroup();
-        factory.open(dnsAddress, 0, true, proxyGroup, new ChannelInitializer<Channel>() {
+        factory.open(proxyAddress, 0, proxyGroup, new ChannelInitializer<DatagramChannel>() {
                     @Override
-                    protected void initChannel(Channel ch) {
-//                        ch.pipeline().addLast(new Socks5DatagramProxyHandler(proxyAddress));
+                    protected void initChannel(DatagramChannel ch) {
+                        ch.pipeline().addLast(new Socks5DatagramProxyHandler(proxyAddress));
 //                        ch.pipeline().addLast(new Socks5ClientDatagramPacketCodec(proxyAddress));
 //                        ch.pipeline().addLast(new SsDatagramProxyHandler(ssProxyAddress, cipher, password));
-                        ch.pipeline().addLast(new TcpDnsResponseDecoder());
-                        ch.pipeline().addLast(new TcpDnsQueryEncoder());
-                        ch.pipeline().addLast(new SimpleChannelInboundHandler<DnsResponse>() {
+                        ch.pipeline().addLast(new DatagramDnsResponseDecoder());
+                        ch.pipeline().addLast(new DatagramDnsQueryEncoder());
+                        ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramDnsResponse>() {
 
                             @Override
-                            protected void channelRead0(final ChannelHandlerContext channelHandlerContext, final DnsResponse datagramDnsResponse) throws Exception {
+                            protected void channelRead0(final ChannelHandlerContext channelHandlerContext, final DatagramDnsResponse datagramDnsResponse) throws Exception {
                                 if (datagramDnsResponse.count(DnsSection.QUESTION) > 0) {
                                     final String domain = datagramDnsResponse.recordAt(DnsSection.QUESTION).name();
                                     System.out.print(String.format("%s -> ", domain));

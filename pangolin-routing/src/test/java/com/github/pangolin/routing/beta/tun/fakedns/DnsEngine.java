@@ -1,6 +1,7 @@
-package com.github.pangolin.routing.beta.fakedns;
+package com.github.pangolin.routing.beta.tun.fakedns;
 
 /**
+ * --dns fake|rule|direct
  *
  */
 public interface DnsEngine {

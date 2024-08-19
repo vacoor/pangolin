@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.fakedns;
+package com.github.pangolin.routing.dns;
 
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;

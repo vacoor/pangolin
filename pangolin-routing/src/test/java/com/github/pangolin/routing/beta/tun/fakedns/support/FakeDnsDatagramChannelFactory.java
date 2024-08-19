@@ -1,29 +1,29 @@
-package com.github.pangolin.routing.beta.fakedns;
+package com.github.pangolin.routing.beta.tun.fakedns.support;
 
-import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
+import com.github.pangolin.routing.beta.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.EventLoopGroup;
 import io.netty.util.NetUtil;
 
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 
-public class FakeDnsSocketChannelFactory implements SocketChannelFactory {
+public class FakeDnsDatagramChannelFactory implements DatagramChannelFactory {
     private final DnsEngine fakeDns;
-    private final SocketChannelFactory delegate;
+    private final DatagramChannelFactory delegate;
 
-    public FakeDnsSocketChannelFactory(final DnsEngine fakeDns, final SocketChannelFactory delegate) {
+    public FakeDnsDatagramChannelFactory(final DnsEngine fakeDns, final DatagramChannelFactory delegate) {
         this.fakeDns = fakeDns;
         this.delegate = delegate;
     }
 
     @Override
-    public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
-        return delegate.open(resolve(remoteAddress), connTimeoutMs, autoRead, group, handler);
+    public ChannelFuture open(final InetSocketAddress remoteAddress, final int connTimeoutMs, final EventLoopGroup group, final ChannelHandler handler) {
+        return delegate.open(resolve(remoteAddress), connTimeoutMs, group, handler);
     }
 
-    private SocketAddress resolve(final SocketAddress remoteAddress) {
+    private InetSocketAddress resolve(final InetSocketAddress remoteAddress) {
         InetSocketAddress destination = (InetSocketAddress) remoteAddress;
         if (null != fakeDns) {
             byte[] address;

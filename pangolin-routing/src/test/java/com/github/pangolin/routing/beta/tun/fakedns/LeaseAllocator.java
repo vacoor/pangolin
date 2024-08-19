@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.fakedns;
+package com.github.pangolin.routing.beta.tun.fakedns;
 
 import java.util.concurrent.atomic.AtomicReference;
 

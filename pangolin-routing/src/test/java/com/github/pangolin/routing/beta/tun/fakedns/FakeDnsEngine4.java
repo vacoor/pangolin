@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.fakedns;
+package com.github.pangolin.routing.beta.tun.fakedns;
 
 import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
@@ -47,13 +47,13 @@ public class FakeDnsEngine4 implements DnsEngine {
     }
 
     final Map<String, LeaseAllocator4.Lease> domainToLeaseMap = new ConcurrentHashMap<>();
-    final Map<String, Binding> nsIpToLeaseMap = new ConcurrentHashMap<>();
+    final Map<String, Entry> nsIpToLeaseMap = new ConcurrentHashMap<>();
 
-    private class Binding {
+    private class Entry {
         private final String domain;
         private final LeaseAllocator4.Lease lease;
 
-        private Binding(final String domain, final LeaseAllocator4.Lease lease) {
+        private Entry(final String domain, final LeaseAllocator4.Lease lease) {
             this.domain = domain;
             this.lease = lease;
         }
@@ -66,7 +66,7 @@ public class FakeDnsEngine4 implements DnsEngine {
                 LeaseAllocator4.Lease l = allocator.acquire();
                 String ipToUse = NetUtil.intToIpAddress(l.value);
                 System.out.println(String.format("%s -> %s", domain, ipToUse));
-                nsIpToLeaseMap.put(NetUtil.intToIpAddress(l.value), new Binding(domain, l));
+                nsIpToLeaseMap.put(NetUtil.intToIpAddress(l.value), new Entry(domain, l));
                 return l;
             }
             return v;
@@ -77,7 +77,7 @@ public class FakeDnsEngine4 implements DnsEngine {
     @Override
     public String resolve(final byte[] ip) {
         String ipToUse = NetUtil.intToIpAddress(ipAddressToInt(ip));
-        Binding compute = nsIpToLeaseMap.compute(ipToUse, (k, v) -> {
+        Entry compute = nsIpToLeaseMap.compute(ipToUse, (k, v) -> {
             if (null == v || System.currentTimeMillis() - v.lease.timestamp >= 2 * ttl) {
                 return null;
             }
@@ -113,7 +113,7 @@ public class FakeDnsEngine4 implements DnsEngine {
         Inet4Address ipAddress = (Inet4Address) SocketUtils.toAddress(ip, false);
         Inet4Address subnetMaskAddress = (Inet4Address) SocketUtils.toAddress(subnetMask, false);
 
-        final long ttl = TimeUnit.MINUTES.toMillis(10);
+        final long ttl = TimeUnit.MINUTES.toMillis(1);
         return new FakeDnsEngine4(ipAddress, subnetMaskAddress, ttl);
     }
 
