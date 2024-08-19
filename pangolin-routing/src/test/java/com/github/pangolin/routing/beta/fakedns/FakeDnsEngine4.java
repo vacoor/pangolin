@@ -95,7 +95,7 @@ public class FakeDnsEngine4 implements DnsEngine {
     public DatagramDnsResponse lookup(DatagramDnsQuery query) {
         final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
         final String domain = dnsQuestion.name();
-        final long ttl = this.ttl;
+        final long ttl = this.ttl / 1000;
         byte[] bytes = this.resolve(domain);
         if (null != bytes) {
             final ByteBuf buf = Unpooled.wrappedBuffer(bytes);
