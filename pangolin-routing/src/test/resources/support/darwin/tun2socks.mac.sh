@@ -4,6 +4,7 @@
 # https://github.com/mellow-io/mellow/blob/f71f6e54768ded3cfcc46bebb706d46cb8baac08/src/helper/win32/config_route.bat
 
 # In macOS, we need to start tun2socks first so that it will create TUN interface for us.
+# In this example, "en0" is the default primary network interface.
 function tun_create() {
     sudo ./tun2socks-darwin-amd64-v3 -device utun123 -proxy socks5://127.0.0.1:2081 -interface en0
 }
@@ -17,8 +18,7 @@ function tun_set_address() {
 
 # Add TUN inteface route.
 function tun_setup_route() {
-   # Mode 1:
-   # Add these specific routes so that tun2socks can handle primary connections.
+   # Mode 1: Add these specific routes so that tun2socks can handle primary connections.
    # sudo route add -net 1.0.0.0/8 198.18.0.1
    # sudo route add -net 2.0.0.0/7 198.18.0.1
    # sudo route add -net 4.0.0.0/6 198.18.0.1
@@ -29,7 +29,7 @@ function tun_setup_route() {
    # sudo route add -net 128.0.0.0/1 198.18.0.1
    sudo route add -net 198.18.0.0/15 198.18.0.1
 
-   # Mode 2: Add as default routes
+   # Mode 2: Route default traffic to TUN interface.
    # sudo route delete -inet default
    # sudo route delete -inet default -ifscope en0
    # sudo route add -inet default 198.18.0.1
