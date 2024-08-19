@@ -1,10 +1,10 @@
 package com.github.pangolin.routing.server;
 
 import com.github.pangolin.routing.RouteApplication;
-import com.github.pangolin.routing.beta.fakedns.handler.DatagramDnsProxyServerHandler;
-import com.github.pangolin.routing.beta.fakedns.handler.DatagramFakeDnsServerHandler;
 import com.github.pangolin.routing.beta.fakedns.DnsEngine;
 import com.github.pangolin.routing.beta.fakedns.FakeDnsEngine4;
+import com.github.pangolin.routing.beta.fakedns.handler.DatagramDnsProxyServerHandler;
+import com.github.pangolin.routing.beta.fakedns.handler.DatagramFakeDnsServerHandler;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.route.predicate.RoutePredicate;
@@ -26,21 +26,70 @@ import io.netty.util.concurrent.GenericFutureListener;
 import org.junit.Test;
 import org.springframework.boot.system.ApplicationHome;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.InetSocketAddress;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 
 /**
+ *
  */
 public class AppTest {
+    private static final String TUN2SOCKS_READY_PATTERN = ".*tun://.* <-> .*";
+
+    private void awaitTun2SocksReady() throws IOException, URISyntaxException {
+        final Process tun2SocksProcess = createTun2SocksProcessBuilder().start();
+        BufferedReader reader = new BufferedReader(new InputStreamReader(tun2SocksProcess.getInputStream()));
+        try {
+            String outputLine;
+            do {
+                outputLine = reader.readLine();
+                if (outputLine == null) {
+                    //Something goes wrong. Stream is ended before server was activated.
+                    throw new RuntimeException("Can't start tun2socks. Check logs for details.");
+                }
+                System.out.println(outputLine);
+            } while (!outputLine.matches(TUN2SOCKS_READY_PATTERN));
+        } finally {
+            IOUtils.close(reader);
+        }
+    }
+
+    ProcessBuilder createTun2SocksProcessBuilder() throws URISyntaxException {
+        final URL resource = getClass().getResource("/support/windows/tun2socks.exe");
+        final File executable = new File(resource.toURI().getPath());
+        // tun2socks.exe -device wintun -proxy socks5://127.0.0.1:3081 -interface "以太网 2"
+        return new ProcessBuilder()
+                .command(
+                        executable.getAbsolutePath(),
+                        "-device", "wintun",
+                        "-proxy", "socks5://127.0.0.1:3081",
+                        "-interface", "以太网 2"
+                )
+                .directory(executable.getParentFile());
+    }
+
+    public void initTun() throws IOException, InterruptedException {
+        int code = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "address", "name=\"wintun\"", "source=static", "address=198.18.0.1", "mask=255.255.255.0").start().waitFor();
+        System.out.println("SetAddress: " + code);
+        int code2 = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "dnsservers", "name=\"wintun\"", "static", "address=127.0.0.1", "register=none", "validate=no").start().waitFor();
+        System.out.println("SetDnsServer: " + code2);
+        int code3 = new ProcessBuilder().command("ipconfig", "/flushdns").start().waitFor();
+        System.out.println("FlushDNS: " + code3);
+    }
+
     @Test
     public void test2() throws Exception {
 //        final Acceptor acceptor = new MixinAcceptorFactory().apply(1089);
 //        acceptor.start(new InMemoryRouteContext(null)).sync().channel().closeFuture().sync();
 //        RouteApplication.main(new String[0]);
+
         final ApplicationHome home = new ApplicationHome(AppTest.class);
         final URL conf = new File(home.getDir(), "conf/default.conf").toURI().toURL();
         final FakeDnsEngine4 engine4 = FakeDnsEngine4.create("198.18.0.0", "255.255.0.0");
@@ -56,7 +105,8 @@ public class AppTest {
         final RouteContext context = app.run(conf);
 
         final EventLoopGroup loop = new NioEventLoopGroup();
-        final List<InetSocketAddress> addresses = Arrays.asList(new InetSocketAddress("192.168.1.1", 53));
+//        final List<InetSocketAddress> addresses = Arrays.asList(new InetSocketAddress("192.168.1.1", 53));
+        final List<InetSocketAddress> addresses = Arrays.asList(new InetSocketAddress("10.188.207.9", 53));
         final DnsNameResolver resolver =
                 new DnsNameResolverBuilder()
                         .eventLoop(loop.next())
@@ -118,6 +168,9 @@ public class AppTest {
         deleteRouteWriter.flush();
         IOUtils.close(deleteRouteWriter);
         System.out.println("-----------------------");
+
+        awaitTun2SocksReady();
+        initTun();
 
         app.await();
     }
