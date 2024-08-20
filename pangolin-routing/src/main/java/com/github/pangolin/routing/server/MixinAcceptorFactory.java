@@ -1,22 +1,14 @@
 package com.github.pangolin.routing.server;
 
+import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
-import com.github.pangolin.routing.context.InMemoryRouteContext;
-import com.github.pangolin.routing.context.RouteContext;
-import com.github.pangolin.routing.support.ProxyDatagramChannelFactory;
-import com.github.pangolin.routing.support.ProxySocketChannelFactory;
-import com.github.pangolin.routing.upstream.AbstractUpstream;
-import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
 import lombok.extern.slf4j.Slf4j;
@@ -69,23 +61,8 @@ public class MixinAcceptorFactory implements AcceptorFactory {
         return new Acceptor() {
             @Override
             public ChannelFuture start(final RouteContext context) throws Exception {
-                final Upstream upstream = "DEFAULT".equals(proxyName) ? new AbstractUpstream("DEFAULT") {
-                    @Override
-                    public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
-                        final Upstream upstream = context.choose(destination);
-                        return null != upstream ? upstream.newSocketProxyHandler(destination) : null;
-                    }
-
-                    @Override
-                    public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
-                        final Upstream upstream = context.choose(destination);
-                        return null != upstream ? upstream.newDatagramProxyHandler(destination) : null;
-                    }
-                } : context.getUpstream(proxyName);
-
-                // FIXME
-                final SocketChannelFactory routeSocketFactory = createSocketChannelFactory(upstream, bypass, context);
-                final DatagramChannelFactory routeDatagramFactory = createDatagramChannelFactory(upstream, bypass, context);
+                final SocketChannelFactory socketChannelFactory = createSocketChannelFactory(context, proxyName);
+                final DatagramChannelFactory datagramChannelFactory = createDatagramChannelFactory(context, proxyName);
 
                 final NettyServer server = new NettyServer(listenPort);
                 return server.start(true, new ChannelInitializer<SocketChannel>() {
@@ -93,7 +70,7 @@ public class MixinAcceptorFactory implements AcceptorFactory {
                     protected void initChannel(final SocketChannel channel) throws Exception {
                         final MixinServerHandshaker[] handshakers = factories
                                 .stream()
-                                .map(factory -> factory.createHandshaker(routeSocketFactory, routeDatagramFactory))
+                                .map(factory -> factory.createHandshaker(socketChannelFactory, datagramChannelFactory))
                                 .toArray(MixinServerHandshaker[]::new);
                         channel.pipeline().addLast(new MixinServerInitializer(handshakers));
                     }
@@ -112,14 +89,12 @@ public class MixinAcceptorFactory implements AcceptorFactory {
         };
     }
 
-    private SocketChannelFactory createSocketChannelFactory(final Upstream upstream, final List<String> bypass, final RouteContext context) {
-        final SocketChannelFactory routeSocketFactory = null != upstream ? new ProxySocketChannelFactory(upstream, bypass) : new StandardSocketChannelFactory();
-        return routeSocketFactory;
+    protected SocketChannelFactory createSocketChannelFactory(final RouteContext context, final String upstream) {
+        return "DEFAULT".equals(upstream) ? context.newSocketChannelFactory() : context.newSocketChannelFactory(upstream);
     }
 
-    private DatagramChannelFactory createDatagramChannelFactory(final Upstream upstream, final List<String> bypass, final RouteContext context) {
-        final DatagramChannelFactory routeDatagramFactory = null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass) : new StandardDatagramChannelFactory();
-        return routeDatagramFactory;
+    protected DatagramChannelFactory createDatagramChannelFactory(final RouteContext context, final String upstream) {
+        return "DEFAULT".equals(upstream) ? context.newDatagramChannelFactory() : context.newDatagramChannelFactory(upstream);
     }
 
     /*
