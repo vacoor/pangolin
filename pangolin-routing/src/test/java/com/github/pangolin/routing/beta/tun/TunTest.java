@@ -130,8 +130,8 @@ public class TunTest {
                 TcpPacket.Builder outTcpPayload = ack(tcpHeader, srcAddr, dstAddr).ack(true);
                 if (ipPacket instanceof IpV4Packet) {
                     IpV4Packet out = (IpV4Packet) ack(ipHeader).payloadBuilder(outTcpPayload).build();
-                    log(((TcpPacket)out.getPayload()).getHeader(), out.getHeader(), false);
-                    ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(out.getRawData())));
+//                    log(((TcpPacket)out.getPayload()).getHeader(), out.getHeader(), false);
+//                    ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(out.getRawData())));
                 }
             } else if (!tcpHeader.getUrg() && tcpHeader.getAck()
                     && !tcpHeader.getPsh() && !tcpHeader.getRst()
@@ -145,8 +145,8 @@ public class TunTest {
                     IpV4Packet build1 = (IpV4Packet) ack(ipHeader).payloadBuilder(outTcpPayload).build();
 
                     IpV4Packet out = (IpV4Packet) ack(ipHeader).payloadBuilder(outTcpPayload).build();
-                    log(((TcpPacket)out.getPayload()).getHeader(), out.getHeader(), false);
-                    ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(build1.getRawData())));
+//                    log(((TcpPacket)out.getPayload()).getHeader(), out.getHeader(), false);
+//                    ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(build1.getRawData())));
                 }
             } else {
             }
