@@ -1,5 +1,7 @@
 package com.github.pangolin.routing.beta.tun;
 
+import com.google.common.collect.Lists;
+import com.sun.jna.WString;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
@@ -9,17 +11,22 @@ import org.drasyl.channel.tun.Tun4Packet;
 import org.drasyl.channel.tun.TunAddress;
 import org.drasyl.channel.tun.TunChannel;
 import org.drasyl.channel.tun.TunPacket;
+import org.drasyl.channel.tun.jna.windows.WindowsTunDevice;
 import org.pcap4j.packet.*;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpV4TosPrecedence;
 import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.TcpPort;
+import org.pcap4j.packet.namednumber.UdpPort;
 import org.pcap4j.util.ByteArrays;
 
+import java.lang.reflect.Field;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -32,9 +39,12 @@ public class TunTest {
 
     static IpPacket parsePacket(final TunPacket packet) throws IllegalRawDataException {
         final byte[] bytes = ByteBufUtil.getBytes(packet.content());
+        return (IpPacket) IpSelector.newPacket(bytes, 0, bytes.length);
+        /*
         return INET6 == packet.version()
                 ? IpV6Packet.newPacket(bytes, 0, bytes.length)
                 : IpV4Packet.newPacket(bytes, 0, bytes.length);
+                */
     }
 
     private static final ThreadLocal<Integer> sequence = new ThreadLocal<Integer>() {
@@ -46,17 +56,22 @@ public class TunTest {
 
     private static TcpPacket.Builder ack(final TcpPacket.TcpHeader header, final InetAddress srcAddr, final InetAddress dstAddr) {
         final int seq = header.getAcknowledgmentNumber() != 0 ? header.getAcknowledgmentNumber() : 1;
+
+        List<TcpPacket.TcpOption> options = Lists.newArrayList();
+        options.addAll(header.getOptions());
+
         return new TcpPacket.Builder()
                 .srcAddr(dstAddr)
                 .dstAddr(srcAddr)
                 .srcPort(header.getDstPort())
                 .dstPort(header.getSrcPort())
                 .options(Arrays.asList()) // FIXME
-                .options(header.getOptions())
+                .options(options)
                 .sequenceNumber(seq)
                 .acknowledgmentNumber(header.getSequenceNumber() + 1)
 //                .ack(true)
 //                .syn(true)
+                .window((short) 65535)
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true);
@@ -118,8 +133,6 @@ public class TunTest {
                     log(((TcpPacket)out.getPayload()).getHeader(), out.getHeader(), false);
                     ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(out.getRawData())));
                 }
-
-
             } else if (!tcpHeader.getUrg() && tcpHeader.getAck()
                     && !tcpHeader.getPsh() && !tcpHeader.getRst()
                     && !tcpHeader.getSyn() && tcpHeader.getFin()) {
@@ -136,11 +149,21 @@ public class TunTest {
                     ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(build1.getRawData())));
                 }
             } else {
-//                System.out.println(f + " TCP: " + srcAddr + " -> " + dstAddr);
             }
+            Packet payload = tcpPacket.getPayload();
+            if (null != payload) {
+                final byte[] rawData = payload.getRawData();
+                System.out.println(new String(rawData, StandardCharsets.UTF_8));
+            }
+//                System.out.println(tcpPacket);
+//                System.out.println(f + " TCP: " + srcAddr + " -> " + dstAddr);
         } else if (IpNumber.UDP.equals(protocol)) {
             final UdpPacket udpPacket = (UdpPacket) ipPacket.getPayload();
-//            System.out.println("UDP: " + srcAddr + " -> " + dstAddr);
+            final UdpPort dstPort = udpPacket.getHeader().getDstPort();
+            if (dstPort.valueAsInt() == 5353) {
+                return;
+            }
+            System.out.println("UDP: " + srcAddr + " -> " + dstAddr + ": " + ByteBufUtil.hexDump(udpPacket.getRawData()));
         } else if (IpNumber.ICMPV6.equals(protocol)) {
             IcmpV6CommonPacket payload = (IcmpV6CommonPacket) ipPacket.getPayload();
 //            System.out.println("ICMPv6: " + srcAddr + " -> " + dstAddr);
@@ -177,12 +200,9 @@ public class TunTest {
     }
 
     public static void main(String[] args) throws Exception {
-        /*
         final Field innerString = WString.class.getDeclaredField("string");
-        if (innerString.trySetAccessible()) {
-            innerString.set(WindowsTunDevice.TUNNEL_TYPE, "TEST");
-        }
-        */
+        innerString.setAccessible(true);
+        innerString.set(WindowsTunDevice.TUNNEL_TYPE, "PAN");
 
         EventLoopGroup group = new DefaultEventLoopGroup(1);
         try {
