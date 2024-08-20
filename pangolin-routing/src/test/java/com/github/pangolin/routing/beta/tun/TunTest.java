@@ -2,6 +2,7 @@ package com.github.pangolin.routing.beta.tun;
 
 import com.github.pangolin.routing.beta.tun.tcp.Socket;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.sun.jna.WString;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
@@ -73,7 +74,7 @@ public class TunTest {
                 .acknowledgmentNumber(header.getSequenceNumber() + 1)
 //                .ack(true)
 //                .syn(true)
-                .window((short) 65535)
+                .window((short) 10)
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true);
@@ -94,7 +95,7 @@ public class TunTest {
                 .correctChecksumAtBuild(true);
     }
 
-    private static volatile Socket socket;
+    private static final Map<String, Socket> socketMap = Maps.newConcurrentMap();
 
     public static void channelRead0(final ChannelHandlerContext ctx, final IpPacket ipPacket) {
         final IpPacket.IpHeader ipHeader = ipPacket.getHeader();
@@ -113,10 +114,11 @@ public class TunTest {
 
 
             if (true) {
+                String key = srcAddr.toString() + tcpSrcPort + dstAddr + tcpDstPort;
                 if (!tcpHeader.getAck() && tcpHeader.getSyn()) {
-                    socket = new Socket(ctx, ipHeader);
+                    socketMap.putIfAbsent(key, new Socket(ctx));
                 }
-                socket.receive(srcAddr, dstAddr, tcpPacket);
+                socketMap.get(key).receive(tcpPacket, ipHeader);
                 return;
             }
 
@@ -206,6 +208,7 @@ public class TunTest {
         if (tcpHeader.getFin()) {
             type += "[FIN]";
         }
+        type += tcpHeader.getSequenceNumber() + "/" + tcpHeader.getAcknowledgmentNumber();
         if (inbound) {
             log.info("{}:{} - {} -> {}:{}", ipHeader.getSrcAddr(), tcpHeader.getSrcPort().valueAsInt(), type, ipHeader.getDstAddr(), tcpHeader.getDstPort().valueAsInt());
         } else {
@@ -232,6 +235,7 @@ public class TunTest {
                         }
                     });
             final Channel ch = b.bind(new TunAddress("utun99")).sync().channel();
+            int code = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "address", "name=\"utun99\"", "source=static", "address=192.168.1.1", "mask=255.255.255.0").start().waitFor();
             // send/receive messages of type TunPacket...
             ch.closeFuture().sync();
         } finally {
