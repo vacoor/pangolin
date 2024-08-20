@@ -15,7 +15,8 @@ public class WindowsTun2Socks extends AbstractTun2Socks {
 
     @Override
     protected ProcessBuilder createProcessBuilder() throws URISyntaxException {
-        final URL resource = getClass().getResource("/support/windows/tun2socks.exe");
+//        final URL resource = getClass().getResource("/support/windows/tun2socks.exe");
+        final URL resource = getClass().getResource("/support/windows/tun2socks-windows-amd64-v3.exe");
         final File executable = new File(resource.toURI().getPath());
         /*-
          *
@@ -24,7 +25,8 @@ public class WindowsTun2Socks extends AbstractTun2Socks {
         return new ProcessBuilder()
                 .command(
                         executable.getAbsolutePath(),
-                        "-device", "wintun",
+                        "-device", "tun://wintun",
+                        // "-device", "tun://wintun?guid={325654bf-23a8-407c-aac8-f56498457c02}",
                         "-proxy", "socks5://127.0.0.1:3081",
                         "-interface", "以太网 2"
                 )
