@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.beta.tun;
 
+import com.github.pangolin.routing.beta.tun.tcp.Socket;
 import com.google.common.collect.Lists;
 import com.sun.jna.WString;
 import io.netty.bootstrap.Bootstrap;
@@ -27,6 +28,7 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -55,7 +57,7 @@ public class TunTest {
     };
 
     private static TcpPacket.Builder ack(final TcpPacket.TcpHeader header, final InetAddress srcAddr, final InetAddress dstAddr) {
-        final int seq = header.getAcknowledgmentNumber() != 0 ? header.getAcknowledgmentNumber() : 1;
+        final int seq = header.getAcknowledgmentNumber() != 0 ? header.getAcknowledgmentNumber() : header.getSequenceNumber();
 
         List<TcpPacket.TcpOption> options = Lists.newArrayList();
         options.addAll(header.getOptions());
@@ -92,6 +94,8 @@ public class TunTest {
                 .correctChecksumAtBuild(true);
     }
 
+    private static volatile Socket socket;
+
     public static void channelRead0(final ChannelHandlerContext ctx, final IpPacket ipPacket) {
         final IpPacket.IpHeader ipHeader = ipPacket.getHeader();
         final InetAddress srcAddr = ipHeader.getSrcAddr();
@@ -106,6 +110,16 @@ public class TunTest {
             final TcpPort tcpDstPort = tcpHeader.getDstPort();
 
             log(tcpHeader, ipHeader, true);
+
+
+            if (true) {
+                if (!tcpHeader.getAck() && tcpHeader.getSyn()) {
+                    socket = new Socket(ctx, ipHeader);
+                }
+                socket.receive(srcAddr, dstAddr, tcpPacket);
+                return;
+            }
+
 
             if (!tcpHeader.getUrg() && !tcpHeader.getAck()
                     && !tcpHeader.getPsh() && !tcpHeader.getRst()
@@ -163,7 +177,7 @@ public class TunTest {
             if (dstPort.valueAsInt() == 5353) {
                 return;
             }
-            System.out.println("UDP: " + srcAddr + " -> " + dstAddr + ": " + ByteBufUtil.hexDump(udpPacket.getRawData()));
+//            System.out.println("UDP: " + srcAddr + " -> " + dstAddr + ": " + ByteBufUtil.hexDump(udpPacket.getRawData()));
         } else if (IpNumber.ICMPV6.equals(protocol)) {
             IcmpV6CommonPacket payload = (IcmpV6CommonPacket) ipPacket.getPayload();
 //            System.out.println("ICMPv6: " + srcAddr + " -> " + dstAddr);
