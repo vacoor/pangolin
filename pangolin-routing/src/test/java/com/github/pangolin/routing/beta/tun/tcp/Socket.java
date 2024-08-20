@@ -6,6 +6,7 @@ import io.netty.channel.ChannelHandlerContext;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.TcpPacket;
+import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 
@@ -66,7 +67,8 @@ public class Socket {
             } else if (header.getAck() && !header.getSyn()) {
                 final byte[] rawData = packet.getPayload().getRawData();
                 System.out.println(new String(rawData, StandardCharsets.UTF_8));
-                write(ack(header, srcAddr, dstAddr).ack(true));
+                byte[] bytes = "HTTP/1.1 404".getBytes(StandardCharsets.UTF_8);
+                write(ack(header, srcAddr, dstAddr).ack(true).payloadBuilder(UnknownPacket.newPacket(bytes, 0, bytes.length).getBuilder()));
             } else if (!header.getAck() && header.getSyn()) {
                 // TODO
             }
