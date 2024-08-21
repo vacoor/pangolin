@@ -29,11 +29,11 @@ public final class AddressAndNetmaskHelper {
         // JNA mapping
     }
 
-    public static native WinDef.DWORD setIPv4AndNetmask(final long luid,
+    public static native WinDef.DWORD setIPv4AndNetmask(final LongByReference luid,
                                                         final String ip,
                                                         final int mask) throws LastErrorException;
 
-    public static native WinDef.DWORD setIPv6AndNetmask(final long luid,
+    public static native WinDef.DWORD setIPv6AndNetmask(final LongByReference luid,
                                                         final String ip,
                                                         final int mask) throws LastErrorException;
 }
