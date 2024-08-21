@@ -7,6 +7,9 @@ import com.sun.jna.platform.win32.Guid.GUID;
 import com.sun.jna.platform.win32.WinDef;
 import static com.sun.jna.platform.win32.WinDef.*;
 import static com.sun.jna.platform.win32.WinNT.*;
+
+import com.sun.jna.ptr.IntByReference;
+import com.sun.jna.ptr.LongByReference;
 import io.netty.util.internal.SystemPropertyUtil;
 import org.drasyl.channel.tun.jna.windows.loader.LibraryLoader;
 
@@ -103,7 +106,7 @@ public final class WintunLib {
      * @throws LastErrorException
      */
     public static native void WintunGetAdapterLUID(final WINTUN_ADAPTER_HANDLE Adapter,
-                                                   final Pointer Luid) throws LastErrorException;
+                                                   final LongByReference Luid) throws LastErrorException;
 
     /**
      * Determines the version of the Wintun driver currently loaded.
@@ -163,7 +166,7 @@ public final class WintunLib {
      * @throws LastErrorException
      */
     public static native Pointer WintunReceivePacket(final WINTUN_SESSION_HANDLE Session,
-                                                     final Pointer PacketSize) throws LastErrorException;
+                                                     final IntByReference PacketSize) throws LastErrorException;
 
     /**
      * Releases internal buffer after the received packet has been processed by the client. This

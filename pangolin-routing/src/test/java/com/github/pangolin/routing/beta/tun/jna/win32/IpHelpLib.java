@@ -8,7 +8,6 @@ import com.sun.jna.Structure;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Guid;
 import com.sun.jna.platform.win32.IPHlpAPI;
-import com.sun.jna.platform.win32.WinDef;
 import com.sun.jna.platform.win32.WinNT;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
@@ -18,8 +17,8 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 
-public interface ExtendedIPHlpAPI extends IPHlpAPI {
-    ExtendedIPHlpAPI INSTANCE = Native.load("IPHlpAPI", ExtendedIPHlpAPI.class, W32APIOptions.DEFAULT_OPTIONS);
+public interface IpHelpLib extends IPHlpAPI {
+    IpHelpLib INSTANCE = Native.load("IPHlpAPI", IpHelpLib.class, W32APIOptions.DEFAULT_OPTIONS);
 
     // ------------------------ START Interface related ------------------------
 

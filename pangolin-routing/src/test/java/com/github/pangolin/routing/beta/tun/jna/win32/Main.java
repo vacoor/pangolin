@@ -1,29 +1,24 @@
 package com.github.pangolin.routing.beta.tun.jna.win32;
 
-import static com.github.pangolin.routing.beta.tun.jna.win32.ExtendedIPHlpAPI.GAA_FLAG_SKIP_ANYCAST;
-import static com.github.pangolin.routing.beta.tun.jna.win32.ExtendedIPHlpAPI.GAA_FLAG_SKIP_FRIENDLY_NAME;
-import static com.github.pangolin.routing.beta.tun.jna.win32.ExtendedIPHlpAPI.GAA_FLAG_SKIP_MULTICAST;
-import static com.github.pangolin.routing.beta.tun.jna.win32.ExtendedIPHlpAPI.GAA_FLAG_SKIP_UNICAST;
+import static com.github.pangolin.routing.beta.tun.jna.win32.IpHelpLib.GAA_FLAG_SKIP_ANYCAST;
+import static com.github.pangolin.routing.beta.tun.jna.win32.IpHelpLib.GAA_FLAG_SKIP_FRIENDLY_NAME;
+import static com.github.pangolin.routing.beta.tun.jna.win32.IpHelpLib.GAA_FLAG_SKIP_MULTICAST;
+import static com.github.pangolin.routing.beta.tun.jna.win32.IpHelpLib.GAA_FLAG_SKIP_UNICAST;
 import static com.sun.jna.platform.win32.IPHlpAPI.AF_UNSPEC;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCloseAdapter;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCreateAdapter;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunEndSession;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunStartSession;
 
-import com.github.pangolin.routing.beta.tun.jna.win32.iphlp.MibUnicastIPAddressRow;
-import com.github.pangolin.routing.beta.tun.jna.win32.iphlp.MibUnicastIPAddressTable;
-import com.github.pangolin.routing.beta.tun.jna.win32.iphlp.SocketAddrIn;
-import com.github.pangolin.routing.beta.tun.jna.win32.iphlp.SocketAddrIn6;
+import com.github.pangolin.routing.beta.tun.jna.win32.iphlp.*;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Memory;
-import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.IPHlpAPI;
 import com.sun.jna.platform.win32.Win32Exception;
 import com.sun.jna.platform.win32.WinError;
 import com.sun.jna.ptr.IntByReference;
-import com.sun.jna.ptr.LongByReference;
 import com.sun.jna.ptr.PointerByReference;
 import freework.codec.Hex;
 import lombok.extern.slf4j.Slf4j;
@@ -33,9 +28,7 @@ import org.drasyl.channel.tun.jna.windows.Wintun;
 
 import java.io.IOException;
 import java.net.Inet4Address;
-import java.net.Inet6Address;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 
 @Slf4j
@@ -58,20 +51,7 @@ public class Main {
         try {
             adapter = WintunCreateAdapter(new WString("iTun"), new WString("PAN"), guid);
 
-            final MibUnicastIPAddressRow row = createMibUnicastIpAddressRow(Inet4Address.getByName("172.16.1.1"), adapter);
-            row.OnLinkPrefixLength = 24;
-            row.ValidLifetime = 1000;
-            row.PreferredLifetime = 1000;
 
-            int err = ExtendedIPHlpAPI.INSTANCE.CreateUnicastIpAddressEntry(row);
-            if (WinError.NO_ERROR != err) {
-                throw new RuntimeException("Failed to create new MIB_UNICASTIPADDRESS_ROW: " + err);
-            }
-            /*
-            if (WinError.NO_ERROR != err && WinError.ERROR_OBJECT_ALREADY_EXISTS != err) {
-                throw new RuntimeException("Failed to create new MIB_UNICASTIPADDRESS_ROW: " + err);
-            }
-            */
             session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));
 
             System.out.println();
@@ -88,30 +68,6 @@ public class Main {
         }
     }
 
-    /**
-     * Create and initialize a [MibUnicastIPAddressRow], fill the luid and ip.
-     * */
-    private static MibUnicastIPAddressRow createMibUnicastIpAddressRow(InetAddress address, Wintun.WINTUN_ADAPTER_HANDLE adapter){
-        final MibUnicastIPAddressRow row = new MibUnicastIPAddressRow();
-        ExtendedIPHlpAPI.INSTANCE.InitializeUnicastIpAddressEntry(row);
-
-        final Pointer memory = new Memory(Native.POINTER_SIZE);
-        Wintun.WintunGetAdapterLUID(adapter, memory);
-        row.InterfaceLuid = memory.getLong(0);
-
-        if (address instanceof Inet4Address) {
-            row.Address.setType(SocketAddrIn.class);
-            row.Address.Ipv4.sin_family = IPHlpAPI.AF_INET;
-            row.Address.Ipv4.sin_port = 0;
-            row.Address.Ipv4.sin_addr = address.getAddress();
-        } else if (address instanceof Inet6Address) {
-            row.Address.setType(SocketAddrIn6.class);
-            row.Address.Ipv4.sin_family = IPHlpAPI.AF_INET6;
-            row.Address.Ipv4.sin_port = 0;
-            row.Address.Ipv4.sin_addr = address.getAddress();
-        }
-        return row;
-    }
 
     /**
      * List all ip address related to this adapter.
@@ -121,7 +77,7 @@ public class Main {
      * */
     public static void listAssociatedAddresses(int ipFamily) throws UnknownHostException {
         final PointerByReference pointerByReference = new PointerByReference();
-        final int err = ExtendedIPHlpAPI.INSTANCE.GetUnicastIpAddressTable(ipFamily, pointerByReference);
+        final int err = IpHelpLib.INSTANCE.GetUnicastIpAddressTable(ipFamily, pointerByReference);
         // something wrong
         if (err != WinError.NO_ERROR && err != WinError.ERROR_NOT_FOUND)
             throw new RuntimeException("Failed to list unicast ip addresses:" + err);
@@ -150,7 +106,7 @@ public class Main {
             }
             System.out.println(row.Address.si_family);
         }
-        ExtendedIPHlpAPI.INSTANCE.FreeMibTable(table.getPointer());
+        IpHelpLib.INSTANCE.FreeMibTable(table.getPointer());
     }
 
 
@@ -159,25 +115,21 @@ public class Main {
         // 15KB working buffer
         Memory buffer = new Memory(15 * 1024L);
         IntByReference size = new IntByReference(0);
-        int flags =
-                GAA_FLAG_SKIP_UNICAST
-                        | GAA_FLAG_SKIP_ANYCAST
-                        | GAA_FLAG_SKIP_MULTICAST
-                        | GAA_FLAG_SKIP_FRIENDLY_NAME;
-        int error = ExtendedIPHlpAPI.INSTANCE.GetAdaptersAddresses(AF_UNSPEC, flags, Pointer.NULL, buffer, size);
+        int flags = GAA_FLAG_SKIP_UNICAST | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_FRIENDLY_NAME;
+        int error = IpHelpLib.INSTANCE.GetAdaptersAddresses(AF_UNSPEC, flags, Pointer.NULL, buffer, size);
         if (error == WinError.ERROR_BUFFER_OVERFLOW) {
             buffer = new Memory(size.getValue());
-            error = ExtendedIPHlpAPI.INSTANCE.GetAdaptersAddresses(AF_UNSPEC, flags, Pointer.NULL, buffer, size);
+            error = IpHelpLib.INSTANCE.GetAdaptersAddresses(AF_UNSPEC, flags, Pointer.NULL, buffer, size);
             if (error != WinError.ERROR_SUCCESS) {
                 throw new Win32Exception(error);
             }
         }
 
-        ExtendedIPHlpAPI.IP_ADAPTER_ADDRESSES_LH result = new ExtendedIPHlpAPI.IP_ADAPTER_ADDRESSES_LH(buffer);
+        IpHelpLib.IP_ADAPTER_ADDRESSES_LH result = new IpHelpLib.IP_ADAPTER_ADDRESSES_LH(buffer);
         do {
             // only interfaces with IfOperStatusUp
             if (result.OperStatus == 1) {
-                ExtendedIPHlpAPI.IP_ADAPTER_DNS_SERVER_ADDRESS_XP dns = result.FirstDnsServerAddress;
+                IpHelpLib.IP_ADAPTER_DNS_SERVER_ADDRESS_XP dns = result.FirstDnsServerAddress;
                 while (dns != null) {
                     InetAddress address;
                     try {
@@ -201,7 +153,7 @@ public class Main {
 
                 log.warn(result.DnsSuffix.toString());
 //                addSearchPath(result.DnsSuffix.toString());
-                ExtendedIPHlpAPI.IP_ADAPTER_DNS_SUFFIX suffix = result.FirstDnsSuffix;
+                IpHelpLib.IP_ADAPTER_DNS_SUFFIX suffix = result.FirstDnsSuffix;
                 while (suffix != null) {
 //                    addSearchPath(String.valueOf(suffix._String));
                     System.out.println(String.valueOf(suffix._String));
