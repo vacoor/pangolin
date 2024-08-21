@@ -1,6 +1,5 @@
 package com.github.pangolin.routing.beta.tun.tcp;
 
-import com.google.common.collect.Lists;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import lombok.extern.slf4j.Slf4j;
@@ -14,10 +13,7 @@ import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -44,9 +40,6 @@ public class Socket {
         this.ctx = ctx;
     }
 
-    private volatile int lastSeq = 0;
-
-
     public synchronized void receive(final TcpPacket packet, final IpPacket.IpHeader ipHeader) {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
@@ -54,72 +47,79 @@ public class Socket {
         final State state = this.state.get();
         if (State.LISTEN.equals(state)) {
             if (header.getSyn() && !header.getAck()) {
-                write(ack(header, srcAddr, dstAddr).ack(true).syn(true), ipHeader);
+                write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader);
                 this.state.compareAndSet(State.LISTEN, State.SYN_RCVD);
+                log.warn("LISTEN -> SYN_RECV, payload: {}", packet.getPayload());
             } else {
                 System.out.println("XXX");
             }
-            lastSeq = header.getSequenceNumber();
         } else if (State.SYN_RCVD.equals(state)) {
             if (header.getAck()) {
-                Packet payload = packet.getPayload();
                 this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED);
-                System.out.println("ESTABLISHED: " + payload);
+                log.warn("SYN_REVD -> ESTABLISHED, payload: {}", packet.getPayload());
             } else if (header.getSyn()) {
                 // TODO
                 System.out.println("!ACK");
             } else {
                 System.out.println("!ACK !SYN");
             }
-            lastSeq = header.getSequenceNumber();
         } else if (State.ESTABLISHED.equals(state)) {
             if (header.getFin()) {
-                write(ack(header, srcAddr, dstAddr).ack(true), ipHeader);
+                // ACK
+                write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader);
                 this.state.compareAndSet(State.ESTABLISHED, State.CLOSE_WAIT);
-                lastSeq = header.getSequenceNumber();
+                log.warn("ESTABLISHED -> CLOSE_WAIT, payload: {}", packet.getPayload());
 
-                write(ack(header, srcAddr, dstAddr).fin(true), ipHeader);
+                write(ack(header, srcAddr, dstAddr, 0).ack(true).fin(true), ipHeader);
                 this.state.compareAndSet(State.CLOSE_WAIT, State.LAST_ACK);
-                lastSeq = header.getSequenceNumber();
+                log.warn("CLOSE_WAIT -> LAST_ACK, payload: {}", packet.getPayload());
             } else if (header.getAck() && !header.getSyn()) {
                 if (header.getRst()) {
                     System.out.println("[ACK][RST]");
-                    lastSeq = header.getSequenceNumber();
                 } else {
                     Packet payload = packet.getPayload();
-                    if (null != payload) {
+                    if (null == payload) {
+                        write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader);
+                    } else {
                         final byte[] rawData = packet.getPayload().getRawData();
                         System.out.println(new String(rawData, StandardCharsets.UTF_8));
-                        byte[] bytes = "HTTP/1.1 404".getBytes(StandardCharsets.UTF_8);
-                        if (lastSeq +1 != header.getSequenceNumber() && lastSeq != header.getSequenceNumber()) {
-//                            write(ack(header, srcAddr, dstAddr).acknowledgmentNumber(lastSeq + 1).ack(true), ipHeader);
-//                            write(ack(header, srcAddr, dstAddr).acknowledgmentNumber(lastSeq + 1).ack(true), ipHeader);
-//                            write(ack(header, srcAddr, dstAddr).acknowledgmentNumber(lastSeq + 1).ack(true), ipHeader);
-                        } else {
-//                            write(ack(header, srcAddr, dstAddr).ack(true).payloadBuilder(UnknownPacket.newPacket(bytes, 0, bytes.length).getBuilder()), ipHeader);
-                            lastSeq = header.getSequenceNumber();
-                        }
-                    } else {
-                        System.out.println("EMPTY");
-                        lastSeq = header.getSequenceNumber();
+
+                        String data = ("<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\r\n"
+                                + "<html><head>\r\n"
+                                + "<title>404 Not Found</title>\r\n"
+                                + "</head><body>\r\n"
+                                + "<h1>Not Found</h1>\r\n"
+                                + "<p>The requested URL /xxid was not found on this server.</p>\r\n"
+                                + "</body></html>\r\n");
+                        final int len = data.getBytes(StandardCharsets.UTF_8).length;
+                        byte[] bytes = ("HTTP/1.1 404 Not Found\r\n"
+                                + "Content-Length: " + len + "\r\n"
+                                + "Date: Wed, 21 Aug 2024 01:55:25 GMT\n"
+                                + "Server: Apache\r\n\r\n" + data
+                        ).getBytes(StandardCharsets.UTF_8);
+
+                        UnknownPacket.Builder builder = UnknownPacket.newPacket(bytes, 0, bytes.length).getBuilder();
+                        write(ack(header, srcAddr, dstAddr, payload.length()).ack(true).psh(true).payloadBuilder(builder), ipHeader);
                     }
                 }
             } else if (!header.getAck() && header.getSyn()) {
-                lastSeq = header.getSequenceNumber();
                 // TODO
                 System.out.println("222");
             } else {
-                lastSeq = header.getSequenceNumber();
                 System.out.println("333");
             }
         } else if (State.CLOSE_WAIT.equals(state)) {
             // 发送数据完毕后发送 FIN
-            System.out.println("X444");
-            lastSeq = header.getSequenceNumber();
+            // WRITE last data
+            // write(ack(header, srcAddr, dstAddr, 0).fin(true).sequenceNumber(header.getAcknowledgmentNumber() + 1).acknowledgmentNumber(header.getSequenceNumber() + 1), ipHeader);
+//            write(ack(header, srcAddr, dstAddr, 0).fin(true), ipHeader);
+//            this.state.compareAndSet(State.CLOSE_WAIT, State.LAST_ACK);
+//            lastSeq = header.getSequenceNumber();
         } else if (State.LAST_ACK.equals(state)) {
-            lastSeq = header.getSequenceNumber();
             if (header.getAck()) {
                 // close.
+                this.state.compareAndSet(State.LAST_ACK, State.CLOSED);
+                log.warn("LAST_ACK -> CLOSED, payload: {}", packet.getPayload());
             }
         }
     }
@@ -144,11 +144,12 @@ public class Socket {
                 .correctChecksumAtBuild(true);
     }
 
-    private static TcpPacket.Builder ack(final TcpPacket.TcpHeader header, final InetAddress srcAddr, final InetAddress dstAddr) {
+    private static TcpPacket.Builder ack(final TcpPacket.TcpHeader header, final InetAddress srcAddr, final InetAddress dstAddr, final int receivedPayloadLength) {
         final int sequence = header.getAcknowledgmentNumber() != 0 ? header.getAcknowledgmentNumber() : 1;
 
 //        List<TcpPacket.TcpOption> options = Lists.newArrayList();
 //        options.addAll(header.getOptions());
+        boolean incr = header.getFin() || header.getSyn();
 
         return new TcpPacket.Builder()
                 .srcAddr(dstAddr)
@@ -157,10 +158,12 @@ public class Socket {
                 .dstPort(header.getSrcPort())
 //                .options(options)     // FIXME
                 .sequenceNumber(sequence)
-                .acknowledgmentNumber(header.getSequenceNumber() + 1)
+//                .acknowledgmentNumber(header.getSequenceNumber() + Math.max(incr ? 1 : 0, receivedPayloadLength))
+                .acknowledgmentNumber(header.getSequenceNumber() + Math.max(incr ? 1 : 0, receivedPayloadLength))
 //                .ack(true)
 //                .syn(true)
                 .window((short) 65535)
+//                .window((short)1)
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true);
