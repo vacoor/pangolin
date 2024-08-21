@@ -26,7 +26,7 @@ public class WintunAdapter {
         this.adapter = adapter;
     }
 
-    private long getLuid() {
+    public long getLuid() {
         final LongByReference luidRef = new LongByReference();
         WintunLib.WintunGetAdapterLUID(adapter, luidRef);
         return luidRef.getValue();
@@ -48,9 +48,10 @@ public class WintunAdapter {
             row.Address.Ipv4.sin_addr = address.getAddress();
         } else if (address instanceof Inet6Address) {
             row.Address.setType(SocketAddrIn6.class);
-            row.Address.Ipv4.sin_family = IPHlpAPI.AF_INET6;
-            row.Address.Ipv4.sin_port = 0;
-            row.Address.Ipv4.sin_addr = address.getAddress();
+            row.Address.Ipv6.sin6_family = IPHlpAPI.AF_INET6;
+            row.Address.Ipv6.sin6_port = 0;
+            row.Address.Ipv6.sin6_addr = address.getAddress();
+            row.Address.Ipv6.sin6_scope_id = ((Inet6Address)address).getScopeId();
         }
         return row;
     }
