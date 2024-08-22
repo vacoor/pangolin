@@ -1,12 +1,8 @@
 package com.github.pangolin.routing.tun.wintun;
 
-import com.github.pangolin.routing.beta.tun.jna.win32.IpHelpLib;
-import com.github.pangolin.routing.beta.tun.jna.win32.iphlp.MibIPInterfaceRow;
-import com.github.pangolin.routing.beta.tun.jna.win32.iphlp.MibUnicastIPAddressRow;
-import com.github.pangolin.routing.beta.tun.jna.win32.iphlp.SocketAddrIn;
-import com.github.pangolin.routing.beta.tun.jna.win32.iphlp.SocketAddrIn6;
+import com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib;
 import com.sun.jna.LastErrorException;
-import com.sun.jna.Native;
+import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.*;
 import com.sun.jna.ptr.LongByReference;
@@ -33,21 +29,21 @@ public class WintunAdapter {
     }
 
     /**
-     * Create and initialize a [MibUnicastIPAddressRow], fill the luid and ip.
+     * Create and initialize a [MIB_UNICASTIPADDRESS_ROW], fill the luid and ip.
      * */
-    private MibUnicastIPAddressRow createMibUnicastIpAddressRow(InetAddress address){
-        final MibUnicastIPAddressRow row = new MibUnicastIPAddressRow();
+    private IpHelpLib.MIB_UNICASTIPADDRESS_ROW createMibUnicastIpAddressRow(InetAddress address){
+        final IpHelpLib.MIB_UNICASTIPADDRESS_ROW row = new IpHelpLib.MIB_UNICASTIPADDRESS_ROW();
         IpHelpLib.INSTANCE.InitializeUnicastIpAddressEntry(row);
 
         row.InterfaceLuid = getLuid();
 
         if (address instanceof Inet4Address) {
-            row.Address.setType(SocketAddrIn.class);
+            row.Address.setType(IpHelpLib.sockaddr_in.class);
             row.Address.Ipv4.sin_family = IPHlpAPI.AF_INET;
             row.Address.Ipv4.sin_port = 0;
             row.Address.Ipv4.sin_addr = address.getAddress();
         } else if (address instanceof Inet6Address) {
-            row.Address.setType(SocketAddrIn6.class);
+            row.Address.setType(IpHelpLib.sockaddr_in6.class);
             row.Address.Ipv6.sin6_family = IPHlpAPI.AF_INET6;
             row.Address.Ipv6.sin6_port = 0;
             row.Address.Ipv6.sin6_addr = address.getAddress();
@@ -57,7 +53,7 @@ public class WintunAdapter {
     }
 
     public void setIp(final InetAddress address, final byte prefixLength) {
-        final MibUnicastIPAddressRow row = createMibUnicastIpAddressRow(address);
+        final IpHelpLib.MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(address);
         row.OnLinkPrefixLength = prefixLength;
         row.ValidLifetime = 1000;
         row.PreferredLifetime = 1000;
@@ -69,7 +65,7 @@ public class WintunAdapter {
     }
 
     public void unsetIp(final InetAddress address) {
-        MibUnicastIPAddressRow row = createMibUnicastIpAddressRow(address);
+        IpHelpLib.MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(address);
         int err = IpHelpLib.INSTANCE.DeleteUnicastIpAddressEntry(row);
         if (WinError.NO_ERROR != err) {
             throw new Win32Exception(err);
@@ -77,7 +73,7 @@ public class WintunAdapter {
     }
 
     public int getMTU(int ipFamily) {
-        MibIPInterfaceRow row = new MibIPInterfaceRow();
+        IpHelpLib.MIB_IPINTERFACE_ROW row = new IpHelpLib.MIB_IPINTERFACE_ROW();
         IpHelpLib.INSTANCE.InitializeIpInterfaceEntry(row);
         row.InterfaceLuid = getLuid();
         row.Family = ipFamily;
@@ -89,7 +85,7 @@ public class WintunAdapter {
     }
 
     public void setMTU(int ipFamily, int mtu) {
-        MibIPInterfaceRow row = new MibIPInterfaceRow();
+        IpHelpLib.MIB_IPINTERFACE_ROW row = new IpHelpLib.MIB_IPINTERFACE_ROW();
         IpHelpLib.INSTANCE.InitializeIpInterfaceEntry(row);
         row.InterfaceLuid = getLuid();
         row.Family = ipFamily;
@@ -160,6 +156,10 @@ public class WintunAdapter {
 
     public static void main(String[] args) throws IOException {
         WintunAdapter adapter = WintunAdapter.open("wintun", "wintun", GUID.newGuid());
+        Pointer pointer = Pointer.createConstant(adapter.getLuid());
+        LongByReference r = new LongByReference(adapter.getLuid());
+        AddressAndNetmaskHelper.setIPv4AndNetmask(r, "192.168.0.1", 24);
+//        adapter.setIp(InetAddress.getByName("192.168.1.1"), (byte) 24);
         WintunSession session = adapter.newSession();
     }
 }

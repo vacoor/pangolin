@@ -16,7 +16,7 @@ public class WindowsTun2Socks extends AbstractTun2Socks {
     @Override
     protected ProcessBuilder createProcessBuilder() throws URISyntaxException {
 //        final URL resource = getClass().getResource("/support/windows/tun2socks.exe");
-        final URL resource = getClass().getResource("/support/windows/tun2socks-windows-amd64-v3.exe");
+        final URL resource = getClass().getResource("/META-INF/native/tun2socks/windows/amd64/tun2socks.exe");
         final File executable = new File(resource.toURI().getPath());
         /*-
          *
@@ -25,8 +25,8 @@ public class WindowsTun2Socks extends AbstractTun2Socks {
         return new ProcessBuilder()
                 .command(
                         executable.getAbsolutePath(),
-                        "-device", "tun://wintun",
-                        // "-device", "tun://wintun?guid={325654bf-23a8-407c-aac8-f56498457c02}",
+//                        "-device", "tun://wintun",
+                        "-device", "tun://wintun?guid={1999b35f-70e1-45e9-ad0f-29eb0e06ee2b}",
                         "-proxy", "socks5://127.0.0.1:3081",
                         "-interface", "以太网 2"
                 )
@@ -41,5 +41,10 @@ public class WindowsTun2Socks extends AbstractTun2Socks {
         System.out.println("SetDnsServer: " + code2);
         int code3 = new ProcessBuilder().command("ipconfig", "/flushdns").start().waitFor();
         System.out.println("FlushDNS: " + code3);
+    }
+
+    public static void main(String[] args) throws Exception {
+        new WindowsTun2Socks().start();
+        System.out.println();
     }
 }

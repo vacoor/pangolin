@@ -13,7 +13,7 @@ public class DarwinTun2Socks extends AbstractTun2Socks {
 
     @Override
     protected ProcessBuilder createProcessBuilder() throws Exception {
-        final URL resource = getClass().getResource("/support/darwin/tun2socks-darwin-amd64-3");
+        final URL resource = getClass().getResource("/META-INF/native/tun2socks/darwin/tun2socks-darwin-amd64-3");
         final File executable = new File(resource.toURI().getPath());
         /*-
          *
