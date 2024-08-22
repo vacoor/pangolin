@@ -556,4 +556,37 @@ public interface IpHelpLib extends IPHlpAPI {
         int scopeLevelCount = 16;
     }
 
+
+    @Structure.FieldOrder({
+            "Version",
+            "Flags",
+            "Domain",
+            "NameServer",
+            "SearchList",
+            "RegistrationEnabled",
+            "RegisterAdapterName",
+            "EnableLLMNR",
+            "QueryAdapterName",
+            "ProfileNameServer"
+    })
+    class DNS_INTERFACE_SETTINGS extends Structure {
+        public static class ByReference
+                extends DNS_INTERFACE_SETTINGS implements Structure.ByReference {
+        }
+
+        public int Version;
+        public long Flags;
+        public String Domain;
+        public String NameServer;
+        public String SearchList;
+        public int RegistrationEnabled;
+        public int RegisterAdapterName;
+        public int EnableLLMNR;
+        public int QueryAdapterName;
+        public String ProfileNameServer;
+    }
+
+    void GetInterfaceDnsSettings(Guid.GUID guid, DNS_INTERFACE_SETTINGS.ByReference settings);
+
+    void FreeInterfaceDnsSettings(Pointer dnsSettings);
 }

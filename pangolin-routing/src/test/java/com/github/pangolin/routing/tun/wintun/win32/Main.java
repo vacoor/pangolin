@@ -38,7 +38,11 @@ public class Main {
     public static void main(String[] args) throws IOException {
 //        System.out.println(NetioAPI.INSTANCE);
 //        listAssociatedAddresses(AF_UNSPEC);
-        getAdapterAddresses();
+//        getAdapterAddresses();
+
+        IpHelpLib.DNS_INTERFACE_SETTINGS.ByReference settings = new IpHelpLib.DNS_INTERFACE_SETTINGS.ByReference();
+        IpHelpLib.INSTANCE.GetInterfaceDnsSettings(com.sun.jna.platform.win32.Guid.GUID.fromString("{6ce10339-9804-4ad3-8310-4f81ce0be645}"), settings);
+        IpHelpLib.INSTANCE.FreeInterfaceDnsSettings(settings.getPointer());
 
         System.exit(0);
         final String id = "{22430978-1194-4d70-b652-f1546d123aff}";
