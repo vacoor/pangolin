@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.tun.wintun.win32.iphlp;
 
+import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
@@ -7,9 +8,12 @@ import com.sun.jna.Union;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Guid;
 import com.sun.jna.platform.win32.IPHlpAPI;
+import com.sun.jna.platform.win32.WinDef;
 import com.sun.jna.platform.win32.WinNT;
 import com.sun.jna.platform.win32.Winsock2;
+import com.sun.jna.ptr.ByteByReference;
 import com.sun.jna.ptr.IntByReference;
+import com.sun.jna.ptr.LongByReference;
 import com.sun.jna.ptr.PointerByReference;
 import com.sun.jna.win32.W32APIOptions;
 
@@ -586,7 +590,11 @@ public interface IpHelpLib extends IPHlpAPI {
         public String ProfileNameServer;
     }
 
-    void GetInterfaceDnsSettings(Guid.GUID guid, DNS_INTERFACE_SETTINGS.ByReference settings);
+    void SetInterfaceDnsSettings(Guid.GUID guid, DNS_INTERFACE_SETTINGS settings) throws LastErrorException;
 
-    void FreeInterfaceDnsSettings(Pointer dnsSettings);
+    void GetInterfaceDnsSettings(Guid.GUID guid, DNS_INTERFACE_SETTINGS settings) throws LastErrorException;
+
+    void FreeInterfaceDnsSettings(Pointer dnsSettings) throws LastErrorException;
+
+    void ConvertInterfaceLuidToGuid(LongByReference luid, Guid.GUID.ByReference guid)throws LastErrorException;
 }

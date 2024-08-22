@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.tun.wintun.win32;
 
+import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_INCLUDE_ALL_INTERFACES;
 import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_INCLUDE_GATEWAYS;
 import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_SKIP_ANYCAST;
 import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_SKIP_FRIENDLY_NAME;
@@ -9,17 +10,20 @@ import static com.sun.jna.platform.win32.IPHlpAPI.AF_UNSPEC;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCloseAdapter;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCreateAdapter;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunEndSession;
+import static org.drasyl.channel.tun.jna.windows.Wintun.WintunGetAdapterLUID;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunStartSession;
 
 import com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Memory;
+import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.IPHlpAPI;
 import com.sun.jna.platform.win32.Win32Exception;
 import com.sun.jna.platform.win32.WinError;
 import com.sun.jna.ptr.IntByReference;
+import com.sun.jna.ptr.LongByReference;
 import com.sun.jna.ptr.PointerByReference;
 import freework.codec.Hex;
 import lombok.extern.slf4j.Slf4j;
@@ -35,27 +39,50 @@ import java.net.UnknownHostException;
 @Slf4j
 public class Main {
 
+    public static void dns(String guid, String dns) {
+        IpHelpLib.DNS_INTERFACE_SETTINGS settings = new IpHelpLib.DNS_INTERFACE_SETTINGS();
+        settings.Version = 1;
+        settings.Flags =  0x0002;
+//        settings.NameServer = "192.168.1.1";
+        settings.NameServer = dns;
+        IpHelpLib.INSTANCE.SetInterfaceDnsSettings(com.sun.jna.platform.win32.Guid.GUID.fromString(guid), settings);
+        IpHelpLib.INSTANCE.FreeInterfaceDnsSettings(settings.getPointer());
+
+//        settings.NameServer = null;
+//        IpHelpLib.INSTANCE.GetInterfaceDnsSettings(com.sun.jna.platform.win32.Guid.GUID.fromString("guid"), settings);
+
+//        IpHelpLib.INSTANCE.FreeInterfaceDnsSettings(settings.getPointer());
+    }
+
     public static void main(String[] args) throws IOException {
 //        System.out.println(NetioAPI.INSTANCE);
 //        listAssociatedAddresses(AF_UNSPEC);
-//        getAdapterAddresses();
+        /*
+        getAdaptersAddresses();
 
-        IpHelpLib.DNS_INTERFACE_SETTINGS.ByReference settings = new IpHelpLib.DNS_INTERFACE_SETTINGS.ByReference();
-        IpHelpLib.INSTANCE.GetInterfaceDnsSettings(com.sun.jna.platform.win32.Guid.GUID.fromString("{6ce10339-9804-4ad3-8310-4f81ce0be645}"), settings);
-        IpHelpLib.INSTANCE.FreeInterfaceDnsSettings(settings.getPointer());
+        System.out.println("------------");
+
 
         System.exit(0);
-        final String id = "{22430978-1194-4d70-b652-f1546d123aff}";
-        final String s = id.replaceAll("^\\{|\\}$|-", "");
-        final Guid.GUID guid = Guid.GUID.fromBinary(Hex.decode(s));
-//        Guid.GUID.newGuid();
+        */
+//        final String id = "{22430978-1194-4d70-b652-f1546d123aff}";
+//        final String s = id.replaceAll("^\\{|\\}$|-", "");
+//        final Guid.GUID guid = Guid.GUID.fromBinary(Hex.decode(s));
+        final Guid.GUID guid = Guid.GUID.newGuid();
 
 //        listAssociatedAddresses(IPHlpAPI.AF_UNSPEC);
         Wintun.WINTUN_ADAPTER_HANDLE adapter = null;
         Wintun.WINTUN_SESSION_HANDLE session = null;
         try {
             adapter = WintunCreateAdapter(new WString("iTun"), new WString("PAN"), guid);
+            final Pointer p = new Memory(Native.POINTER_SIZE);
+            WintunGetAdapterLUID(adapter, p);
+            long aLong = p.getLong(0);
 
+            final com.sun.jna.platform.win32.Guid.GUID.ByReference guid2 = new com.sun.jna.platform.win32.Guid.GUID.ByReference();
+            IpHelpLib.INSTANCE.ConvertInterfaceLuidToGuid(new LongByReference(aLong), guid2);
+
+            dns(guid2.toGuidString(), "192.168.1.1");
 
             session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));
 
@@ -115,14 +142,15 @@ public class Main {
     }
 
 
-    private static void getAdapterAddresses() {
+    private static void getAdaptersAddresses() {
         // The recommended method of calling the GetAdaptersAddresses function is to pre-allocate a
         // 15KB working buffer
         Memory buffer = new Memory(15 * 1024L);
         IntByReference size = new IntByReference(0);
         int flags = GAA_FLAG_SKIP_UNICAST | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST
                 | GAA_FLAG_INCLUDE_GATEWAYS
-                | GAA_FLAG_SKIP_FRIENDLY_NAME;
+                | GAA_FLAG_SKIP_FRIENDLY_NAME
+                | GAA_FLAG_INCLUDE_ALL_INTERFACES;
         int error = IpHelpLib.INSTANCE.GetAdaptersAddresses(AF_UNSPEC, flags, Pointer.NULL, buffer, size);
         if (error == WinError.ERROR_BUFFER_OVERFLOW) {
             buffer = new Memory(size.getValue());
@@ -136,6 +164,7 @@ public class Main {
         do {
             // only interfaces with IfOperStatusUp
             if (result.OperStatus == 1) {
+                System.out.println(result.AdapterName + " -> " + result.NetworkGuid.toGuidString());
                 IpHelpLib.IP_ADAPTER_DNS_SERVER_ADDRESS_XP dns = result.FirstDnsServerAddress;
 //                IpHelpLib.IP_ADAPTER_GATEWAY_ADDRESS_LH dns = result.FirstGatewayAddress;
                 while (dns != null) {
