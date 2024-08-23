@@ -15,7 +15,6 @@ public class WindowsTun2Socks extends AbstractTun2Socks {
 
     @Override
     protected ProcessBuilder createProcessBuilder() throws URISyntaxException {
-//        final URL resource = getClass().getResource("/support/windows/tun2socks.exe");
         final URL resource = getClass().getResource("/META-INF/native/tun2socks/windows/amd64/tun2socks.exe");
         final File executable = new File(resource.toURI().getPath());
         /*-
@@ -34,7 +33,7 @@ public class WindowsTun2Socks extends AbstractTun2Socks {
     }
 
     @Override
-    protected void customimeReady() throws IOException, InterruptedException {
+    protected void onReady() throws IOException, InterruptedException {
         int code = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "address", "name=\"wintun\"", "source=static", "address=198.18.0.1", "mask=255.255.255.0").start().waitFor();
         System.out.println("SetAddress: " + code);
         int code2 = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "dnsservers", "name=\"wintun\"", "static", "address=127.0.0.1", "register=none", "validate=no").start().waitFor();

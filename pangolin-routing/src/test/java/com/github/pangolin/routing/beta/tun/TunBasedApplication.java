@@ -48,7 +48,8 @@ public class TunBasedApplication {
         final ApplicationHome home = new ApplicationHome(TunBasedApplication.class);
         final URL conf = new File(home.getDir(), "conf/default.conf").toURI().toURL();
         final FakeDnsEngine4 fakeDns = FakeDnsEngine4.create("198.18.0.0", "255.255.0.0");
-        final List<InetSocketAddress> dnsServers = Arrays.asList(new InetSocketAddress("10.188.207.9", 53));
+//        final List<InetSocketAddress> dnsServers = Arrays.asList(new InetSocketAddress("10.188.207.9", 53));
+        final List<InetSocketAddress> dnsServers = Arrays.asList(new InetSocketAddress("192.168.1.1", 53));
 
         final RouteApplication app = new RouteApplication() {
             @Override
@@ -86,7 +87,7 @@ public class TunBasedApplication {
             }
         });
 
-        new WindowsTun2Socks().start();
+//        new WindowsTun2Socks().start();
 
         app.await();
     }

@@ -618,7 +618,7 @@ public interface IpHelpLib extends IPHlpAPI {
      * @throws LastErrorException
      * @see <a href="https://learn.microsoft.com/zh-cn/windows/win32/api/netioapi/nf-netioapi-setinterfacednssettings"></a>
      */
-    void SetInterfaceDnsSettings(Guid.GUID Interface, DNS_INTERFACE_SETTINGS.ByReference Settings) throws LastErrorException;
+    int SetInterfaceDnsSettings(Guid.GUID Interface, DNS_INTERFACE_SETTINGS Settings) throws LastErrorException;
 
     void GetInterfaceDnsSettings(Guid.GUID Interface, DNS_INTERFACE_SETTINGS settings) throws LastErrorException;
 

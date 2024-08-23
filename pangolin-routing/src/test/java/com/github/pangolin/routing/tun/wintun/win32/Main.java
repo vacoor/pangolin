@@ -7,7 +7,9 @@ import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_F
 import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_SKIP_FRIENDLY_NAME;
 import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_SKIP_MULTICAST;
 import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_SKIP_UNICAST;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_UNSPEC;
+import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.DNS_INTERFACE_SETTINGS;
+import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.*;
+import static com.sun.jna.platform.win32.IPHlpAPI.*;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCloseAdapter;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCreateAdapter;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunEndSession;
@@ -15,6 +17,7 @@ import static org.drasyl.channel.tun.jna.windows.Wintun.WintunGetAdapterLUID;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunStartSession;
 
 import com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib;
+import com.google.common.base.Preconditions;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
@@ -34,30 +37,67 @@ import org.drasyl.channel.tun.jna.windows.Wintun;
 
 import java.io.IOException;
 import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Arrays;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 @Slf4j
 public class Main {
 
-    public static void setInterfaceDns(final com.sun.jna.platform.win32.Guid.GUID interfaceGuid, String dns) {
-
+    public static com.sun.jna.platform.win32.Guid.GUID luidToGuid(final long luid) {
+        final LongByReference luidRef = new LongByReference(luid);
+        final com.sun.jna.platform.win32.Guid.GUID.ByReference guidRef = new com.sun.jna.platform.win32.Guid.GUID.ByReference();
+        IpHelpLib.INSTANCE.ConvertInterfaceLuidToGuid(luidRef, guidRef);
+        return guidRef;
     }
 
-    public static void dns(final com.sun.jna.platform.win32.Guid.GUID guid, String dns) {
-        IpHelpLib.DNS_INTERFACE_SETTINGS.ByReference settings = new IpHelpLib.DNS_INTERFACE_SETTINGS.ByReference();
-        settings.Version = IpHelpLib.DNS_INTERFACE_SETTINGS_VERSION1;
-        settings.Flags =  DNS_SETTING_NAMESERVER;
-//        settings.NameServer = "192.168.1.1";
-        settings.NameServer = dns;
-        IpHelpLib.INSTANCE.SetInterfaceDnsSettings(guid, settings);
-        IpHelpLib.INSTANCE.FreeInterfaceDnsSettings(settings.getPointer());
+    public static void setInterfaceDns(final com.sun.jna.platform.win32.Guid.GUID interfaceGuid,
+                                       final int family, final InetAddress[] dnsServers, final String[] domains) {
+        Preconditions.checkArgument(AF_INET == family || AF_INET6 == family, "ERROR_PROTOCOL_UNREACHABLE");
 
-//        settings.NameServer = null;
-//        IpHelpLib.INSTANCE.GetInterfaceDnsSettings(com.sun.jna.platform.win32.Guid.GUID.fromString("guid"), settings);
+        final StringBuilder nameServers = new StringBuilder();
+        for (final InetAddress dnsServer : dnsServers) {
+            if ((AF_INET == family && dnsServer instanceof Inet4Address)
+                    || (AF_INET6 == family && dnsServer instanceof Inet6Address)) {
+                if (nameServers.length() > 0) {
+                    nameServers.append(",");
+                }
+                nameServers.append(dnsServer.getHostAddress());
+            }
+        }
+        final String searchList = String.join(",", domains);
 
-//        IpHelpLib.INSTANCE.FreeInterfaceDnsSettings(settings.getPointer());
+        final DNS_INTERFACE_SETTINGS dnsInterfaceSettings = new DNS_INTERFACE_SETTINGS();
+        dnsInterfaceSettings.Version = DNS_INTERFACE_SETTINGS_VERSION1;
+        dnsInterfaceSettings.Flags = DNS_SETTING_NAMESERVER | DNS_SETTING_SEARCHLIST;
+        dnsInterfaceSettings.NameServer = nameServers.toString();
+        dnsInterfaceSettings.SearchList = searchList;
+
+        if (AF_INET6 == family) {
+            dnsInterfaceSettings.Flags |= DNS_SETTING_IPV6;
+        }
+
+        // For >= Windows 10 1809
+        final int err = IpHelpLib.INSTANCE.SetInterfaceDnsSettings(interfaceGuid, dnsInterfaceSettings);
+        if (WinError.ERROR_PROC_NOT_FOUND == err) {
+            // For < Windows 10 1809
+        }
+        // TODO
     }
+
+    private static void getInterfaceDns(final com.sun.jna.platform.win32.Guid.GUID interfaceGuid) {
+        final DNS_INTERFACE_SETTINGS.ByReference dnsInterfaceSettings = new DNS_INTERFACE_SETTINGS.ByReference();
+        dnsInterfaceSettings.Version = DNS_INTERFACE_SETTINGS_VERSION1;
+        dnsInterfaceSettings.QueryAdapterName = DNS_SETTINGS_QUERY_ADAPTER_NAME;
+        dnsInterfaceSettings.Flags = DNS_SETTING_NAMESERVER | DNS_SETTING_SEARCHLIST;
+
+        IpHelpLib.INSTANCE.GetInterfaceDnsSettings(interfaceGuid, dnsInterfaceSettings);
+        IpHelpLib.INSTANCE.FreeInterfaceDnsSettings(dnsInterfaceSettings.getPointer());
+    }
+
 
     public static void main(String[] args) throws IOException {
 //        System.out.println(NetioAPI.INSTANCE);
@@ -82,12 +122,10 @@ public class Main {
             adapter = WintunCreateAdapter(new WString("iTun"), new WString("PAN"), guid);
             final Pointer p = new Memory(Native.POINTER_SIZE);
             WintunGetAdapterLUID(adapter, p);
-            long aLong = p.getLong(0);
 
-            final com.sun.jna.platform.win32.Guid.GUID.ByReference guid2 = new com.sun.jna.platform.win32.Guid.GUID.ByReference();
-            IpHelpLib.INSTANCE.ConvertInterfaceLuidToGuid(new LongByReference(aLong), guid2);
+            final long luid = p.getLong(0);
 
-            dns(guid2, "192.168.1.1");
+            setInterfaceDns(luidToGuid(luid), AF_INET, new InetAddress[]{InetAddress.getByName("192.168.1.1")}, new String[0]);
 
             session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));
 
@@ -130,11 +168,11 @@ public class Main {
         // "MIB_UNICASTIPADDRESS_TABLE size not match. Expect ${table.NumEntries}, actual: ${table.Table.size}"
         assert table.NumEntries == table.Table.length;
         for (final IpHelpLib.MIB_UNICASTIPADDRESS_ROW row : table.Table) {
-            if (IPHlpAPI.AF_INET == row.Address.si_family) {
+            if (AF_INET == row.Address.si_family) {
                 final IpHelpLib.sockaddr_in v4 = (IpHelpLib.sockaddr_in) row.Address.getTypedValue(IpHelpLib.sockaddr_in.class);
                 InetAddress inet4 = InetAddress.getByAddress(v4.sin_addr);
                 System.out.println(inet4);
-            } else if (IPHlpAPI.AF_INET6 == row.Address.si_family) {
+            } else if (AF_INET6 == row.Address.si_family) {
                 final IpHelpLib.sockaddr_in6 v6 = (IpHelpLib.sockaddr_in6) row.Address.getTypedValue(IpHelpLib.sockaddr_in6.class);
                 InetAddress inet6 = InetAddress.getByAddress(v6.sin6_addr);
                 System.out.println(inet6);

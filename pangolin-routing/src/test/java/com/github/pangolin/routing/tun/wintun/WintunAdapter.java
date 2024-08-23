@@ -55,8 +55,8 @@ public class WintunAdapter {
     public void setIp(final InetAddress address, final byte prefixLength) {
         final IpHelpLib.MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(address);
         row.OnLinkPrefixLength = prefixLength;
-        row.ValidLifetime = 1000;
-        row.PreferredLifetime = 1000;
+        row.ValidLifetime = 0xffffffff;
+        row.PreferredLifetime = 0xffffffff;
 
         int err = IpHelpLib.INSTANCE.CreateUnicastIpAddressEntry(row);
         if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {

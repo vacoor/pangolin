@@ -235,7 +235,7 @@ public class TunTest {
                         }
                     });
             final Channel ch = b.bind(new TunAddress("utun99")).sync().channel();
-            int code = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "address", "name=\"utun99\"", "source=static", "address=192.168.1.1", "mask=255.255.255.0").start().waitFor();
+            // int code = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "address", "name=\"utun99\"", "source=static", "address=192.168.1.1", "mask=255.255.255.0").start().waitFor();
             // send/receive messages of type TunPacket...
             ch.closeFuture().sync();
         } finally {

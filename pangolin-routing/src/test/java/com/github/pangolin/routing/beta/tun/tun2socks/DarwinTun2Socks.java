@@ -1,5 +1,8 @@
 package com.github.pangolin.routing.beta.tun.tun2socks;
 
+import org.drasyl.channel.tun.jna.TunDevice;
+import org.drasyl.channel.tun.jna.darwin.DarwinTunDevice;
+
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
@@ -7,13 +10,8 @@ import java.net.URL;
 public class DarwinTun2Socks extends AbstractTun2Socks {
 
     @Override
-    protected String tun2socksReadyPattern() {
-        return null;
-    }
-
-    @Override
     protected ProcessBuilder createProcessBuilder() throws Exception {
-        final URL resource = getClass().getResource("/META-INF/native/tun2socks/darwin/tun2socks-darwin-amd64-3");
+        final URL resource = getClass().getResource("/META-INF/native/tun2socks/darwin/tun2socks-darwin-amd64-v3");
         final File executable = new File(resource.toURI().getPath());
         /*-
          *
@@ -30,10 +28,19 @@ public class DarwinTun2Socks extends AbstractTun2Socks {
     }
 
     @Override
-    protected void customimeReady() throws IOException, InterruptedException {
+    protected void onReady() throws IOException, InterruptedException {
+        int code = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "address", "name=\"wintun\"", "source=static", "address=198.18.0.1", "mask=255.255.255.0").start().waitFor();
+        System.out.println("SetAddress: " + code);
+        int code2 = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "dnsservers", "name=\"wintun\"", "static", "address=127.0.0.1", "register=none", "validate=no").start().waitFor();
+        System.out.println("SetDnsServer: " + code2);
+        int code3 = new ProcessBuilder().command("ipconfig", "/flushdns").start().waitFor();
+        System.out.println("FlushDNS: " + code3);
     }
 
-    public static void main(String[] args) {
-
+    public static void main(String[] args) throws Exception {
+//        new DarwinTun2Socks().start();
+//        System.out.println();
+        TunDevice utun111 = DarwinTunDevice.open("utun3", 1500);
+        System.out.println(utun111);
     }
 }

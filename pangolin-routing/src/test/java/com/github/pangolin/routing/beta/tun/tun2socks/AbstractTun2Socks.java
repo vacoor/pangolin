@@ -8,6 +8,8 @@ import java.io.InputStreamReader;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public abstract class AbstractTun2Socks {
+    protected static final String TUN2SOCKS_READY_PATTERN = ".*tun://.* <-> .*";
+
     private final AtomicBoolean started = new AtomicBoolean(false);
     private volatile Process tun2SocksProcess;
 
@@ -19,7 +21,7 @@ public abstract class AbstractTun2Socks {
         tun2SocksProcess = createProcessBuilder().start();
 
         awaitTun2SocksReady(tun2SocksProcess, tun2socksReadyPattern());
-        customimeReady();
+        onReady();
     }
 
     public void stop() {
@@ -54,10 +56,12 @@ public abstract class AbstractTun2Socks {
         }
     }
 
-    protected abstract String tun2socksReadyPattern();
+    protected String tun2socksReadyPattern() {
+        return TUN2SOCKS_READY_PATTERN;
+    }
 
     protected abstract ProcessBuilder createProcessBuilder() throws Exception;
 
-    protected void customimeReady() throws Exception {}
+    protected void onReady() throws Exception {}
 
 }
