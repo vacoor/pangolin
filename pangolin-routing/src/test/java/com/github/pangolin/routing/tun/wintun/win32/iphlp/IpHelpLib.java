@@ -528,7 +528,7 @@ public interface IpHelpLib extends IPHlpAPI {
 
         public int Ipv4Metric;
         public int Ipv6Metric;
-        public WinNT.LUID Luid;
+        public long Luid;
         public SOCKET_ADDRESS Dhcpv4Server;
         public int CompartmentId;
         public Guid.GUID NetworkGuid;

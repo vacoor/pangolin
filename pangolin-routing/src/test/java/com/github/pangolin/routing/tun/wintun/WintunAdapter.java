@@ -28,49 +28,7 @@ public class WintunAdapter {
         return luidRef.getValue();
     }
 
-    /**
-     * Create and initialize a [MIB_UNICASTIPADDRESS_ROW], fill the luid and ip.
-     * */
-    private IpHelpLib.MIB_UNICASTIPADDRESS_ROW createMibUnicastIpAddressRow(InetAddress address){
-        final IpHelpLib.MIB_UNICASTIPADDRESS_ROW row = new IpHelpLib.MIB_UNICASTIPADDRESS_ROW();
-        IpHelpLib.INSTANCE.InitializeUnicastIpAddressEntry(row);
 
-        row.InterfaceLuid = getLuid();
-
-        if (address instanceof Inet4Address) {
-            row.Address.setType(IpHelpLib.sockaddr_in.class);
-            row.Address.Ipv4.sin_family = IPHlpAPI.AF_INET;
-            row.Address.Ipv4.sin_port = 0;
-            row.Address.Ipv4.sin_addr = address.getAddress();
-        } else if (address instanceof Inet6Address) {
-            row.Address.setType(IpHelpLib.sockaddr_in6.class);
-            row.Address.Ipv6.sin6_family = IPHlpAPI.AF_INET6;
-            row.Address.Ipv6.sin6_port = 0;
-            row.Address.Ipv6.sin6_addr = address.getAddress();
-            row.Address.Ipv6.sin6_scope_id = ((Inet6Address)address).getScopeId();
-        }
-        return row;
-    }
-
-    public void setIp(final InetAddress address, final byte prefixLength) {
-        final IpHelpLib.MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(address);
-        row.OnLinkPrefixLength = prefixLength;
-        row.ValidLifetime = 0xffffffff;
-        row.PreferredLifetime = 0xffffffff;
-
-        int err = IpHelpLib.INSTANCE.CreateUnicastIpAddressEntry(row);
-        if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {
-            throw new RuntimeException("Failed to create new MIB_UNICASTIPADDRESS_ROW: " + err);
-        }
-    }
-
-    public void unsetIp(final InetAddress address) {
-        IpHelpLib.MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(address);
-        int err = IpHelpLib.INSTANCE.DeleteUnicastIpAddressEntry(row);
-        if (WinError.NO_ERROR != err) {
-            throw new Win32Exception(err);
-        }
-    }
 
     public int getMTU(int ipFamily) {
         IpHelpLib.MIB_IPINTERFACE_ROW row = new IpHelpLib.MIB_IPINTERFACE_ROW();
