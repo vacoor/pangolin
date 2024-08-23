@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.tun.wintun.win32;
 
+import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.DNS_SETTING_NAMESERVER;
 import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_INCLUDE_ALL_INTERFACES;
 import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_INCLUDE_GATEWAYS;
 import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_SKIP_ANYCAST;
@@ -39,13 +40,17 @@ import java.net.UnknownHostException;
 @Slf4j
 public class Main {
 
-    public static void dns(String guid, String dns) {
-        IpHelpLib.DNS_INTERFACE_SETTINGS settings = new IpHelpLib.DNS_INTERFACE_SETTINGS();
-        settings.Version = 1;
-        settings.Flags =  0x0002;
+    public static void setInterfaceDns(final com.sun.jna.platform.win32.Guid.GUID interfaceGuid, String dns) {
+
+    }
+
+    public static void dns(final com.sun.jna.platform.win32.Guid.GUID guid, String dns) {
+        IpHelpLib.DNS_INTERFACE_SETTINGS.ByReference settings = new IpHelpLib.DNS_INTERFACE_SETTINGS.ByReference();
+        settings.Version = IpHelpLib.DNS_INTERFACE_SETTINGS_VERSION1;
+        settings.Flags =  DNS_SETTING_NAMESERVER;
 //        settings.NameServer = "192.168.1.1";
         settings.NameServer = dns;
-        IpHelpLib.INSTANCE.SetInterfaceDnsSettings(com.sun.jna.platform.win32.Guid.GUID.fromString(guid), settings);
+        IpHelpLib.INSTANCE.SetInterfaceDnsSettings(guid, settings);
         IpHelpLib.INSTANCE.FreeInterfaceDnsSettings(settings.getPointer());
 
 //        settings.NameServer = null;
@@ -82,7 +87,7 @@ public class Main {
             final com.sun.jna.platform.win32.Guid.GUID.ByReference guid2 = new com.sun.jna.platform.win32.Guid.GUID.ByReference();
             IpHelpLib.INSTANCE.ConvertInterfaceLuidToGuid(new LongByReference(aLong), guid2);
 
-            dns(guid2.toGuidString(), "192.168.1.1");
+            dns(guid2, "192.168.1.1");
 
             session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));
 

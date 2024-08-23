@@ -560,6 +560,27 @@ public interface IpHelpLib extends IPHlpAPI {
         int scopeLevelCount = 16;
     }
 
+    /**
+     * DNS_INTERFACE_SETTINGS.
+     */
+    int DNS_INTERFACE_SETTINGS_VERSION1 = 1;
+    /**
+     * DNS_INTERFACE_SETTINGS_EX.
+     */
+    int DNS_INTERFACE_SETTINGS_VERSION2 = 2;
+    /**
+     * DNS_INTERFACE_SETTINGS3.
+     */
+    int DNS_INTERFACE_SETTINGS_VERSION3 = 3;
+
+    int DNS_SETTING_IPV6 = 0x0001;
+    int DNS_SETTING_NAMESERVER = 0x0002;
+    int DNS_SETTING_SEARCHLIST = 0x0004;
+    int DNS_SETTING_REGISTRATION_ENABLED = 0x0008;
+    int DNS_SETTING_DOMAIN = 0x0020;
+    int DNS_SETTINGS_ENABLE_LLMNR = 0x0080;
+    int DNS_SETTINGS_QUERY_ADAPTER_NAME = 0x0100;
+    int DNS_SETTING_PROFILE_NAMESERVER = 0x0200;
 
     @Structure.FieldOrder({
             "Version",
@@ -578,7 +599,7 @@ public interface IpHelpLib extends IPHlpAPI {
                 extends DNS_INTERFACE_SETTINGS implements Structure.ByReference {
         }
 
-        public int Version;
+        public int Version = DNS_INTERFACE_SETTINGS_VERSION1;
         public long Flags;
         public String Domain;
         public String NameServer;
@@ -590,9 +611,16 @@ public interface IpHelpLib extends IPHlpAPI {
         public String ProfileNameServer;
     }
 
-    void SetInterfaceDnsSettings(Guid.GUID guid, DNS_INTERFACE_SETTINGS settings) throws LastErrorException;
+    /**
+     *
+     * @param Interface
+     * @param Settings
+     * @throws LastErrorException
+     * @see <a href="https://learn.microsoft.com/zh-cn/windows/win32/api/netioapi/nf-netioapi-setinterfacednssettings"></a>
+     */
+    void SetInterfaceDnsSettings(Guid.GUID Interface, DNS_INTERFACE_SETTINGS.ByReference Settings) throws LastErrorException;
 
-    void GetInterfaceDnsSettings(Guid.GUID guid, DNS_INTERFACE_SETTINGS settings) throws LastErrorException;
+    void GetInterfaceDnsSettings(Guid.GUID Interface, DNS_INTERFACE_SETTINGS settings) throws LastErrorException;
 
     void FreeInterfaceDnsSettings(Pointer dnsSettings) throws LastErrorException;
 
