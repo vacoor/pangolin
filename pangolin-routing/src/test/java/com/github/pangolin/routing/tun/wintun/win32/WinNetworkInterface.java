@@ -17,6 +17,7 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.List;
+import java.util.Objects;
 
 import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.*;
 import static com.sun.jna.platform.win32.Guid.GUID;
@@ -168,6 +169,19 @@ public class WinNetworkInterface {
             addresses = addresses.Next;
         } while (addresses != null);
         return null;
+    }
+
+    public static long friendlyNameToLuid(final String friendlyName) {
+        final int flags = GAA_FLAG_SKIP_UNICAST | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST
+                | GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_ALL_INTERFACES;
+        IP_ADAPTER_ADDRESSES_LH addresses = GetAdaptersAddresses(AF_UNSPEC, flags);
+        while (null != addresses) {
+            if (Objects.equals(friendlyName, addresses.FriendlyName)) {
+                return addresses.Luid;
+            }
+            addresses = addresses.Next;
+        }
+        return 0;
     }
 
     private static IP_ADAPTER_ADDRESSES_LH GetAdaptersAddresses(final int family, final int gaaFlags) {
