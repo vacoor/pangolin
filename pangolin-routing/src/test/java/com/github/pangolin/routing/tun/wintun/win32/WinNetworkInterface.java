@@ -176,7 +176,7 @@ public class WinNetworkInterface {
                 | GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_ALL_INTERFACES;
         IP_ADAPTER_ADDRESSES_LH addresses = GetAdaptersAddresses(AF_UNSPEC, flags);
         while (null != addresses) {
-            if (Objects.equals(friendlyName, addresses.FriendlyName)) {
+            if (Objects.equals(friendlyName, addresses.FriendlyName.toString())) {
                 return addresses.Luid;
             }
             addresses = addresses.Next;
