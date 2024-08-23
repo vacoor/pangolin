@@ -10,6 +10,7 @@ import com.sun.jna.platform.win32.Win32Exception;
 import com.sun.jna.platform.win32.WinError;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -23,7 +24,8 @@ import static com.sun.jna.platform.win32.Guid.GUID;
 /**
  * @see <a href="https://github.com/WireGuard/wireguard-windows/blob/master/tunnel/winipcfg/luid.go">luid</a>
  */
-public class WinNet {
+@Slf4j
+public class WinNetworkInterface {
 
     public static GUID interfaceLuidToGuid(final long interfaceLuid) {
         final LongByReference luidRef = new LongByReference(interfaceLuid);

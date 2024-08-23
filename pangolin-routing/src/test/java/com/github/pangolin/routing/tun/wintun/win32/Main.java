@@ -54,8 +54,8 @@ public class Main {
             WintunGetAdapterLUID(adapter, luidRef);
             final long luid = luidRef.getLong(0);
 
-            WinNet.addInetAddress(luid, InetAddress.getByName("198.18.0.1"), (byte) 24);
-            WinNet.setInterfaceDns(WinNet.interfaceLuidToGuid(luid), AF_INET, new InetAddress[]{InetAddress.getByName("198.18.0.2")}, new String[0]);
+            WinNetworkInterface.addInetAddress(luid, InetAddress.getByName("198.18.0.1"), (byte) 24);
+            WinNetworkInterface.setInterfaceDns(WinNetworkInterface.interfaceLuidToGuid(luid), AF_INET, new InetAddress[]{InetAddress.getByName("198.18.0.2")}, new String[0]);
 
             session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));
 
