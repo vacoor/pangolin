@@ -535,7 +535,7 @@ public interface IpHelpLib extends IPHlpAPI {
      * @param Settings  GetInterfaceDnsSettings populates all the settings in this structure.
      * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getinterfacednssettings">GetInterfaceDnsSettings</a>
      */
-    void GetInterfaceDnsSettings(GUID Interface, DNS_INTERFACE_SETTINGS Settings) throws LastErrorException;
+    int GetInterfaceDnsSettings(GUID Interface, DNS_INTERFACE_SETTINGS Settings) throws LastErrorException;
 
     /**
      * Frees the settings object returned by GetInterfaceDnsSettings.

@@ -29,36 +29,39 @@ public class WinNetworkInterface {
 
     public static long interfaceNameToLuid(final String interfaceName) {
         final LongByReference luidRef = new LongByReference();
-        INSTANCE.ConvertInterfaceNameToLuidW(interfaceName, luidRef);
+        final int err = INSTANCE.ConvertInterfaceNameToLuidW(interfaceName, luidRef);
+        assertNoError(err, "ConvertInterfaceNameToLuidW failed: %s", interfaceName);
         return luidRef.getValue();
     }
 
     public static long interfaceAliasToLuid(final String interfaceAlias) {
         final LongByReference luidRef = new LongByReference();
-        INSTANCE.ConvertInterfaceAliasToLuid(interfaceAlias, luidRef);
+        final int err = INSTANCE.ConvertInterfaceAliasToLuid(interfaceAlias, luidRef);
+        assertNoError(err, "ConvertInterfaceAliasToLuid failed: %s", interfaceAlias);
         return luidRef.getValue();
     }
 
     public static String interfaceLuidToName(final long interfaceLuid) {
         final LongByReference luidRef = new LongByReference(interfaceLuid);
         final char[] buff = new char[NDIS_IF_MAX_STRING_SIZE + 1];
-
-        INSTANCE.ConvertInterfaceLuidToNameW(luidRef, buff, buff.length);
+        final int err = INSTANCE.ConvertInterfaceLuidToNameW(luidRef, buff, buff.length);
+        assertNoError(err, "ConvertInterfaceLuidToNameW failed: %s", interfaceLuid);
         return stringify(buff);
     }
 
     public static String interfaceLuidToAlias(final long interfaceLuid) {
         final LongByReference luidRef = new LongByReference(interfaceLuid);
         final char[] buff = new char[NDIS_IF_MAX_STRING_SIZE + 1];
-
-        INSTANCE.ConvertInterfaceLuidToAlias(luidRef, buff, buff.length);
+        final int err = INSTANCE.ConvertInterfaceLuidToAlias(luidRef, buff, buff.length);
+        assertNoError(err, "ConvertInterfaceLuidToAlias failed: %s", interfaceLuid);
         return stringify(buff);
     }
 
     public static GUID interfaceLuidToGuid(final long interfaceLuid) {
         final LongByReference luidRef = new LongByReference(interfaceLuid);
         final GUID.ByReference guidRef = new GUID.ByReference();
-        INSTANCE.ConvertInterfaceLuidToGuid(luidRef, guidRef);
+        final int err = INSTANCE.ConvertInterfaceLuidToGuid(luidRef, guidRef);
+        assertNoError(err, "ConvertInterfaceLuidToGuid failed: %s", interfaceLuid);
         return guidRef;
     }
 
@@ -88,6 +91,7 @@ public class WinNetworkInterface {
         row.Family = family;
 
         final int err = INSTANCE.GetIpInterfaceEntry(row);
+        assertNoError(err, "GetIpInterfaceEntry failed: luid = %s, family=%s", interfaceLuid, family);
         return row;
     }
 
@@ -98,9 +102,11 @@ public class WinNetworkInterface {
         row.InterfaceLuid = interfaceLuid;
 
         final int err = INSTANCE.GetIpInterfaceEntry(row);
+        assertNoError(err, "GetIpInterfaceEntry failed: luid = %s, family=%s", interfaceLuid, family, mtu);
 
         row.NlMtu = mtu;
-        INSTANCE.SetIpInterfaceEntry(row);
+        final int err2 = INSTANCE.SetIpInterfaceEntry(row);
+        assertNoError(err2, "SetIpInterfaceEntry failed: luid = %s, family=%s, MTU=%s", interfaceLuid, family, mtu);
     }
 
 
@@ -109,6 +115,7 @@ public class WinNetworkInterface {
         INSTANCE.InitializeIpInterfaceEntry(row);
         row.InterfaceLuid = interfaceLuid;
 
+        // FIXME
         INSTANCE.SetIpInterfaceEntry(row);
         System.out.println();
     }
@@ -126,9 +133,9 @@ public class WinNetworkInterface {
         row.PreferredLifetime = 0xffffffff;
         row.DadState = 4;
 
-        int err = INSTANCE.CreateUnicastIpAddressEntry(row);
+        final int err = INSTANCE.CreateUnicastIpAddressEntry(row);
         if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {
-            throw new RuntimeException("Failed to create new MIB_UNICASTIPADDRESS_ROW: " + err);
+            throw new IllegalStateException("CreateUnicastIpAddressEntry failed: " + err);
         }
     }
 
@@ -136,10 +143,8 @@ public class WinNetworkInterface {
         final MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(interfaceLuid, address);
         row.OnLinkPrefixLength = prefixLength;
 
-        int err = INSTANCE.DeleteUnicastIpAddressEntry(row);
-        if (WinError.NO_ERROR != err) {
-            throw new Win32Exception(err);
-        }
+        final int err = INSTANCE.DeleteUnicastIpAddressEntry(row);
+        assertNoError(err, "DeleteUnicastIpAddressEntry failed: luid = %s", interfaceLuid);
     }
 
     public static void setInterfaceAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
@@ -169,7 +174,8 @@ public class WinNetworkInterface {
             System.out.println(row.Address.si_family);
             */
             if (row.InterfaceLuid == interfaceLuid) {
-                INSTANCE.DeleteUnicastIpAddressEntry(row);
+                final int err = INSTANCE.DeleteUnicastIpAddressEntry(row);
+                assertNoError(err, "DeleteUnicastIpAddressEntry failed: luid = %s", interfaceLuid);
             }
         }
         INSTANCE.FreeMibTable(table.getPointer());
@@ -206,13 +212,8 @@ public class WinNetworkInterface {
         final PointerByReference pointerByRef = new PointerByReference();
         final int err = INSTANCE.GetUnicastIpAddressTable(family, pointerByRef);
         // something wrong
-        if (err != WinError.NO_ERROR && err != WinError.ERROR_NOT_FOUND)
+        if (err != WinError.NO_ERROR && err != WinError.ERROR_NOT_FOUND) {
             throw new RuntimeException("Failed to list unicast ip addresses:" + err);
-        // no ip, return empty list
-        if (err != WinError.NO_ERROR) {
-            //return emptyList();
-            System.out.println("EMPTY");
-            return null;
         }
 
         // parsing pointer
@@ -250,7 +251,8 @@ public class WinNetworkInterface {
             row.Address.setTypedValue(sockaddrIn6);
         }
 
-        int i = INSTANCE.GetUnicastIpAddressEntry(row);
+        final int err = INSTANCE.GetUnicastIpAddressEntry(row);
+        assertNoError(err, "GetUnicastIpAddressEntry failed: luid = %s, address = %s", interfaceLuid, address);
         return row;
     }
 
@@ -266,7 +268,9 @@ public class WinNetworkInterface {
         dnsInterfaceSettings.QueryAdapterName = DNS_SETTINGS_QUERY_ADAPTER_NAME;
         dnsInterfaceSettings.Flags = DNS_SETTING_NAMESERVER | DNS_SETTING_SEARCHLIST;
 
-        INSTANCE.GetInterfaceDnsSettings(interfaceGuid, dnsInterfaceSettings);
+        final int err = INSTANCE.GetInterfaceDnsSettings(interfaceGuid, dnsInterfaceSettings);
+        assertNoError(err, "GetInterfaceDnsSettings failed: GUID = %s", interfaceGuid.toGuidString());
+
         INSTANCE.FreeInterfaceDnsSettings(dnsInterfaceSettings.getPointer());
     }
 
@@ -299,14 +303,18 @@ public class WinNetworkInterface {
         // For >= Windows 10 1809
         final int err = INSTANCE.SetInterfaceDnsSettings(interfaceGuid, dnsInterfaceSettings);
         if (WinError.ERROR_PROC_NOT_FOUND == err) {
+            // TODO
             // For < Windows 10 1809
         }
-        // TODO
+        assertNoError(err, "SetInterfaceDnsSettings failed: GUID = %s", interfaceGuid.toGuidString());
     }
+
 
     // ------------------------ END DNS related ------------------------
 
+
     // ------------------------ START AdapterAddresses related ------------------------
+
 
     public static long friendlyNameToLuid(final String friendlyName) {
         final int flags = GAA_FLAG_SKIP_UNICAST | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST
@@ -380,4 +388,10 @@ public class WinNetworkInterface {
 
     // ------------------------ END AdapterAddresses related ------------------------
 
+    private static void assertNoError(final int err, final String message, final Object... args) {
+        if (WinError.NO_ERROR != err) {
+//            throw new Win32Exception(err)
+            throw new IllegalStateException("[" + err + "]" + String.format(message, args));
+        }
+    }
 }
