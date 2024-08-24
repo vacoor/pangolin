@@ -181,6 +181,8 @@ public interface IpHelpLib extends IPHlpAPI {
             "DadState", "ScopeId", "CreationTimeStamp",
     })
     class MIB_UNICASTIPADDRESS_ROW extends Structure {
+        public static class ByReference extends MIB_UNICASTIPADDRESS_ROW implements Structure.ByReference {}
+
         public SOCKADDR_INET Address;
         public long InterfaceLuid;
         public int InterfaceIndex;

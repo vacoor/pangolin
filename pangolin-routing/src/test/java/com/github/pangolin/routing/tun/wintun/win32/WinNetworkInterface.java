@@ -35,8 +35,19 @@ public class WinNetworkInterface {
         return guidRef;
     }
 
-    public static void getInetAddress(final long interfaceLuid) {
-        final MIB_UNICASTIPADDRESS_ROW row = new MIB_UNICASTIPADDRESS_ROW();
+    public static void getInetAddress() throws UnknownHostException {
+        final long interfaceLuid = friendlyNameToLuid("以太网 2");
+        final MIB_UNICASTIPADDRESS_ROW.ByReference row = new MIB_UNICASTIPADDRESS_ROW.ByReference();
+        INSTANCE.InitializeUnicastIpAddressEntry(row);
+//        row.InterfaceLuid = interfaceLuid;
+//        row.Address.si_family = AF_INET;
+//        row.Address.Ipv4.sin_family = AF_INET;
+        row.Address.Ipv4.sin_addr = InetAddress.getByName("10.188.71.3").getAddress();
+        row.Address.Ipv4.sin_port = 0;
+//        row.OnLinkPrefixLength = 24;
+
+        int i = INSTANCE.GetUnicastIpAddressEntry(row);
+        System.out.println(i);
     }
 
     public static void setInetAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
@@ -94,7 +105,7 @@ public class WinNetworkInterface {
             row.Address.Ipv6.sin6_family = AF_INET6;
             row.Address.Ipv6.sin6_port = 0;
             row.Address.Ipv6.sin6_addr = address.getAddress();
-            row.Address.Ipv6.sin6_scope_id = ((Inet6Address)address).getScopeId();
+            // row.Address.Ipv6.sin6_scope_id = ((Inet6Address)address).getScopeId();
         }
         return row;
     }
