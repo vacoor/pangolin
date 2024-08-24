@@ -44,7 +44,7 @@ public interface IpHelpLib extends IPHlpAPI {
      * @param InterfaceGuid A pointer to a GUID for a network interface.
      * @param InterfaceLuid A pointer to the NET_LUID for this interface.
      */
-    int ConvertInterfaceGuidToLuid(GUID.ByReference InterfaceGuid, LongByReference InterfaceLuid) throws LastErrorException;
+    int ConvertInterfaceGuidToLuid(GUID InterfaceGuid, LongByReference InterfaceLuid) throws LastErrorException;
 
     /**
      * Converts a local index for a network interface to the locally unique identifier (LUID) for the interface.
