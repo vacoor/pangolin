@@ -23,31 +23,20 @@ import java.net.InetAddress;
 @Slf4j
 public class Main {
 
-    /**
-     *
-     * @param interfaceLuid
-     * @param family
-     * @return
-     * @see <a href="https://learn.microsoft.com/zh-cn/windows/win32/api/netioapi/nf-netioapi-getipinterfaceentry">GetIpInterfaceEntry</a>
-     */
-    public MIB_IPINTERFACE_ROW GetIpInterface(final long interfaceLuid, final int family) {
-        final MIB_IPINTERFACE_ROW row = new MIB_IPINTERFACE_ROW();
-        INSTANCE.InitializeIpInterfaceEntry(row);
-        row.Family = family;
-        row.InterfaceLuid = interfaceLuid;
-
-        INSTANCE.GetIpInterfaceEntry(row);
-        return row;
-    }
-
     public static void main(String[] args) throws IOException {
         final int family = AF_INET;
         final long interfaceLuid = WinNetworkInterface.friendlyNameToLuid("以太网 2");
 
+        int mtu = WinNetworkInterface.getMTU(interfaceLuid, family);
+        System.out.println(mtu);
 
-//        WinNetworkInterface.GetUnicastIpAddress();;
+        WinNetworkInterface.setMTU(interfaceLuid, family, mtu - 100);
+
+        mtu = WinNetworkInterface.getMTU(interfaceLuid, family);
+        System.out.println(mtu);
+
         System.out.println();
-//        System.exit(0);
+        System.exit(0);
 //        System.out.println(NetioAPI.INSTANCE);
 //        listAssociatedAddresses(AF_UNSPEC);
         /*
@@ -84,7 +73,7 @@ public class Main {
             System.out.println(row.Metric);
             System.out.println(row.NlMtu);
             System.out.println();
-//            flushAddresses(luid, AF_UNSPEC);
+//            flushInterfaceAddresses(luid, AF_UNSPEC);
 
             row.Metric = 6;
             row.NlMtu = 65500;

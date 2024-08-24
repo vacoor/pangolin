@@ -19,12 +19,52 @@ public interface IpHelpLib extends IPHlpAPI {
 
     int NDIS_IF_MAX_STRING_SIZE = 256;
 
+    /**
+     * Converts an interface alias name for a network interface to the locally unique identifier (LUID) for the interface.
+     *
+     * @param InterfaceAlias A pointer to a NULL-terminated Unicode string containing the alias name of the network interface.
+     * @param InterfaceLuid  A pointer to the NET_LUID for this interface.
+     * @return On success, ConvertInterfaceAliasToLuid returns NO_ERROR. Any nonzero return value indicates failure
+     * and a NULL is returned in the InterfaceLuid parameter.
+     * <ul><li>[com.sun.jna.platform.win32.WinError.ERROR_INVALID_PARAMETER]: Wrong parameter</li></ul>
+     */
     int ConvertInterfaceAliasToLuid(String InterfaceAlias, LongByReference InterfaceLuid) throws LastErrorException;
 
+    /**
+     * Converts a Unicode network interface name to the locally unique identifier (LUID) for the interface.
+     *
+     * @param InterfaceName A pointer to a NULL-terminated Unicode string containing the network interface name.
+     * @param InterfaceLuid A pointer to the NET_LUID for this interface.
+     */
+    int ConvertInterfaceNameToLuidW(final String InterfaceName, final LongByReference InterfaceLuid) throws LastErrorException;
+
+    /**
+     * Converts a globally unique identifier (GUID) for a network interface to the locally unique identifier (LUID) for the interface.
+     *
+     * @param InterfaceGuid A pointer to a GUID for a network interface.
+     * @param InterfaceLuid A pointer to the NET_LUID for this interface.
+     */
     int ConvertInterfaceGuidToLuid(GUID.ByReference InterfaceGuid, LongByReference InterfaceLuid) throws LastErrorException;
 
+    /**
+     * Converts a local index for a network interface to the locally unique identifier (LUID) for the interface.
+     *
+     * @param InterfaceIndex The local index value for a network interface.
+     * @param InterfaceLuid  A pointer to the NET_LUID for this interface.
+     */
     int ConvertInterfaceIndexToLuid(int InterfaceIndex, LongByReference InterfaceLuid) throws LastErrorException;
 
+    /**
+     * Converts a locally unique identifier (LUID) for a network interface to an interface alias.
+     *
+     * @param InterfaceLuid  A pointer to a NET_LUID for a network interface.
+     * @param InterfaceAlias A pointer to a buffer to hold the NULL-terminated Unicode string containing
+     *                       the alias name of the network interface when the function returns successfully.
+     * @param Length         The length, in characters, of the buffer pointed to by the InterfaceAlias parameter.
+     *                       This value must be large enough to accommodate the alias name of the network
+     *                       interface and the terminating NULL character. The maximum required length is
+     *                       NDIS_IF_MAX_STRING_SIZE + 1.
+     */
     int ConvertInterfaceLuidToAlias(LongByReference InterfaceLuid, char[] InterfaceAlias, int Length) throws LastErrorException;
 
     /**
@@ -39,11 +79,25 @@ public interface IpHelpLib extends IPHlpAPI {
      */
     int ConvertInterfaceLuidToGuid(LongByReference InterfaceLuid, GUID.ByReference InterfaceGuid) throws LastErrorException;
 
+    /**
+     * Converts a locally unique identifier (LUID) for a network interface to the local index for the interface.
+     *
+     * @param InterfaceLuid  A pointer to a NET_LUID for a network interface.
+     * @param InterfaceIndex The local index value for the interface.
+     */
     int ConvertInterfaceLuidToIndex(LongByReference InterfaceLuid, IntByReference InterfaceIndex) throws LastErrorException;
 
+    /**
+     * Converts a locally unique identifier (LUID) for a network interface to the Unicode interface name.
+     *
+     * @param InterfaceLuid A pointer to a NET_LUID for a network interface.
+     * @param InterfaceName A pointer to a buffer to hold the NULL-terminated Unicode string containing
+     *                      the interface name when the function returns successfully.
+     * @param Length        The number of characters in the array pointed to by the InterfaceName parameter.
+     *                      This value must be large enough to accommodate the interface name and the
+     *                      terminating null character. The maximum required length is NDIS_IF_MAX_STRING_SIZE + 1.
+     */
     int ConvertInterfaceLuidToNameW(LongByReference InterfaceLuid, char[] InterfaceName, int Length) throws LastErrorException;
-
-    int ConvertInterfaceNameToLuidW(final String InterfaceName, final LongByReference InterfaceLuid) throws LastErrorException;
 
 
     // ------------------------ START Interface related ------------------------
@@ -239,9 +293,6 @@ public interface IpHelpLib extends IPHlpAPI {
             "DadState", "ScopeId", "CreationTimeStamp",
     })
     class MIB_UNICASTIPADDRESS_ROW extends Structure {
-        public static class ByReference extends MIB_UNICASTIPADDRESS_ROW implements Structure.ByReference {
-        }
-
         public SOCKADDR_INET Address;
         public long InterfaceLuid;
         public int InterfaceIndex;
@@ -357,7 +408,7 @@ public interface IpHelpLib extends IPHlpAPI {
     int CreateUnicastIpAddressEntry(MIB_UNICASTIPADDRESS_ROW Row) throws LastErrorException;
 
     /**
-     * Sets/updates the properties of an existing unicast IP address entry on the local computer.
+     * Sets/updates the [properties] of an existing unicast IP address entry on the local computer.
      *
      * @param Row A pointer to [MIB_UNICASTIPADDRESS_ROW].
      * @return If the function succeeds, the return value is [com.sun.jna.platform.win32.WinError.NO_ERROR].
