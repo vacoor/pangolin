@@ -8,10 +8,6 @@ import com.sun.jna.Union;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Guid;
 import com.sun.jna.platform.win32.IPHlpAPI;
-import com.sun.jna.platform.win32.WinDef;
-import com.sun.jna.platform.win32.WinNT;
-import com.sun.jna.platform.win32.Winsock2;
-import com.sun.jna.ptr.ByteByReference;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
 import com.sun.jna.ptr.PointerByReference;
@@ -283,7 +279,7 @@ public interface IpHelpLib extends IPHlpAPI {
      * + [com.sun.jna.platform.win32.WinError.ERROR_NOT_SUPPORTED]: Missing IP stack.
      * + other
      */
-    int SetUnicastIpAddressEntry(MIB_UNICASTIPADDRESS_ROW row);
+    int SetUnicastIpAddressEntry(MIB_UNICASTIPADDRESS_ROW row)throws LastErrorException;
 
     /**
      * Deletes an existing unicast IP address entry on the local computer.
