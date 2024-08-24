@@ -77,12 +77,13 @@ public class Main {
     /**
      * List all ip address related to this adapter.
      *
-     * @param ipFamily Must be [IPHlpAPI.AF_INET], [IPHlpAPI.AF_INET6] or [IPHlpAPI.AF_UNSPEC]
+     * @param family Must be [IPHlpAPI.AF_INET], [IPHlpAPI.AF_INET6] or [IPHlpAPI.AF_UNSPEC]
      * @return List of [AdapterIPAddress], representing an IP.
      * */
-    public static void listAssociatedAddresses(int ipFamily) throws UnknownHostException {
-        final PointerByReference pointerByReference = new PointerByReference();
-        final int err = IpHelpLib.INSTANCE.GetUnicastIpAddressTable(ipFamily, pointerByReference);
+    public static void listAssociatedAddresses(int family) throws UnknownHostException {
+//        final PointerByReference pointerByReference = new PointerByReference();
+        final MIB_UNICASTIPADDRESS_TABLE mibUnicastIpAddressTable = new MIB_UNICASTIPADDRESS_TABLE();
+        final int err = IpHelpLib.INSTANCE.GetUnicastIpAddressTable(family, mibUnicastIpAddressTable);
         // something wrong
         if (err != WinError.NO_ERROR && err != WinError.ERROR_NOT_FOUND)
             throw new RuntimeException("Failed to list unicast ip addresses:" + err);
@@ -94,7 +95,7 @@ public class Main {
         }
 
         // parsing pointer
-        final IpHelpLib.MIB_MULTICASTIPADDRESS_TABLE table = new IpHelpLib.MIB_MULTICASTIPADDRESS_TABLE(pointerByReference.getValue());
+        final MIB_UNICASTIPADDRESS_TABLE table = mibUnicastIpAddressTable;//new MIB_UNICASTIPADDRESS_TABLE(pointerByReference.getValue());
         // "MIB_UNICASTIPADDRESS_TABLE size not match. Expect ${table.NumEntries}, actual: ${table.Table.size}"
         assert table.NumEntries == table.Table.length;
         for (final IpHelpLib.MIB_UNICASTIPADDRESS_ROW row : table.Table) {

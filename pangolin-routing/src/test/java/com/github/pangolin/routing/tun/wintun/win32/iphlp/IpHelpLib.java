@@ -211,15 +211,15 @@ public interface IpHelpLib extends IPHlpAPI {
      * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_unicastipaddress_table">MIB_UNICASTIPADDRESS_TABLE</a>
      */
     @Structure.FieldOrder({"NumEntries", "Table"})
-    class MIB_MULTICASTIPADDRESS_TABLE extends Structure {
+    class MIB_UNICASTIPADDRESS_TABLE extends Structure {
         public int NumEntries;
         public MIB_UNICASTIPADDRESS_ROW[] Table = new MIB_UNICASTIPADDRESS_ROW[1];
 
-        public MIB_MULTICASTIPADDRESS_TABLE() {
+        public MIB_UNICASTIPADDRESS_TABLE() {
             super();
         }
 
-        public MIB_MULTICASTIPADDRESS_TABLE(Pointer p) {
+        public MIB_UNICASTIPADDRESS_TABLE(Pointer p) {
             super(p);
             this.Table = new MIB_UNICASTIPADDRESS_ROW[p.getInt(0)];
             read();
@@ -303,7 +303,7 @@ public interface IpHelpLib extends IPHlpAPI {
      * Retrieves the unicast IP address table on the local computer.
      *
      * @param family Must be [IPHlpAPI.AF_INET], [IPHlpAPI.AF_INET6] or [IPHlpAPI.AF_UNSPEC]
-     * @param table  The pointer of the pointer to [info.skyblond.jna.iphlp.MIB_MULTICASTIPADDRESS_TABLE].
+     * @param table  The pointer of the pointer to [info.skyblond.jna.iphlp.MIB_UNICASTIPADDRESS_TABLE].
      *               The pointer must be released by [FreeMibTable].
      * @return If the function succeeds, the return value is [com.sun.jna.platform.win32.WinError.NO_ERROR].
      * If the function fails, the return value is one of the following error codes:
@@ -313,7 +313,7 @@ public interface IpHelpLib extends IPHlpAPI {
      * + [com.sun.jna.platform.win32.WinError.ERROR_NOT_SUPPORTED]: Missing IP stack.
      * + other
      */
-    int GetUnicastIpAddressTable(int family, PointerByReference table);
+    int GetUnicastIpAddressTable(int family, MIB_UNICASTIPADDRESS_TABLE table);
 
     /**
      * Frees the buffer allocated by the functions that return tables of network
