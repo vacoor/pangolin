@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.tun.wintun;
 
-import com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib;
+import com.github.pangolin.routing.tun.wintun.win32.IpHelpLib;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
@@ -8,9 +8,6 @@ import com.sun.jna.platform.win32.*;
 import com.sun.jna.ptr.LongByReference;
 
 import java.io.IOException;
-import java.net.Inet4Address;
-import java.net.Inet6Address;
-import java.net.InetAddress;
 
 import static com.github.pangolin.routing.tun.wintun.WintunLib.*;
 import static com.sun.jna.platform.win32.Guid.GUID;

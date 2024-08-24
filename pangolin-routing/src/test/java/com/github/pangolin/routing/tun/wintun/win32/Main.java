@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.tun.wintun.win32;
 
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.*;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.*;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCloseAdapter;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCreateAdapter;
 import static org.drasyl.channel.tun.jna.windows.Wintun.WintunEndSession;
@@ -69,7 +69,7 @@ public class Main {
             WintunGetAdapterLUID(adapter, luidRef);
             final long luid = luidRef.getLong(0);
 
-            WinNetworkInterface.addAddress(luid, InetAddress.getByName("198.18.0.1"), (byte) 24);
+            WinNetworkInterface.addInterfaceAddress(luid, InetAddress.getByName("198.18.0.1"), (byte) 24);
             WinNetworkInterface.setInterfaceDns(WinNetworkInterface.interfaceLuidToGuid(luid), AF_INET, new InetAddress[]{InetAddress.getByName("198.18.0.2")}, new String[0]);
 
             session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));

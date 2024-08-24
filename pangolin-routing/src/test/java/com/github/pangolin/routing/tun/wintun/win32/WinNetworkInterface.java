@@ -1,31 +1,5 @@
 package com.github.pangolin.routing.tun.wintun.win32;
 
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.AF_INET;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.AF_INET6;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.AF_UNSPEC;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.DNS_INTERFACE_SETTINGS;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.DNS_INTERFACE_SETTINGS_VERSION1;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.DNS_SETTINGS_QUERY_ADAPTER_NAME;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.DNS_SETTING_IPV6;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.DNS_SETTING_NAMESERVER;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.DNS_SETTING_SEARCHLIST;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_INCLUDE_ALL_INTERFACES;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_INCLUDE_GATEWAYS;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_SKIP_ANYCAST;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_SKIP_FRIENDLY_NAME;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_SKIP_MULTICAST;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.GAA_FLAG_SKIP_UNICAST;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.INSTANCE;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.IP_ADAPTER_ADDRESSES_LH;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.IP_ADAPTER_DNS_SERVER_ADDRESS_XP;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.IP_ADAPTER_DNS_SUFFIX;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.MIB_UNICASTIPADDRESS_ROW;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.MIB_UNICASTIPADDRESS_TABLE;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.sockaddr_in;
-import static com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib.sockaddr_in6;
-import static com.sun.jna.platform.win32.Guid.GUID;
-
-import com.github.pangolin.routing.tun.wintun.win32.iphlp.IpHelpLib;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.sun.jna.Memory;
@@ -44,6 +18,9 @@ import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Objects;
 
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.*;
+import static com.sun.jna.platform.win32.Guid.GUID;
+
 /**
  * @see <a href="https://github.com/WireGuard/wireguard-windows/blob/master/tunnel/winipcfg/luid.go">luid</a>
  */
@@ -57,111 +34,7 @@ public class WinNetworkInterface {
         return guidRef;
     }
 
-    public static void setAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
-        final int family = address instanceof Inet4Address ? AF_INET : (address instanceof Inet6Address ? AF_INET6 : AF_UNSPEC);
-        flushAddresses(interfaceLuid, family);
-        addAddress(interfaceLuid, address, prefixLength);
-    }
-
-    public static void addAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
-        final MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(interfaceLuid, address);
-        row.OnLinkPrefixLength = prefixLength;
-        row.ValidLifetime = 0xffffffff;
-        row.PreferredLifetime = 0xffffffff;
-        row.DadState = 4;
-
-        int err = IpHelpLib.INSTANCE.CreateUnicastIpAddressEntry(row);
-        if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {
-            throw new RuntimeException("Failed to create new MIB_UNICASTIPADDRESS_ROW: " + err);
-        }
-    }
-
-    public static void deleteAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
-        final MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(interfaceLuid, address);
-        row.OnLinkPrefixLength = prefixLength;
-
-        int err = IpHelpLib.INSTANCE.DeleteUnicastIpAddressEntry(row);
-        if (WinError.NO_ERROR != err) {
-            throw new Win32Exception(err);
-        }
-    }
-
-    /**
-     * List all ip address related to this adapter.
-     *
-     * @param family Must be [IPHlpAPI.AF_INET], [IPHlpAPI.AF_INET6] or [IPHlpAPI.AF_UNSPEC]
-     * @return List of [AdapterIPAddress], representing an IP.
-     * */
-    public static void flushAddresses(final long interfaceLuid, int family) {
-        final MIB_UNICASTIPADDRESS_TABLE table = GetUnicastIpAddressTable(family);
-        for (final IpHelpLib.MIB_UNICASTIPADDRESS_ROW row : table.Table) {
-            /*
-            if (AF_INET == row.Address.si_family) {
-                final IpHelpLib.sockaddr_in v4 = (IpHelpLib.sockaddr_in) row.Address.getTypedValue(IpHelpLib.sockaddr_in.class);
-                InetAddress inet4 = InetAddress.getByAddress(v4.sin_addr);
-                System.out.println(inet4);
-            } else if (AF_INET6 == row.Address.si_family) {
-                final IpHelpLib.sockaddr_in6 v6 = (IpHelpLib.sockaddr_in6) row.Address.getTypedValue(IpHelpLib.sockaddr_in6.class);
-                InetAddress inet6 = InetAddress.getByAddress(v6.sin6_addr);
-                System.out.println(inet6);
-            } else {
-                //  Unknown si family: ${it.Address.si_family}
-            }
-            System.out.println(row.Address.si_family);
-            */
-            if (row.InterfaceLuid == interfaceLuid) {
-                INSTANCE.DeleteUnicastIpAddressEntry(row);
-            }
-        }
-        IpHelpLib.INSTANCE.FreeMibTable(table.getPointer());
-    }
-
-
-    /**
-     * Create and initialize a [MIB_UNICASTIPADDRESS_ROW], fill the luid and ip.
-     * */
-    private static MIB_UNICASTIPADDRESS_ROW createMibUnicastIpAddressRow(final long interfaceLuid, InetAddress address){
-        final MIB_UNICASTIPADDRESS_ROW row = new MIB_UNICASTIPADDRESS_ROW();
-        IpHelpLib.INSTANCE.InitializeUnicastIpAddressEntry(row);
-
-        row.InterfaceLuid = interfaceLuid;
-
-        if (address instanceof Inet4Address) {
-            final sockaddr_in sockaddrIn = new sockaddr_in();
-            sockaddrIn.sin_family = AF_INET;
-            sockaddrIn.sin_port = 0;
-            sockaddrIn.sin_addr = address.getAddress();
-            row.Address.setTypedValue(sockaddrIn);
-        } else if (address instanceof Inet6Address) {
-            final sockaddr_in6 sockaddrIn6 = new sockaddr_in6();
-            sockaddrIn6.sin6_family = AF_INET6;
-            sockaddrIn6.sin6_port = 0;
-            sockaddrIn6.sin6_addr = address.getAddress();
-            // sockaddrIn6.sin6_scope_id = ((Inet6Address) address).getScopeId();
-            row.Address.setTypedValue(sockaddrIn6);
-        }
-        return row;
-    }
-
-    private static MIB_UNICASTIPADDRESS_TABLE GetUnicastIpAddressTable(final int family) {
-        final PointerByReference  pointerByRef = new PointerByReference();
-        final int err = IpHelpLib.INSTANCE.GetUnicastIpAddressTable(family, pointerByRef);
-        // something wrong
-        if (err != WinError.NO_ERROR && err != WinError.ERROR_NOT_FOUND)
-            throw new RuntimeException("Failed to list unicast ip addresses:" + err);
-        // no ip, return empty list
-        if (err != WinError.NO_ERROR) {
-            //return emptyList();
-            System.out.println("EMPTY");
-            return null;
-        }
-
-        // parsing pointer
-        final MIB_UNICASTIPADDRESS_TABLE table = new MIB_UNICASTIPADDRESS_TABLE(pointerByRef.getValue());
-        // "MIB_UNICASTIPADDRESS_TABLE size not match. Expect ${table.NumEntries}, actual: ${table.Table.size}"
-        assert table.NumEntries == table.Table.length;
-        return table;
-    }
+    // ------------------------ START Interface related ------------------------
 
     public static MIB_UNICASTIPADDRESS_ROW GetUnicastIpAddress(final long interfaceLuid,
                                                                final InetAddress address) {
@@ -196,8 +69,130 @@ public class WinNetworkInterface {
     }
 
 
+    // ------------------------ END Interface related ------------------------
 
 
+    // ------------------------ START UnicastIP related ------------------------
+
+
+    public static void addInterfaceAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
+        final MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(interfaceLuid, address);
+        row.OnLinkPrefixLength = prefixLength;
+        row.ValidLifetime = 0xffffffff;
+        row.PreferredLifetime = 0xffffffff;
+        row.DadState = 4;
+
+        int err = IpHelpLib.INSTANCE.CreateUnicastIpAddressEntry(row);
+        if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {
+            throw new RuntimeException("Failed to create new MIB_UNICASTIPADDRESS_ROW: " + err);
+        }
+    }
+
+    public static void deleteInterfaceAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
+        final MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(interfaceLuid, address);
+        row.OnLinkPrefixLength = prefixLength;
+
+        int err = IpHelpLib.INSTANCE.DeleteUnicastIpAddressEntry(row);
+        if (WinError.NO_ERROR != err) {
+            throw new Win32Exception(err);
+        }
+    }
+
+    public static void setInterfaceAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
+        final int family = address instanceof Inet4Address ? AF_INET : (address instanceof Inet6Address ? AF_INET6 : AF_UNSPEC);
+        flushAddresses(interfaceLuid, family);
+        addInterfaceAddress(interfaceLuid, address, prefixLength);
+    }
+
+    /**
+     * @param family Must be [IPHlpAPI.AF_INET], [IPHlpAPI.AF_INET6] or [IPHlpAPI.AF_UNSPEC]
+     */
+    public static void flushAddresses(final long interfaceLuid, int family) {
+        final MIB_UNICASTIPADDRESS_TABLE table = GetUnicastIpAddressTable(family);
+        for (final IpHelpLib.MIB_UNICASTIPADDRESS_ROW row : table.Table) {
+            /*
+            if (AF_INET == row.Address.si_family) {
+                final IpHelpLib.sockaddr_in v4 = (IpHelpLib.sockaddr_in) row.Address.getTypedValue(IpHelpLib.sockaddr_in.class);
+                InetAddress inet4 = InetAddress.getByAddress(v4.sin_addr);
+                System.out.println(inet4);
+            } else if (AF_INET6 == row.Address.si_family) {
+                final IpHelpLib.sockaddr_in6 v6 = (IpHelpLib.sockaddr_in6) row.Address.getTypedValue(IpHelpLib.sockaddr_in6.class);
+                InetAddress inet6 = InetAddress.getByAddress(v6.sin6_addr);
+                System.out.println(inet6);
+            } else {
+                //  Unknown si family: ${it.Address.si_family}
+            }
+            System.out.println(row.Address.si_family);
+            */
+            if (row.InterfaceLuid == interfaceLuid) {
+                INSTANCE.DeleteUnicastIpAddressEntry(row);
+            }
+        }
+        IpHelpLib.INSTANCE.FreeMibTable(table.getPointer());
+    }
+
+
+    /**
+     * Create and initialize a [MIB_UNICASTIPADDRESS_ROW], fill the luid and ip.
+     */
+    private static MIB_UNICASTIPADDRESS_ROW createMibUnicastIpAddressRow(final long interfaceLuid, InetAddress address) {
+        final MIB_UNICASTIPADDRESS_ROW row = new MIB_UNICASTIPADDRESS_ROW();
+        IpHelpLib.INSTANCE.InitializeUnicastIpAddressEntry(row);
+
+        row.InterfaceLuid = interfaceLuid;
+
+        if (address instanceof Inet4Address) {
+            final sockaddr_in sockaddrIn = new sockaddr_in();
+            sockaddrIn.sin_family = AF_INET;
+            sockaddrIn.sin_port = 0;
+            sockaddrIn.sin_addr = address.getAddress();
+            row.Address.setTypedValue(sockaddrIn);
+        } else if (address instanceof Inet6Address) {
+            final sockaddr_in6 sockaddrIn6 = new sockaddr_in6();
+            sockaddrIn6.sin6_family = AF_INET6;
+            sockaddrIn6.sin6_port = 0;
+            sockaddrIn6.sin6_addr = address.getAddress();
+            // sockaddrIn6.sin6_scope_id = ((Inet6Address) address).getScopeId();
+            row.Address.setTypedValue(sockaddrIn6);
+        }
+        return row;
+    }
+
+    private static MIB_UNICASTIPADDRESS_TABLE GetUnicastIpAddressTable(final int family) {
+        final PointerByReference pointerByRef = new PointerByReference();
+        final int err = IpHelpLib.INSTANCE.GetUnicastIpAddressTable(family, pointerByRef);
+        // something wrong
+        if (err != WinError.NO_ERROR && err != WinError.ERROR_NOT_FOUND)
+            throw new RuntimeException("Failed to list unicast ip addresses:" + err);
+        // no ip, return empty list
+        if (err != WinError.NO_ERROR) {
+            //return emptyList();
+            System.out.println("EMPTY");
+            return null;
+        }
+
+        // parsing pointer
+        final MIB_UNICASTIPADDRESS_TABLE table = new MIB_UNICASTIPADDRESS_TABLE(pointerByRef.getValue());
+        // "MIB_UNICASTIPADDRESS_TABLE size not match. Expect ${table.NumEntries}, actual: ${table.Table.size}"
+        assert table.NumEntries == table.Table.length;
+        return table;
+    }
+
+    // ------------------------ END UnicastIP related ------------------------
+
+
+    // ------------------------ START DNS related ------------------------
+
+
+    private static void getInterfaceDns(GUID interfaceGuid) {
+        final DNS_INTERFACE_SETTINGS.ByReference dnsInterfaceSettings = new DNS_INTERFACE_SETTINGS.ByReference();
+        dnsInterfaceSettings.Version = DNS_INTERFACE_SETTINGS_VERSION1;
+        dnsInterfaceSettings.QueryAdapterName = DNS_SETTINGS_QUERY_ADAPTER_NAME;
+        dnsInterfaceSettings.Flags = DNS_SETTING_NAMESERVER | DNS_SETTING_SEARCHLIST;
+
+        IpHelpLib.INSTANCE.GetInterfaceDnsSettings(interfaceGuid, dnsInterfaceSettings);
+        IpHelpLib.INSTANCE.FreeInterfaceDnsSettings(dnsInterfaceSettings.getPointer());
+    }
 
     public static void setInterfaceDns(final GUID interfaceGuid, final int family,
                                        final InetAddress[] dnsServers, final String[] domains) {
@@ -233,18 +228,24 @@ public class WinNetworkInterface {
         // TODO
     }
 
-    private static void getInterfaceDns(final com.sun.jna.platform.win32.Guid.GUID interfaceGuid) {
-        final DNS_INTERFACE_SETTINGS.ByReference dnsInterfaceSettings = new DNS_INTERFACE_SETTINGS.ByReference();
-        dnsInterfaceSettings.Version = DNS_INTERFACE_SETTINGS_VERSION1;
-        dnsInterfaceSettings.QueryAdapterName = DNS_SETTINGS_QUERY_ADAPTER_NAME;
-        dnsInterfaceSettings.Flags = DNS_SETTING_NAMESERVER | DNS_SETTING_SEARCHLIST;
+    // ------------------------ END DNS related ------------------------
 
-        IpHelpLib.INSTANCE.GetInterfaceDnsSettings(interfaceGuid, dnsInterfaceSettings);
-        IpHelpLib.INSTANCE.FreeInterfaceDnsSettings(dnsInterfaceSettings.getPointer());
+    // ------------------------ START AdapterAddresses related ------------------------
+
+    public static long friendlyNameToLuid(final String friendlyName) {
+        final int flags = GAA_FLAG_SKIP_UNICAST | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST
+                | GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_ALL_INTERFACES;
+        IP_ADAPTER_ADDRESSES_LH addresses = GetAdaptersAddresses(AF_UNSPEC, flags);
+        while (null != addresses) {
+            if (Objects.equals(friendlyName, addresses.FriendlyName.toString())) {
+                return addresses.Luid;
+            }
+            addresses = addresses.Next;
+        }
+        return 0;
     }
 
-
-    public static List<InetAddress> getInterfaceDns(final long interfaceLuid) {
+    public static List<InetAddress> getInterfaceAllDns(final long interfaceLuid) {
         final int flags = GAA_FLAG_SKIP_UNICAST | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST
                 | GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_ALL_INTERFACES;
 
@@ -285,19 +286,6 @@ public class WinNetworkInterface {
         return null;
     }
 
-    public static long friendlyNameToLuid(final String friendlyName) {
-        final int flags = GAA_FLAG_SKIP_UNICAST | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST
-                | GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_ALL_INTERFACES;
-        IP_ADAPTER_ADDRESSES_LH addresses = GetAdaptersAddresses(AF_UNSPEC, flags);
-        while (null != addresses) {
-            if (Objects.equals(friendlyName, addresses.FriendlyName.toString())) {
-                return addresses.Luid;
-            }
-            addresses = addresses.Next;
-        }
-        return 0;
-    }
-
     private static IP_ADAPTER_ADDRESSES_LH GetAdaptersAddresses(final int family, final int gaaFlags) {
         // The recommended method of calling the GetAdaptersAddresses function is to pre-allocate a
         // 15KB working buffer
@@ -313,5 +301,7 @@ public class WinNetworkInterface {
         }
         return new IP_ADAPTER_ADDRESSES_LH(buffer);
     }
+
+    // ------------------------ END AdapterAddresses related ------------------------
 
 }
