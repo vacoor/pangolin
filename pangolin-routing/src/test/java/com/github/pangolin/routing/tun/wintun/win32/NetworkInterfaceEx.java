@@ -49,7 +49,7 @@ import java.util.Objects;
  * @see <a href="https://github.com/WireGuard/wireguard-windows/blob/master/tunnel/winipcfg/luid.go">luid</a>
  */
 @Slf4j
-public class WinNetworkInterface {
+public class NetworkInterfaceEx {
 
     public static long interfaceNameToLuid(final String interfaceName) {
         final LongByReference luidRef = new LongByReference();
@@ -62,6 +62,13 @@ public class WinNetworkInterface {
         final LongByReference luidRef = new LongByReference();
         final int err = INSTANCE.ConvertInterfaceAliasToLuid(interfaceAlias, luidRef);
         assertNoError(err, "ConvertInterfaceAliasToLuid failed: %s", interfaceAlias);
+        return luidRef.getValue();
+    }
+
+    public static long interfaceIndexToLuid(final int interfaceIndex) {
+        final LongByReference luidRef = new LongByReference();
+        final int err = INSTANCE.ConvertInterfaceIndexToLuid(interfaceIndex, luidRef);
+        assertNoError(err, "ConvertInterfaceIndexToLuid failed: %s", interfaceIndex);
         return luidRef.getValue();
     }
 
@@ -87,6 +94,14 @@ public class WinNetworkInterface {
         final int err = INSTANCE.ConvertInterfaceLuidToGuid(luidRef, guidRef);
         assertNoError(err, "ConvertInterfaceLuidToGuid failed: %s", interfaceLuid);
         return guidRef;
+    }
+
+    public static int interfaceLuidToIndex(final long interfaceLuid) {
+        final IntByReference indexRef = new IntByReference();
+        final LongByReference luidRef = new LongByReference(interfaceLuid);
+        final int err = INSTANCE.ConvertInterfaceLuidToIndex(luidRef, indexRef);
+        assertNoError(err, "ConvertInterfaceLuidToIndex failed: %s", interfaceLuid);
+        return indexRef.getValue();
     }
 
     private static String stringify(final char[] buff) {

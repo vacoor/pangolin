@@ -19,34 +19,35 @@ import org.drasyl.channel.tun.jna.windows.Wintun;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.util.Enumeration;
 
 @Slf4j
 public class Main {
 
     public static void main(String[] args) throws IOException {
         final int family = AF_INET;
-        final long interfaceLuid = WinNetworkInterface.friendlyNameToLuid("以太网 2");
+        // final long interfaceLuid = NetworkInterfaceEx.interfaceAliasToLuid("以太网 2");
+        final Enumeration<NetworkInterface> networkInterfaces = NetworkInterface.getNetworkInterfaces();
+        while (networkInterfaces.hasMoreElements()) {
+            final NetworkInterface ni = networkInterfaces.nextElement();
+            final String name = ni.getName();
+            final String alias = ni.getDisplayName();
+            final int index = ni.getIndex();
+            final int mtu = ni.getMTU();
+            System.out.println("------");
+            System.out.println(String.format("[%s] %s / %s -> %s", index, name, alias, mtu));
 
-        int mtu = WinNetworkInterface.getMTU(interfaceLuid, family);
-        System.out.println(mtu);
+            final long luid = NetworkInterfaceEx.interfaceIndexToLuid(index);
+            int mtu1 = NetworkInterfaceEx.getMTU(luid, AF_INET);
+            System.out.println(mtu1);
+//            ni.getInetAddresses()
+//            ni.getInterfaceAddresses().get(0).getNetworkPrefixLength()
+        }
 
-        WinNetworkInterface.setMTU(interfaceLuid, family, mtu - 50);
-
-        mtu = WinNetworkInterface.getMTU(interfaceLuid, family);
-        System.out.println(mtu);
 
         System.out.println();
         System.exit(0);
-//        System.out.println(NetioAPI.INSTANCE);
-//        listAssociatedAddresses(AF_UNSPEC);
-        /*
-        getAdaptersAddresses();
-
-        System.out.println("------------");
-        */
-//        final String id = "{22430978-1194-4d70-b652-f1546d123aff}";
-//        final String s = id.replaceAll("^\\{|\\}$|-", "");
-//        final Guid.GUID guid = Guid.GUID.fromBinary(Hex.decode(s));
         final Guid.GUID guid = Guid.GUID.newGuid();
 
 //        listAssociatedAddresses(IPHlpAPI.AF_UNSPEC);
@@ -58,8 +59,8 @@ public class Main {
             WintunGetAdapterLUID(adapter, luidRef);
             final long luid = luidRef.getLong(0);
 
-            WinNetworkInterface.addInterfaceAddress(luid, InetAddress.getByName("198.18.0.1"), (byte) 24);
-            WinNetworkInterface.setInterfaceDns(WinNetworkInterface.interfaceLuidToGuid(luid), AF_INET, new InetAddress[]{InetAddress.getByName("198.18.0.2")}, new String[0]);
+            NetworkInterfaceEx.addInterfaceAddress(luid, InetAddress.getByName("198.18.0.1"), (byte) 24);
+            NetworkInterfaceEx.setInterfaceDns(NetworkInterfaceEx.interfaceLuidToGuid(luid), AF_INET, new InetAddress[]{InetAddress.getByName("198.18.0.2")}, new String[0]);
 
             session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));
 
