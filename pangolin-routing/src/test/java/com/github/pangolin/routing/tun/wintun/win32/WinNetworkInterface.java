@@ -10,6 +10,7 @@ import com.sun.jna.platform.win32.Win32Exception;
 import com.sun.jna.platform.win32.WinError;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
+import com.sun.jna.ptr.PointerByReference;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.Inet4Address;
@@ -35,15 +36,99 @@ public class WinNetworkInterface {
         return guidRef;
     }
 
+    public static void setAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
+        final int family = address instanceof Inet4Address ? AF_INET : (address instanceof Inet6Address ? AF_INET6 : AF_UNSPEC);
+        final MIB_UNICASTIPADDRESS_TABLE table = GetUnicastIpAddressTable(family);
+        for (final MIB_UNICASTIPADDRESS_ROW row : table.Table) {
+            if (row.InterfaceLuid != interfaceLuid) {
+                continue;
+            }
+            if (address instanceof Inet4Address) {
+                final sockaddr_in sockaddrIn = new sockaddr_in();
+                sockaddrIn.sin_family = AF_INET;
+                sockaddrIn.sin_port = 0;
+                sockaddrIn.sin_addr = address.getAddress();
+                row.Address.setTypedValue(sockaddrIn);
+            } else if (address instanceof Inet6Address) {
+                final sockaddr_in6 sockaddrIn6 = new sockaddr_in6();
+                sockaddrIn6.sin6_family = AF_INET6;
+                sockaddrIn6.sin6_port = 0;
+                sockaddrIn6.sin6_addr = address.getAddress();
+                // sockaddrIn6.sin6_scope_id = ((Inet6Address) address).getScopeId();
+                row.Address.setTypedValue(sockaddrIn6);
+            }
+            INSTANCE.SetUnicastIpAddressEntry(row);
+            return;
+        }
+        addInetAddress(interfaceLuid, address, prefixLength);
+    }
+
+    /**
+     * List all ip address related to this adapter.
+     *
+     * @param family Must be [IPHlpAPI.AF_INET], [IPHlpAPI.AF_INET6] or [IPHlpAPI.AF_UNSPEC]
+     * @return List of [AdapterIPAddress], representing an IP.
+     * */
+    public static void flushAddresses(final long interfaceLuid, int family) throws UnknownHostException {
+        final MIB_UNICASTIPADDRESS_TABLE table = GetUnicastIpAddressTable(family);
+        for (final IpHelpLib.MIB_UNICASTIPADDRESS_ROW row : table.Table) {
+            if (AF_INET == row.Address.si_family) {
+                final IpHelpLib.sockaddr_in v4 = (IpHelpLib.sockaddr_in) row.Address.getTypedValue(IpHelpLib.sockaddr_in.class);
+                InetAddress inet4 = InetAddress.getByAddress(v4.sin_addr);
+                System.out.println(inet4);
+            } else if (AF_INET6 == row.Address.si_family) {
+                final IpHelpLib.sockaddr_in6 v6 = (IpHelpLib.sockaddr_in6) row.Address.getTypedValue(IpHelpLib.sockaddr_in6.class);
+                InetAddress inet6 = InetAddress.getByAddress(v6.sin6_addr);
+                System.out.println(inet6);
+            } else {
+                //  Unknown si family: ${it.Address.si_family}
+            }
+            System.out.println(row.Address.si_family);
+
+            if (row.InterfaceLuid == interfaceLuid) {
+                INSTANCE.DeleteUnicastIpAddressEntry(row);
+            }
+        }
+        IpHelpLib.INSTANCE.FreeMibTable(table.getPointer());
+    }
+
+    private static MIB_UNICASTIPADDRESS_TABLE GetUnicastIpAddressTable(final int family) {
+        final PointerByReference  pointerByRef = new PointerByReference();
+        final int err = IpHelpLib.INSTANCE.GetUnicastIpAddressTable(family, pointerByRef);
+        // something wrong
+        if (err != WinError.NO_ERROR && err != WinError.ERROR_NOT_FOUND)
+            throw new RuntimeException("Failed to list unicast ip addresses:" + err);
+        // no ip, return empty list
+        if (err != WinError.NO_ERROR) {
+            //return emptyList();
+            System.out.println("EMPTY");
+            return null;
+        }
+
+        // parsing pointer
+        final MIB_UNICASTIPADDRESS_TABLE table = new MIB_UNICASTIPADDRESS_TABLE(pointerByRef.getValue());
+        // "MIB_UNICASTIPADDRESS_TABLE size not match. Expect ${table.NumEntries}, actual: ${table.Table.size}"
+        assert table.NumEntries == table.Table.length;
+        return table;
+    }
+
     public static void getInetAddress() throws UnknownHostException {
+        byte[] address = InetAddress.getByName("10.188.71.3").getAddress();
+
         final long interfaceLuid = friendlyNameToLuid("以太网 2");
         final MIB_UNICASTIPADDRESS_ROW.ByReference row = new MIB_UNICASTIPADDRESS_ROW.ByReference();
-        INSTANCE.InitializeUnicastIpAddressEntry(row);
-//        row.InterfaceLuid = interfaceLuid;
-//        row.Address.si_family = AF_INET;
+//        INSTANCE.InitializeUnicastIpAddressEntry(row);
+        row.InterfaceLuid = interfaceLuid;
+        row.Address.si_family = AF_INET;
 //        row.Address.Ipv4.sin_family = AF_INET;
-        row.Address.Ipv4.sin_addr = InetAddress.getByName("10.188.71.3").getAddress();
-        row.Address.Ipv4.sin_port = 0;
+        final sockaddr_in sockaddrIn = new sockaddr_in();
+        sockaddrIn.sin_family = AF_INET;
+        sockaddrIn.sin_port = 0;
+        sockaddrIn.sin_addr = address;
+        row.Address.setTypedValue(sockaddrIn);
+
+//        row.Address.Ipv4.sin_addr = address;
+//        row.Address.Ipv4.sin_port = 0;
 //        row.OnLinkPrefixLength = 24;
 
         int i = INSTANCE.GetUnicastIpAddressEntry(row);

@@ -213,7 +213,8 @@ public interface IpHelpLib extends IPHlpAPI {
     @Structure.FieldOrder({"NumEntries", "Table"})
     class MIB_UNICASTIPADDRESS_TABLE extends Structure {
         public int NumEntries;
-        public MIB_UNICASTIPADDRESS_ROW[] Table = new MIB_UNICASTIPADDRESS_ROW[1];
+//        public MIB_UNICASTIPADDRESS_ROW[] Table = new MIB_UNICASTIPADDRESS_ROW[1];
+        public MIB_UNICASTIPADDRESS_ROW[] Table = new MIB_UNICASTIPADDRESS_ROW[0];
 
         public MIB_UNICASTIPADDRESS_TABLE() {
             super();
@@ -313,7 +314,7 @@ public interface IpHelpLib extends IPHlpAPI {
      * + [com.sun.jna.platform.win32.WinError.ERROR_NOT_SUPPORTED]: Missing IP stack.
      * + other
      */
-    int GetUnicastIpAddressTable(int family, MIB_UNICASTIPADDRESS_TABLE table);
+    int GetUnicastIpAddressTable(int family, PointerByReference table);
 
     /**
      * Frees the buffer allocated by the functions that return tables of network
@@ -355,6 +356,9 @@ public interface IpHelpLib extends IPHlpAPI {
 
     @Structure.FieldOrder({"sin6_family", "sin6_port", "sin6_flowinfo", "sin6_addr", "sin6_scope_id"})
     class sockaddr_in6 extends Structure {
+
+        public sockaddr_in6() {
+        }
 
         public sockaddr_in6(Pointer p) {
             super(p);
