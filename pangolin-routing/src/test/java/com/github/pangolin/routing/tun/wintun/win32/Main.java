@@ -31,15 +31,29 @@ public class Main {
         final Enumeration<NetworkInterface> networkInterfaces = NetworkInterface.getNetworkInterfaces();
         while (networkInterfaces.hasMoreElements()) {
             final NetworkInterface ni = networkInterfaces.nextElement();
+//            if (ni.isVirtual()) {
+//                continue;
+//            }
             final String name = ni.getName();
             final String alias = ni.getDisplayName();
             final int index = ni.getIndex();
             final int mtu = ni.getMTU();
+
             System.out.println("------");
             System.out.println(String.format("[%s] %s / %s -> %s", index, name, alias, mtu));
 
             final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.of(ni);
+            String name2 = NetworkInterfaceEx.interfaceLuidToName(nix.getLuid());
+            String alias2 = NetworkInterfaceEx.interfaceLuidToAlias(nix.getLuid());
+            int mtu2 = -1;
+            try {
+                mtu2 = NetworkInterfaceEx.getMTU(nix.getLuid(), AF_INET);
+            }catch (Exception ex) {
+                //
+            }
+            System.out.println(String.format("[%s] %s / %s -> %s", index, name2, alias2, mtu2));
             System.out.println(nix.getInterfaceAddresses());
+
 //            final long luid = NetworkInterfaceEx.interfaceIndexToLuid(index);
 //            int mtu1 = NetworkInterfaceEx.getMTU(luid, AF_INET);
 //            System.out.println(mtu1);
@@ -47,11 +61,10 @@ public class Main {
 //            ni.getInterfaceAddresses().get(0).getNetworkPrefixLength()
         }
         System.out.println();
-        System.exit(0);
+//        System.exit(0);
 
         final Guid.GUID guid = Guid.GUID.newGuid();
 
-//        listAssociatedAddresses(IPHlpAPI.AF_UNSPEC);
         Wintun.WINTUN_ADAPTER_HANDLE adapter = null;
         Wintun.WINTUN_SESSION_HANDLE session = null;
         try {
@@ -60,7 +73,12 @@ public class Main {
             WintunGetAdapterLUID(adapter, luidRef);
             final long luid = luidRef.getLong(0);
 
-            NetworkInterfaceEx.addInterfaceAddress(luid, InetAddress.getByName("198.18.0.1"), (byte) 24);
+            /*-
+             * Initialize interface address and dns.
+             */
+            final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByLuid(luid);
+            nix.addInterfaceAddress(InterfaceAddressEx.of(InetAddress.getByName("198.18.0.1"), (short) 24));
+
             NetworkInterfaceEx.setInterfaceDns(NetworkInterfaceEx.interfaceLuidToGuid(luid), AF_INET, new InetAddress[]{InetAddress.getByName("198.18.0.2")}, new String[0]);
 
             session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));

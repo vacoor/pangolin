@@ -3,23 +3,23 @@ package com.github.pangolin.routing.tun.wintun.win32;
 import com.sun.jna.platform.win32.IPHlpAPI;
 
 import java.net.InetAddress;
-import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
-import java.util.LinkedList;
 import java.util.List;
 
 public class WindowsNetworkInterfaceEx {
     private final long interfaceLuid;
-    private final NetworkInterface ni;
+    private transient volatile int index;
 
-    public WindowsNetworkInterfaceEx(final long interfaceLuid, final NetworkInterface ni) {
+    public WindowsNetworkInterfaceEx(final long interfaceLuid) {
         this.interfaceLuid = interfaceLuid;
-        this.ni = ni;
     }
 
     public int getIndex() {
-        return ni.getIndex();
+        if (index <= 0) {
+            index = NetworkInterfaceEx.interfaceLuidToIndex(interfaceLuid);
+        }
+        return index;
     }
 
     public long getLuid() {
@@ -27,16 +27,30 @@ public class WindowsNetworkInterfaceEx {
     }
 
     public int getMTU() throws SocketException {
-        return ni.getMTU();
+        return networkInterface().getMTU();
     }
 
     public List<InterfaceAddressEx> getInterfaceAddresses() {
-        final List<InterfaceAddress> addrs = ni.getInterfaceAddresses();
+        /* 地址信息可能不对.
+        final List<InterfaceAddress> addrs = networkInterface().getInterfaceAddresses();
         final List<InterfaceAddressEx> addr2s = new LinkedList<>();
         for (final InterfaceAddress addr : addrs) {
             addr2s.add(InterfaceAddressEx.of(addr.getAddress(), addr.getNetworkPrefixLength()));
         }
         return addr2s;
+        */
+        return NetworkInterfaceEx.getInterfaceAddresses(interfaceLuid);
+    }
+
+    private NetworkInterface networkInterface() {
+        try {
+            /*-
+             * java.net.NetworkInterface is SNAPSHOT and name/displayName, getInterfaceAddresses().networkPrefixLength is wrong.
+             */
+            return NetworkInterface.getByIndex(getIndex());
+        } catch (final SocketException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     public void addInterfaceAddress(final InterfaceAddressEx address) {
@@ -55,27 +69,27 @@ public class WindowsNetworkInterfaceEx {
         return of(NetworkInterface.getByIndex(index));
     }
 
-    public static WindowsNetworkInterfaceEx getByName(final String name) throws SocketException {
-        return of(NetworkInterface.getByName(name));
-    }
-
     public static WindowsNetworkInterfaceEx getByInetAddress(final InetAddress addr) throws SocketException {
         return of(NetworkInterface.getByInetAddress(addr));
     }
 
+    /* TODO NetworkInterface name/displayName 和 实际name/alias不一样.
+    public static WindowsNetworkInterfaceEx getByName(final String name) throws SocketException {
+        return of(NetworkInterface.getByName(name));
+    }
+    */
+
     public static WindowsNetworkInterfaceEx getByAlias(final String interfaceAlias) throws SocketException {
-        final long interfaceLuid = NetworkInterfaceEx.interfaceAliasToLuid(interfaceAlias);
-        return getByLuid(interfaceLuid);
+        return getByLuid(NetworkInterfaceEx.interfaceAliasToLuid(interfaceAlias));
     }
 
     public static WindowsNetworkInterfaceEx getByLuid(final long interfaceLuid) throws SocketException {
-        final int index = NetworkInterfaceEx.interfaceLuidToIndex(interfaceLuid);
-        return new WindowsNetworkInterfaceEx(interfaceLuid, NetworkInterface.getByIndex(index));
+        return new WindowsNetworkInterfaceEx(interfaceLuid);
     }
 
     public static WindowsNetworkInterfaceEx of(final NetworkInterface ni) {
         final long interfaceLuid = NetworkInterfaceEx.interfaceIndexToLuid(ni.getIndex());
-        return new WindowsNetworkInterfaceEx(interfaceLuid, ni);
+        return new WindowsNetworkInterfaceEx(interfaceLuid);
     }
 
 }
