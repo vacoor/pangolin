@@ -17,13 +17,15 @@ import static com.sun.jna.platform.win32.Guid.GUID;
 public interface IpHelpLib extends IPHlpAPI {
     IpHelpLib INSTANCE = Native.load("IPHlpAPI", IpHelpLib.class, W32APIOptions.DEFAULT_OPTIONS);
 
+    int NDIS_IF_MAX_STRING_SIZE = 256;
+
     int ConvertInterfaceAliasToLuid(String InterfaceAlias, LongByReference InterfaceLuid) throws LastErrorException;
 
     int ConvertInterfaceGuidToLuid(GUID.ByReference InterfaceGuid, LongByReference InterfaceLuid) throws LastErrorException;
 
     int ConvertInterfaceIndexToLuid(int InterfaceIndex, LongByReference InterfaceLuid) throws LastErrorException;
 
-    int ConvertInterfaceLuidToAlias(LongByReference InterfaceLuid, Pointer InterfaceAlias, IntByReference Length);
+    int ConvertInterfaceLuidToAlias(LongByReference InterfaceLuid, char[] InterfaceAlias, int Length) throws LastErrorException;
 
     /**
      * Converts a locally unique identifier (LUID) for a network interface
@@ -39,7 +41,9 @@ public interface IpHelpLib extends IPHlpAPI {
 
     int ConvertInterfaceLuidToIndex(LongByReference InterfaceLuid, IntByReference InterfaceIndex) throws LastErrorException;
 
-//    int ConvertInterfaceLuidToNameW(LongByReference InterfaceLuid, Pointer InterfaceName, ) throws LastErrorException;
+    int ConvertInterfaceLuidToNameW(LongByReference InterfaceLuid, char[] InterfaceName, int Length) throws LastErrorException;
+
+    int ConvertInterfaceNameToLuidW(final String InterfaceName, final LongByReference InterfaceLuid) throws LastErrorException;
 
 
     // ------------------------ START Interface related ------------------------
