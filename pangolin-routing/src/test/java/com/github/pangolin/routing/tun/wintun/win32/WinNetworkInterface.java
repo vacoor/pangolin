@@ -35,6 +35,23 @@ public class WinNetworkInterface {
         return guidRef;
     }
 
+    public static void getInetAddress(final long interfaceLuid) {
+        final MIB_UNICASTIPADDRESS_ROW row = new MIB_UNICASTIPADDRESS_ROW();
+    }
+
+    public static void setInetAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
+        final MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(interfaceLuid, address);
+        row.OnLinkPrefixLength = prefixLength;
+        row.ValidLifetime = 0xffffffff;
+        row.PreferredLifetime = 0xffffffff;
+        row.DadState = 4;
+
+        int err = IpHelpLib.INSTANCE.SetUnicastIpAddressEntry(row);
+        if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {
+            throw new RuntimeException("Failed to create new MIB_UNICASTIPADDRESS_ROW: " + err);
+        }
+    }
+
     public static void addInetAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
         final MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(interfaceLuid, address);
         row.OnLinkPrefixLength = prefixLength;
