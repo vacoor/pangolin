@@ -19,12 +19,13 @@ import org.drasyl.channel.tun.jna.windows.Wintun;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.util.Enumeration;
 
 @Slf4j
 public class Main {
 
     public static void main(String[] args) throws IOException {
-        /*
         final int family = AF_INET;
         // final long interfaceLuid = NetworkInterfaceEx.interfaceAliasToLuid("以太网 2");
         final Enumeration<NetworkInterface> networkInterfaces = NetworkInterface.getNetworkInterfaces();
@@ -37,7 +38,9 @@ public class Main {
             System.out.println("------");
             System.out.println(String.format("[%s] %s / %s -> %s", index, name, alias, mtu));
 
-            final long luid = NetworkInterfaceEx.interfaceIndexToLuid(index);
+            final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.of(ni);
+            System.out.println(nix.getInterfaceAddresses());
+//            final long luid = NetworkInterfaceEx.interfaceIndexToLuid(index);
 //            int mtu1 = NetworkInterfaceEx.getMTU(luid, AF_INET);
 //            System.out.println(mtu1);
 //            ni.getInetAddresses()
@@ -45,7 +48,7 @@ public class Main {
         }
         System.out.println();
         System.exit(0);
-        */
+
         final Guid.GUID guid = Guid.GUID.newGuid();
 
 //        listAssociatedAddresses(IPHlpAPI.AF_UNSPEC);
