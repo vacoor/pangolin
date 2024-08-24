@@ -27,11 +27,38 @@ import static com.sun.jna.platform.win32.Guid.GUID;
 @Slf4j
 public class WinNetworkInterface {
 
+
     public static GUID interfaceLuidToGuid(final long interfaceLuid) {
         final LongByReference luidRef = new LongByReference(interfaceLuid);
         final GUID.ByReference guidRef = new GUID.ByReference();
         IpHelpLib.INSTANCE.ConvertInterfaceLuidToGuid(luidRef, guidRef);
         return guidRef;
+    }
+
+
+    public static String interfaceLuidToName(final long interfaceLuid) {
+        final LongByReference luidRef = new LongByReference(interfaceLuid);
+        final char[] buff = new char[NDIS_IF_MAX_STRING_SIZE + 1];
+
+        INSTANCE.ConvertInterfaceLuidToNameW(luidRef, buff, buff.length);
+        return stringify(buff);
+    }
+
+    public static String interfaceLuidToAlias(final long interfaceLuid) {
+        final LongByReference luidRef = new LongByReference(interfaceLuid);
+        final char[] buff = new char[NDIS_IF_MAX_STRING_SIZE + 1];
+
+        INSTANCE.ConvertInterfaceLuidToAlias(luidRef, buff, buff.length);
+        return stringify(buff);
+    }
+
+    private static String stringify(final char[] buff) {
+        for (int i = 0; i < buff.length; i++) {
+            if ('\0' == buff[i]) {
+                return String.valueOf(buff, 0, i);
+            }
+        }
+        return String.valueOf(buff);
     }
 
     // ------------------------ START Interface related ------------------------
