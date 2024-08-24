@@ -30,7 +30,7 @@ public class Main {
         int mtu = WinNetworkInterface.getMTU(interfaceLuid, family);
         System.out.println(mtu);
 
-        WinNetworkInterface.setMTU(interfaceLuid, family, mtu - 100);
+        WinNetworkInterface.setMTU(interfaceLuid, family, mtu - 50);
 
         mtu = WinNetworkInterface.getMTU(interfaceLuid, family);
         System.out.println(mtu);
