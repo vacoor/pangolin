@@ -1,17 +1,6 @@
 package com.github.pangolin.routing.tun.wintun.win32;
 
-import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.AF_INET;
-import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCloseAdapter;
-import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCreateAdapter;
-import static org.drasyl.channel.tun.jna.windows.Wintun.WintunEndSession;
-import static org.drasyl.channel.tun.jna.windows.Wintun.WintunGetAdapterLUID;
-import static org.drasyl.channel.tun.jna.windows.Wintun.WintunStartSession;
-
-import com.sun.jna.LastErrorException;
-import com.sun.jna.Memory;
-import com.sun.jna.Native;
-import com.sun.jna.Pointer;
-import com.sun.jna.WString;
+import com.sun.jna.*;
 import lombok.extern.slf4j.Slf4j;
 import org.drasyl.channel.tun.jna.windows.Guid;
 import org.drasyl.channel.tun.jna.windows.WinDef;
@@ -23,51 +12,21 @@ import java.net.NetworkInterface;
 import java.util.Enumeration;
 import java.util.List;
 
+import static org.drasyl.channel.tun.jna.windows.Wintun.*;
+
 @Slf4j
 public class Main {
 
     public static void main(String[] args) throws IOException {
-        NetworkInterfaceEx.printInterfaces();
-        System.out.println("--------");
-        final int family = AF_INET;
-        final long interfaceLuid = NetworkInterfaceEx.interfaceAliasToLuid("以太网 2");
-        final List<InetAddress> interfaceAllDns = NetworkInterfaceEx.getInterfaceDns(interfaceLuid, false);
-        final List<InetAddress> interfaceDns = NetworkInterfaceEx.getInterfaceDns(interfaceLuid, true);
-
-        final Enumeration<NetworkInterface> networkInterfaces = NetworkInterface.getNetworkInterfaces();
-        while (networkInterfaces.hasMoreElements()) {
-            final NetworkInterface ni = networkInterfaces.nextElement();
-//            if (ni.isVirtual()) {
-//                continue;
-//            }
-            final String name = ni.getName();
-            final String alias = ni.getDisplayName();
-            final int index = ni.getIndex();
-            final int mtu = ni.getMTU();
-
-            System.out.println("------");
-            System.out.println(String.format("[%s] %s / %s -> %s", index, name, alias, mtu));
-
-            final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.of(ni);
-            String name2 = NetworkInterfaceEx.interfaceLuidToAlias(nix.getLuid());
-            String alias2 = NetworkInterfaceEx.interfaceLuidToAlias(nix.getLuid());
-            int mtu2 = -1;
-            try {
-                mtu2 = NetworkInterfaceEx.getMTU(nix.getLuid(), AF_INET);
-            }catch (Exception ex) {
-                //
+        final Enumeration<NetworkInterface> nis = NetworkInterface.getNetworkInterfaces();
+        while (nis.hasMoreElements()) {
+            final NetworkInterface ni = nis.nextElement();
+            if (!ni.isLoopback() && ni.isUp()) {
             }
-            System.out.println(String.format("[%s] %s / %s -> %s", index, name2, alias2, mtu2));
-            System.out.println(nix.getInterfaceAddresses());
 
-//            final long luid = NetworkInterfaceEx.interfaceIndexToLuid(index);
-//            int mtu1 = NetworkInterfaceEx.getMTU(luid, AF_INET);
-//            System.out.println(mtu1);
-//            ni.getInetAddresses()
-//            ni.getInterfaceAddresses().get(0).getNetworkPrefixLength()
+            final List<InetAddress> interfaceDns = WindowsNetworkInterfaceEx.getByAlias("以太网 2").getInterfaceDns(false);
+            System.out.println(interfaceDns);
         }
-        System.out.println();
-//        System.exit(0);
 
         final Guid.GUID guid = Guid.GUID.newGuid();
 
@@ -84,8 +43,7 @@ public class Main {
              */
             final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByLuid(luid);
             nix.addInterfaceAddress(InterfaceAddressEx.of(InetAddress.getByName("198.18.0.1"), (short) 24));
-
-            NetworkInterfaceEx.setInterfaceDns(NetworkInterfaceEx.interfaceLuidToGuid(luid), AF_INET, new InetAddress[]{InetAddress.getByName("198.18.0.2")}, new String[0]);
+            nix.setInterfaceDns(new InetAddress[]{InetAddress.getByName("198.18.0.2")});
 
             session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));
 
