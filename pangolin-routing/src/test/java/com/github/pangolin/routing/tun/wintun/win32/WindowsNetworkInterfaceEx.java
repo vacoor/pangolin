@@ -73,13 +73,18 @@ public class WindowsNetworkInterfaceEx {
         return of(NetworkInterface.getByInetAddress(addr));
     }
 
-    /* TODO NetworkInterface name/displayName 和 实际name/alias不一样.
-    public static WindowsNetworkInterfaceEx getByName(final String name) throws SocketException {
-        return of(NetworkInterface.getByName(name));
-    }
-    */
-
     public static WindowsNetworkInterfaceEx getByAlias(final String interfaceAlias) throws SocketException {
+        /*-
+         * java.net.NetworkInterface
+         * - name: eth0 (windows平台也是)
+         * - displayName: 以太网 2
+         * 对应
+         * IpHlpAPI GetAdapterAddress
+         * - adapterName: {6CE10339-9804-4AD3-8310-4F81CE0BE645}
+         * - FriendlyName: 以太网 2
+         * - Description: Realtek PCIe GbE Family Controller #2
+         * 两者有些情况下 displayName 与 FriendlyName 一致, 某些情况下完全不一样.
+         */
         return getByLuid(NetworkInterfaceEx.interfaceAliasToLuid(interfaceAlias));
     }
 

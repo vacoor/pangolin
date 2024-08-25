@@ -299,16 +299,19 @@ public class NetworkInterfaceEx {
     // ------------------------ START DNS related ------------------------
 
 
-    private static void getInterfaceDns(GUID interfaceGuid) {
-        final DNS_INTERFACE_SETTINGS.ByReference dnsInterfaceSettings = new DNS_INTERFACE_SETTINGS.ByReference();
+    public static String getInterfaceDns(GUID interfaceGuid) {
+        final DNS_INTERFACE_SETTINGS dnsInterfaceSettings = new DNS_INTERFACE_SETTINGS();
         dnsInterfaceSettings.Version = DNS_INTERFACE_SETTINGS_VERSION1;
-        dnsInterfaceSettings.QueryAdapterName = DNS_SETTINGS_QUERY_ADAPTER_NAME;
+        // dnsInterfaceSettings.QueryAdapterName = DNS_SETTINGS_QUERY_ADAPTER_NAME;
         dnsInterfaceSettings.Flags = DNS_SETTING_NAMESERVER | DNS_SETTING_SEARCHLIST;
 
         final int err = INSTANCE.GetInterfaceDnsSettings(interfaceGuid, dnsInterfaceSettings);
         assertNoError(err, "GetInterfaceDnsSettings failed: GUID = %s", interfaceGuid.toGuidString());
 
         INSTANCE.FreeInterfaceDnsSettings(dnsInterfaceSettings.getPointer());
+
+        // Only has a value when manually set
+        return dnsInterfaceSettings.NameServer;
     }
 
     public static void setInterfaceDns(final GUID interfaceGuid, final int family,
@@ -365,7 +368,7 @@ public class NetworkInterfaceEx {
             final int ifIndex = addresses.IfIndex;
             final int ifIndex6 = addresses.Ipv6IfIndex;
             final int mtu = addresses.Mtu;
-            final String name = addresses.AdapterName;
+            final String name = addresses.AdapterName.getString(0);
             final WString alias = addresses.FriendlyName;
             final WString desc = addresses.Description;
             final int ipv4Metric = addresses.Ipv4Metric;
@@ -404,7 +407,6 @@ public class NetworkInterfaceEx {
                     } catch (UnknownHostException e) {
                         log.warn("Invalid nameserver address on adapter index {}", addresses.IfIndex, e);
                     }
-                    dns = dns.Next;
                 }
 
                 log.debug("DnsSuffix: {}", addresses.DnsSuffix);
@@ -432,6 +434,12 @@ public class NetworkInterfaceEx {
                 throw new Win32Exception(error);
             }
         }
+        /*-
+         * GetAdapterAddress
+         * - AdapterName: {6CE10339-9804-4AD3-8310-4F81CE0BE645}
+         * - FriendlyName: 以太网 2 (alias)
+         * - Description: Realtek PCIe GbE Family Controller #2
+         */
         return new IP_ADAPTER_ADDRESSES_LH(buffer);
     }
 

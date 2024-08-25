@@ -697,7 +697,7 @@ public interface IpHelpLib extends IPHlpAPI {
         public int IfIndex;
 
         public IP_ADAPTER_ADDRESSES_LH.ByReference Next;
-        public String AdapterName;
+        public Pointer AdapterName;
         public IP_ADAPTER_UNICAST_ADDRESS_LH.ByReference FirstUnicastAddress;
         public IP_ADAPTER_ANYCAST_ADDRESS_XP.ByReference FirstAnycastAddress;
         public IP_ADAPTER_MULTICAST_ADDRESS_XP.ByReference FirstMulticastAddress;
