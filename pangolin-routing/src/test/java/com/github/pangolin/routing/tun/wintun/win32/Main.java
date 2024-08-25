@@ -1,6 +1,17 @@
 package com.github.pangolin.routing.tun.wintun.win32;
 
-import com.sun.jna.*;
+import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCloseAdapter;
+import static org.drasyl.channel.tun.jna.windows.Wintun.WintunCreateAdapter;
+import static org.drasyl.channel.tun.jna.windows.Wintun.WintunEndSession;
+import static org.drasyl.channel.tun.jna.windows.Wintun.WintunGetAdapterLUID;
+import static org.drasyl.channel.tun.jna.windows.Wintun.WintunStartSession;
+
+import com.google.common.collect.Lists;
+import com.sun.jna.LastErrorException;
+import com.sun.jna.Memory;
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
+import com.sun.jna.WString;
 import lombok.extern.slf4j.Slf4j;
 import org.drasyl.channel.tun.jna.windows.Guid;
 import org.drasyl.channel.tun.jna.windows.WinDef;
@@ -9,24 +20,40 @@ import org.drasyl.channel.tun.jna.windows.Wintun;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.util.Enumeration;
 import java.util.List;
-
-import static org.drasyl.channel.tun.jna.windows.Wintun.*;
 
 @Slf4j
 public class Main {
 
-    public static void main(String[] args) throws IOException {
+    private static List<InetAddress> allDns() throws SocketException {
+        final List<InetAddress> nameServers = Lists.newLinkedList();
         final Enumeration<NetworkInterface> nis = NetworkInterface.getNetworkInterfaces();
         while (nis.hasMoreElements()) {
             final NetworkInterface ni = nis.nextElement();
-            if (!ni.isLoopback() && ni.isUp()) {
+            if (ni.isLoopback() || !ni.isUp()) {
+                continue;
             }
 
-            final List<InetAddress> interfaceDns = WindowsNetworkInterfaceEx.getByAlias("以太网 2").getInterfaceDns(false);
-            System.out.println(interfaceDns);
+            final int index = ni.getIndex();
+            final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByIndex(index);
+            final List<InetAddress> interfaceDns = nix.getInterfaceDns(false);
+
+            /*
+            final String name = String.format(
+                    "[Java NetworkInterface name = %s, display name = %s, System Adapter name = %s, alias = %s]",
+                    ni.getName(), ni.getDisplayName(), nix.name(), nix.alias()
+            );
+            System.out.println(String.format("%s %s", name, interfaceDns));
+            */
+            nameServers.addAll(interfaceDns);
         }
+        return nameServers;
+    }
+
+    public static void main(String[] args) throws IOException {
+        final List<InetAddress> dns = allDns();
 
         final Guid.GUID guid = Guid.GUID.newGuid();
 

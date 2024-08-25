@@ -1,5 +1,31 @@
 package com.github.pangolin.routing.tun.wintun.win32;
 
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.AF_UNSPEC;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.DNS_INTERFACE_SETTINGS;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.DNS_INTERFACE_SETTINGS_VERSION1;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.DNS_SETTING_IPV6;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.DNS_SETTING_NAMESERVER;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.DNS_SETTING_SEARCHLIST;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_INCLUDE_ALL_INTERFACES;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_INCLUDE_GATEWAYS;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_SKIP_ANYCAST;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_SKIP_FRIENDLY_NAME;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_SKIP_MULTICAST;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_SKIP_UNICAST;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.INSTANCE;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.IP_ADAPTER_ADDRESSES_LH;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.IP_ADAPTER_DNS_SERVER_ADDRESS_XP;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.IP_ADAPTER_DNS_SUFFIX;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.MIB_IPINTERFACE_ROW;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.MIB_UNICASTIPADDRESS_ROW;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.MIB_UNICASTIPADDRESS_TABLE;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.NDIS_IF_MAX_STRING_SIZE;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.sockaddr_in;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.sockaddr_in6;
+import static com.sun.jna.platform.win32.Guid.GUID;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
+
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.sun.jna.Memory;
@@ -13,15 +39,15 @@ import com.sun.jna.ptr.PointerByReference;
 import io.netty.util.NetUtil;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.*;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
-
-import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.*;
-import static com.sun.jna.platform.win32.Guid.GUID;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
 
 /**
  * @see <a href="https://github.com/WireGuard/wireguard-windows/blob/master/tunnel/winipcfg/luid.go">luid</a>
@@ -34,16 +60,24 @@ public class WindowsNetworkInterfaceEx {
         this.interfaceLuid = interfaceLuid;
     }
 
-    public int getIndex() {
-        return interfaceLuidToIndex(interfaceLuid);
-    }
-
-    public long getLuid() {
+    public long luid() {
         return interfaceLuid;
     }
 
-    public GUID getGuid() {
+    public int index() {
+        return interfaceLuidToIndex(interfaceLuid);
+    }
+
+    public GUID guid() {
         return interfaceLuidToGuid(interfaceLuid);
+    }
+
+    public String name() {
+        return interfaceLuidToName(interfaceLuid);
+    }
+
+    public String alias() {
+        return interfaceLuidToAlias(interfaceLuid);
     }
 
     public List<InterfaceAddressEx> getInterfaceAddresses() {
@@ -83,7 +117,7 @@ public class WindowsNetworkInterfaceEx {
             /*-
              * java.net.NetworkInterface is SNAPSHOT and name/displayName, getInterfaceAddresses().networkPrefixLength is wrong.
              */
-            return NetworkInterface.getByIndex(getIndex());
+            return NetworkInterface.getByIndex(index());
         } catch (final SocketException e) {
             throw new IllegalStateException(e);
         }
