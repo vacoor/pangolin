@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.tun.wintun;
 
-import com.github.pangolin.routing.tun.wintun.win32.IpHelpLib;
+import com.github.pangolin.routing.tun.wintun.win32.jna.IpHelpLib;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;

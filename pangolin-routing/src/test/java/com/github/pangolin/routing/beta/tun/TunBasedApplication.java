@@ -7,11 +7,7 @@ import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramDnsProxyServ
 import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramFakeDnsServerHandler;
 import com.github.pangolin.routing.beta.tun.tun2socks.WindowsTun2Socks;
 import com.github.pangolin.routing.context.RouteContext;
-import com.github.pangolin.routing.route.Route;
-import com.github.pangolin.routing.route.predicate.RoutePredicate;
-import com.github.pangolin.routing.route.predicate.SubnetRoutePredicate;
-import com.google.common.collect.Lists;
-import freework.io.IOUtils;
+import com.github.pangolin.routing.tun.wintun.win32.WindowsNetworkInterfaceEx;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
@@ -28,11 +24,11 @@ import org.junit.Test;
 import org.springframework.boot.system.ApplicationHome;
 
 import java.io.File;
-import java.io.FileWriter;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  *
@@ -45,11 +41,19 @@ public class TunBasedApplication {
 //        acceptor.start(new InMemoryRouteContext(null)).sync().channel().closeFuture().sync();
 //        RouteApplication.main(new String[0]);
 
+        final boolean isWindows = System.getProperty("os.name").toLowerCase().contains("windows");
+
         final ApplicationHome home = new ApplicationHome(TunBasedApplication.class);
         final URL conf = new File(home.getDir(), "conf/default.conf").toURI().toURL();
         final FakeDnsEngine4 fakeDns = FakeDnsEngine4.create("198.18.0.0", "255.255.0.0");
-//        final List<InetSocketAddress> dnsServers = Arrays.asList(new InetSocketAddress("10.188.207.9", 53));
-        final List<InetSocketAddress> dnsServers = Arrays.asList(new InetSocketAddress("192.168.1.1", 53));
+
+        List<InetSocketAddress> dnsServers = Arrays.asList(new InetSocketAddress("192.168.1.1", 53));
+
+
+
+        if (isWindows) {
+            dnsServers = WindowsNetworkInterfaceEx.allDns().stream().map(a -> new InetSocketAddress(a, 53)).collect(Collectors.toList());
+        }
 
         final RouteApplication app = new RouteApplication() {
             @Override
@@ -87,7 +91,7 @@ public class TunBasedApplication {
             }
         });
 
-        if (System.getProperty("os.name").toLowerCase().contains("windows")) {
+        if (isWindows) {
             new WindowsTun2Socks().start();
         }
 

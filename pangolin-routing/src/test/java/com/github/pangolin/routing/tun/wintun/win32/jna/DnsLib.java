@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.tun.wintun.win32;
+package com.github.pangolin.routing.tun.wintun.win32.jna;
 
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Library;
@@ -20,8 +20,6 @@ public interface DnsLib extends Library {
      * without any parameters.
      * <p>
      * He cannot be found in MSDN. It seems to be an unmarshented function.
-     *
-     * @return
      */
     boolean DnsFlushResolverCache() throws LastErrorException;
 
