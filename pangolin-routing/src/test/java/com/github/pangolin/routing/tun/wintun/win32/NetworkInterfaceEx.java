@@ -1,5 +1,31 @@
 package com.github.pangolin.routing.tun.wintun.win32;
 
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.AF_INET;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.AF_INET6;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.AF_UNSPEC;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.DNS_INTERFACE_SETTINGS;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.DNS_INTERFACE_SETTINGS_VERSION1;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.DNS_SETTING_IPV6;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.DNS_SETTING_NAMESERVER;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.DNS_SETTING_SEARCHLIST;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_INCLUDE_ALL_INTERFACES;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_INCLUDE_GATEWAYS;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_SKIP_ANYCAST;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_SKIP_FRIENDLY_NAME;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_SKIP_MULTICAST;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.GAA_FLAG_SKIP_UNICAST;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.INSTANCE;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.IP_ADAPTER_ADDRESSES_LH;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.IP_ADAPTER_DNS_SERVER_ADDRESS_XP;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.IP_ADAPTER_DNS_SUFFIX;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.MIB_IPINTERFACE_ROW;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.MIB_UNICASTIPADDRESS_ROW;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.MIB_UNICASTIPADDRESS_TABLE;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.NDIS_IF_MAX_STRING_SIZE;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.sockaddr_in;
+import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.sockaddr_in6;
+import static com.sun.jna.platform.win32.Guid.GUID;
+
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.sun.jna.Memory;
@@ -10,6 +36,7 @@ import com.sun.jna.platform.win32.WinError;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
 import com.sun.jna.ptr.PointerByReference;
+import io.netty.util.NetUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.Inet4Address;
@@ -18,9 +45,6 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.LinkedList;
 import java.util.List;
-
-import static com.github.pangolin.routing.tun.wintun.win32.IpHelpLib.*;
-import static com.sun.jna.platform.win32.Guid.GUID;
 
 /**
  * @see <a href="https://github.com/WireGuard/wireguard-windows/blob/master/tunnel/winipcfg/luid.go">luid</a>
@@ -166,6 +190,14 @@ public class NetworkInterfaceEx {
         }
     }
 
+    private static InetAddress toInetAddress(final String ipAddressStr) {
+        final byte[] addr = NetUtil.createByteArrayFromIpAddressString(ipAddressStr);
+        if (null == addr) {
+            throw new IllegalStateException("Unknown host: " + ipAddressStr);
+        }
+        return toInetAddress(addr);
+    }
+
     private static InetAddress toInetAddress(final byte[] sinAddr) {
         try {
             return InetAddress.getByAddress(sinAddr);
@@ -298,8 +330,15 @@ public class NetworkInterfaceEx {
 
     // ------------------------ START DNS related ------------------------
 
+    public static List<InetAddress> getInterfaceDns(long interfaceLuid, boolean manualSetOnly) {
+        return manualSetOnly ? getInterfaceDns0(interfaceLuidToGuid(interfaceLuid)) : getInterfaceDns1(interfaceLuid);
+    }
 
-    public static String getInterfaceDns(GUID interfaceGuid) {
+    public static List<InetAddress> getInterfaceDns(GUID interfaceGuid, boolean manualSetOnly) {
+        return manualSetOnly ? getInterfaceDns0(interfaceGuid) : getInterfaceDns1(interfaceGuidToLuid(interfaceGuid));
+    }
+
+    private static List<InetAddress> getInterfaceDns0(GUID interfaceGuid) {
         final DNS_INTERFACE_SETTINGS dnsInterfaceSettings = new DNS_INTERFACE_SETTINGS();
         dnsInterfaceSettings.Version = DNS_INTERFACE_SETTINGS_VERSION1;
         // dnsInterfaceSettings.QueryAdapterName = DNS_SETTINGS_QUERY_ADAPTER_NAME;
@@ -311,7 +350,15 @@ public class NetworkInterfaceEx {
         INSTANCE.FreeInterfaceDnsSettings(dnsInterfaceSettings.getPointer());
 
         // Only has a value when manually set
-        return dnsInterfaceSettings.NameServer;
+        final String nameServersStr = dnsInterfaceSettings.NameServer;
+        final List<InetAddress> nameServers = new LinkedList<>();
+        if (null != nameServersStr && !nameServersStr.isEmpty()) {
+            final String[] servers = nameServersStr.split(",");
+            for (final String server : servers) {
+                nameServers.add(toInetAddress(server));
+            }
+        }
+        return nameServers;
     }
 
     public static void setInterfaceDns(final GUID interfaceGuid, final int family,
@@ -381,7 +428,7 @@ public class NetworkInterfaceEx {
         } while (null != addresses);
     }
 
-    public static List<InetAddress> getInterfaceAllDns(final long interfaceLuid) {
+    private static List<InetAddress> getInterfaceDns1(final long interfaceLuid) {
         final int flags = GAA_FLAG_SKIP_UNICAST | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST
                 | GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_ALL_INTERFACES;
 

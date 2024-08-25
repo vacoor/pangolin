@@ -31,8 +31,8 @@ public class Main {
         System.out.println("--------");
         final int family = AF_INET;
         final long interfaceLuid = NetworkInterfaceEx.interfaceAliasToLuid("以太网 2");
-        final List<InetAddress> interfaceAllDns = NetworkInterfaceEx.getInterfaceAllDns(interfaceLuid);
-        final String interfaceDns = NetworkInterfaceEx.getInterfaceDns(NetworkInterfaceEx.interfaceLuidToGuid(interfaceLuid));
+        final List<InetAddress> interfaceAllDns = NetworkInterfaceEx.getInterfaceDns(interfaceLuid, false);
+        final List<InetAddress> interfaceDns = NetworkInterfaceEx.getInterfaceDns(interfaceLuid, true);
 
         final Enumeration<NetworkInterface> networkInterfaces = NetworkInterface.getNetworkInterfaces();
         while (networkInterfaces.hasMoreElements()) {
@@ -86,9 +86,6 @@ public class Main {
             nix.addInterfaceAddress(InterfaceAddressEx.of(InetAddress.getByName("198.18.0.1"), (short) 24));
 
             NetworkInterfaceEx.setInterfaceDns(NetworkInterfaceEx.interfaceLuidToGuid(luid), AF_INET, new InetAddress[]{InetAddress.getByName("198.18.0.2")}, new String[0]);
-
-            final List<InetAddress> interfaceAllDns2 = NetworkInterfaceEx.getInterfaceAllDns(luid);
-            final String interfaceDns2 = NetworkInterfaceEx.getInterfaceDns(NetworkInterfaceEx.interfaceLuidToGuid(luid));
 
             session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));
 
