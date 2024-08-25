@@ -87,7 +87,9 @@ public class TunBasedApplication {
             }
         });
 
-//        new WindowsTun2Socks().start();
+        if (System.getProperty("os.name").toLowerCase().contains("windows")) {
+            new WindowsTun2Socks().start();
+        }
 
         app.await();
     }
