@@ -7,13 +7,17 @@ import org.drasyl.channel.tun.Tun4Packet;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.Packet;
+import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
 import org.pcap4j.packet.TcpPacket;
+import org.pcap4j.packet.TcpWindowScaleOption;
 import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
+import org.pcap4j.packet.namednumber.TcpOptionKind;
 
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -40,6 +44,29 @@ public class Socket {
         this.ctx = ctx;
     }
 
+    private int sendWindow;
+    private int sendMss;
+
+    private int recvSequence;
+    private int recvAck;
+
+    private void createSession(final TcpPacket.TcpHeader header) {
+        sendWindow = header.getWindowAsInt();
+        sendMss = 576 - 20 - 20;
+        recvSequence = header.getSequenceNumber();
+        recvAck = header.getAcknowledgmentNumber();
+        List<TcpPacket.TcpOption> options = header.getOptions();
+        for (TcpPacket.TcpOption option : options) {
+            final TcpOptionKind kind = option.getKind();
+            if (TcpOptionKind.MAXIMUM_SEGMENT_SIZE.equals(kind)) {
+                sendMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
+            } else if (TcpOptionKind.WINDOW_SCALE.equals(kind)) {
+                sendWindow <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
+            }
+            System.out.println();
+        }
+    }
+
     public synchronized void receive(final TcpPacket packet, final IpPacket.IpHeader ipHeader) {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
@@ -47,6 +74,10 @@ public class Socket {
         final State state = this.state.get();
         if (State.LISTEN.equals(state)) {
             if (header.getSyn() && !header.getAck()) {
+                createSession(header);
+
+
+
                 write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader);
                 this.state.compareAndSet(State.LISTEN, State.SYN_RCVD);
                 log.warn("LISTEN -> SYN_RECV, payload: {}", packet.getPayload());

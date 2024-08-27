@@ -1,6 +1,8 @@
 package com.github.pangolin.routing.beta.tun;
 
 import com.github.pangolin.routing.beta.tun.tcp.Socket;
+import com.github.pangolin.routing.tun.wintun.win32.InterfaceAddressEx;
+import com.github.pangolin.routing.tun.wintun.win32.WindowsNetworkInterfaceEx;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.sun.jna.WString;
@@ -234,9 +236,11 @@ public class TunTest {
                             channelRead0(ctx, ipPacket);
                         }
                     });
-            final Channel ch = b.bind(new TunAddress("utun99")).sync().channel();
+            final Channel ch = b.bind(new TunAddress("iTCP")).sync().channel();
             // int code = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "address", "name=\"utun99\"", "source=static", "address=192.168.1.1", "mask=255.255.255.0").start().waitFor();
             // send/receive messages of type TunPacket...
+            WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias("iTCP");
+            nix.setInterfaceAddress(InterfaceAddressEx.of(InetAddress.getByName("192.168.1.1"), (short) 24));
             ch.closeFuture().sync();
         } finally {
             group.shutdownGracefully();
