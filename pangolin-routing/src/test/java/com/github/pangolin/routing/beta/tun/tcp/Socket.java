@@ -87,10 +87,10 @@ public class Socket {
                 createSession(header);
 
                 rcvIsn = header.getSequenceNumber();
-                rcvNxt = header.getSequenceNumber();
+                rcvNxt = 0;
 
                 sndIsn = header.getSequenceNumber();
-                sndNxt = sndIsn;
+                sndNxt = 0;
 
                 rcvNxt += incr(packet);
                 write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader);
@@ -177,7 +177,7 @@ public class Socket {
     }
 
     protected void write(TcpPacket.Builder packet, IpPacket.IpHeader ipHeader) {
-        packet.sequenceNumber(sndNxt).acknowledgmentNumber(rcvNxt);
+        packet.sequenceNumber(sndIsn + sndNxt).acknowledgmentNumber(rcvIsn + rcvNxt);
         log(packet.build().getHeader(), ipHeader, false);
         sndNxt += incr(packet.build());
 
@@ -201,11 +201,8 @@ public class Socket {
     }
 
     private static TcpPacket.Builder ack(final TcpPacket.TcpHeader header, final InetAddress srcAddr, final InetAddress dstAddr, final int receivedPayloadLength) {
-        final int sequence = header.getAcknowledgmentNumber() != 0 ? header.getAcknowledgmentNumber() : 1;
-
 //        List<TcpPacket.TcpOption> options = Lists.newArrayList();
 //        options.addAll(header.getOptions());
-        boolean incr = header.getFin() || header.getSyn();
 
         return new TcpPacket.Builder()
                 .srcAddr(dstAddr)
@@ -213,9 +210,6 @@ public class Socket {
                 .srcPort(header.getDstPort())
                 .dstPort(header.getSrcPort())
 //                .options(options)     // FIXME
-                .sequenceNumber(sequence)
-//                .acknowledgmentNumber(header.getSequenceNumber() + Math.max(incr ? 1 : 0, receivedPayloadLength))
-                .acknowledgmentNumber(header.getSequenceNumber() + Math.max(incr ? 1 : 0, receivedPayloadLength))
 //                .ack(true)
 //                .syn(true)
                 .window((short) 65535)
