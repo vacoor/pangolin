@@ -59,7 +59,8 @@ public class Socket {
         if (h.getSyn() || h.getFin()) {
             return 1;
         }
-        return packet.getPayload().length();
+        Packet payload = packet.getPayload();
+        return null != payload ? payload.length() : 0;
     }
 
     private void createSession(final TcpPacket.TcpHeader header) {
@@ -73,7 +74,6 @@ public class Socket {
             } else if (TcpOptionKind.WINDOW_SCALE.equals(kind)) {
                 sendWindow <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
             }
-            System.out.println();
         }
     }
 
