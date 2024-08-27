@@ -44,17 +44,27 @@ public class Socket {
         this.ctx = ctx;
     }
 
+    private int rcvIsn;
+    private int rcvNxt;
+
+    private int sndIsn;
+    private int sndNxt;
+
     private int sendWindow;
     private int sendMss;
 
-    private int recvSequence;
-    private int recvAck;
+
+    private int incr(final TcpPacket packet) {
+        final TcpPacket.TcpHeader h = packet.getHeader();
+        if (h.getSyn() || h.getFin()) {
+            return 1;
+        }
+        return packet.getPayload().length();
+    }
 
     private void createSession(final TcpPacket.TcpHeader header) {
         sendWindow = header.getWindowAsInt();
         sendMss = 576 - 20 - 20;
-        recvSequence = header.getSequenceNumber();
-        recvAck = header.getAcknowledgmentNumber();
         List<TcpPacket.TcpOption> options = header.getOptions();
         for (TcpPacket.TcpOption option : options) {
             final TcpOptionKind kind = option.getKind();
@@ -76,16 +86,24 @@ public class Socket {
             if (header.getSyn() && !header.getAck()) {
                 createSession(header);
 
+                rcvIsn = header.getSequenceNumber();
+                rcvNxt = header.getSequenceNumber();
 
+                sndIsn = header.getSequenceNumber();
+                sndNxt = sndIsn;
 
+                rcvNxt += incr(packet);
                 write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader);
+
                 this.state.compareAndSet(State.LISTEN, State.SYN_RCVD);
                 log.warn("LISTEN -> SYN_RECV, payload: {}", packet.getPayload());
             } else {
                 System.out.println("XXX");
             }
         } else if (State.SYN_RCVD.equals(state)) {
+            rcvNxt += incr(packet);
             if (header.getAck()) {
+                // add to queue
                 this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED);
                 log.warn("SYN_REVD -> ESTABLISHED, payload: {}", packet.getPayload());
             } else if (header.getSyn()) {
@@ -95,6 +113,7 @@ public class Socket {
                 System.out.println("!ACK !SYN");
             }
         } else if (State.ESTABLISHED.equals(state)) {
+            rcvNxt += incr(packet);
             if (header.getFin()) {
                 // ACK
                 write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader);
@@ -140,6 +159,7 @@ public class Socket {
                 System.out.println("333");
             }
         } else if (State.CLOSE_WAIT.equals(state)) {
+            rcvNxt += incr(packet);
             // 发送数据完毕后发送 FIN
             // WRITE last data
             // write(ack(header, srcAddr, dstAddr, 0).fin(true).sequenceNumber(header.getAcknowledgmentNumber() + 1).acknowledgmentNumber(header.getSequenceNumber() + 1), ipHeader);
@@ -147,6 +167,7 @@ public class Socket {
 //            this.state.compareAndSet(State.CLOSE_WAIT, State.LAST_ACK);
 //            lastSeq = header.getSequenceNumber();
         } else if (State.LAST_ACK.equals(state)) {
+            rcvNxt += incr(packet);
             if (header.getAck()) {
                 // close.
                 this.state.compareAndSet(State.LAST_ACK, State.CLOSED);
@@ -156,9 +177,13 @@ public class Socket {
     }
 
     protected void write(TcpPacket.Builder packet, IpPacket.IpHeader ipHeader) {
+        packet.sequenceNumber(sndNxt).acknowledgmentNumber(rcvNxt);
         log(packet.build().getHeader(), ipHeader, false);
+        sndNxt += incr(packet.build());
+
         ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(packet).build().getRawData())));
     }
+
 
     private static IpPacket.Builder ack(final IpPacket.Header ipHeader) {
         return new IpV4Packet.Builder()
