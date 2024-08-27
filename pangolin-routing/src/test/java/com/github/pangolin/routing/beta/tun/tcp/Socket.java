@@ -44,6 +44,7 @@ public class Socket {
         this.ctx = ctx;
     }
 
+    private int rcvWnd = 65535;
     private int rcvIsn;
     private int rcvUna;
     private int rcvNxt;
@@ -107,6 +108,7 @@ public class Socket {
         } else if (State.SYN_RCVD.equals(state)) {
             rcvNxt += incr(packet);
             if (header.getAck()) {
+                sndUna = header.getAcknowledgmentNumber();
                 // add to queue
                 this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED);
                 log.warn("SYN_REVD -> ESTABLISHED, payload: {}", packet.getPayload());
@@ -118,6 +120,9 @@ public class Socket {
             }
         } else if (State.ESTABLISHED.equals(state)) {
             rcvNxt += incr(packet);
+            if (header.getAck()) {
+                sndUna = header.getAcknowledgmentNumber();
+            }
             if (header.getFin()) {
                 // ACK
                 write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader);
@@ -164,6 +169,9 @@ public class Socket {
             }
         } else if (State.CLOSE_WAIT.equals(state)) {
             rcvNxt += incr(packet);
+            if (header.getAck()) {
+                sndUna = header.getAcknowledgmentNumber();
+            }
             // 发送数据完毕后发送 FIN
             // WRITE last data
             // write(ack(header, srcAddr, dstAddr, 0).fin(true).sequenceNumber(header.getAcknowledgmentNumber() + 1).acknowledgmentNumber(header.getSequenceNumber() + 1), ipHeader);
@@ -174,6 +182,7 @@ public class Socket {
             rcvNxt += incr(packet);
             if (header.getAck()) {
                 // close.
+                sndUna = header.getAcknowledgmentNumber();
                 this.state.compareAndSet(State.LAST_ACK, State.CLOSED);
                 log.warn("LAST_ACK -> CLOSED, payload: {}", packet.getPayload());
             }
@@ -181,10 +190,14 @@ public class Socket {
     }
 
     protected void write(TcpPacket.Builder packet, IpPacket.IpHeader ipHeader) {
-
         packet.sequenceNumber(sndNxt).acknowledgmentNumber(rcvNxt);
         log(packet.build().getHeader(), ipHeader, false);
+        rcvUna = rcvNxt;
         sndNxt += incr(packet.build());
+
+        int avaWnd = rcvWnd - (rcvNxt - rcvUna);
+        packet.window((short) avaWnd);
+        log.warn("[RCV-WND] {} ({} - ({} - {})", avaWnd, rcvWnd, rcvNxt, rcvUna);
 
         ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(packet).build().getRawData())));
     }
