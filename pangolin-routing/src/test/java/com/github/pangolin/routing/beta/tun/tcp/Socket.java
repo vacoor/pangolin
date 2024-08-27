@@ -192,6 +192,7 @@ public class Socket {
     protected void write(TcpPacket.Builder packet, IpPacket.IpHeader ipHeader) {
         packet.sequenceNumber(sndNxt).acknowledgmentNumber(rcvNxt);
         log(packet.build().getHeader(), ipHeader, false);
+        // ??
         rcvUna = rcvNxt;
         sndNxt += incr(packet.build());
 
