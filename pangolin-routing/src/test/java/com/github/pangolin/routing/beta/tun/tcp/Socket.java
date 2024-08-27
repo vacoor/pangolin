@@ -45,9 +45,11 @@ public class Socket {
     }
 
     private int rcvIsn;
+    private int rcvUna;
     private int rcvNxt;
 
     private int sndIsn;
+    private int sndUna;
     private int sndNxt;
 
     private int sendWindow;
@@ -87,10 +89,12 @@ public class Socket {
                 createSession(header);
 
                 rcvIsn = header.getSequenceNumber();
-                rcvNxt = 0;
+                rcvNxt = rcvIsn;
+                rcvUna = rcvIsn;
 
                 sndIsn = header.getSequenceNumber();
-                sndNxt = 0;
+                sndNxt = sndIsn;
+                sndUna = sndIsn;
 
                 rcvNxt += incr(packet);
                 write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader);
@@ -177,7 +181,8 @@ public class Socket {
     }
 
     protected void write(TcpPacket.Builder packet, IpPacket.IpHeader ipHeader) {
-        packet.sequenceNumber(sndIsn + sndNxt).acknowledgmentNumber(rcvIsn + rcvNxt);
+
+        packet.sequenceNumber(sndNxt).acknowledgmentNumber(rcvNxt);
         log(packet.build().getHeader(), ipHeader, false);
         sndNxt += incr(packet.build());
 
