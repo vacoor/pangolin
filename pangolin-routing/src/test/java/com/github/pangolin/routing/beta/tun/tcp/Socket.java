@@ -66,7 +66,7 @@ public class Socket {
         return null != payload ? payload.length() : 0;
     }
 
-    private void createSession(final TcpPacket.TcpHeader header) {
+    private void initSession(final TcpPacket.TcpHeader header) {
         sendWindow = header.getWindowAsInt();
         sendMss = 576 - 20 - 20;
         List<TcpPacket.TcpOption> options = header.getOptions();
@@ -87,7 +87,7 @@ public class Socket {
         final State state = this.state.get();
         if (State.LISTEN.equals(state)) {
             if (header.getSyn() && !header.getAck()) {
-                createSession(header);
+                initSession(header);
 
                 rcvIsn = header.getSequenceNumber();
                 rcvNxt = rcvIsn;
@@ -101,11 +101,16 @@ public class Socket {
                 write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader);
 
                 this.state.compareAndSet(State.LISTEN, State.SYN_RCVD);
-                log.warn("LISTEN -> SYN_RECV, payload: {}", packet.getPayload());
+                log.warn("[LISTEN] -> [SYN_RECV], payload: {}", packet.getPayload());
             } else {
                 System.out.println("XXX");
+                throw new IllegalStateException();
             }
         } else if (State.SYN_RCVD.equals(state)) {
+            if (rcvNxt != header.getSequenceNumber()) {
+                log.warn("No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
+                return;
+            }
             rcvNxt += incr(packet);
             if (header.getAck()) {
                 sndUna = header.getAcknowledgmentNumber();
@@ -119,6 +124,10 @@ public class Socket {
                 System.out.println("!ACK !SYN");
             }
         } else if (State.ESTABLISHED.equals(state)) {
+            if (rcvNxt != header.getSequenceNumber()) {
+                log.warn("No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
+                return;
+            }
             rcvNxt += incr(packet);
             if (header.getAck()) {
                 sndUna = header.getAcknowledgmentNumber();
@@ -168,6 +177,10 @@ public class Socket {
                 System.out.println("333");
             }
         } else if (State.CLOSE_WAIT.equals(state)) {
+            if (rcvNxt != header.getSequenceNumber()) {
+                log.warn("No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
+                return;
+            }
             rcvNxt += incr(packet);
             if (header.getAck()) {
                 sndUna = header.getAcknowledgmentNumber();
@@ -179,6 +192,10 @@ public class Socket {
 //            this.state.compareAndSet(State.CLOSE_WAIT, State.LAST_ACK);
 //            lastSeq = header.getSequenceNumber();
         } else if (State.LAST_ACK.equals(state)) {
+            if (rcvNxt != header.getSequenceNumber()) {
+                log.warn("No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
+                return;
+            }
             rcvNxt += incr(packet);
             if (header.getAck()) {
                 // close.
