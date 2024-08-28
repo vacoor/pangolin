@@ -44,13 +44,36 @@ public class Socket {
         this.ctx = ctx;
     }
 
+    /**
+     * Receive - window.
+     */
     private int rcvWnd = 65535;
+
+    /**
+     * Receive - initialize sequence number.
+     */
     private int rcvIsn;
+
     private int rcvUna;
+
+    /**
+     * Receive - next sequence number.
+     */
     private int rcvNxt;
 
+    /**
+     * Send - initialize sequence number.
+     */
     private int sndIsn;
+
+    /**
+     * Send - unacknowledged sequence number.
+     */
     private int sndUna;
+
+    /**
+     * Send - next sequence number.
+     */
     private int sndNxt;
 
     private int sendWindow;
@@ -85,6 +108,9 @@ public class Socket {
         final InetAddress dstAddr = ipHeader.getDstAddr();
         final TcpPacket.TcpHeader header = packet.getHeader();
         final State state = this.state.get();
+
+        log(header, ipHeader, true);
+
         if (State.LISTEN.equals(state)) {
             if (header.getSyn() && !header.getAck()) {
                 initSession(header);
@@ -100,10 +126,9 @@ public class Socket {
                 rcvNxt += incr(packet);
                 write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader);
 
+                log.warn("[S] LISTEN -> SYN_RECV");
                 this.state.compareAndSet(State.LISTEN, State.SYN_RCVD);
-                log.warn("[LISTEN] -> [SYN_RECV], payload: {}", packet.getPayload());
             } else {
-                System.out.println("XXX");
                 throw new IllegalStateException();
             }
         } else if (State.SYN_RCVD.equals(state)) {
@@ -113,10 +138,11 @@ public class Socket {
             }
             rcvNxt += incr(packet);
             if (header.getAck()) {
+                log.warn("[S] SYN_RECV -> ESTABLISHED");
+
                 sndUna = header.getAcknowledgmentNumber();
                 // add to queue
                 this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED);
-                log.warn("SYN_REVD -> ESTABLISHED, payload: {}", packet.getPayload());
             } else if (header.getSyn()) {
                 // TODO
                 System.out.println("!ACK");
@@ -135,12 +161,12 @@ public class Socket {
             if (header.getFin()) {
                 // ACK
                 write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader);
+                log.warn("[S] ESTABLISHED -> CLOSE_WAIT");
                 this.state.compareAndSet(State.ESTABLISHED, State.CLOSE_WAIT);
-                log.warn("ESTABLISHED -> CLOSE_WAIT, payload: {}", packet.getPayload());
 
                 write(ack(header, srcAddr, dstAddr, 0).ack(true).fin(true), ipHeader);
                 this.state.compareAndSet(State.CLOSE_WAIT, State.LAST_ACK);
-                log.warn("CLOSE_WAIT -> LAST_ACK, payload: {}", packet.getPayload());
+                log.warn("[S] CLOSE_WAIT -> LAST_ACK");
             } else if (header.getAck() && !header.getSyn()) {
                 if (header.getRst()) {
                     System.out.println("[ACK][RST]");
@@ -200,10 +226,15 @@ public class Socket {
             if (header.getAck()) {
                 // close.
                 sndUna = header.getAcknowledgmentNumber();
+                log.warn("[S] LAST_ACK -> CLOSED");
                 this.state.compareAndSet(State.LAST_ACK, State.CLOSED);
-                log.warn("LAST_ACK -> CLOSED, payload: {}", packet.getPayload());
+                onClosed();
             }
         }
+    }
+
+    protected void onClosed() {
+
     }
 
     protected void write(TcpPacket.Builder packet, IpPacket.IpHeader ipHeader) {
@@ -256,7 +287,7 @@ public class Socket {
     }
 
     private static void log(final TcpPacket.TcpHeader tcpHeader, final IpPacket.IpHeader ipHeader, boolean inbound) {
-        String type = "";
+        String type = String.format("[SEQ=%s, ACK=%s] ", tcpHeader.getSequenceNumber(), tcpHeader.getAcknowledgmentNumber());
         if (tcpHeader.getUrg()) {
             type += "[URG]";
         }
@@ -275,11 +306,11 @@ public class Socket {
         if (tcpHeader.getFin()) {
             type += "[FIN]";
         }
-        type += tcpHeader.getSequenceNumber() + "/" + tcpHeader.getAcknowledgmentNumber();
+//        type += tcpHeader.getSequenceNumber() + "/" + tcpHeader.getAcknowledgmentNumber();
         if (inbound) {
-            log.info("{}:{} - {} -> {}:{}", ipHeader.getSrcAddr(), tcpHeader.getSrcPort().valueAsInt(), type, ipHeader.getDstAddr(), tcpHeader.getDstPort().valueAsInt());
+            log.info("{} - {}:{} -> {}:{}", type, ipHeader.getSrcAddr(), tcpHeader.getSrcPort().valueAsInt(), ipHeader.getDstAddr(), tcpHeader.getDstPort().valueAsInt());
         } else {
-            log.info("{}:{} <- {} - {}:{}", ipHeader.getDstAddr(), tcpHeader.getDstPort().valueAsInt(), type, ipHeader.getSrcAddr(), tcpHeader.getSrcPort().valueAsInt());
+            log.info("{} - {}:{} <- {}:{}", type, ipHeader.getDstAddr(), tcpHeader.getDstPort().valueAsInt(), ipHeader.getSrcAddr(), tcpHeader.getSrcPort().valueAsInt());
         }
     }
 }
