@@ -19,8 +19,6 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -126,6 +124,18 @@ public class Socket {
         }
     }
 
+    private int determineSndWnd(final TcpPacket.TcpHeader header) {
+        int sndWnd = header.getWindowAsInt();
+        List<TcpPacket.TcpOption> options = header.getOptions();
+        for (TcpPacket.TcpOption option : options) {
+            final TcpOptionKind kind = option.getKind();
+            if (TcpOptionKind.WINDOW_SCALE.equals(kind)) {
+                sndWnd <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
+            }
+        }
+        return sndWnd;
+    }
+
     public synchronized void receive(final TcpPacket packet, final IpPacket.IpHeader ipHeader) {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
@@ -164,6 +174,7 @@ public class Socket {
                 log.warn("[S] SYN_RECV -> ESTABLISHED");
 
                 sndUna = header.getAcknowledgmentNumber();
+                sndWnd = determineSndWnd(header);
                 // add to queue
                 this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED);
             } else if (header.getSyn()) {
@@ -180,6 +191,7 @@ public class Socket {
             rcvNxt += incr(packet);
             if (header.getAck()) {
                 sndUna = header.getAcknowledgmentNumber();
+                sndWnd = determineSndWnd(header);
             }
             if (header.getFin()) {
                 // ACK
@@ -234,6 +246,7 @@ public class Socket {
             rcvNxt += incr(packet);
             if (header.getAck()) {
                 sndUna = header.getAcknowledgmentNumber();
+                sndWnd = determineSndWnd(header);
             }
             // 发送数据完毕后发送 FIN
             // WRITE last data
@@ -250,6 +263,7 @@ public class Socket {
             if (header.getAck()) {
                 // close.
                 sndUna = header.getAcknowledgmentNumber();
+                sndWnd = determineSndWnd(header);
                 log.warn("[S] LAST_ACK -> CLOSED");
                 this.state.compareAndSet(State.LAST_ACK, State.CLOSED);
                 onClosed();
