@@ -293,7 +293,7 @@ public class Socket {
                     write0();
                     delayAckTask = null;
                 }
-            }, 200, TimeUnit.MILLISECONDS);
+            }, 1000, TimeUnit.MILLISECONDS);
         }
     }
 
@@ -320,9 +320,10 @@ public class Socket {
             prev.sequenceNumber(sndNxt);
             prev.acknowledgmentNumber(rcvNxt);
             sndNxt += incr(prev.build());
-        }
 
-        ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(prev).build().getRawData())));
+            log(prev.build().getHeader(), ipHeader, false);
+            ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(prev).build().getRawData())));
+        }
     }
 
     private static IpPacket.Builder ack(final IpPacket.Header ipHeader) {
