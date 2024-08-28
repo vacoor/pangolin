@@ -17,7 +17,9 @@ import org.pcap4j.packet.namednumber.TcpOptionKind;
 
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -54,8 +56,6 @@ public class Socket {
      */
     private int rcvIsn;
 
-    private int rcvUna;
-
     /**
      * Receive - next sequence number.
      */
@@ -65,6 +65,22 @@ public class Socket {
      * Send - initialize sequence number.
      */
     private int sndIsn;
+
+    /*-
+     *              |<------- TCP send window ------->|
+     *              |            (snd.wnd)            |
+     *  --------------------------------------------------------------------
+     * | .. | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 |  15  |
+     *  --------------------------------------------------------------------
+     * |            |               |                 |                     |
+     * |  sent and  | sent and not  |    being sent   |   can't send until  |
+     * |acknowledged| acknowledged  | (Usable window) |     window moves    |
+     * |            |               |                 |                      |
+     *              ^-closes->      ^                 ^
+     *          left edge         snd.nxt   <-shrinks-|-opens->
+     *          (snd.una)                        right edge
+     *                                       (snd.una + snd.wnd)
+     */
 
     /**
      * Send - unacknowledged sequence number.
@@ -76,7 +92,10 @@ public class Socket {
      */
     private int sndNxt;
 
-    private int sendWindow;
+    /**
+     */
+    private int sndWnd;
+
     private int sendMss;
 
 
@@ -89,8 +108,10 @@ public class Socket {
         return null != payload ? payload.length() : 0;
     }
 
+    private IpPacket.IpHeader ipHeader;
+
     private void initSession(final TcpPacket.TcpHeader header) {
-        sendWindow = header.getWindowAsInt();
+        sndWnd = header.getWindowAsInt();
         sendMss = 576 - 20 - 20;
         List<TcpPacket.TcpOption> options = header.getOptions();
         for (TcpPacket.TcpOption option : options) {
@@ -98,7 +119,7 @@ public class Socket {
             if (TcpOptionKind.MAXIMUM_SEGMENT_SIZE.equals(kind)) {
                 sendMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
             } else if (TcpOptionKind.WINDOW_SCALE.equals(kind)) {
-                sendWindow <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
+                sndWnd <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
             }
         }
     }
@@ -114,10 +135,10 @@ public class Socket {
         if (State.LISTEN.equals(state)) {
             if (header.getSyn() && !header.getAck()) {
                 initSession(header);
+                this.ipHeader = ipHeader;
 
                 rcvIsn = header.getSequenceNumber();
                 rcvNxt = rcvIsn;
-                rcvUna = rcvIsn;
 
                 sndIsn = header.getSequenceNumber();
                 sndNxt = sndIsn;
@@ -237,20 +258,52 @@ public class Socket {
 
     }
 
+    private ConcurrentLinkedQueue<TcpPacket.Builder> sndQueue = new ConcurrentLinkedQueue<>();
+
     protected void write(TcpPacket.Builder packet, IpPacket.IpHeader ipHeader) {
+        /*
         packet.sequenceNumber(sndNxt).acknowledgmentNumber(rcvNxt);
         log(packet.build().getHeader(), ipHeader, false);
-        // ??
-        rcvUna = rcvNxt;
         sndNxt += incr(packet.build());
 
-        int avaWnd = rcvWnd - (rcvNxt - rcvUna);
-        packet.window((short) avaWnd);
-        log.warn("[RCV-WND] {} ({} - ({} - {})", avaWnd, rcvWnd, rcvNxt, rcvUna);
+//        int avaWnd = rcvWnd - (rcvNxt - rcvUna);
+        log.warn("[RCV-WND] {}", rcvWnd);
 
         ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(packet).build().getRawData())));
+        */
+        if (!sndQueue.offer(packet)) {
+            throw new IllegalStateException();
+        }
+        write0();
     }
 
+    private void write0() {
+        TcpPacket.Builder prev = null;
+        for (TcpPacket.Builder next = sndQueue.poll(); null != next; next = sndQueue.poll()) {
+            if (null == prev) {
+                prev = next;
+            } else {
+                final Packet.Builder prevPayload = prev.getPayloadBuilder();
+                final Packet.Builder nextPayload = next.getPayloadBuilder();
+                if (null == prevPayload) {
+                    prev.payloadBuilder(nextPayload);
+                } else if (null != nextPayload) {
+                    byte[] rawData1 = prevPayload.build().getRawData();
+                    byte[] rawData2 = nextPayload.build().getRawData();
+                    byte[] bytes = Arrays.copyOfRange(rawData1, 0, rawData1.length + rawData2.length);
+                    System.arraycopy(rawData2, 0, bytes, rawData1.length, rawData2.length);
+                    prev.payloadBuilder(new UnknownPacket.Builder().rawData(bytes));
+                }
+            }
+        }
+        if (null != prev) {
+            prev.sequenceNumber(sndNxt);
+            prev.acknowledgmentNumber(rcvNxt);
+            sndNxt += incr(prev.build());
+        }
+
+        ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(prev).build().getRawData())));
+    }
 
     private static IpPacket.Builder ack(final IpPacket.Header ipHeader) {
         return new IpV4Packet.Builder()
