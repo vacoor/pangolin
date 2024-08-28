@@ -70,7 +70,13 @@ public class TunTest {
                     }
                 });
             }
-            socketMap.get(key).receive(tcpPacket, ipHeader);
+            Socket socket = socketMap.get(key);
+            if (null != socket) {
+                socket.receive(tcpPacket, ipHeader);
+            } else {
+                // RST
+                throw new IllegalStateException();
+            }
             return;
         } else if (IpNumber.UDP.equals(protocol)) {
             final UdpPacket udpPacket = (UdpPacket) ipPacket.getPayload();

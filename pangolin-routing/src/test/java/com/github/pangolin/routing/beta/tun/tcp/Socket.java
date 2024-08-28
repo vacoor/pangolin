@@ -192,7 +192,8 @@ public class Socket {
                 log.warn("[S] CLOSE_WAIT -> LAST_ACK");
             } else if (header.getAck() && !header.getSyn()) {
                 if (header.getRst()) {
-                    System.out.println("[ACK][RST]");
+                    this.state.compareAndSet(State.ESTABLISHED, State.CLOSED);
+                    onClosed();
                 } else {
                     Packet payload = packet.getPayload();
                     if (null == payload) {
@@ -286,18 +287,20 @@ public class Socket {
         if (!sndQueue.offer(packet)) {
             throw new IllegalStateException();
         }
-        if (null == delayAckTask) {
-            delayAckTask = scheduler.schedule(new Runnable() {
-                @Override
-                public void run() {
+//        if (null == delayAckTask) {
+//            delayAckTask = scheduler.schedule(new Runnable() {
+//                @Override
+//                public void run() {
                     write0();
-                    delayAckTask = null;
-                }
-            }, 1000, TimeUnit.MILLISECONDS);
-        }
+//                    delayAckTask = null;
+//                }
+//            }, 1000, TimeUnit.MILLISECONDS);
+//        }
     }
 
     private void write0() {
+        final int usableWnd =  sndUna + sndWnd - sndNxt;
+        log.info("USABLE-WND = {}", usableWnd);
         TcpPacket.Builder prev = null;
         for (TcpPacket.Builder next = sndQueue.poll(); null != next; next = sndQueue.poll()) {
             if (null == prev) {
