@@ -19,7 +19,9 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -260,6 +262,16 @@ public class Socket {
 
     private ConcurrentLinkedQueue<TcpPacket.Builder> sndQueue = new ConcurrentLinkedQueue<>();
 
+    private ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1, new ThreadFactory() {
+        @Override
+        public Thread newThread(final Runnable r) {
+            Thread t = new Thread(r);
+            t.setDaemon(true);
+            return t;
+        }
+    });
+    private volatile Future<?> delayAckTask;
+
     protected void write(TcpPacket.Builder packet, IpPacket.IpHeader ipHeader) {
         /*
         packet.sequenceNumber(sndNxt).acknowledgmentNumber(rcvNxt);
@@ -274,7 +286,15 @@ public class Socket {
         if (!sndQueue.offer(packet)) {
             throw new IllegalStateException();
         }
-        write0();
+        if (null == delayAckTask) {
+            delayAckTask = scheduler.schedule(new Runnable() {
+                @Override
+                public void run() {
+                    write0();
+                    delayAckTask = null;
+                }
+            }, 200, TimeUnit.MILLISECONDS);
+        }
     }
 
     private void write0() {
