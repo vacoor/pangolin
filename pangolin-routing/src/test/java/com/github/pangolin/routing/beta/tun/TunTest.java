@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.beta.tun;
 
-import com.github.pangolin.routing.beta.tun.tcp.Socket;
+import com.github.pangolin.routing.beta.tun.tcp.RawSocket;
 import com.github.pangolin.routing.tun.wintun.win32.InterfaceAddressEx;
 import com.github.pangolin.routing.tun.wintun.win32.WindowsNetworkInterfaceEx;
 import com.google.common.collect.Maps;
@@ -47,7 +47,7 @@ public class TunTest {
                 */
     }
 
-    private static final Map<String, Socket> socketMap = Maps.newConcurrentMap();
+    private static final Map<String, RawSocket> socketMap = Maps.newConcurrentMap();
 
     public static void channelRead0(final ChannelHandlerContext ctx, final IpPacket ipPacket) {
         final IpPacket.IpHeader ipHeader = ipPacket.getHeader();
@@ -63,16 +63,16 @@ public class TunTest {
 
             String key = srcAddr.toString() + tcpSrcPort + dstAddr + tcpDstPort;
             if (!tcpHeader.getAck() && tcpHeader.getSyn()) {
-                socketMap.putIfAbsent(key, new Socket(ctx) {
+                socketMap.putIfAbsent(key, new RawSocket(ctx) {
                     @Override
                     protected void onClosed() {
                         socketMap.remove(key);
                     }
                 });
             }
-            Socket socket = socketMap.get(key);
-            if (null != socket) {
-                socket.receive(tcpPacket, ipHeader);
+            RawSocket rawSocket = socketMap.get(key);
+            if (null != rawSocket) {
+                rawSocket.receive(tcpPacket, ipHeader);
             } else {
                 // RST
                 throw new IllegalStateException();

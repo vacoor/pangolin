@@ -19,11 +19,15 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
-public class Socket {
+public class RawSocket {
 
     enum State {
         CLOSED,
@@ -42,9 +46,24 @@ public class Socket {
     private final ChannelHandlerContext ctx;
     private final AtomicReference<State> state = new AtomicReference<>(State.LISTEN);
 
-    public Socket(final ChannelHandlerContext ctx) {
+    public RawSocket(final ChannelHandlerContext ctx) {
         this.ctx = ctx;
     }
+
+    /*-
+     *              |<------- TCP recv window ------->|
+     *              |            (rcv.wnd)            |
+     *  --------------------------------------------------------------------
+     * | .. | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 |  15  | ...
+     *  --------------------------------------------------------------------
+     * |  sent and  |                                 | can't receive until |
+     * |acknowledged|                                 |    window moves     |
+     *              ^                                 ^
+     *              |-closes->              <-shrinks-|-opens->
+     *          left edge                        right edge
+     *          (rcv.nxt)                    (rcv.nxt + rcv.wnd)
+     *
+     */
 
     /**
      * Receive - window.
@@ -61,26 +80,27 @@ public class Socket {
      */
     private int rcvNxt;
 
+    /*-
+     *              |<------- TCP send window ------->|
+     *              |            (snd.wnd)            |
+     *              |               |<-Usable window->|
+     *  --------------------------------------------------------------------
+     * | .. | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 |  15  | ...
+     *  --------------------------------------------------------------------
+     * |  sent and  | sent and not  |    being sent   |   can't send until  |
+     * |acknowledged| acknowledged  |                 |     window moves    |
+     *              ^               ^                 ^
+     *              |-closes->    snd.nxt   <-shrinks-|-opens->
+     *          left edge                        right edge
+     *          (snd.una)                    (snd.una + snd.wnd)
+     *
+     * Usable window = snd.una + snd.wnd + snd.nxt
+     */
+
     /**
      * Send - initialize sequence number.
      */
     private int sndIsn;
-
-    /*-
-     *              |<------- TCP send window ------->|
-     *              |            (snd.wnd)            |
-     *  --------------------------------------------------------------------
-     * | .. | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 |  15  |
-     *  --------------------------------------------------------------------
-     * |            |               |                 |                     |
-     * |  sent and  | sent and not  |    being sent   |   can't send until  |
-     * |acknowledged| acknowledged  | (Usable window) |     window moves    |
-     * |            |               |                 |                      |
-     *              ^-closes->      ^                 ^
-     *          left edge         snd.nxt   <-shrinks-|-opens->
-     *          (snd.una)                        right edge
-     *                                       (snd.una + snd.wnd)
-     */
 
     /**
      * Send - unacknowledged sequence number.
@@ -93,6 +113,7 @@ public class Socket {
     private int sndNxt;
 
     /**
+     *
      */
     private int sndWnd;
 
@@ -284,6 +305,32 @@ public class Socket {
         }
     }
 
+    /**
+     * https://ty-chen.github.io/linux-kernel-tcp-receive/
+     */
+    private void tcp_data_queue(TcpPacket skb) {
+        final TcpPacket.TcpHeader skbh = skb.getHeader();
+        final RawSocket tp = this;
+        if (skbh.getSequenceNumber() == this.rcvNxt) {
+            if (tcp_receive_window(tp) == 0) {
+                //
+                out_of_window();
+                return;
+            }
+
+            /* Ok, In sequence. In window. */
+
+        }
+    }
+
+    private int tcp_receive_window(RawSocket tp) {
+        return 0;
+    }
+
+    private void out_of_window() {
+
+    }
+
     protected void onClosed() {
 
     }
@@ -318,7 +365,7 @@ public class Socket {
 //            delayAckTask = scheduler.schedule(new Runnable() {
 //                @Override
 //                public void run() {
-                    write0();
+        write0();
 //                    delayAckTask = null;
 //                }
 //            }, 1000, TimeUnit.MILLISECONDS);
@@ -326,8 +373,12 @@ public class Socket {
     }
 
     private void write0() {
-        final int usableWnd =  sndUna + sndWnd - sndNxt;
+        final int usableWnd = sndUna + sndWnd - sndNxt;
         log.info("USABLE-WND = {}", usableWnd);
+        if (usableWnd <= 0) {
+            return;
+        }
+
         TcpPacket.Builder prev = null;
         for (TcpPacket.Builder next = sndQueue.poll(); null != next; next = sndQueue.poll()) {
             if (null == prev) {
