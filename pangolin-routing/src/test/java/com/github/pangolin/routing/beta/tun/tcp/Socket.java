@@ -166,7 +166,20 @@ public class Socket {
             }
         } else if (State.SYN_RCVD.equals(state)) {
             if (rcvNxt != header.getSequenceNumber()) {
-                log.warn("No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
+                /*-
+                 * tcp_data_queue
+                 * https://blog.csdn.net/wuyongmao/article/details/126265842
+                 */
+                log.warn("[Out-Of-Order], expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
+                if (rcvNxt < header.getSequenceNumber()) {
+                    log.warn("[Out-Of-Order] TCP Previous segment not captured, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
+                } else {
+                    if (header.getSequenceNumber() >= rcvNxt + rcvWnd) {
+                        log.warn("[Out-Of-Window]");
+                    } else {
+                        // tcp_data_queue_ofo(sk, skb)
+                    }
+                }
                 return;
             }
             rcvNxt += incr(packet);
