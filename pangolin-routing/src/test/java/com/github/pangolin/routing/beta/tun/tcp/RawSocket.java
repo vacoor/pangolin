@@ -117,7 +117,14 @@ public class RawSocket {
      */
     private int sndWnd;
 
-    private int sendMss;
+    private int sndMss;
+
+    private int cwnd = 1;
+
+    /**
+     * slow start threshold.
+     */
+    private int ssthresh;
 
 
     private int incr(final TcpPacket packet) {
@@ -133,12 +140,12 @@ public class RawSocket {
 
     private void initSession(final TcpPacket.TcpHeader header) {
         sndWnd = header.getWindowAsInt();
-        sendMss = 576 - 20 - 20;
+        sndMss = 576 - 20 - 20;
         List<TcpPacket.TcpOption> options = header.getOptions();
         for (TcpPacket.TcpOption option : options) {
             final TcpOptionKind kind = option.getKind();
             if (TcpOptionKind.MAXIMUM_SEGMENT_SIZE.equals(kind)) {
-                sendMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
+                sndMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
             } else if (TcpOptionKind.WINDOW_SCALE.equals(kind)) {
                 sndWnd <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
             }
@@ -209,6 +216,7 @@ public class RawSocket {
 
                 sndUna = header.getAcknowledgmentNumber();
                 sndWnd = determineSndWnd(header);
+                cwnd = cwnd < ssthresh ? cwnd + 1 : cwnd + 1 / cwnd;
                 // add to queue
                 this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED);
             } else if (header.getSyn()) {
@@ -374,8 +382,9 @@ public class RawSocket {
 
     private void write0() {
         final int usableWnd = sndUna + sndWnd - sndNxt;
-        log.info("USABLE-WND = {}", usableWnd);
-        if (usableWnd <= 0) {
+        final int wndToUse = sndUna + cwnd * sndMss - sndNxt;
+        log.info("USABLE-WND = {}, USABLE-CWND = {}", usableWnd, wndToUse);
+        if (wndToUse <= 0) {
             return;
         }
 
