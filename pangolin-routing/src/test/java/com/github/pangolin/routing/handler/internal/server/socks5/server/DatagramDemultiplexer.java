@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.handler.internal.server.socks5.server;
 
 import com.github.pangolin.routing.handler.internal.server.Socks5DatagramServerHandler;
+import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.google.common.collect.Maps;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandler;
@@ -18,7 +19,12 @@ import java.util.concurrent.ConcurrentMap;
  * @since 20240831
  */
 public class DatagramDemultiplexer extends ChannelInboundHandlerAdapter {
-    private ConcurrentMap<InetAddress, HandlerWrap> handlerMap = Maps.newConcurrentMap();
+    private final DatagramChannelFactory datagramChannelFactory;
+    private final ConcurrentMap<InetAddress, HandlerWrap> handlerMap = Maps.newConcurrentMap();
+
+    public DatagramDemultiplexer(final DatagramChannelFactory datagramChannelFactory) {
+        this.datagramChannelFactory = datagramChannelFactory;
+    }
 
     @Override
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
@@ -39,7 +45,7 @@ public class DatagramDemultiplexer extends ChannelInboundHandlerAdapter {
                 h.retain();
                 return h;
             } else {
-                return new HandlerWrap(new Socks5DatagramServerHandler(sender, null));
+                return new HandlerWrap(new Socks5DatagramServerHandler(sender, datagramChannelFactory));
             }
         });
         System.out.println(handler);
@@ -143,7 +149,7 @@ public class DatagramDemultiplexer extends ChannelInboundHandlerAdapter {
     }
 
     public static void main(String[] args) {
-        final DatagramDemultiplexer d = new DatagramDemultiplexer();
+        final DatagramDemultiplexer d = new DatagramDemultiplexer(null);
         d.addHandler(new InetSocketAddress(0));
         d.addHandler(new InetSocketAddress(0));
 
