@@ -5,6 +5,7 @@ import com.github.pangolin.routing.handler.internal.server.support.DatagramChann
 import com.google.common.collect.Maps;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
@@ -100,6 +101,7 @@ public class Socks5DatagramServerHandler extends ChannelInboundHandlerAdapter {
                                 log.info("[UDP] {} -> {} -> {}: {}", sender, recipient, callback, ByteBufUtil.hexDump(rawPacket.content()));
 
                                 callbackCtx.writeAndFlush(new DatagramPacket(rawPacket.content().retain(), callback, sender));
+                                        // .addListener(ChannelFutureListener.CLOSE);
                             }
                         });
                     }
