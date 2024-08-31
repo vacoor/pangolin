@@ -2,7 +2,7 @@ package com.github.pangolin.routing.beta.tun.fakedns;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class LeaseAllocator4 extends LeaseAllocator<LeaseAllocator4.Lease> {
+public class FixedTtlInet4AddressAllocator extends LeaseAllocator<FixedTtlInet4AddressAllocator.Lease> {
 
     @Override
     protected boolean check(final Lease item) {
@@ -24,7 +24,7 @@ public class LeaseAllocator4 extends LeaseAllocator<LeaseAllocator4.Lease> {
     private final AtomicInteger generator;
     private final long ttl;
 
-    public LeaseAllocator4(final int min, final int max, final long ttl) {
+    public FixedTtlInet4AddressAllocator(final int min, final int max, final long ttl) {
         this.min = min;
         this.max = max;
         generator = new AtomicInteger(min);

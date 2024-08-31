@@ -23,7 +23,7 @@ public class FakeDnsEngine4 implements DnsEngine {
     private final int subnetMask;
     private final int networkAddress;
     private final long ttl;
-    private final LeaseAllocator4 allocator;
+    private final FixedTtlInet4AddressAllocator allocator;
 
     public FakeDnsEngine4(final Inet4Address ipAddress, final int cidrPrefix, final long ttl) {
         this.ipAddress = ipAddress;
@@ -41,19 +41,19 @@ public class FakeDnsEngine4 implements DnsEngine {
         this.allocator = createAllocator(ttl);
     }
 
-    private LeaseAllocator4 createAllocator(final long ttl) {
+    private FixedTtlInet4AddressAllocator createAllocator(final long ttl) {
         final int size = 0xFFFFFFFF - subnetMask;
-        return new LeaseAllocator4(networkAddress + 3, networkAddress + size - 1, ttl);
+        return new FixedTtlInet4AddressAllocator(networkAddress + 3, networkAddress + size - 1, ttl);
     }
 
-    final Map<String, LeaseAllocator4.Lease> domainToLeaseMap = new ConcurrentHashMap<>();
+    final Map<String, FixedTtlInet4AddressAllocator.Lease> domainToLeaseMap = new ConcurrentHashMap<>();
     final Map<String, Entry> nsIpToLeaseMap = new ConcurrentHashMap<>();
 
     private class Entry {
         private final String domain;
-        private final LeaseAllocator4.Lease lease;
+        private final FixedTtlInet4AddressAllocator.Lease lease;
 
-        private Entry(final String domain, final LeaseAllocator4.Lease lease) {
+        private Entry(final String domain, final FixedTtlInet4AddressAllocator.Lease lease) {
             this.domain = domain;
             this.lease = lease;
         }
@@ -63,7 +63,7 @@ public class FakeDnsEngine4 implements DnsEngine {
         int value = domainToLeaseMap.compute(domain, (k, v) -> {
             // TODO v.value == null
             if (null == v || System.currentTimeMillis() - v.timestamp >= 2 * ttl) {
-                LeaseAllocator4.Lease l = allocator.acquire();
+                FixedTtlInet4AddressAllocator.Lease l = allocator.acquire();
                 String ipToUse = NetUtil.intToIpAddress(l.value);
                 System.out.println(String.format("%s -> %s", domain, ipToUse));
                 nsIpToLeaseMap.put(NetUtil.intToIpAddress(l.value), new Entry(domain, l));
