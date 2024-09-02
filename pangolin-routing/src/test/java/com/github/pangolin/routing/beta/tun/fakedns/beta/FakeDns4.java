@@ -1,19 +1,21 @@
 package com.github.pangolin.routing.beta.tun.fakedns.beta;
 
 import com.google.common.cache.*;
-import io.netty.util.NetUtil;
+import com.google.common.collect.Maps;
 
 import java.net.Inet4Address;
-import java.net.InetAddress;
+import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
-public class FakeDns {
+public class FakeDns4 {
     private final int maxLeaseTime;
-    private final Cache<String, Inet4Address> leases;
     private final InetAddressPool<Inet4Address> pool;
+    private final Cache<String, Inet4Address> leases;
+    private final Map<Inet4Address, String> addressToHostMap = Maps.newConcurrentMap();
 
-    protected FakeDns(final int maxLeaseTime, final InetAddressPool<Inet4Address> pool) {
+    protected FakeDns4(final int maxLeaseTime, final InetAddressPool<Inet4Address> pool) {
         this.maxLeaseTime = maxLeaseTime;
         this.leases = CacheBuilder.newBuilder()
                         .recordStats()
@@ -31,15 +33,32 @@ public class FakeDns {
 
 
     private void release(final String s, final Inet4Address lease) {
+        addressToHostMap.remove(lease);
         pool.release(lease);
     }
 
-    public Inet4Address acquire(final String key) {
+    public Inet4Address resolve(final String domain) {
         try {
-            return leases.get(key, pool::acquire);
+            return leases.get(domain, new Callable<Inet4Address>() {
+                @Override
+                public Inet4Address call() throws Exception {
+                    final Inet4Address address = pool.acquire();
+                    addressToHostMap.put(address, domain);
+                    return address;
+                }
+            });
         } catch (ExecutionException e) {
             return null;
         }
+    }
+
+    public String resolve(final Inet4Address address) {
+        final String hostname = addressToHostMap.get(address);
+        if (null != hostname) {
+            // touch
+            resolve(hostname);
+        }
+        return hostname;
     }
 
     private static int ipAddressToInt(final byte[] ipBytes) {
@@ -48,14 +67,16 @@ public class FakeDns {
     }
 
     public static void main(String[] args) throws InterruptedException {
-        final int min = ipAddressToInt(NetUtil.createByteArrayFromIpAddressString("198.18.0.1"));
-        final int max = ipAddressToInt(NetUtil.createByteArrayFromIpAddressString("198.18.0.254"));
-        final InetAddressPool<Inet4Address> pool = new InetAddressPool<>(new Inet4AddressFactory(min, max));
-        FakeDns fakeDns = new FakeDns(1, pool);
+//        final int min = ipAddressToInt(NetUtil.createByteArrayFromIpAddressString("198.18.0.1"));
+//        final int max = ipAddressToInt(NetUtil.createByteArrayFromIpAddressString("198.18.0.254"));
+        final String definition = "198.18.0.1/24";
+
+        final InetAddressPool<Inet4Address> pool = new InetAddressPool<>(Inet4AddressFactory.create(definition));
+        FakeDns4 fakeDns4 = new FakeDns4(1, pool);
 
         for (int i = 0; ; i++) {
             final String key = "baidu" + i + ".com";
-            Inet4Address addr = fakeDns.acquire(key);
+            Inet4Address addr = fakeDns4.resolve(key);
             System.out.println(key + " -> " + addr);
             TimeUnit.MILLISECONDS.sleep(1500);
         }
