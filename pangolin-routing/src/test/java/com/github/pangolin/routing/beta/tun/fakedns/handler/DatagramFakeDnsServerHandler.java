@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.beta.tun.fakedns.handler;
 
-import com.github.pangolin.routing.beta.tun.fakedns.FakeDnsEngine4;
+import com.github.pangolin.routing.beta.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.route.Route;
 import io.netty.channel.ChannelHandlerContext;
@@ -11,10 +11,10 @@ import io.netty.handler.codec.dns.*;
 import java.net.InetSocketAddress;
 
 public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<DatagramDnsQuery> {
-    private final FakeDnsEngine4 engine;
+    private final DnsEngine engine;
     private final RouteContext routeContext;
 
-    public DatagramFakeDnsServerHandler(final FakeDnsEngine4 engine, final RouteContext routeContext) {
+    public DatagramFakeDnsServerHandler(final DnsEngine engine, final RouteContext routeContext) {
         this.engine = engine;
         this.routeContext = routeContext;
     }

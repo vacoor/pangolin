@@ -2,7 +2,7 @@ package com.github.pangolin.routing.beta.tun;
 
 import com.github.pangolin.routing.RouteApplication;
 import com.github.pangolin.routing.beta.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.beta.tun.fakedns.FakeDnsEngine4;
+import com.github.pangolin.routing.beta.tun.fakedns.beta.SimpleInet4FakeDns;
 import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramDnsProxyServerHandler;
 import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramFakeDnsServerHandler;
 import com.github.pangolin.routing.beta.tun.tun2socks.WindowsTun2Socks;
@@ -45,7 +45,13 @@ public class TunBasedApplication {
 
         final ApplicationHome home = new ApplicationHome(TunBasedApplication.class);
         final URL conf = new File(home.getDir(), "conf/default.conf").toURI().toURL();
-        final FakeDnsEngine4 fakeDns = FakeDnsEngine4.create("198.18.0.0", "255.255.0.0");
+//        final FakeDnsEngine4 fakeDns = FakeDnsEngine4.create("198.18.0.0", "255.255.0.0");
+//        final DnsEngine fakeDns = FakeDnsEngine4.create("198.18.0.0", "255.255.0.0");
+        /*-
+         * benchmark RFC1544.
+         */
+        final DnsEngine fakeDns = SimpleInet4FakeDns.create("198.18.0.0/15", 60).asDnsEngine();
+//        final DnsEngine fakeDns = SimpleInet6FakeDns.create("2001:2::/48", 60).asDnsEngine();
 
         List<InetSocketAddress> dnsServers = Arrays.asList(new InetSocketAddress("192.168.1.1", 53));
 

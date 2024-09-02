@@ -1,14 +1,18 @@
 package com.github.pangolin.routing.beta.tun.fakedns.beta;
 
+import com.github.pangolin.routing.beta.tun.fakedns.DnsEngine;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.dns.*;
 import io.netty.util.NetUtil;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class Inet4AddressFactory implements InetAddressFactory<Inet4Address> {
-
+public class SimpleInet4FakeDns extends AbstractFakeDns<Inet4Address> {
     private final int subnetMask;
     private final int networkAddress;
 
@@ -16,16 +20,18 @@ public class Inet4AddressFactory implements InetAddressFactory<Inet4Address> {
     private final int max;
     private final AtomicInteger current;
 
-    public Inet4AddressFactory(final Inet4Address ipAddress, final int cidrPrefix) {
-        this(ipAddress, cidrPrefix, null, null);
+    public SimpleInet4FakeDns(final Inet4Address ipAddress, final int cidrPrefix, final int leaseTime) {
+        this(ipAddress, cidrPrefix, null, null, leaseTime);
     }
 
-    public Inet4AddressFactory(final Inet4Address ipAddress, final int cidrPrefix,
-                               final Inet4Address startAddress, final Inet4Address endAddress) {
+    public SimpleInet4FakeDns(final Inet4Address ipAddress, final int cidrPrefix,
+                              final Inet4Address startAddress, final Inet4Address endAddress,
+                              final int leaseTime) {
+        super(leaseTime);
         this.subnetMask = prefixToSubnetMask(cidrPrefix);
         this.networkAddress = ipAddressToInt(ipAddress) & subnetMask;
 
-        final int lowerBound = networkAddress + 1;
+        final int lowerBound = networkAddress + 2;
         // excludes network address & multicast address
         final int upperBound = networkAddress + (0xFFFFFFFF - subnetMask) - 1 - 1;
 
@@ -49,7 +55,10 @@ public class Inet4AddressFactory implements InetAddressFactory<Inet4Address> {
     }
 
     private static int ipAddressToInt(final Inet4Address ipAddress) {
-        final byte[] ipBytes = ipAddress.getAddress();
+        return ipAddressToInt(ipAddress.getAddress());
+    }
+
+    private static int ipAddressToInt(final byte[] ipBytes) {
         assert ipBytes.length == 4;
         return (ipBytes[0] & 0xff) << 24 | (ipBytes[1] & 0xff) << 16 | (ipBytes[2] & 0xff) << 8 | ipBytes[3] & 0xff;
     }
@@ -69,7 +78,16 @@ public class Inet4AddressFactory implements InetAddressFactory<Inet4Address> {
     }
 
     @Override
-    public Inet4Address create() {
+    protected Generator<Inet4Address> createGenerator() {
+        return this::create;
+    }
+
+    @Override
+    public boolean isFakeAddress(final byte[] address) {
+        return (ipAddressToInt(address) & subnetMask) == networkAddress;
+    }
+
+    private Inet4Address create() {
         int value;
         do {
             value = current.get();
@@ -90,7 +108,50 @@ public class Inet4AddressFactory implements InetAddressFactory<Inet4Address> {
         }
     }
 
-    public static Inet4AddressFactory create(final String definition) {
+    public DnsEngine asDnsEngine() {
+        return new DnsEngine() {
+            @Override
+            public byte[] resolve(final String name) {
+                return doResolve(name).getAddress();
+            }
+
+            @Override
+            public String resolve(final byte[] address) {
+                try {
+                    return doResolve((Inet4Address) Inet4Address.getByAddress(address));
+                } catch (UnknownHostException e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+
+            @Override
+            public boolean isFake(final byte[] address) {
+                return isFakeAddress(address);
+            }
+
+            @Override
+            public DatagramDnsResponse lookup(DatagramDnsQuery query) {
+                final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
+                if (DnsRecordType.A.equals(dnsQuestion.type())) {
+                    final int ttl = leaseTime;
+                    final String domain = dnsQuestion.name();
+                    byte[] bytes = this.resolve(domain);
+                    if (null != bytes) {
+                        final ByteBuf buf = Unpooled.wrappedBuffer(bytes);
+                        final DefaultDnsRawRecord dnsQuestionAnswer = new DefaultDnsRawRecord(dnsQuestion.name(), DnsRecordType.A, ttl, buf);
+
+                        final DatagramDnsResponse response = new DatagramDnsResponse(query.recipient(), query.sender(), query.id());
+                        response.addRecord(DnsSection.QUESTION, dnsQuestion);
+                        response.addRecord(DnsSection.ANSWER, dnsQuestionAnswer);
+                        return response;
+                    }
+                }
+                return null;
+            }
+        };
+    }
+
+    public static SimpleInet4FakeDns create(final String definition, final int leaseTime) {
         final int index = definition.indexOf("/");
         final String address = 0 < index ? definition.substring(0, index) : definition;
 
@@ -101,7 +162,7 @@ public class Inet4AddressFactory implements InetAddressFactory<Inet4Address> {
         } else {
             cidrPrefix = ipAddress.getAddress().length * Byte.SIZE;
         }
-        return new Inet4AddressFactory(ipAddress, cidrPrefix);
+        return new SimpleInet4FakeDns(ipAddress, cidrPrefix, leaseTime);
     }
 
     private static Inet4Address checkIpAddress(final String ipAddress) {
@@ -116,6 +177,22 @@ public class Inet4AddressFactory implements InetAddressFactory<Inet4Address> {
             return (Inet4Address) InetAddress.getByAddress(ipBytes);
         } catch (final UnknownHostException e) {
             throw new IllegalArgumentException("ipAddress", e);
+        }
+    }
+
+
+    public static void main(String[] args) throws InterruptedException, UnknownHostException {
+//        final int min = ipAddressToInt(NetUtil.createByteArrayFromIpAddressString("198.18.0.1"));
+//        final int max = ipAddressToInt(NetUtil.createByteArrayFromIpAddressString("198.18.0.254"));
+        final String definition = "198.18.0.1/24";
+
+        SimpleInet4FakeDns dns = SimpleInet4FakeDns.create(definition, 2);
+
+        for (int i = 0; ; i++) {
+            final String key = "baidu" + i + ".com";
+            Inet4Address addr = dns.doResolve(key);
+            System.out.println(key + " -> " + addr);
+            TimeUnit.MILLISECONDS.sleep(1500);
         }
     }
 }

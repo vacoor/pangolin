@@ -1,17 +1,20 @@
 package com.github.pangolin.routing.beta.tun.fakedns.beta;
 
+import com.github.pangolin.routing.beta.tun.fakedns.DnsEngine;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.dns.*;
 import io.netty.util.NetUtil;
 
 import java.math.BigInteger;
-import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class Inet6AddressFactory implements InetAddressFactory<Inet6Address> {
+public class SimpleInet6FakeDns extends AbstractFakeDns<Inet6Address> {
     private static final BigInteger MINUS_ONE = BigInteger.valueOf(-1);
 
     private final BigInteger subnetMask;
@@ -21,16 +24,17 @@ public class Inet6AddressFactory implements InetAddressFactory<Inet6Address> {
     private final BigInteger max;
     private final AtomicReference<BigInteger> current;
 
-    public Inet6AddressFactory(final Inet6Address ipAddress, final int cidrPrefix) {
-        this(ipAddress, cidrPrefix, null, null);
+    public SimpleInet6FakeDns(final Inet6Address ipAddress, final int cidrPrefix, final int leaseTime) {
+        this(ipAddress, cidrPrefix, null, null, leaseTime);
     }
 
-    public Inet6AddressFactory(final Inet6Address ipAddress, final int cidrPrefix,
-                               final Inet6Address startAddress, final Inet6Address endAddress) {
+    public SimpleInet6FakeDns(final Inet6Address ipAddress, final int cidrPrefix,
+                              final Inet6Address startAddress, final Inet6Address endAddress, final int leaseTime) {
+        super(leaseTime);
         this.subnetMask = prefixToSubnetMask(cidrPrefix);
         this.networkAddress = ipAddressToInt(ipAddress).and(subnetMask);
 
-        final BigInteger lowerBound = networkAddress.add(BigInteger.ONE);
+        final BigInteger lowerBound = networkAddress.add(BigInteger.ONE).add(BigInteger.ONE);
         // excludes network address & multicast address
         byte[] bytes = new byte[16];
         Arrays.fill(bytes, (byte) 0xFF);
@@ -77,7 +81,6 @@ public class Inet6AddressFactory implements InetAddressFactory<Inet6Address> {
         throw new IllegalArgumentException(String.format("address %s not in subnet", address));
     }
 
-    @Override
     public Inet6Address create() {
         BigInteger value;
         do {
@@ -86,7 +89,6 @@ public class Inet6AddressFactory implements InetAddressFactory<Inet6Address> {
                 return null;
             }
         } while (!current.compareAndSet(value, value.add(BigInteger.ONE)));
-
         try {
             return (Inet6Address) InetAddress.getByAddress(value.toByteArray());
         } catch (UnknownHostException e) {
@@ -94,7 +96,12 @@ public class Inet6AddressFactory implements InetAddressFactory<Inet6Address> {
         }
     }
 
-    public static Inet6AddressFactory create(final String definition) {
+    @Override
+    public boolean isFakeAddress(final byte[] addr) {
+        return new BigInteger(addr).and(subnetMask).compareTo(networkAddress) == 0;
+    }
+
+    public static SimpleInet6FakeDns create(final String definition, final int leaseTime) {
         final int index = definition.indexOf("/");
         final String address = 0 < index ? definition.substring(0, index) : definition;
 
@@ -105,7 +112,7 @@ public class Inet6AddressFactory implements InetAddressFactory<Inet6Address> {
         } else {
             cidrPrefix = ipAddress.getAddress().length * Byte.SIZE;
         }
-        return new Inet6AddressFactory(ipAddress, cidrPrefix);
+        return new SimpleInet6FakeDns(ipAddress, cidrPrefix, leaseTime);
     }
 
     private static Inet6Address checkIpAddress(final String ipAddress) {
@@ -120,6 +127,69 @@ public class Inet6AddressFactory implements InetAddressFactory<Inet6Address> {
             return (Inet6Address) InetAddress.getByAddress(ipBytes);
         } catch (final UnknownHostException e) {
             throw new IllegalArgumentException("ipAddress", e);
+        }
+    }
+
+    @Override
+    protected Generator<Inet6Address> createGenerator() {
+        return this::create;
+    }
+
+    public DnsEngine asDnsEngine() {
+        return new DnsEngine() {
+            @Override
+            public byte[] resolve(final String name) {
+                return doResolve(name).getAddress();
+            }
+
+            @Override
+            public String resolve(final byte[] address) {
+                try {
+                    return doResolve((Inet6Address) InetAddress.getByAddress(address));
+                } catch (UnknownHostException e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+
+            @Override
+            public boolean isFake(final byte[] address) {
+                return isFakeAddress(address);
+            }
+
+            @Override
+            public DatagramDnsResponse lookup(DatagramDnsQuery query) {
+                final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
+                if (DnsRecordType.AAAA.equals(dnsQuestion.type())) {
+                    final int ttl = leaseTime;
+                    final String domain = dnsQuestion.name();
+                    byte[] bytes = this.resolve(domain);
+                    if (null != bytes) {
+                        final ByteBuf buf = Unpooled.wrappedBuffer(bytes);
+                        final DefaultDnsRawRecord dnsQuestionAnswer = new DefaultDnsRawRecord(dnsQuestion.name(), DnsRecordType.AAAA, ttl, buf);
+
+                        final DatagramDnsResponse response = new DatagramDnsResponse(query.recipient(), query.sender(), query.id());
+                        response.addRecord(DnsSection.QUESTION, dnsQuestion);
+                        response.addRecord(DnsSection.ANSWER, dnsQuestionAnswer);
+                        return response;
+                    }
+                }
+                return null;
+            }
+        };
+    }
+
+    public static void main(String[] args) throws InterruptedException, UnknownHostException {
+//        final int min = ipAddressToInt(NetUtil.createByteArrayFromIpAddressString("198.18.0.1"));
+//        final int max = ipAddressToInt(NetUtil.createByteArrayFromIpAddressString("198.18.0.254"));
+        final String definition = "2001:2::/48";
+
+        SimpleInet6FakeDns dns = SimpleInet6FakeDns.create(definition, 2);
+
+        for (int i = 0; ; i++) {
+            final String key = "baidu" + i + ".com";
+            Inet6Address addr = dns.doResolve(key);
+            System.out.println(key + " -> " + addr);
+            TimeUnit.MILLISECONDS.sleep(1500);
         }
     }
 }
