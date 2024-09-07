@@ -213,6 +213,7 @@ public class RouteApplication {
     }
 
     public static void main(String[] args) throws Exception {
+        /*
         final ApplicationHome home = new ApplicationHome(RouteApplication.class);
         final URL conf = new File(home.getDir(), "conf/default.conf").toURI().toURL();
         final RouteApplication app = new RouteApplication();
@@ -227,5 +228,8 @@ public class RouteApplication {
             }
         }
         app.await();
+        */
+//        UnixTunUtils.main(args);
+        MacTunUtils.main(args);
     }
 }

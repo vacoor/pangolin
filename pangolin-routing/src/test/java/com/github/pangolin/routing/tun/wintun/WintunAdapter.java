@@ -114,7 +114,7 @@ public class WintunAdapter {
         Pointer pointer = Pointer.createConstant(adapter.getLuid());
         LongByReference r = new LongByReference(adapter.getLuid());
         AddressAndNetmaskHelper.setIPv4AndNetmask(r, "192.168.0.1", 24);
-//        adapter.setIp(InetAddress.getByName("192.168.1.1"), (byte) 24);
+//        adapter.setIpAddress(InetAddress.getByName("192.168.1.1"), (byte) 24);
         WintunSession session = adapter.newSession();
     }
 }
