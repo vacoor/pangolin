@@ -1,15 +1,12 @@
-package com.github.pangolin.routing;
+package com.github.pangolin.routing.beta;
 
 import com.sun.jna.Native;
 import com.sun.jna.ptr.IntByReference;
-import io.netty.util.NetUtil;
 import org.drasyl.channel.tun.jna.darwin.DarwinTunDevice;
 
-import java.net.InetAddress;
 import java.util.concurrent.TimeUnit;
 
-import static com.github.pangolin.routing.KernControl.CTLIOCGINFO;
-import static com.github.pangolin.routing.UnixTunUtils.*;
+import static com.github.pangolin.routing.beta.KernControl.CTLIOCGINFO;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 import static org.drasyl.channel.tun.jna.shared.LibC.*;
 import static org.drasyl.channel.tun.jna.shared.Socket.AF_SYSTEM;
