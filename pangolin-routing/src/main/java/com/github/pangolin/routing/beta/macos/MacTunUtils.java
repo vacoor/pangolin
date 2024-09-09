@@ -43,11 +43,13 @@ public class MacTunUtils {
 
 //        System.out.println("MTU=" + getMtu(ifname));
         Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("10.18.71.2");
-        MacOsNetworkInterfaceEx mix = new MacOsNetworkInterfaceEx(ifname);
-        mix.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 32));
+//        MacOsNetworkInterfaceEx mix = new MacOsNetworkInterfaceEx(ifname);
+//        mix.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 32));
+        MacOsNetworkInterfaceEx.setInterfaceAddress(ifname, ipv4);
 
-        System.out.println("IPv4 -> " + mix.getInterfaceAddresses());
-        System.out.println("MTU -> " + mix.getMTU());
+//        System.out.println("IPv4 -> " + mix.getInterfaceAddresses());
+//        System.out.println("MTU -> " + mix.getMTU());
+        System.out.println("OK");
 
 
         /*

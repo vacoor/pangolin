@@ -65,6 +65,9 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         try {
             setInterfaceIpAddress(fd, ifname, (Inet4Address) addr);
             byte[] bytes = subnetMaskToAddress(prefixToSubnetMask(networkPrefixLength));
+
+            System.out.println(NetUtil.bytesToIpAddress(bytes));
+
             setInterfaceNetmask(fd, ifname, (Inet4Address) toInetAddress(bytes));
         } finally {
             close(fd);
@@ -188,8 +191,16 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
 
     // -------------------
 
+    public static void setInterfaceAddress(final String ifname, final Inet4Address address) {
+        int fd = fd();
+        try {
+            setInterfaceAddress(fd, ifname, address);
+        } finally {
+            close(fd);
+        }
+    }
 
-    static void setInterfaceAddress(final int fd, final String ifname, final Inet4Address address) {
+    public static void setInterfaceAddress(final int fd, final String ifname, final Inet4Address address) {
         final ifaliasreq ifra = new ifaliasreq(ifname);
         ifra.ifra_addr.sin_family = Inets.AF_INET;
         ifra.ifra_addr.sin_port = 0;
@@ -204,6 +215,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         System.out.println(NetUtil.bytesToIpAddress(ifra.ifra_mask.sin_addr));
 
         ioctl(fd, SIOCSIFADDR, ifra);
+//        ioctl(fd, SIOCAIFADDR, ifra);
     }
 
     static void setInterfaceAddress6(final int fd, final String ifname, final Inet6Address address) {
@@ -238,19 +250,6 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
 
 //        ioctl(fd, SIOCSIFADDR, ifr6);
         ioctl(fd, SIOCAIFADDR_IN6, ifr6);
-    }
-
-    static byte[] getNetworkAddress(final byte[] ipBytes, int cidrPrefix) {
-        final byte[] networkBytes = new byte[ipBytes.length];
-        for (int i = 0, prefix = cidrPrefix; i < ipBytes.length && prefix > 0; i++, prefix -= 8) {
-            byte b = ipBytes[i];
-            if (prefix < 8) {
-                final int shift = 8 - prefix;
-                b = (byte) ((b >> shift) << shift);
-            }
-            networkBytes[i] = b;
-        }
-        return networkBytes;
     }
 
     @Structure.FieldOrder({"ifra_name", "ifra_addr", "ifra_broadaddr", "ifra_mask"})
