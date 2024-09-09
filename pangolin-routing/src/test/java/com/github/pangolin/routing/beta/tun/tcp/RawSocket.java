@@ -119,7 +119,7 @@ public class RawSocket {
 
     private int sndMss;
 
-    private int cwnd = 1;
+    private int cwnd;
 
     /**
      * slow start threshold.
@@ -150,6 +150,7 @@ public class RawSocket {
                 sndWnd <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
             }
         }
+        cwnd = sndMss;
     }
 
     private int determineSndWnd(final TcpPacket.TcpHeader header) {
@@ -216,7 +217,7 @@ public class RawSocket {
 
                 sndUna = header.getAcknowledgmentNumber();
                 sndWnd = determineSndWnd(header);
-                cwnd = cwnd < ssthresh ? cwnd + 1 : cwnd + 1 / cwnd;
+                cwnd = cwnd < ssthresh ? cwnd + sndMss  : cwnd + sndMss / cwnd;
                 // add to queue
                 this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED);
             } else if (header.getSyn()) {
@@ -382,8 +383,9 @@ public class RawSocket {
 
     private void write0() {
         final int usableWnd = sndUna + sndWnd - sndNxt;
-        final int wndToUse = sndUna + cwnd * sndMss - sndNxt;
-        log.info("USABLE-WND = {}, USABLE-CWND = {}", usableWnd, wndToUse);
+        final int cwndToUse = sndUna + cwnd - sndNxt;
+        final int wndToUse = Math.min(usableWnd, cwndToUse);
+        log.info("USABLE-WND = {}, CWND-To-USE = {}, USABLE-CWND = {}", usableWnd, cwndToUse, wndToUse);
         if (wndToUse <= 0) {
             return;
         }
