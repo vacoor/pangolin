@@ -36,23 +36,27 @@ public class LinuxTunUtils {
         final String ifname = createUnixTun("tun9");
         System.out.println(ifname);
 
-        setIpAddress(ifname, InetAddress.getByName("10.18.71.2"));
+        Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("10.18.71.2");
 
-        System.out.println("IPv4 -> OK");
+        setIpAddress(ifname, ipv4);
+        setIpv4Netmask(ifname, InetAddress.getByName("255.255.0.0"));
 
         byte[] ip = getIpAddress(ifname);
         System.out.println(NetUtil.bytesToIpAddress(ip));
 
-        setIpv4Netmask(ifname, InetAddress.getByName("255.255.0.0"));
+
         byte[] netmask = getIpv4Netmask(ifname);
         System.out.println(NetUtil.bytesToIpAddress(netmask));
 
+        System.out.println("IPv4 -> OK");
+
         System.out.println("MTU: " + getMtu(ifname));
+
+        TimeUnit.SECONDS.sleep(30);
 
         setIpAddress(ifname, InetAddress.getByName("fec2::22"));
         System.out.println("IPv6 -> OK");
 
-        TimeUnit.SECONDS.sleep(30);
     }
 
     private static String createUnixTun(final String name) throws Exception {
