@@ -326,14 +326,6 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         }
     }
 
-    private static InetAddress toInetAddress(final String ipAddressStr) {
-        final byte[] addr = NetUtil.createByteArrayFromIpAddressString(ipAddressStr);
-        if (null == addr) {
-            throw new IllegalStateException("Unknown host: " + ipAddressStr);
-        }
-        return toInetAddress(addr);
-    }
-
     private static InetAddress toInetAddress(final byte[] sinAddr) {
         try {
             return InetAddress.getByAddress(sinAddr);
@@ -495,6 +487,14 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
             }
         }
         return nameServers;
+    }
+
+    private static InetAddress toInetAddress(final String ipAddressStr) {
+        final byte[] addr = NetUtil.createByteArrayFromIpAddressString(ipAddressStr);
+        if (null == addr) {
+            throw new IllegalStateException("Unknown host: " + ipAddressStr);
+        }
+        return toInetAddress(addr);
     }
 
     private static void setInterfaceDns(final GUID interfaceGuid, final int family,

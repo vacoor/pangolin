@@ -3,17 +3,14 @@ package com.github.pangolin.routing.beta.linux;
 
 import static com.github.pangolin.routing.beta.linux.Socket.AF_INET;
 import static com.github.pangolin.routing.beta.linux.Socket.AF_INET6;
-import static com.github.pangolin.routing.beta.linux.Sockios.SIOGIFINDEX;
 import static com.sun.jna.platform.linux.Fcntl.O_RDWR;
 import static org.drasyl.channel.tun.jna.shared.LibC.close;
 import static org.drasyl.channel.tun.jna.shared.LibC.ioctl;
 import static org.drasyl.channel.tun.jna.shared.LibC.socket;
 import static org.drasyl.channel.tun.jna.shared.Socket.SOCK_DGRAM;
 
-import com.github.pangolin.routing.beta.If;
 import com.github.pangolin.routing.beta.If.Ifreq;
-import com.github.pangolin.routing.beta.If.in6_ifreq;
-import com.github.pangolin.routing.beta.If.sockaddr_in;
+import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 import io.netty.util.NetUtil;
@@ -37,7 +34,13 @@ public class LinuxTunUtils {
         System.out.println(ifname);
 
         Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("10.18.71.2");
+        final LinuxNetworkInterfaceEx lix = new LinuxNetworkInterfaceEx(ifname);
+        lix.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 16));
 
+        System.out.println("IPv4 -> " + lix.getInterfaceAddresses());
+        System.out.println("MTU -> " + lix.getMTU());
+
+        /*
         setIpAddress(ifname, ipv4);
         setIpv4Netmask(ifname, InetAddress.getByName("255.255.0.0"));
 
@@ -52,11 +55,12 @@ public class LinuxTunUtils {
 
         System.out.println("MTU: " + getMtu(ifname));
 
-        TimeUnit.SECONDS.sleep(30);
 
         setIpAddress(ifname, InetAddress.getByName("fec2::22"));
         System.out.println("IPv6 -> OK");
+        */
 
+        TimeUnit.SECONDS.sleep(30);
     }
 
     private static String createUnixTun(final String name) throws Exception {
@@ -77,61 +81,5 @@ public class LinuxTunUtils {
         return Native.toString(ifr.ifr_name, StandardCharsets.US_ASCII);
     }
 
-
-    public static byte[] getIpAddress(final String ifname) {
-        final int fd = socket(AF_INET, SOCK_DGRAM, 0);
-        try {
-          return LinuxNetworkInterfaceEx.getIpAddress(fd, ifname);
-        } finally {
-            close(fd);
-        }
-    }
-
-    public static void setIpAddress(final String ifname, final InetAddress addr) {
-        if (addr instanceof Inet4Address) {
-            final int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-            try {
-                LinuxNetworkInterfaceEx.setIpAddress(sockfd, ifname, (Inet4Address) addr);
-            } finally {
-                close(sockfd);
-            }
-        } else if (addr instanceof Inet6Address) {
-            final int sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
-            try {
-                LinuxNetworkInterfaceEx.setInterfaceAddress6(sockfd, ifname, (Inet6Address) addr, 64);
-            } finally {
-                close(sockfd);
-            }
-        } else {
-            throw new UnsupportedOperationException();
-        }
-    }
-
-    public static byte[] getIpv4Netmask(final String ifname) {
-        final int fd = socket(AF_INET, SOCK_DGRAM, 0);
-        try {
-          return LinuxNetworkInterfaceEx.getNetmask(fd, ifname);
-        } finally {
-            close(fd);
-        }
-    }
-
-    public static void setIpv4Netmask(final String ifname, final InetAddress addr) {
-        final int fd = socket(AF_INET, SOCK_DGRAM, 0);
-        try {
-          LinuxNetworkInterfaceEx.setNetmask(fd, ifname, (Inet4Address) addr);
-        } finally {
-            close(fd);
-        }
-    }
-
-    public static int getMtu(final String ifname) {
-        final int fd = socket(AF_INET, SOCK_DGRAM, 0);
-        try {
-          return LinuxNetworkInterfaceEx.getMtu(fd, ifname);
-        } finally {
-            close(fd);
-        }
-    }
 
 }

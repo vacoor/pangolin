@@ -4,9 +4,9 @@ import java.net.InetAddress;
 
 public class InterfaceAddressEx {
     private final InetAddress address;
-    private final short networkPrefixLength;
+    private final int networkPrefixLength;
 
-    private InterfaceAddressEx(final InetAddress address, final short networkPrefixLength) {
+    private InterfaceAddressEx(final InetAddress address, final int networkPrefixLength) {
         this.address = address;
         this.networkPrefixLength = networkPrefixLength;
     }
@@ -15,7 +15,7 @@ public class InterfaceAddressEx {
         return address;
     }
 
-    public short getNetworkPrefixLength() {
+    public int getNetworkPrefixLength() {
         return networkPrefixLength;
     }
 
@@ -71,7 +71,7 @@ public class InterfaceAddressEx {
         return address + "/" + networkPrefixLength;
     }
 
-    public static InterfaceAddressEx of(final InetAddress address, final short networkPrefixLength) {
+    public static InterfaceAddressEx of(final InetAddress address, final int networkPrefixLength) {
         return new InterfaceAddressEx(address, networkPrefixLength);
     }
 }

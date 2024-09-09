@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.beta.macos;
 
 import com.github.pangolin.routing.beta.If.sockaddr_in;
+import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
@@ -10,6 +11,7 @@ import org.drasyl.channel.tun.jna.darwin.DarwinTunDevice;
 import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.beta.If.IFNAMSIZ;
@@ -21,6 +23,8 @@ import static org.drasyl.channel.tun.jna.shared.Socket.SOCK_DGRAM;
 
 public class MacTunUtils {
     static final int AF_INET = 2;
+    static final int AF_INET6 = 30;
+
     static final int SYSPROTO_CONTROL = 2;
     static final String UTUN_CONTROL_NAME = "com.apple.net.utun_control";
     static final int UTUN_OPT_IFNAME = 2;
@@ -38,9 +42,24 @@ public class MacTunUtils {
         System.out.println("IFNAME:" + ifname);
 
 //        System.out.println("MTU=" + getMtu(ifname));
+        Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("10.18.71.2");
+        MacOsNetworkInterfaceEx mix = new MacOsNetworkInterfaceEx(ifname);
+        mix.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 32));
 
-        setIpv4Address(ifname, (Inet4Address) InetAddress.getByName("10.18.71.2"));
-        System.out.println("IPv4 -> OK");
+        System.out.println("IPv4 -> " + mix.getInterfaceAddresses());
+        System.out.println("MTU -> " + mix.getMTU());
+
+
+        /*
+        final int sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
+        try {
+            Inet6Address ipv6 = (Inet6Address) InetAddress.getByName("2001:da8:ecd1::1");
+            MacOsNetworkInterfaceEx2.setInterfaceAddress6(sockfd, ifname, ipv6);
+            System.out.println("IPv6 -> OK");
+        }finally {
+            close(sockfd);
+        }
+        */
 
         /*
         byte[] ip = getIpAddress(ifname);
@@ -99,71 +118,10 @@ public class MacTunUtils {
         getsockopt(fd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME, sockName, sockNameLen);
 
             final String ifname = Native.toString(sockName.name, US_ASCII);
-        System.out.println("IF:" + ifname);
-        TimeUnit.SECONDS.sleep(15);
-        System.out.println("MTU=" + getMtu(fd, ifname));
+//        System.out.println("IF:" + ifname);
+//        TimeUnit.SECONDS.sleep(15);
+//        System.out.println("MTU=" + getMtu(fd, ifname));
         return ifname;
-    }
-
-    public static int getMtu(final int fd, final String ifname) {
-//        final int fd = socket(AF_INET, SOCK_DGRAM, 0);
-        /*
-        try {
-            final If.Ifreq ifr = new If.Ifreq(ifname);
-
-            final int code = ioctl(fd, SIOCGIFMTU, ifr);
-            if (0 != code) {
-                throw new IllegalStateException("Error code: " + code);
-            }
-            return ifr.ifr_ifru.ifru_mtu;
-        } finally {
-            close(fd);
-        }
-        */
-        // get mtu
-        final org.drasyl.channel.tun.jna.shared.If.Ifreq ifreq = new org.drasyl.channel.tun.jna.shared.If.Ifreq(ifname);
-        ioctl(fd, SIOCGIFMTU, ifreq);
-        return ifreq.ifr_ifru.ifru_mtu;
-    }
-
-    private static void setIpv4Address(final String ifname, final Inet4Address addr) {
-        final int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-        try {
-            System.out.println("sockfd=" + sockfd);
-            final ifaliasreq ifra = new ifaliasreq(ifname);
-
-            final sockaddr_in sockaddr_in = new sockaddr_in();
-            sockaddr_in.sin_family = AF_INET;
-            sockaddr_in.sin_port = 0;
-            sockaddr_in.sin_addr = addr.getAddress();
-
-            ifra.ifra_addr = sockaddr_in;
-//            ifr.ifr_ifru.ifru_addr = sockaddr_in;
-
-            final int code = ioctl(sockfd, SIOCSIFADDR, ifra);
-            if (0 != code) {
-                throw new IllegalStateException("Error code: " + code);
-            }
-        } finally {
-            close(sockfd);
-        }
-    }
-
-    @Structure.FieldOrder({ "ifra_name", "ifra_addr", "ifra_broadaddr", "ifra_mask" })
-    public static class ifaliasreq extends Structure {
-        public byte[] ifra_name = new byte[IFNAMSIZ];
-        public sockaddr_in ifra_addr;
-        public sockaddr_in ifra_broadaddr;
-        public sockaddr_in ifra_mask;
-
-        public ifaliasreq(final String name) {
-            this.ifra_name = new byte[IFNAMSIZ];
-            if (name != null) {
-                final byte[] bytes = name.getBytes(US_ASCII);
-                System.arraycopy(bytes, 0, this.ifra_name, 0, bytes.length);
-            }
-        }
-
     }
 
 }
