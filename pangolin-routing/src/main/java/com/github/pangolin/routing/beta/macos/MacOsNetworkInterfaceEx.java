@@ -73,15 +73,25 @@ public class MacOsNetworkInterfaceEx {
   }
 
 
+  /**
+   * https://github.com/apple/darwin-xnu/blob/main/bsd/netinet6/in6_var.h
+   */
   @Structure.FieldOrder({ "ifra_name", "ifra_addr", "ifra_dstaddr", "ifra_prefixmask", "ifra_flags" })
-  public static class in6_aliasreq {
+  public static class in6_aliasreq extends Structure {
     public byte[] ifra_name = new byte[IFNAMSIZ];
     public sockaddr_in6 ifra_addr;
     public sockaddr_in6 ifra_dstaddr;
     public sockaddr_in6 ifra_prefixmask;
     public int ifra_flags;
-//    public ifra_lifetime;
+    public in6_addrlifetime ifra_lifetime;
 
+  }
+
+  public static class in6_addrlifetime extends Structure {
+    public long ia6t_expire;
+    public long ia6t_preferred;
+    public int ia6t_vltime = 0xFFFFFFFF;
+    public int ia6t_pltime = 0xFFFFFFFF;
   }
 
 }
