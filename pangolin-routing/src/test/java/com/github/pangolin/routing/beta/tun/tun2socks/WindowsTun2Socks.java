@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.beta.tun.tun2socks;
 
-import com.github.pangolin.routing.tun.wintun.win32.InterfaceAddressEx;
+import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.github.pangolin.routing.tun.wintun.win32.WindowsNetworkInterfaceEx;
 
 import java.io.File;

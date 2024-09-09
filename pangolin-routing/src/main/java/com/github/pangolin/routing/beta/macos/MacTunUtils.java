@@ -1,5 +1,6 @@
-package com.github.pangolin.routing.beta;
+package com.github.pangolin.routing.beta.macos;
 
+import com.github.pangolin.routing.beta.If.sockaddr_in;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
@@ -12,15 +13,14 @@ import java.net.InetAddress;
 import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.beta.If.IFNAMSIZ;
-import static com.github.pangolin.routing.beta.KernControl.CTLIOCGINFO;
-import static com.github.pangolin.routing.beta.UnixTunUtils.AF_INET;
-import static com.github.pangolin.routing.beta.UnixTunUtils.SIOCSIFADDR;
+import static com.github.pangolin.routing.beta.macos.KernControl.CTLIOCGINFO;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 import static org.drasyl.channel.tun.jna.shared.LibC.*;
 import static org.drasyl.channel.tun.jna.shared.Socket.AF_SYSTEM;
 import static org.drasyl.channel.tun.jna.shared.Socket.SOCK_DGRAM;
 
 public class MacTunUtils {
+    static final int AF_INET = 2;
     static final int SYSPROTO_CONTROL = 2;
     static final String UTUN_CONTROL_NAME = "com.apple.net.utun_control";
     static final int UTUN_OPT_IFNAME = 2;
@@ -132,7 +132,7 @@ public class MacTunUtils {
             System.out.println("sockfd=" + sockfd);
             final ifaliasreq ifra = new ifaliasreq(ifname);
 
-            final If.Ifreq.sockaddr_in sockaddr_in = new If.Ifreq.sockaddr_in();
+            final sockaddr_in sockaddr_in = new sockaddr_in();
             sockaddr_in.sin_family = AF_INET;
             sockaddr_in.sin_port = 0;
             sockaddr_in.sin_addr = addr.getAddress();
@@ -152,9 +152,9 @@ public class MacTunUtils {
     @Structure.FieldOrder({ "ifra_name", "ifra_addr", "ifra_broadaddr", "ifra_mask" })
     public static class ifaliasreq extends Structure {
         public byte[] ifra_name = new byte[IFNAMSIZ];
-        public If.Ifreq.sockaddr_in ifra_addr;
-        public If.Ifreq.sockaddr_in ifra_broadaddr;
-        public If.Ifreq.sockaddr_in ifra_mask;
+        public sockaddr_in ifra_addr;
+        public sockaddr_in ifra_broadaddr;
+        public sockaddr_in ifra_mask;
 
         public ifaliasreq(final String name) {
             this.ifra_name = new byte[IFNAMSIZ];

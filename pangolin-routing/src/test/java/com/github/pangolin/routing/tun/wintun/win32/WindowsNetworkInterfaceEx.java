@@ -1,5 +1,7 @@
 package com.github.pangolin.routing.tun.wintun.win32;
 
+import com.github.pangolin.routing.beta.InterfaceAddressEx;
+import com.github.pangolin.routing.beta.NetworkInterfaceEx;
 import com.github.pangolin.routing.tun.wintun.win32.jna.DnsLib;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
@@ -29,7 +31,7 @@ import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
  * @see <a href="https://github.com/WireGuard/wireguard-windows/blob/master/tunnel/winipcfg/luid.go">luid</a>
  */
 @Slf4j
-public class WindowsNetworkInterfaceEx {
+public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
     private final long interfaceLuid;
 
     public WindowsNetworkInterfaceEx(final long interfaceLuid) {
@@ -56,6 +58,7 @@ public class WindowsNetworkInterfaceEx {
         return interfaceLuidToAlias(interfaceLuid);
     }
 
+    @Override
     public List<InterfaceAddressEx> getInterfaceAddresses() {
         /* java.net.NetworkInterfaceAddresses#getNetworkPrefixLength is wrong.
         final List<InterfaceAddress> addrs = networkInterface().getInterfaceAddresses();
@@ -68,6 +71,11 @@ public class WindowsNetworkInterfaceEx {
         return getInterfaceAddresses(interfaceLuid, AF_UNSPEC);
     }
 
+    @Override
+    public void setInterfaceAddress(final InterfaceAddressEx address) {
+        setInterfaceAddress(interfaceLuid, address.getAddress(), (byte) address.getNetworkPrefixLength());
+    }
+
     public void addInterfaceAddress(final InterfaceAddressEx address) {
         addInterfaceAddress(interfaceLuid, address.getAddress(), (byte) address.getNetworkPrefixLength());
     }
@@ -76,14 +84,12 @@ public class WindowsNetworkInterfaceEx {
         deleteInterfaceAddress(interfaceLuid, address.getAddress(), (byte) address.getNetworkPrefixLength());
     }
 
-    public void setInterfaceAddress(final InterfaceAddressEx address) {
-        setInterfaceAddress(interfaceLuid, address.getAddress(), (byte) address.getNetworkPrefixLength());
-    }
-
+    @Override
     public void flushInterfaceAddresses() {
         flushInterfaceAddresses(interfaceLuid, AF_UNSPEC);
     }
 
+    @Override
     public int getMTU() throws SocketException {
         return networkInterface().getMTU();
     }

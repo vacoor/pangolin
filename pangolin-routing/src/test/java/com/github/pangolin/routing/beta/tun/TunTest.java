@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.beta.tun;
 
 import com.github.pangolin.routing.beta.tun.tcp.RawSocket;
-import com.github.pangolin.routing.tun.wintun.win32.InterfaceAddressEx;
+import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.github.pangolin.routing.tun.wintun.win32.WindowsNetworkInterfaceEx;
 import com.google.common.collect.Maps;
 import com.sun.jna.WString;

@@ -2,7 +2,8 @@ package com.github.pangolin.routing;
 
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
-import com.github.pangolin.routing.beta.MacTunUtils;
+import com.github.pangolin.routing.beta.linux.LinuxTunUtils;
+import com.github.pangolin.routing.beta.macos.MacTunUtils;
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.context.RouteContextFactory;
@@ -225,7 +226,7 @@ public class RouteApplication {
         }
         app.await();
         */
-//        UnixTunUtils.main(args);
-        MacTunUtils.main(args);
+        LinuxTunUtils.main(args);
+//        MacTunUtils.main(args);
     }
 }

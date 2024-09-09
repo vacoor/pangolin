@@ -14,20 +14,43 @@ public interface If {
     int IFNAMSIZ = 16;
 
     /**
-     * https://github.com/torvalds/linux/blob/b31c4492884252a8360f312a0ac2049349ddf603/include/uapi/linux/in6.h#L32
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/in.h">in.h</a>
      */
-    class in6_addr {
+    @Structure.FieldOrder({"sin_family", "sin_port", "sin_addr", "sin_zero"})
+    class sockaddr_in extends Structure {
+        public short sin_family;
+        public short sin_port;
+        public byte[] sin_addr = new byte[4];
+        public byte[] sin_zero = new byte[8];
 
+        public sockaddr_in() {
+        }
+
+        public sockaddr_in(final Pointer p) {
+            super(p);
+            read();
+        }
     }
 
     /**
-     * https://github.com/torvalds/linux/blob/b31c4492884252a8360f312a0ac2049349ddf603/include/uapi/linux/ipv6.h#L36
+     * https://github.com/torvalds/linux/blob/master/include/uapi/linux/in6.h
      */
-    @Structure.FieldOrder({ "ifr6_addr", "ifr6_prefixlen", "ifr6_ifindex" })
-    class in6_ifreq extends Structure {
-        public Ifreq.sockaddr_in6 ifr6_addr;
-        public int ifr6_prefixlen;
-        public int ifr6_ifindex;
+    @Structure.FieldOrder({"sin6_family", "sin6_port", "sin6_flowinfo", "sin6_addr", "sin6_scope_id"})
+    class sockaddr_in6 extends Structure {
+
+        public sockaddr_in6() {
+        }
+
+        public sockaddr_in6(Pointer p) {
+            super(p);
+            read();
+        }
+
+        public short sin6_family;
+        public short sin6_port;
+        public int sin6_flowinfo;
+        public byte[] sin6_addr = new byte[16];
+        public int sin6_scope_id;
     }
 
     @Structure.FieldOrder({ "ifr_name", "ifr_ifru" })
@@ -54,72 +77,6 @@ public interface If {
             this.ifr_ifru.ifru_flags = flags;
         }
 
-        public Ifreq(final String ifr_name, final int mtu) {
-            this.ifr_name = new byte[IFNAMSIZ];
-            if (ifr_name != null) {
-                final byte[] bytes = ifr_name.getBytes(US_ASCII);
-                System.arraycopy(bytes, 0, this.ifr_name, 0, bytes.length);
-            }
-            this.ifr_ifru.setType("ifru_mtu");
-            this.ifr_ifru.ifru_mtu = mtu;
-        }
-
-        /*-
-         * https://github.com/torvalds/linux/blob/master/include/uapi/linux/socket.h
-         */
-//        @FieldOrder({"ss_family", "__data"})
-//        public static class sockaddr extends Structure {
-//            public short ss_family;
-//            public byte[] __data = new byte[14];
-//        }
-
-        public static class sockaddr extends Union {
-            public sockaddr_in ipv4;
-            public sockaddr_in6 ipv6;
-        }
-
-        /**
-         * https://github.com/torvalds/linux/blob/master/include/uapi/linux/in.h
-         */
-        @Structure.FieldOrder({"sin_family", "sin_port", "sin_addr", "sin_zero"})
-        public static class sockaddr_in extends Structure {
-            public short sin_family;
-            public short sin_port;
-//            public in_addr sin_addr;
-            public byte[] sin_addr = new byte[4];
-            public byte[] sin_zero = new byte[8];
-
-            public sockaddr_in() {
-            }
-
-            public sockaddr_in(Pointer p) {
-                super(p);
-                read();
-            }
-        }
-
-        /**
-         * https://github.com/torvalds/linux/blob/master/include/uapi/linux/in6.h
-         */
-        @Structure.FieldOrder({"sin6_family", "sin6_port", "sin6_flowinfo", "sin6_addr", "sin6_scope_id"})
-        public static class sockaddr_in6 extends Structure {
-
-            public sockaddr_in6() {
-            }
-
-            public sockaddr_in6(Pointer p) {
-                super(p);
-                read();
-            }
-
-            public short sin6_family;
-            public short sin6_port;
-            public int sin6_flowinfo;
-            public byte[] sin6_addr = new byte[16];
-            public int sin6_scope_id;
-        }
-
-
         public static class IfrIfru extends Union {
             // struct	sockaddr ifru_addr;
             // struct	sockaddr ifru_dstaddr;
@@ -135,11 +92,11 @@ public interface If {
             // void __user *	ifru_data;
             // struct	if_settings ifru_settings;
 
-            public sockaddr ifru_addr;
-            public sockaddr ifru_dstaddr;
-            public sockaddr ifru_broadaddr;
-            public sockaddr ifru_netmask;
-            public sockaddr ifru_hwaddr;
+            public sockaddr_in ifru_addr;
+            public sockaddr_in ifru_dstaddr;
+            public sockaddr_in ifru_broadaddr;
+            public sockaddr_in ifru_netmask;
+            public sockaddr_in ifru_hwaddr;
             public short	ifru_flags;
             public int ifru_ifindex;
             public int	ifru_mtu;
@@ -149,4 +106,15 @@ public interface If {
 
         }
     }
+
+    /**
+     * https://github.com/torvalds/linux/blob/b31c4492884252a8360f312a0ac2049349ddf603/include/uapi/linux/ipv6.h#L36
+     */
+    @Structure.FieldOrder({ "ifr6_addr", "ifr6_prefixlen", "ifr6_ifindex" })
+    class in6_ifreq extends Structure {
+        public sockaddr_in6 ifr6_addr;
+        public int ifr6_prefixlen;
+        public int ifr6_ifindex;
+    }
+
 }
