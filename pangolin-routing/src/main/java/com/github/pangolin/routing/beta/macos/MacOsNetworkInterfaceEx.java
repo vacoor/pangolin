@@ -40,7 +40,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
             final InetAddress ipAddress = toInetAddress(getInterfaceIpAddress(fd, ifname));
             final byte[] interfaceNetmask = getInterfaceNetmask(fd, ifname);
             final int prefix = subnetMaskToPrefix(ipAddressToInt(interfaceNetmask));
-            return Collections.singletonList(InterfaceAddressEx.of(ipAddress, (short) prefix));
+            return Collections.singletonList(InterfaceAddressEx.of(ipAddress, prefix));
         } finally {
             close(fd);
         }
@@ -173,7 +173,8 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         ifr.ifr_ifru.ifru_netmask.sin_port = 0;
         ifr.ifr_ifru.ifru_netmask.sin_addr = addr.getAddress();
 
-        ioctl(fd, SIOCSIFNETMASK, ifr);
+        int code = ioctl(fd, SIOCSIFNETMASK, ifr);
+        System.out.println("CODE=" + code);
     }
 
     private static int getMtu(final int fd, final String ifname) {

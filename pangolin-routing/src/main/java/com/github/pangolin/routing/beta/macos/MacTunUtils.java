@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.beta.If.IFNAMSIZ;
@@ -36,6 +37,8 @@ public class MacTunUtils {
 //        TunDevice dev = DarwinTunDevice.open("utun9", 0);
 //        System.out.println(dev.localAddress());
 
+//        MacOsNetworkInterfaceEx en0 = new MacOsNetworkInterfaceEx("en0");
+//        List<InterfaceAddressEx> interfaceAddresses = en0.getInterfaceAddresses();
 //        System.exit(0);
 
         final String ifname = createDarwinTun("utun9");
@@ -43,12 +46,13 @@ public class MacTunUtils {
 
 //        System.out.println("MTU=" + getMtu(ifname));
         Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("10.18.71.2");
-//        MacOsNetworkInterfaceEx mix = new MacOsNetworkInterfaceEx(ifname);
-//        mix.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 32));
-        MacOsNetworkInterfaceEx.setInterfaceAddress(ifname, ipv4);
+        MacOsNetworkInterfaceEx mix = new MacOsNetworkInterfaceEx(ifname);
+        mix.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 24));
 
-//        System.out.println("IPv4 -> " + mix.getInterfaceAddresses());
-//        System.out.println("MTU -> " + mix.getMTU());
+//        MacOsNetworkInterfaceEx.setInterfaceAddress(ifname, ipv4);
+
+        System.out.println("IPv4 -> " + mix.getInterfaceAddresses());
+        System.out.println("MTU -> " + mix.getMTU());
         System.out.println("OK");
 
 
