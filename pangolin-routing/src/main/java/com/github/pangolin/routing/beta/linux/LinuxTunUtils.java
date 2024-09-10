@@ -1,22 +1,16 @@
 package com.github.pangolin.routing.beta.linux;
 
 
-import static com.github.pangolin.routing.beta.linux.Socket.AF_INET;
-import static com.github.pangolin.routing.beta.linux.Socket.AF_INET6;
 import static com.sun.jna.platform.linux.Fcntl.O_RDWR;
-import static org.drasyl.channel.tun.jna.shared.LibC.close;
 import static org.drasyl.channel.tun.jna.shared.LibC.ioctl;
-import static org.drasyl.channel.tun.jna.shared.LibC.socket;
-import static org.drasyl.channel.tun.jna.shared.Socket.SOCK_DGRAM;
 
-import com.github.pangolin.routing.beta.If.Ifreq;
+import com.github.pangolin.routing.beta.linux.If.Ifreq;
 import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
-import io.netty.util.NetUtil;
+
 import java.io.IOException;
 import java.net.Inet4Address;
-import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;

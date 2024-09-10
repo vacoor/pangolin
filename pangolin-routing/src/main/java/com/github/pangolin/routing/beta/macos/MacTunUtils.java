@@ -1,21 +1,16 @@
 package com.github.pangolin.routing.beta.macos;
 
-import com.github.pangolin.routing.beta.If.sockaddr_in;
-import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
-import com.sun.jna.Structure;
 import com.sun.jna.ptr.IntByReference;
 import org.drasyl.channel.tun.jna.darwin.DarwinTunDevice;
 
 import java.io.IOException;
 import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import static com.github.pangolin.routing.beta.If.IFNAMSIZ;
 import static com.github.pangolin.routing.beta.macos.KernControl.CTLIOCGINFO;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 import static org.drasyl.channel.tun.jna.shared.LibC.*;
@@ -23,9 +18,6 @@ import static org.drasyl.channel.tun.jna.shared.Socket.AF_SYSTEM;
 import static org.drasyl.channel.tun.jna.shared.Socket.SOCK_DGRAM;
 
 public class MacTunUtils {
-    static final int AF_INET = 2;
-    static final int AF_INET6 = 30;
-
     static final int SYSPROTO_CONTROL = 2;
     static final String UTUN_CONTROL_NAME = "com.apple.net.utun_control";
     static final int UTUN_OPT_IFNAME = 2;
@@ -34,20 +26,16 @@ public class MacTunUtils {
 
 
     public static void main(String[] args) throws Exception {
-//        TunDevice dev = DarwinTunDevice.open("utun9", 0);
-//        System.out.println(dev.localAddress());
-
-//        MacOsNetworkInterfaceEx en0 = new MacOsNetworkInterfaceEx("en0");
-//        List<InterfaceAddressEx> interfaceAddresses = en0.getInterfaceAddresses();
-//        System.exit(0);
-
         final String ifname = createDarwinTun("utun9");
         System.out.println("IFNAME:" + ifname);
 
 //        System.out.println("MTU=" + getMtu(ifname));
-        Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("10.18.71.2");
+        Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("192.168.3.1");
+        Inet4Address ipv4_2 = (Inet4Address) InetAddress.getByName("192.168.3.2");
         MacOsNetworkInterfaceEx mix = new MacOsNetworkInterfaceEx(ifname);
-        mix.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 24));
+//        mix.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 16));
+        MacOsNetworkInterfaceEx.addInterfaceAddress(ifname, ipv4, 16);
+        MacOsNetworkInterfaceEx.addInterfaceAddress(ifname, ipv4_2, 24);
 
 //        MacOsNetworkInterfaceEx.setInterfaceAddress(ifname, ipv4);
 
@@ -55,28 +43,12 @@ public class MacTunUtils {
         System.out.println("MTU -> " + mix.getMTU());
         System.out.println("OK");
 
+        Inet6Address ipv6 = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
+        MacOsNetworkInterfaceEx.addInterfaceAddress(ifname, ipv6, 64);
 
-        /*
-        final int sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
-        try {
-            Inet6Address ipv6 = (Inet6Address) InetAddress.getByName("2001:da8:ecd1::1");
-            MacOsNetworkInterfaceEx2.setInterfaceAddress6(sockfd, ifname, ipv6);
-            System.out.println("IPv6 -> OK");
-        }finally {
-            close(sockfd);
-        }
-        */
+        System.out.println("IPv6 -> OK");
 
-        /*
-        byte[] ip = getIpAddress(ifname);
-        System.out.println(NetUtil.bytesToIpAddress(ip));
-
-        setIpv4Netmask(ifname, InetAddress.getByName("255.255.0.0"));
-        byte[] netmask = getIpv4Netmask(ifname);
-        System.out.println(NetUtil.bytesToIpAddress(netmask));
-
-        System.out.println("MTU: " + getMtu(ifname));
-        */
+        System.out.println(MacOsNetworkInterfaceEx.getInterfaceIpAddress6(ifname));
 
         TimeUnit.SECONDS.sleep(30);
     }
@@ -90,16 +62,13 @@ public class MacTunUtils {
             if (name.startsWith(DEVICE_PREFIX)) {
                 try {
                     index = Integer.parseInt(name.substring(DEVICE_PREFIX.length()));
-                }
-                catch (final NumberFormatException e) {
+                } catch (final NumberFormatException e) {
                     throw ILLEGAL_NAME_EXCEPTION;
                 }
-            }
-            else {
+            } else {
                 throw ILLEGAL_NAME_EXCEPTION;
             }
-        }
-        else {
+        } else {
             index = 0;
         }
 
@@ -123,7 +92,7 @@ public class MacTunUtils {
         final IntByReference sockNameLen = new IntByReference(DarwinTunDevice.SockName.LENGTH);
         getsockopt(fd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME, sockName, sockNameLen);
 
-            final String ifname = Native.toString(sockName.name, US_ASCII);
+        final String ifname = Native.toString(sockName.name, US_ASCII);
 //        System.out.println("IF:" + ifname);
 //        TimeUnit.SECONDS.sleep(15);
 //        System.out.println("MTU=" + getMtu(fd, ifname));

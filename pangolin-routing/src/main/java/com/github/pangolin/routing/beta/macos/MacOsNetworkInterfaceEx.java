@@ -1,26 +1,19 @@
 package com.github.pangolin.routing.beta.macos;
 
 
-import com.github.pangolin.routing.beta.If.*;
 import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.github.pangolin.routing.beta.NetworkInterfaceEx;
-import com.sun.jna.Native;
-import com.sun.jna.Pointer;
-import com.sun.jna.Structure;
+import com.github.pangolin.routing.beta.macos.If.*;
 import io.netty.util.NetUtil;
-import org.pcap4j.core.Inets;
 
 import java.net.*;
 import java.util.Collections;
 import java.util.List;
 
-import static com.github.pangolin.routing.beta.If.IFNAMSIZ;
 import static com.github.pangolin.routing.beta.linux.Socket.AF_INET;
 import static com.github.pangolin.routing.beta.linux.Socket.SOCK_DGRAM;
 import static com.github.pangolin.routing.beta.macos.Sockio.*;
-import static java.nio.charset.StandardCharsets.US_ASCII;
 import static org.drasyl.channel.tun.jna.shared.LibC.*;
-import static org.drasyl.channel.tun.jna.shared.LibC.ioctl;
 import static org.drasyl.channel.tun.jna.shared.Socket.AF_INET6;
 
 /**
@@ -35,7 +28,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
 
     @Override
     public List<InterfaceAddressEx> getInterfaceAddresses() {
-        final int fd = fd();
+        final int fd = fd4();
         try {
             final InetAddress ipAddress = toInetAddress(getInterfaceIpAddress(fd, ifname));
             final byte[] interfaceNetmask = getInterfaceNetmask(fd, ifname);
@@ -61,7 +54,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         if (!(addr instanceof Inet4Address)) {
             throw new UnsupportedOperationException();
         }
-        final int fd = fd();
+        final int fd = fd4();
         try {
             setInterfaceIpAddress(fd, ifname, (Inet4Address) addr);
             byte[] bytes = subnetMaskToAddress(prefixToSubnetMask(networkPrefixLength));
@@ -102,7 +95,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
     }
 
     private static byte[] subnetMaskToAddress(final int subnetMask) {
-        return new byte[] {
+        return new byte[]{
                 (byte) ((subnetMask >> 24) & 0xff),
                 (byte) ((subnetMask >> 16) & 0xff),
                 (byte) ((subnetMask >> 8) & 0xff),
@@ -122,7 +115,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
 
     @Override
     public int getMTU() throws SocketException {
-        final int fd = fd();
+        final int fd = fd4();
         try {
             return getMtu(fd, ifname);
         } finally {
@@ -130,48 +123,42 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         }
     }
 
-    private static int fd() {
+    private static int fd4() {
         return socket(AF_INET, SOCK_DGRAM, 0);
     }
 
-    private static byte[] getInterfaceIpAddress(final int fd, final String ifname) {
-        final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_addr");
-
-        ioctl(fd, SIOCGIFADDR, ifr);
-
-        final sockaddr_in addr = ifr.ifr_ifru.ifru_addr;
-        assert AF_INET == addr.sin_family;
-        return addr.sin_addr;
+    private static int fd6() {
+        return socket(AF_INET6, SOCK_DGRAM, 0);
     }
 
-    private static void setInterfaceIpAddress(final int fd, final String ifname, final Inet4Address addr) {
-        final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_addr");
-        ifr.ifr_ifru.ifru_addr.sin_family = AF_INET;
-        ifr.ifr_ifru.ifru_addr.sin_port = 0;
-        ifr.ifr_ifru.ifru_addr.sin_addr = addr.getAddress();
-
-        ioctl(fd, SIOCSIFADDR, ifr);
-    }
 
     private static byte[] getInterfaceNetmask(final int fd, final String ifname) {
         final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_netmask");
+        ifr.ifr_ifru.setType("ifru_addr");
 
         ioctl(fd, SIOCGIFNETMASK, ifr);
 
-        final sockaddr_in netmask = ifr.ifr_ifru.ifru_netmask;
+        final sockaddr netmask = ifr.ifr_ifru.ifru_addr;
         assert AF_INET == netmask.sin_family;
         return netmask.sin_addr;
     }
 
     private static void setInterfaceNetmask(final int fd, final String ifname, final Inet4Address addr) {
+        /*-
+         Wrong:
+         -> Wrong 1: address: 1.2.3.4 netmask: 255.255.255.0
+         -> Wrong 2: address: 10.18.71.2 netmask: 255.255.255.0
+         -> result: netmask 0xff0000
+         --------------------------
+         Correct: address: 192.168.1.1 netmask: 255.255.255.0
+         -> result: netmask 0xffffff00
+         */
         final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_netmask");
-        ifr.ifr_ifru.ifru_netmask.sin_family = AF_INET;
-        ifr.ifr_ifru.ifru_netmask.sin_port = 0;
-        ifr.ifr_ifru.ifru_netmask.sin_addr = addr.getAddress();
+        ifr.ifr_ifru.setType("ifru_addr");
+
+        ifr.ifr_ifru.ifru_addr.sin_family = AF_INET;
+        ifr.ifr_ifru.ifru_addr.sin_port = 0;
+        ifr.ifr_ifru.ifru_addr.sin_addr = addr.getAddress();
 
         int code = ioctl(fd, SIOCSIFNETMASK, ifr);
         System.out.println("CODE=" + code);
@@ -192,131 +179,110 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
 
     // -------------------
 
-    public static void setInterfaceAddress(final String ifname, final Inet4Address address) {
-        int fd = fd();
+    public static void addInterfaceAddress(final String ifname, final InetAddress address, final int prefixLength) {
+        int fd = 0;
         try {
-            setInterfaceAddress(fd, ifname, address);
+            if (address instanceof Inet4Address) {
+                fd = fd4();
+                addInterfaceAddress(fd, ifname, (Inet4Address) address, prefixLength);
+            } else if (address instanceof Inet6Address) {
+                fd = fd6();
+                addInterfaceAddress(fd, ifname, (Inet6Address) address, prefixLength);
+            } else {
+                throw new UnsupportedOperationException();
+            }
         } finally {
             close(fd);
         }
     }
 
-    public static void setInterfaceAddress(final int fd, final String ifname, final Inet4Address address) {
-        final ifaliasreq ifra = new ifaliasreq(ifname);
-        ifra.ifra_addr.sin_family = Inets.AF_INET;
-        ifra.ifra_addr.sin_port = 0;
-        ifra.ifra_addr.sin_addr = address.getAddress();
+    @Deprecated
+    public static byte[] getInterfaceIpAddress6(final String ifname) {
+        int fd = fd6();
+        final In6Ifreq ifr6 = new In6Ifreq(ifname);
+        ifr6.ifr_ifru.setType("ifru_addr");
 
-        ifra.ifra_mask.sin_family = Inets.AF_INET;
-        ifra.ifra_mask.sin_port = 0;
-//        ifra.ifra_mask.sin_addr = getNetworkAddress(address.getAddress(), 32);
-        ifra.ifra_mask.sin_addr = new byte[] {
-                (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF
-        };
-        System.out.println(NetUtil.bytesToIpAddress(ifra.ifra_mask.sin_addr));
+        ioctl(fd, SIOCGIFADDR_IN6, ifr6);
 
-        ioctl(fd, SIOCSIFADDR, ifra);
-//        ioctl(fd, SIOCAIFADDR, ifra);
+        final sockaddr_in6 addr = ifr6.ifr_ifru.ifru_addr;
+        assert AF_INET6 == addr.sin6_family;
+        return addr.sin6_addr;
     }
 
-    static void setInterfaceAddress6(final int fd, final String ifname, final Inet6Address address) {
+    private static byte[] getInterfaceIpAddress(final int fd, final String ifname) {
+        final Ifreq ifr = new Ifreq(ifname);
+        ifr.ifr_ifru.setType("ifru_addr");
+
+        ioctl(fd, SIOCGIFADDR, ifr);
+
+        final sockaddr addr = ifr.ifr_ifru.ifru_addr;
+        assert AF_INET == addr.sin_family;
+        return addr.sin_addr;
+    }
+
+    private static void setInterfaceIpAddress(final int fd, final String ifname, final Inet4Address addr) {
+        final Ifreq ifr = new Ifreq(ifname);
+        ifr.ifr_ifru.setType("ifru_addr");
+        ifr.ifr_ifru.ifru_addr.sin_family = AF_INET;
+        ifr.ifr_ifru.ifru_addr.sin_port = 0;
+        ifr.ifr_ifru.ifru_addr.sin_addr = addr.getAddress();
+
+        ioctl(fd, SIOCSIFADDR, ifr);
+    }
+
+    private static void addInterfaceAddress(final int fd, final String ifname,
+                                            final Inet4Address address, final int prefixLength) {
+        final byte[] ipAddress = address.getAddress();
+
+        final in_aliasreq ifr = new in_aliasreq(ifname);
+        ifr.ifra_addr.sin_family = AF_INET;
+        ifr.ifra_addr.sin_port = 0;
+        ifr.ifra_addr.sin_addr = ipAddress;
+
+        // required.
+        ifr.ifra_broadaddr.sin_family = AF_INET;
+        ifr.ifra_broadaddr.sin_port = 0;
+        ifr.ifra_broadaddr.sin_addr = ipAddress;
+
+        ifr.ifra_mask.sin_family = AF_INET;
+        ifr.ifra_mask.sin_port = 0;
+        ifr.ifra_mask.sin_addr = prefixLengthToNetmask4(prefixLength);
+
+        ioctl(fd, SIOCAIFADDR, ifr);
+    }
+
+    private static byte[] prefixLengthToNetmask4(final int length) {
+        return subnetMaskToAddress(prefixToSubnetMask(length));
+    }
+
+    private static void addInterfaceAddress(final int fd, final String ifname,
+                                            final Inet6Address address, final int prefixLength) {
+        final byte[] ipAddress = address.getAddress();
+
         final in6_aliasreq ifr6 = new in6_aliasreq(ifname);
-        ifr6.ifra_addr.sin6_len = (byte) Native.getNativeSize(sockaddr_in6.class, ifr6.ifra_addr);
-//        ifr6.ifra_addr.sin6_len = 16;
+        ifr6.ifra_addr.sin6_len = (byte) ifr6.ifra_addr.size();
         ifr6.ifra_addr.sin6_family = AF_INET6;
         ifr6.ifra_addr.sin6_port = 0;
-        ifr6.ifra_addr.sin6_addr = address.getAddress();
+        ifr6.ifra_addr.sin6_addr = ipAddress;
 
-        System.out.println("Size: " + ifr6.ifra_addr.sin6_len);
-
-
-//        ifr6.ifra_prefixmask.sin6_len = 16;
-        ifr6.ifra_prefixmask.sin6_len = (byte) Native.getNativeSize(sockaddr_in6.class, ifr6.ifra_prefixmask);
+        ifr6.ifra_prefixmask.sin6_len = (byte) ifr6.ifra_prefixmask.size();
         ifr6.ifra_prefixmask.sin6_family = AF_INET6;
         ifr6.ifra_prefixmask.sin6_port = 0;
-        ifr6.ifra_prefixmask.sin6_addr = new byte[] {
+        ifr6.ifra_prefixmask.sin6_addr = prefixLengthToNetmask6(prefixLength);
+
+        /* important!!! */
+        ifr6.ifra_lifetime.ia6t_vltime = in6_addrlifetime.ND6_INFINITE_LIFETIME;
+        ifr6.ifra_lifetime.ia6t_pltime = in6_addrlifetime.ND6_INFINITE_LIFETIME;
+
+        ioctl(fd, SIOCAIFADDR_IN6, ifr6);
+    }
+
+    private static byte[] prefixLengthToNetmask6(final int length) {
+        return new byte[]{
                 (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF,
                 (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF,
                 0, 0, 0, 0,
                 0, 0, 0, 0
         };
-
-        System.out.println("Size: " + ifr6.ifra_prefixmask.sin6_len);
-
-        /* important!!! */
-        ifr6.ifra_lifetime.ia6t_vltime = 0xFFFFFFFF;
-        ifr6.ifra_lifetime.ia6t_pltime = 0xFFFFFFFF;
-
-        System.out.println(NetUtil.bytesToIpAddress(ifr6.ifra_addr.sin6_addr));
-
-//        ioctl(fd, SIOCSIFADDR, ifr6);
-        ioctl(fd, SIOCAIFADDR_IN6, ifr6);
-    }
-
-    @Structure.FieldOrder({"ifra_name", "ifra_addr", "ifra_broadaddr", "ifra_mask"})
-    public static class ifaliasreq extends Structure {
-        public byte[] ifra_name = new byte[IFNAMSIZ];
-        public sockaddr_in ifra_addr;
-        public sockaddr_in ifra_broadaddr;
-        public sockaddr_in ifra_mask;
-
-        public ifaliasreq(final String name) {
-            this.ifra_name = new byte[IFNAMSIZ];
-            if (name != null) {
-                final byte[] bytes = name.getBytes(US_ASCII);
-                System.arraycopy(bytes, 0, this.ifra_name, 0, bytes.length);
-            }
-        }
-    }
-
-    /**
-     * https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/in6.h
-     */
-    @Structure.FieldOrder({"sin6_len", "sin6_family", "sin6_port", "sin6_flowinfo", "sin6_addr", "sin6_scope_id"})
-    public static class sockaddr_in6 extends Structure {
-
-        public sockaddr_in6() {
-        }
-
-        public sockaddr_in6(Pointer p) {
-            super(p);
-            read();
-        }
-
-        public byte sin6_len;
-        public short sin6_family;
-        public short sin6_port;
-        public int sin6_flowinfo;
-        public byte[] sin6_addr = new byte[16];
-        public int sin6_scope_id;
-    }
-
-    /**
-     * https://github.com/apple/darwin-xnu/blob/main/bsd/netinet6/in6_var.h
-     */
-    @Structure.FieldOrder({"ifra_name", "ifra_addr", "ifra_dstaddr", "ifra_prefixmask", "ifra_flags", "ifra_lifetime"})
-    public static class in6_aliasreq extends Structure {
-        public byte[] ifra_name = new byte[IFNAMSIZ];
-        public sockaddr_in6 ifra_addr;
-        public sockaddr_in6 ifra_dstaddr;
-        public sockaddr_in6 ifra_prefixmask;
-        public int ifra_flags;
-        public in6_addrlifetime ifra_lifetime;
-
-        public in6_aliasreq(final String name) {
-            this.ifra_name = new byte[IFNAMSIZ];
-            if (name != null) {
-                final byte[] bytes = name.getBytes(US_ASCII);
-                System.arraycopy(bytes, 0, this.ifra_name, 0, bytes.length);
-            }
-        }
-    }
-
-    @Structure.FieldOrder({"ia6t_expire", "ia6t_preferred", "ia6t_vltime", "ia6t_pltime"})
-    public static class in6_addrlifetime extends Structure {
-        public long ia6t_expire;
-        public long ia6t_preferred;
-        public int ia6t_vltime = 0xFFFFFFFF;
-        public int ia6t_pltime = 0xFFFFFFFF;
     }
 }

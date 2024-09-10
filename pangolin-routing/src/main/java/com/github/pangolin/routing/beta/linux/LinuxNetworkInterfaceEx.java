@@ -1,9 +1,8 @@
 package com.github.pangolin.routing.beta.linux;
 
-import com.github.pangolin.routing.beta.If;
-import com.github.pangolin.routing.beta.If.Ifreq;
-import com.github.pangolin.routing.beta.If.in6_ifreq;
-import com.github.pangolin.routing.beta.If.sockaddr_in;
+import com.github.pangolin.routing.beta.linux.If.Ifreq;
+import com.github.pangolin.routing.beta.linux.If.in6_ifreq;
+import com.github.pangolin.routing.beta.linux.If.sockaddr_in;
 import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.github.pangolin.routing.beta.NetworkInterfaceEx;
 
