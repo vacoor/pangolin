@@ -55,6 +55,7 @@ public class LinuxTunUtils {
         System.out.println("IPv6 -> OK");
 
         ifaddrs ifa = new ifaddrs();
+        ifa.ifa_name = ifname;
         int code = LibC2.INSTANCE.getifaddrs(ifa);
 
         for(ifaddrs node = ifa; null != node; node = node.ifa_next) {
@@ -78,7 +79,7 @@ public class LinuxTunUtils {
                 System.out.println(LinuxNetworkInterfaceEx.netmaskToPrefixLength(sockaddr_in.sin6_addr));
             }
 
-            sa_family = node.ifa_netmask.sa_family;
+            sa_family = null != node.ifa_netmask ? node.ifa_netmask.sa_family : -1;
             if (AF_INET == sa_family) {
                 final sockaddr_in sockaddr_in = (If.sockaddr_in) node.ifa_netmask.getTypedValue(sockaddr_in.class);
                 System.out.println(NetUtil.bytesToIpAddress(sockaddr_in.sin_addr));
