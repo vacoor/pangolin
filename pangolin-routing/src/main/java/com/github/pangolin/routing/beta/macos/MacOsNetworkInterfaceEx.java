@@ -290,16 +290,6 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         ioctl(fd, SIOCSIFADDR, ifr);
     }
 
-    private static void deleteInterfaceIpAddress4(final int fd, final String ifname, final Inet4Address addr) {
-        final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_addr");
-        ifr.ifr_ifru.ifru_addr.sin_family = AF_INET;
-        ifr.ifr_ifru.ifru_addr.sin_port = 0;
-        ifr.ifr_ifru.ifru_addr.sin_addr = addr.getAddress();
-
-        ioctl(fd, SIOCDIFADDR, ifr);
-    }
-
     private static byte[] getInterfaceNetmask4(final int fd, final String ifname) {
         final Ifreq ifr = new Ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_addr");
@@ -351,22 +341,19 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         ioctl(fd, SIOCAIFADDR, ifr);
     }
 
+    private static void deleteInterfaceIpAddress4(final int fd, final String ifname, final Inet4Address addr) {
+        final Ifreq ifr = new Ifreq(ifname);
+        ifr.ifr_ifru.setType("ifru_addr");
+        ifr.ifr_ifru.ifru_addr.sin_family = AF_INET;
+        ifr.ifr_ifru.ifru_addr.sin_port = 0;
+        ifr.ifr_ifru.ifru_addr.sin_addr = addr.getAddress();
+
+        ioctl(fd, SIOCDIFADDR, ifr);
+    }
+
     // ------------------------ END IPv4 related ------------------------
 
     // ------------------------ START IPv6 related ------------------------
-
-    @Deprecated
-    public static byte[] getInterfaceIpAddress6(final String ifname) {
-        int fd = fd6();
-        final In6Ifreq ifr6 = new In6Ifreq(ifname);
-        ifr6.ifr_ifru.setType("ifru_addr");
-
-        ioctl(fd, SIOCGIFADDR_IN6, ifr6);
-
-        final sockaddr_in6 addr = ifr6.ifr_ifru.ifru_addr;
-        assert AF_INET6 == addr.sin6_family;
-        return addr.sin6_addr;
-    }
 
 
     private static void addInterfaceAddress6(final int fd, final String ifname,

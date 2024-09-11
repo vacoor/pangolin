@@ -34,41 +34,34 @@ public class LinuxTunUtils {
         final String ifname = createUnixTun("tun9");
         System.out.println(ifname);
 
+
         final LinuxNetworkInterfaceEx nix = new LinuxNetworkInterfaceEx(ifname);
         System.out.println("MTU -> " + nix.getMTU());
 
-        nix.setInterfaceAddress(InterfaceAddressEx.of("192.168.1.2", 16));
-        nix.setInterfaceAddress(InterfaceAddressEx.of("192.168.1.3", 16));
+        Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("192.168.3.1");
+        Inet4Address ipv4_2 = (Inet4Address) InetAddress.getByName("192.168.3.2");
 
-        System.out.println("Set IPv4 -> " + nix.getInterfaceAddresses());
+        nix.setInterfaceAddress4(ipv4, 16);
+        nix.addInterfaceAddress(InterfaceAddressEx.of(ipv4_2, 24));
 
-        nix.addInterfaceAddress(InterfaceAddressEx.of("192.168.1.4", 16));
-        System.out.println("Add IPv4 -> " + nix.getInterfaceAddresses());
-
-//        TimeUnit.SECONDS.sleep(10);
-
-//        nix.deleteInterfaceAddress(InterfaceAddressEx.of("192.168.1.4", 16));
+        System.out.println("IPv4 -> " + nix.getInterfaceAddresses());
+        System.out.println("OK");
 
         Inet6Address ipv6 = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
+        Inet6Address ipv62 = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa3");
         nix.addInterfaceAddress(InterfaceAddressEx.of(ipv6, 64));
+        nix.addInterfaceAddress(InterfaceAddressEx.of(ipv62, 64));
 
         System.out.println("IPv6 -> OK");
 
-        for (InterfaceAddressEx address : nix.getInterfaceAddresses()) {
-            System.out.println(address);
-        }
-        System.out.println("----------");
-
-        for (InterfaceAddressEx address : LinuxNetworkInterfaceEx.getInterfaceAddresses(null, AF_UNSPEC)) {
-            System.out.println(address);
-        }
-
         TimeUnit.SECONDS.sleep(10);
 
-        nix.deleteInterfaceAddress(InterfaceAddressEx.of(ipv6, 64));
-        System.out.println("IPv6 -> Clean");
+        nix.flushInterfaceAddresses();
+
+        System.out.println("Cleanup -> OK");
 
         TimeUnit.SECONDS.sleep(30);
+
     }
 
     private static String createUnixTun(final String name) throws Exception {

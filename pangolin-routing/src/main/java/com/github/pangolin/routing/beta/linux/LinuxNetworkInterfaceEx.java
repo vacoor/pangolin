@@ -14,6 +14,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static com.github.pangolin.routing.beta.linux.Socket.*;
 import static com.github.pangolin.routing.beta.linux.Sockios.*;
@@ -29,19 +30,32 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         this.ifname = ifname;
     }
 
-    @Override
-    public List<InterfaceAddressEx> getInterfaceAddresses() {
-        /*
+    public InterfaceAddressEx getInterfaceAddress4() {
         final int fd = fd4();
         try {
             final InetAddress ipAddress = toInetAddress(getInterfaceIpAddress4(fd, ifname));
             final byte[] interfaceNetmask = getInterfaceNetmask4(fd, ifname);
             final int prefix = netmaskToPrefixLength(interfaceNetmask);
-            return Collections.singletonList(InterfaceAddressEx.of(ipAddress, (short) prefix));
+            return InterfaceAddressEx.of(ipAddress, prefix);
         } finally {
             close(fd);
         }
-        */
+    }
+
+    public void setInterfaceAddress4(final Inet4Address addr, final int networkPrefixLength) {
+        final int fd = fd4();
+        try {
+            setInterfaceIpAddress4(fd, ifname, addr);
+
+            final byte[] netmask = cidrPrefixToNetmask(addr.getAddress().clone(), networkPrefixLength);
+            setInterfaceNetmask4(fd, ifname, netmask);
+        } finally {
+            close(fd);
+        }
+    }
+
+    @Override
+    public List<InterfaceAddressEx> getInterfaceAddresses() {
         return getInterfaceAddresses(ifname, AF_UNSPEC);
     }
 
@@ -52,30 +66,24 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         if (addr instanceof Inet4Address) {
             final int fd = fd4();
             try {
-                setInterfaceAddress4(fd, ifname, (Inet4Address) addr, networkPrefixLength);
+                flushInterfaceAddresses4(fd, ifname);
+                addInterfaceAddress4(fd, ifname, (Inet4Address) addr, networkPrefixLength);
             } finally {
                 close(fd);
             }
         } else if (addr instanceof Inet6Address) {
             final int fd = fd6();
             try {
-                // FIXME flushInterfaceAddress6
+                flushInterfaceAddresses6(fd, ifname);
                 addInterfaceAddress6(fd, ifname, (Inet6Address) addr, networkPrefixLength);
             } finally {
                 close(fd);
             }
         } else {
             throw new UnsupportedOperationException();
+
         }
     }
-
-    private void setInterfaceAddress4(final int fd, final String ifname, final Inet4Address addr, final int networkPrefixLength) {
-        setInterfaceIpAddress4(fd, ifname, (Inet4Address) addr);
-
-        final byte[] netmask = cidrPrefixToNetmask(addr.getAddress().clone(), networkPrefixLength);
-        setInterfaceNetmask4(fd, ifname, (Inet4Address) toInetAddress(netmask));
-    }
-
 
     @Override
     public void addInterfaceAddress(final InterfaceAddressEx address) {
@@ -84,8 +92,7 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         if (addr instanceof Inet4Address) {
             final int fd = fd4();
             try {
-                // FIXME
-                setInterfaceAddress4(fd, ifname, (Inet4Address) addr, networkPrefixLength);
+                addInterfaceAddress4(fd, ifname, (Inet4Address) addr, networkPrefixLength);
             } finally {
                 close(fd);
             }
@@ -127,7 +134,29 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
 
     @Override
     public void flushInterfaceAddresses() {
-        // FIXME
+        final List<InterfaceAddressEx> addresses = getInterfaceAddresses(ifname, AF_UNSPEC);
+        final List<InterfaceAddressEx> ipv4 = addresses.stream()
+                .filter(a -> a.getAddress() instanceof Inet4Address)
+                .collect(Collectors.toList());
+        final List<InterfaceAddressEx> ipv6 = addresses.stream()
+                .filter(a -> a.getAddress() instanceof Inet6Address)
+                .collect(Collectors.toList());
+        if (!ipv4.isEmpty()) {
+            final int fd = fd4();
+            try {
+                ipv4.forEach(addr -> deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) addr.getAddress()));
+            } finally {
+                close(fd);
+            }
+        }
+        if (!ipv6.isEmpty()) {
+            final int fd = fd6();
+            try {
+                ipv6.forEach(addr -> deleteInterfaceAddress6(fd, ifname, (Inet6Address) addr.getAddress(), addr.getNetworkPrefixLength()));
+            } finally {
+                close(fd);
+            }
+        }
     }
 
     @Override
@@ -204,36 +233,23 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         }
     }
 
-    private static void flushInterfaceAddresses(final String ifname, int family) {
-        for (final InterfaceAddressEx interfaceAddress : getInterfaceAddresses(ifname, family)) {
-            deleteInterfaceAddress(ifname, interfaceAddress);
-        }
-    }
-
-    private static void deleteInterfaceAddress(final String ifname, final InterfaceAddressEx address) {
-        final InetAddress addr = address.getAddress();
-        if (addr instanceof Inet4Address) {
-            final int fd = fd4();
-            try {
-                deleteInterfaceIpAddress4(fd4(), ifname, (Inet4Address) addr);
-            } finally {
-                close(fd);
-            }
-        } else if (addr instanceof Inet6Address) {
-            final int fd = fd6();
-            try {
-                deleteInterfaceAddress6(fd6(), ifname, (Inet6Address) addr, address.getNetworkPrefixLength());
-            } finally {
-                close(fd);
-            }
-        }
-    }
-
     private static InetAddress toInetAddress(final byte[] sinAddr) {
         try {
             return InetAddress.getByAddress(sinAddr);
         } catch (final UnknownHostException e) {
             throw new IllegalStateException(e);
+        }
+    }
+
+    private static void flushInterfaceAddresses4(final int fd, final String ifname) {
+        for (final InterfaceAddressEx remove : getInterfaceAddresses(ifname, AF_INET)) {
+            deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) remove.getAddress());
+        }
+    }
+
+    private static void flushInterfaceAddresses6(final int fd, final String ifname) {
+        for (final InterfaceAddressEx remove : getInterfaceAddresses(ifname, AF_INET6)) {
+            deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) remove.getAddress());
         }
     }
 
@@ -262,17 +278,6 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         ioctl(fd, SIOCSIFADDR, ifr);
     }
 
-    private static void deleteInterfaceIpAddress4(final int fd, final String ifname, final Inet4Address addr) {
-        final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_addr");
-        ifr.ifr_ifru.ifru_addr.sin_family = AF_INET;
-        ifr.ifr_ifru.ifru_addr.sin_port = 0;
-        ifr.ifr_ifru.ifru_addr.sin_addr = addr.getAddress();
-
-        // FIXME [25] Inappropriate ioctl for device
-        ioctl(fd, SIOCDIFADDR, ifr);
-    }
-
     private static byte[] getInterfaceNetmask4(final int fd, final String ifname) {
         final Ifreq ifr = new Ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_netmask");
@@ -284,19 +289,56 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         return netmask.sin_addr;
     }
 
-    private static void setInterfaceNetmask4(final int fd, final String ifname, final Inet4Address addr) {
+    private static void setInterfaceNetmask4(final int fd, final String ifname, final byte[] addr) {
         final Ifreq ifr = new Ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_netmask");
         ifr.ifr_ifru.ifru_netmask.sin_family = AF_INET;
         ifr.ifr_ifru.ifru_netmask.sin_port = 0;
-        ifr.ifr_ifru.ifru_netmask.sin_addr = addr.getAddress();
+        ifr.ifr_ifru.ifru_netmask.sin_addr = addr;
 
         ioctl(fd, SIOCSIFNETMASK, ifr);
     }
 
+    private static void addInterfaceAddress4(final int fd, final String ifname,
+                                             final Inet4Address address, final int prefixLength) {
+        // FIXME
+        /*
+        final byte[] ipAddress = address.getAddress();
+
+        final in_aliasreq ifr = new in_aliasreq(ifname);
+        ifr.ifra_addr.sin_family = AF_INET;
+        ifr.ifra_addr.sin_port = 0;
+        ifr.ifra_addr.sin_addr = ipAddress;
+
+        // required.
+        ifr.ifra_broadaddr.sin_family = AF_INET;
+        ifr.ifra_broadaddr.sin_port = 0;
+        ifr.ifra_broadaddr.sin_addr = ipAddress;
+
+        ifr.ifra_mask.sin_family = AF_INET;
+        ifr.ifra_mask.sin_port = 0;
+        ifr.ifra_mask.sin_addr = cidrPrefixToNetmask(ipAddress.clone(), prefixLength);
+
+        ioctl(fd, SIOCAIFADDR, ifr);
+        */
+    }
+
+    private static void deleteInterfaceIpAddress4(final int fd, final String ifname, final Inet4Address addr) {
+        final Ifreq ifr = new Ifreq(ifname);
+        ifr.ifr_ifru.setType("ifru_addr");
+        ifr.ifr_ifru.ifru_addr.sin_family = AF_INET;
+        ifr.ifr_ifru.ifru_addr.sin_port = 0;
+        ifr.ifr_ifru.ifru_addr.sin_addr = addr.getAddress();
+
+        // FIXME [25] Inappropriate ioctl for device
+//        ioctl(fd, SIOCDIFADDR, ifr);
+    }
+
+
     // ------------------------ END IPv4 related ------------------------
 
     // ------------------------ START IPv6 related ------------------------
+
 
     private static void addInterfaceAddress6(final int fd, final String ifname, final Inet6Address addr, final int prefixLength) {
         // Wrong: sysctl net.ipv6.conf.all.disable_ipv6 --> 1: [13] Permission denied
