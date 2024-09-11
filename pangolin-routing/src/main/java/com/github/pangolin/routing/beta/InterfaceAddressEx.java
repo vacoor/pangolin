@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.beta;
 
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 
 public class InterfaceAddressEx {
     private final InetAddress address;
@@ -74,4 +75,9 @@ public class InterfaceAddressEx {
     public static InterfaceAddressEx of(final InetAddress address, final int networkPrefixLength) {
         return new InterfaceAddressEx(address, networkPrefixLength);
     }
+
+    public static InterfaceAddressEx of(final String address, final int networkPrefixLength) throws UnknownHostException {
+        return new InterfaceAddressEx(InetAddress.getByName(address), networkPrefixLength);
+    }
+
 }

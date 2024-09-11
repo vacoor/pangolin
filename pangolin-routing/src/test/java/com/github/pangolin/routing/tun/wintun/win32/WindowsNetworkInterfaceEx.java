@@ -76,10 +76,12 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         setInterfaceAddress(interfaceLuid, address.getAddress(), (byte) address.getNetworkPrefixLength());
     }
 
+    @Override
     public void addInterfaceAddress(final InterfaceAddressEx address) {
         addInterfaceAddress(interfaceLuid, address.getAddress(), (byte) address.getNetworkPrefixLength());
     }
 
+    @Override
     public void deleteInterfaceAddress(final InterfaceAddressEx address) {
         deleteInterfaceAddress(interfaceLuid, address.getAddress(), (byte) address.getNetworkPrefixLength());
     }
@@ -632,6 +634,14 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         if (WinError.NO_ERROR != err) {
 //            throw new Win32Exception(err)
             throw new IllegalStateException("[" + err + "] " + String.format(message, args));
+        }
+    }
+
+    public static void main(String[] args) throws SocketException, UnknownHostException {
+        final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias("以太网 2");
+//        nix.addInterfaceAddress(InterfaceAddressEx.of("192.168.1.3", 24));
+        for (InterfaceAddressEx interfaceAddress : nix.getInterfaceAddresses()) {
+            System.out.println(interfaceAddress);
         }
     }
 }

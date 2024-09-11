@@ -9,7 +9,6 @@ import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 
-import io.netty.util.NetUtil;
 import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -29,39 +28,30 @@ public class LinuxTunUtils {
         final String ifname = createUnixTun("tun9");
         System.out.println(ifname);
 
-        Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("10.18.71.2");
-        final LinuxNetworkInterfaceEx lix = new LinuxNetworkInterfaceEx(ifname);
-        lix.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 16));
+        final LinuxNetworkInterfaceEx nix = new LinuxNetworkInterfaceEx(ifname);
+        System.out.println("MTU -> " + nix.getMTU());
 
-        System.out.println("IPv4 -> " + lix.getInterfaceAddresses());
-        System.out.println("MTU -> " + lix.getMTU());
+        nix.setInterfaceAddress(InterfaceAddressEx.of("192.168.1.2", 16));
+        nix.setInterfaceAddress(InterfaceAddressEx.of("192.168.1.3", 16));
+
+        System.out.println("Set IPv4 -> " + nix.getInterfaceAddresses());
+
+        nix.addInterfaceAddress(InterfaceAddressEx.of("192.168.1.4", 16));
+        System.out.println("Add IPv4 -> " + nix.getInterfaceAddresses());
+
+        TimeUnit.SECONDS.sleep(10);
+
+//        nix.deleteInterfaceAddress(InterfaceAddressEx.of("192.168.1.4", 16));
 
         Inet6Address ipv6 = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
-        LinuxNetworkInterfaceEx.setInterfaceAddress6(ifname, ipv6, 64);
+        nix.addInterfaceAddress(InterfaceAddressEx.of(ipv6, 64));
 
         System.out.println("IPv6 -> OK");
 
-//        System.out.println(NetUtil.bytesToIpAddress(LinuxNetworkInterfaceEx.getInterfaceAddress6(ifname)));
+        TimeUnit.SECONDS.sleep(10);
 
-        /*
-        setIpAddress(ifname, ipv4);
-        setIpv4Netmask(ifname, InetAddress.getByName("255.255.0.0"));
-
-        byte[] ip = getIpAddress(ifname);
-        System.out.println(NetUtil.bytesToIpAddress(ip));
-
-
-        byte[] netmask = getIpv4Netmask(ifname);
-        System.out.println(NetUtil.bytesToIpAddress(netmask));
-
-        System.out.println("IPv4 -> OK");
-
-        System.out.println("MTU: " + getMtu(ifname));
-
-
-        setIpAddress(ifname, InetAddress.getByName("fec2::22"));
-        System.out.println("IPv6 -> OK");
-        */
+        nix.deleteInterfaceAddress(InterfaceAddressEx.of(ipv6, 64));
+        System.out.println("IPv6 -> Clean");
 
         TimeUnit.SECONDS.sleep(30);
     }

@@ -35,24 +35,6 @@ public interface If {
     /**
      * https://github.com/torvalds/linux/blob/master/include/uapi/linux/in6.h
      */
-//    @Structure.FieldOrder({"sin6_family", "sin6_port", "sin6_flowinfo", "sin6_addr", "sin6_scope_id"})
-    @Structure.FieldOrder({"sin6_addr"})
-    class sockaddr_in6 extends Structure {
-
-        public sockaddr_in6() {
-        }
-
-        public sockaddr_in6(Pointer p) {
-            super(p);
-            read();
-        }
-
-//        public short sin6_family;
-//        public short sin6_port;
-//        public int sin6_flowinfo;
-        public byte[] sin6_addr = new byte[16];
-//        public int sin6_scope_id;
-    }
 
     @Structure.FieldOrder({ "ifr_name", "ifr_ifru" })
     class Ifreq extends Structure {
@@ -113,7 +95,7 @@ public interface If {
      */
     @Structure.FieldOrder({ "ifr6_addr", "ifr6_prefixlen", "ifr6_ifindex" })
     class in6_ifreq extends Structure {
-        public sockaddr_in6 ifr6_addr;
+        public byte[] ifr6_addr = new byte[16];
         public int ifr6_prefixlen;
         public int ifr6_ifindex;
     }

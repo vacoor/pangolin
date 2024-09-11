@@ -39,4 +39,6 @@ public interface Sockios {
   NativeLong SIOCGIFINDEX = new NativeLong(0x8933);
 
   NativeLong SIOGIFINDEX = SIOCGIFINDEX;
+
+  NativeLong SIOCDIFADDR = new NativeLong(0x8936);
 }

@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.beta.macos;
 
+import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 import com.sun.jna.ptr.IntByReference;
@@ -34,8 +35,8 @@ public class MacTunUtils {
         Inet4Address ipv4_2 = (Inet4Address) InetAddress.getByName("192.168.3.2");
         MacOsNetworkInterfaceEx mix = new MacOsNetworkInterfaceEx(ifname);
 //        mix.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 16));
-        MacOsNetworkInterfaceEx.addInterfaceAddress(ifname, ipv4, 16);
-        MacOsNetworkInterfaceEx.addInterfaceAddress(ifname, ipv4_2, 24);
+        mix.addInterfaceAddress(InterfaceAddressEx.of(ipv4, 16));
+        mix.addInterfaceAddress(InterfaceAddressEx.of(ipv4_2, 24));
 
 //        MacOsNetworkInterfaceEx.setInterfaceAddress(ifname, ipv4);
 
@@ -44,7 +45,7 @@ public class MacTunUtils {
         System.out.println("OK");
 
         Inet6Address ipv6 = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
-        MacOsNetworkInterfaceEx.addInterfaceAddress(ifname, ipv6, 64);
+        mix.addInterfaceAddress(InterfaceAddressEx.of(ipv6, 64));
 
         System.out.println("IPv6 -> OK");
 

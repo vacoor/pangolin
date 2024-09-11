@@ -11,6 +11,10 @@ public interface NetworkInterfaceEx {
 
   void setInterfaceAddress(InterfaceAddressEx address);
 
+  void addInterfaceAddress(InterfaceAddressEx address);
+
+  void deleteInterfaceAddress(InterfaceAddressEx address);
+
   void flushInterfaceAddresses();
 
   int getMTU() throws SocketException;
