@@ -24,6 +24,7 @@ import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -85,7 +86,7 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
     private void setInterfaceAddress4(final int fd, final String ifname, final Inet4Address addr, final int networkPrefixLength) {
         setInterfaceIpAddress4(fd, ifname, (Inet4Address) addr);
 
-        final byte[] netmask = prefixLengthToNetmask4(networkPrefixLength);
+        final byte[] netmask = cidrPrefixToNetmask(addr.getAddress().clone(), networkPrefixLength);
         setInterfaceNetmask4(fd, ifname, (Inet4Address) toInetAddress(netmask));
     }
 
@@ -276,14 +277,14 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
 
     // ------------------------ END IPv6 related ------------------------
 
-    private static byte[] prefixLengthToNetmask4(final int cidrPrefix) {
-        final int subnetMask = (int) ((-1L << 32 - cidrPrefix) & 0xffffffff);
-        return new byte[] {
-            (byte) ((subnetMask >> 24) & 0xff),
-            (byte) ((subnetMask >> 16) & 0xff),
-            (byte) ((subnetMask >> 8) & 0xff),
-            (byte) ((subnetMask >> 0) & 0xff)
-        };
+    private static byte[] cidrPrefixToNetmask(final byte[] bytes, int prefix) {
+        Arrays.fill(bytes, (byte) 0xFF);
+        bytes[prefix / 8] <<= prefix % 8;
+        prefix += prefix % 8;
+        for (int i = prefix / 8; i < bytes.length; i++) {
+            bytes[i] = 0;
+        }
+        return bytes;
     }
 
     private static int netmaskToPrefixLength4(final byte[] ipBytes) {

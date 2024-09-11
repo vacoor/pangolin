@@ -28,11 +28,13 @@ import com.github.pangolin.routing.beta.macos.If.in6_aliasreq;
 import com.github.pangolin.routing.beta.macos.If.in_aliasreq;
 import com.github.pangolin.routing.beta.macos.If.sockaddr;
 import com.github.pangolin.routing.beta.macos.If.sockaddr_in6;
+import io.netty.util.NetUtil;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -94,7 +96,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
     private void setInterfaceAddress4(final int fd, final String ifname, final Inet4Address addr, final int networkPrefixLength) {
         setInterfaceIpAddress4(fd, ifname, (Inet4Address) addr);
 
-        final byte[] netmask = prefixLengthToNetmask4(networkPrefixLength);
+        final byte[] netmask = cidrPrefixToNetmask(addr.getAddress().clone(), networkPrefixLength);
         setInterfaceNetmask4(fd, ifname, (Inet4Address) toInetAddress(netmask));
     }
 
@@ -261,7 +263,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
 
         ifr.ifra_mask.sin_family = AF_INET;
         ifr.ifra_mask.sin_port = 0;
-        ifr.ifra_mask.sin_addr = prefixLengthToNetmask4(prefixLength);
+        ifr.ifra_mask.sin_addr = cidrPrefixToNetmask(ipAddress.clone(), prefixLength);
 
         ioctl(fd, SIOCAIFADDR, ifr);
     }
@@ -297,7 +299,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         ifr6.ifra_prefixmask.sin6_len = (byte) ifr6.ifra_prefixmask.size();
         ifr6.ifra_prefixmask.sin6_family = AF_INET6;
         ifr6.ifra_prefixmask.sin6_port = 0;
-        ifr6.ifra_prefixmask.sin6_addr = prefixLengthToNetmask6(prefixLength);
+        ifr6.ifra_prefixmask.sin6_addr = cidrPrefixToNetmask(ipAddress.clone(), prefixLength);
 
         /* important!!! */
         ifr6.ifra_lifetime.ia6t_vltime = in6_addrlifetime.ND6_INFINITE_LIFETIME;
@@ -318,7 +320,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         ifr6.ifra_prefixmask.sin6_len = (byte) ifr6.ifra_prefixmask.size();
         ifr6.ifra_prefixmask.sin6_family = AF_INET6;
         ifr6.ifra_prefixmask.sin6_port = 0;
-        ifr6.ifra_prefixmask.sin6_addr = prefixLengthToNetmask6(prefixLength);
+        ifr6.ifra_prefixmask.sin6_addr = cidrPrefixToNetmask(ipAddress.clone(), prefixLength);
 
         /* important!!! */
         ifr6.ifra_lifetime.ia6t_vltime = in6_addrlifetime.ND6_INFINITE_LIFETIME;
@@ -329,14 +331,14 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
 
     // ------------------------ END IPv6 related ------------------------
 
-    private static byte[] prefixLengthToNetmask4(final int cidrPrefix) {
-        final int subnetMask = (int) ((-1L << 32 - cidrPrefix) & 0xffffffff);
-        return new byte[] {
-            (byte) ((subnetMask >> 24) & 0xff),
-            (byte) ((subnetMask >> 16) & 0xff),
-            (byte) ((subnetMask >> 8) & 0xff),
-            (byte) ((subnetMask >> 0) & 0xff)
-        };
+    private static byte[] cidrPrefixToNetmask(final byte[] bytes, int prefix) {
+        Arrays.fill(bytes, (byte) 0xFF);
+        bytes[prefix / 8] <<= prefix % 8;
+        prefix += prefix % 8;
+        for (int i = prefix / 8; i < bytes.length; i++) {
+            bytes[i] = 0;
+        }
+        return bytes;
     }
 
     private static int netmaskToPrefixLength4(final byte[] ipBytes) {
@@ -354,13 +356,11 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         return 32 - i;
     }
 
-    private static byte[] prefixLengthToNetmask6(final int length) {
-        return new byte[]{
-                (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF,
-                (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF,
-                0, 0, 0, 0,
-                0, 0, 0, 0
-        };
-    }
 
+    public static void main(String[] args) throws Exception {
+//        InetAddress byAddress = (InetAddress) Inet4Address.getByName("192.168.1.1");
+        Inet6Address byAddress = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
+        byte[] netmask = cidrPrefixToNetmask(byAddress.getAddress(), 64);
+        System.out.println(NetUtil.bytesToIpAddress(netmask));
+    }
 }
