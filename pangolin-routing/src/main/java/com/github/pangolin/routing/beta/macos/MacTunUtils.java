@@ -29,26 +29,26 @@ public class MacTunUtils {
         final String ifname = createDarwinTun("utun9");
         System.out.println("ifname: " + ifname);
 
-        MacOsNetworkInterfaceEx mix = new MacOsNetworkInterfaceEx(ifname);
-        System.out.println("MTU -> " + mix.getMTU());
+        MacOsNetworkInterfaceEx nix = new MacOsNetworkInterfaceEx(ifname);
+        System.out.println("MTU -> " + nix.getMTU());
 
         Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("192.168.3.1");
         Inet4Address ipv4_2 = (Inet4Address) InetAddress.getByName("192.168.3.2");
 
-        mix.setInterfaceAddress4(ipv4, 16);
-        mix.addInterfaceAddress(InterfaceAddressEx.of(ipv4_2, 24));
+        nix.setInterfaceAddress4(ipv4, 16);
+        nix.addInterfaceAddress(InterfaceAddressEx.of(ipv4_2, 24));
 
-        System.out.println("IPv4 -> " + mix.getInterfaceAddresses());
+        System.out.println("IPv4 -> " + nix.getInterfaceAddresses());
         System.out.println("OK");
 
         Inet6Address ipv6 = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
-        mix.addInterfaceAddress(InterfaceAddressEx.of(ipv6, 64));
+        nix.addInterfaceAddress(InterfaceAddressEx.of(ipv6, 64));
 
         System.out.println("IPv6 -> OK");
 
         TimeUnit.SECONDS.sleep(10);
 
-        mix.flushInterfaceAddresses();
+        nix.flushInterfaceAddresses();
 
         System.out.println("Cleanup -> OK");
 
