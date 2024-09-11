@@ -100,4 +100,49 @@ public interface If {
         public int ifr6_ifindex;
     }
 
+    @Structure.FieldOrder({"ifa_next", "ifa_name", "ifa_flags", "ifa_addr", "ifa_netmask", "ifa_ifu", "ifa_data"})
+    class ifaddrs extends Structure {
+        public static class ByRef extends ifaddrs implements ByReference {}
+        public ByRef ifa_next = null;
+        public String ifa_name;
+        public int ifa_flags;
+        public sockaddr.ByRef ifa_addr;
+        public sockaddr.ByRef ifa_netmask;
+        public IfaIfu ifa_ifu;
+        public Pointer ifa_data;
+
+        public ifaddrs() {}
+
+        /*
+        public ifaddrs(final String name) {
+          this.ifa_name = new byte[IFNAMSIZ];
+          if (name != null) {
+            final byte[] bytes = name.getBytes(US_ASCII);
+            System.arraycopy(bytes, 0, this.ifa_name, 0, bytes.length);
+          }
+        }
+        */
+
+      public static class IfaIfu extends Union {
+            public sockaddr ifu_broadaddr;
+            public sockaddr ifu_dstaddr;
+        }
+    }
+
+    @Structure.FieldOrder({"sin6_family", "sin6_port", "sin6_flowinfo", "sin6_addr", "sin6_scope_id"})
+    class sockaddr_in6 extends Structure {
+        public short sin6_family;
+        public short sin6_port;
+        public int sin6_flowinfo;
+        public byte[] sin6_addr = new byte[16];
+        public int sin6_scope_id;
+    }
+
+    class sockaddr extends Union {
+      public static class ByRef extends sockaddr implements ByReference {}
+
+        public short sa_family;
+        public sockaddr_in ipv4;
+        public sockaddr_in6 ipv6;
+    }
 }

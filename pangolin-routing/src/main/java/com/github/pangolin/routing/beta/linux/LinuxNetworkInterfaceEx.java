@@ -44,7 +44,7 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         try {
             final InetAddress ipAddress = toInetAddress(getInterfaceIpAddress4(fd, ifname));
             final byte[] interfaceNetmask = getInterfaceNetmask4(fd, ifname);
-            final int prefix = netmaskToPrefixLength4(interfaceNetmask);
+            final int prefix = netmaskToPrefixLength(interfaceNetmask);
             return Collections.singletonList(InterfaceAddressEx.of(ipAddress, (short) prefix));
         } finally {
             close(fd);
@@ -279,26 +279,28 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
 
     private static byte[] cidrPrefixToNetmask(final byte[] bytes, int prefix) {
         Arrays.fill(bytes, (byte) 0xFF);
-        bytes[prefix / 8] <<= prefix % 8;
-        prefix += prefix % 8;
-        for (int i = prefix / 8; i < bytes.length; i++) {
+        bytes[prefix / Byte.SIZE] <<= prefix % Byte.SIZE;
+        prefix += prefix % Byte.SIZE;
+        for (int i = prefix / Byte.SIZE; i < bytes.length; i++) {
             bytes[i] = 0;
         }
         return bytes;
     }
 
-    private static int netmaskToPrefixLength4(final byte[] ipBytes) {
-        assert ipBytes.length == 4;
-        final int subnetMask = (ipBytes[0] & 0xff) << 24 | (ipBytes[1] & 0xff) << 16 | (ipBytes[2] & 0xff) << 8 | ipBytes[3] & 0xff;
-        int i = 0;
-        int mask = subnetMask;
-        for (i = 0; i < 32; i++) {
-            if ((mask & 1) != 1) {
-                mask >>= 1;
-            } else {
-                break;
+    static int netmaskToPrefixLength(final byte[] ipBytes) {
+        int prefix_length = 0;
+        for (byte b : ipBytes) {
+            if ((b & 0xFF) == 0xFF) {
+                prefix_length += Byte.SIZE;
+                continue;
+            }
+            for (int j = 0; j < Byte.SIZE; j++) {
+                if ((b >> j & 1) != 1) {
+                    return prefix_length;
+                }
+                prefix_length += 1;
             }
         }
-        return 32 - i;
+        return prefix_length;
     }
 }
