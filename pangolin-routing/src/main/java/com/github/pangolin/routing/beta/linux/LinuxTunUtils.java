@@ -9,8 +9,10 @@ import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 
+import io.netty.util.NetUtil;
 import java.io.IOException;
 import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
@@ -33,6 +35,13 @@ public class LinuxTunUtils {
 
         System.out.println("IPv4 -> " + lix.getInterfaceAddresses());
         System.out.println("MTU -> " + lix.getMTU());
+
+        Inet6Address ipv6 = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
+        LinuxNetworkInterfaceEx.setInterfaceAddress6(ifname, ipv6, 64);
+
+        System.out.println("IPv6 -> OK");
+
+//        System.out.println(NetUtil.bytesToIpAddress(LinuxNetworkInterfaceEx.getInterfaceAddress6(ifname)));
 
         /*
         setIpAddress(ifname, ipv4);

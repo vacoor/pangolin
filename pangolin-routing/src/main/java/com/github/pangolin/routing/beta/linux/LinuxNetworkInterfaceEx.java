@@ -179,7 +179,11 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
 
     // -------------------
 
-    static void setInterfaceAddress6(final int fd, final String ifname, final Inet6Address addr, final int prefixLength) {
+    static void setInterfaceAddress6(final String ifname, final Inet6Address addr, final int prefixLength) {
+        // Wrong: sysctl net.ipv6.conf.all.disable_ipv6 --> 1: [13] Permission denied
+        // sysctl net.ipv6.conf.all.disable_ipv6=0
+        int fd = socket(AF_INET6, SOCK_DGRAM, 0);
+
         final If.Ifreq ifr = new If.Ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_ifindex");
         ioctl(fd, SIOGIFINDEX, ifr);
@@ -187,13 +191,12 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
 
         final in6_ifreq ifr6 = new in6_ifreq();
         ifr6.ifr6_ifindex = ifr.ifr_ifru.ifru_ifindex;
-
-        ifr6.ifr6_addr.sin6_family = AF_INET6;
-        ifr6.ifr6_addr.sin6_port = 0;
-        ifr6.ifr6_addr.sin6_addr = addr.getAddress();
-        ifr6.ifr6_addr.sin6_scope_id = addr.getScopeId();
         ifr6.ifr6_prefixlen = prefixLength;
+
+//        ifr6.ifr6_addr.sin6_family = AF_INET6;
+//        ifr6.ifr6_addr.sin6_port = 0;
+        ifr6.ifr6_addr.sin6_addr = addr.getAddress();
+//        ifr6.ifr6_addr.sin6_scope_id = addr.getScopeId();
         ioctl(fd, Sockios.SIOCSIFADDR, ifr6);
     }
-
 }
