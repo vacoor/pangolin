@@ -1,32 +1,23 @@
 package com.github.pangolin.routing.beta.linux;
 
-import static com.github.pangolin.routing.beta.linux.Socket.AF_INET;
-import static com.github.pangolin.routing.beta.linux.Socket.AF_INET6;
-import static com.github.pangolin.routing.beta.linux.Socket.SOCK_DGRAM;
-import static com.github.pangolin.routing.beta.linux.Sockios.SIOCDIFADDR;
-import static com.github.pangolin.routing.beta.linux.Sockios.SIOCGIFADDR;
-import static com.github.pangolin.routing.beta.linux.Sockios.SIOCGIFMTU;
-import static com.github.pangolin.routing.beta.linux.Sockios.SIOCGIFNETMASK;
-import static com.github.pangolin.routing.beta.linux.Sockios.SIOCSIFADDR;
-import static com.github.pangolin.routing.beta.linux.Sockios.SIOCSIFMTU;
-import static com.github.pangolin.routing.beta.linux.Sockios.SIOCSIFNETMASK;
-import static com.github.pangolin.routing.beta.linux.Sockios.SIOGIFINDEX;
-import static org.drasyl.channel.tun.jna.shared.LibC.close;
-import static org.drasyl.channel.tun.jna.shared.LibC.ioctl;
-import static org.drasyl.channel.tun.jna.shared.LibC.socket;
-
 import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.github.pangolin.routing.beta.NetworkInterfaceEx;
 import com.github.pangolin.routing.beta.linux.If.Ifreq;
 import com.github.pangolin.routing.beta.linux.If.in6_ifreq;
 import com.github.pangolin.routing.beta.linux.If.sockaddr_in;
+import com.github.pangolin.routing.beta.linux.If.sockaddr_in6;
+import com.google.common.collect.Lists;
+
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
+
+import static com.github.pangolin.routing.beta.linux.Socket.*;
+import static com.github.pangolin.routing.beta.linux.Sockios.*;
+import static org.drasyl.channel.tun.jna.shared.LibC.*;
 
 /**
  *
@@ -40,6 +31,7 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
 
     @Override
     public List<InterfaceAddressEx> getInterfaceAddresses() {
+        /*
         final int fd = fd4();
         try {
             final InetAddress ipAddress = toInetAddress(getInterfaceIpAddress4(fd, ifname));
@@ -49,14 +41,8 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         } finally {
             close(fd);
         }
-    }
-
-    private static InetAddress toInetAddress(final byte[] sinAddr) {
-        try {
-            return InetAddress.getByAddress(sinAddr);
-        } catch (final UnknownHostException e) {
-            throw new IllegalStateException(e);
-        }
+        */
+        return getInterfaceAddresses(ifname, AF_UNSPEC);
     }
 
     @Override
@@ -122,7 +108,7 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         if (addr instanceof Inet4Address) {
             final int fd = fd4();
             try {
-              deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) addr);
+                deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) addr);
             } finally {
                 close(fd);
             }
@@ -178,6 +164,79 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
     }
 
     // ------------------------ END Interface related ------------------------
+
+    static List<InterfaceAddressEx> getInterfaceAddresses(final String ifname, final int family) {
+        final If.ifaddrs ifa = new If.ifaddrs();
+        LibC2.INSTANCE.getifaddrs(ifa);
+
+        try {
+            final List<InterfaceAddressEx> interfaceAddresses = Lists.newArrayList();
+            for (If.ifaddrs n = ifa; null != n; n = n.ifa_next) {
+                // IFF_UP ?
+                if (null == n.ifa_addr) {
+                    continue;
+                }
+
+                final String ifaName = n.ifa_name;
+                final short sa_family = n.ifa_addr.sa_family;
+                if ((AF_UNSPEC != family && family != sa_family) || (null != ifname && !ifname.equals(ifaName))) {
+                    continue;
+                }
+
+                if (AF_INET == sa_family) {
+                    final sockaddr_in sockaddr = (sockaddr_in) n.ifa_addr.getTypedValue(sockaddr_in.class);
+                    final sockaddr_in netmask = null != n.ifa_netmask ? (sockaddr_in) n.ifa_netmask.getTypedValue(sockaddr_in.class) : null;
+                    final int prefix = null != netmask ? netmaskToPrefixLength(netmask.sin_addr) : 0;
+
+                    interfaceAddresses.add(InterfaceAddressEx.of(toInetAddress(sockaddr.sin_addr), prefix));
+                } else if (AF_INET6 == sa_family) {
+                    final sockaddr_in6 sockaddr = (sockaddr_in6) n.ifa_addr.getTypedValue(sockaddr_in6.class);
+
+                    final sockaddr_in6 netmask = null != n.ifa_netmask ? (sockaddr_in6) n.ifa_netmask.getTypedValue(sockaddr_in6.class) : null;
+                    final int prefix = null != netmask ? netmaskToPrefixLength(netmask.sin6_addr) : 0;
+
+                    interfaceAddresses.add(InterfaceAddressEx.of(toInetAddress(sockaddr.sin6_addr), prefix));
+                }
+            }
+            return interfaceAddresses;
+        } finally {
+            LibC2.INSTANCE.freeifaddrs(ifa);
+        }
+    }
+
+    private static void flushInterfaceAddresses(final String ifname, int family) {
+        for (final InterfaceAddressEx interfaceAddress : getInterfaceAddresses(ifname, family)) {
+            deleteInterfaceAddress(ifname, interfaceAddress);
+        }
+    }
+
+    private static void deleteInterfaceAddress(final String ifname, final InterfaceAddressEx address) {
+        final InetAddress addr = address.getAddress();
+        if (addr instanceof Inet4Address) {
+            final int fd = fd4();
+            try {
+                deleteInterfaceIpAddress4(fd4(), ifname, (Inet4Address) addr);
+            } finally {
+                close(fd);
+            }
+        } else if (addr instanceof Inet6Address) {
+            final int fd = fd6();
+            try {
+                deleteInterfaceAddress6(fd6(), ifname, (Inet6Address) addr, address.getNetworkPrefixLength());
+            } finally {
+                close(fd);
+            }
+        }
+    }
+
+    private static InetAddress toInetAddress(final byte[] sinAddr) {
+        try {
+            return InetAddress.getByAddress(sinAddr);
+        } catch (final UnknownHostException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
 
     // ------------------------ START IPv4 related ------------------------
 
@@ -245,7 +304,6 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         final If.Ifreq ifr = new If.Ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_ifindex");
         ioctl(fd, SIOGIFINDEX, ifr);
-        System.out.println("IFR index=" + ifr.ifr_ifru.ifru_ifindex);
 
         final in6_ifreq ifr6 = new in6_ifreq();
         ifr6.ifr6_ifindex = ifr.ifr_ifru.ifru_ifindex;

@@ -2,13 +2,14 @@ package com.github.pangolin.routing.beta.linux;
 
 import com.github.pangolin.routing.beta.linux.If.ifaddrs;
 import com.sun.jna.Native;
+import com.sun.jna.Structure;
 import com.sun.jna.platform.linux.LibC;
 
 public interface LibC2 extends LibC {
   LibC2 INSTANCE = Native.load(NAME, LibC2.class);
 
-  int getifaddrs(ifaddrs ifap);
+  int getifaddrs(Structure ifap);
 
-  void freeifaddrs(ifaddrs ifa);
+  void freeifaddrs(Structure ifa);
 
 }

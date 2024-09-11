@@ -1,8 +1,7 @@
 package com.github.pangolin.routing.beta.linux;
 
 
-import static com.github.pangolin.routing.beta.linux.Socket.AF_INET;
-import static com.github.pangolin.routing.beta.linux.Socket.AF_INET6;
+import static com.github.pangolin.routing.beta.linux.Socket.*;
 import static com.sun.jna.platform.linux.Fcntl.O_RDWR;
 import static org.drasyl.channel.tun.jna.shared.LibC.ioctl;
 
@@ -20,6 +19,7 @@ import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.drasyl.channel.tun.jna.shared.LibC;
 
@@ -54,45 +54,14 @@ public class LinuxTunUtils {
 
         System.out.println("IPv6 -> OK");
 
-        ifaddrs ifa = new ifaddrs();
-        ifa.ifa_name = ifname;
-        int code = LibC2.INSTANCE.getifaddrs(ifa);
-
-        for(ifaddrs node = ifa; null != node; node = node.ifa_next) {
-//            final String name = Native.toString(node.ifa_name, StandardCharsets.US_ASCII);
-            System.out.println("------------");
-            String name = node.ifa_name;
-            System.out.println(name);
-            if (null == node.ifa_addr) {
-                continue;
-            }
-
-            System.out.println(ifa.ifa_flags);
-            short sa_family = node.ifa_addr.sa_family;
-            if (AF_INET == sa_family) {
-                final sockaddr_in sockaddr_in = (If.sockaddr_in) node.ifa_addr.getTypedValue(sockaddr_in.class);
-                System.out.println(NetUtil.bytesToIpAddress(sockaddr_in.sin_addr));
-                System.out.println(LinuxNetworkInterfaceEx.netmaskToPrefixLength(sockaddr_in.sin_addr));
-            } else if (AF_INET6 == sa_family) {
-                final sockaddr_in6 sockaddr_in = (If.sockaddr_in6) node.ifa_addr.getTypedValue(sockaddr_in6.class);
-                System.out.println(NetUtil.bytesToIpAddress(sockaddr_in.sin6_addr));
-                System.out.println(LinuxNetworkInterfaceEx.netmaskToPrefixLength(sockaddr_in.sin6_addr));
-            }
-
-            sa_family = null != node.ifa_netmask ? node.ifa_netmask.sa_family : -1;
-            if (AF_INET == sa_family) {
-                final sockaddr_in sockaddr_in = (If.sockaddr_in) node.ifa_netmask.getTypedValue(sockaddr_in.class);
-                System.out.println(NetUtil.bytesToIpAddress(sockaddr_in.sin_addr));
-                System.out.println(LinuxNetworkInterfaceEx.netmaskToPrefixLength(sockaddr_in.sin_addr));
-            } else if (AF_INET6 == sa_family) {
-                final sockaddr_in6 sockaddr_in = (If.sockaddr_in6) node.ifa_netmask.getTypedValue(sockaddr_in6.class);
-                System.out.println(NetUtil.bytesToIpAddress(sockaddr_in.sin6_addr));
-                System.out.println(LinuxNetworkInterfaceEx.netmaskToPrefixLength(sockaddr_in.sin6_addr));
-            }
-            System.out.println("------------");
+        for (InterfaceAddressEx address : nix.getInterfaceAddresses()) {
+            System.out.println(address);
         }
+        System.out.println("----------");
 
-        LibC2.INSTANCE.freeifaddrs(ifa);
+        for (InterfaceAddressEx address : LinuxNetworkInterfaceEx.getInterfaceAddresses(null, AF_UNSPEC)) {
+            System.out.println(address);
+        }
 
         TimeUnit.SECONDS.sleep(10);
 

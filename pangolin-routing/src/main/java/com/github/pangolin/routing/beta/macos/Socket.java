@@ -1,9 +1,10 @@
-package com.github.pangolin.routing.beta.linux;
+package com.github.pangolin.routing.beta.macos;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/socket.h">socket.h</a>
  */
 public interface Socket {
+
 
   /**
    * stream socket.
@@ -20,6 +21,7 @@ public interface Socket {
    */
   int AF_UNSPEC = 0;
 
+
   /**
    * IPv4.
    */
@@ -28,6 +30,8 @@ public interface Socket {
   /**
    * IPv6.
    */
-  int AF_INET6 = 10;
+  int AF_INET6 = 30;
+
+  int AF_SYSTEM = 32;
 
 }

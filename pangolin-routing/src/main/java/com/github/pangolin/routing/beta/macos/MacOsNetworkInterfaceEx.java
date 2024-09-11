@@ -1,8 +1,7 @@
 package com.github.pangolin.routing.beta.macos;
 
 
-import static com.github.pangolin.routing.beta.linux.Socket.AF_INET;
-import static com.github.pangolin.routing.beta.linux.Socket.SOCK_DGRAM;
+import static com.github.pangolin.routing.beta.macos.Socket.*;
 import static com.github.pangolin.routing.beta.macos.Sockio.SIOCAIFADDR;
 import static com.github.pangolin.routing.beta.macos.Sockio.SIOCAIFADDR_IN6;
 import static com.github.pangolin.routing.beta.macos.Sockio.SIOCDIFADDR;
@@ -17,26 +16,28 @@ import static com.github.pangolin.routing.beta.macos.Sockio.SIOCSIFNETMASK;
 import static org.drasyl.channel.tun.jna.shared.LibC.close;
 import static org.drasyl.channel.tun.jna.shared.LibC.ioctl;
 import static org.drasyl.channel.tun.jna.shared.LibC.socket;
-import static org.drasyl.channel.tun.jna.shared.Socket.AF_INET6;
 
 import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.github.pangolin.routing.beta.NetworkInterfaceEx;
+import com.github.pangolin.routing.beta.linux.LibC2;
 import com.github.pangolin.routing.beta.macos.If.Ifreq;
+import com.github.pangolin.routing.beta.macos.If.*;
 import com.github.pangolin.routing.beta.macos.If.In6Ifreq;
 import com.github.pangolin.routing.beta.macos.If.in6_addrlifetime;
 import com.github.pangolin.routing.beta.macos.If.in6_aliasreq;
 import com.github.pangolin.routing.beta.macos.If.in_aliasreq;
 import com.github.pangolin.routing.beta.macos.If.sockaddr;
 import com.github.pangolin.routing.beta.macos.If.sockaddr_in6;
-import io.netty.util.NetUtil;
+import com.google.common.collect.Lists;
+
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  *
@@ -48,25 +49,33 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         this.ifname = ifname;
     }
 
-    @Override
-    public List<InterfaceAddressEx> getInterfaceAddresses() {
+    public InterfaceAddressEx getInterfaceAddress4() {
         final int fd = fd4();
         try {
             final InetAddress ipAddress = toInetAddress(getInterfaceIpAddress4(fd, ifname));
             final byte[] interfaceNetmask = getInterfaceNetmask4(fd, ifname);
             final int prefix = netmaskToPrefixLength(interfaceNetmask);
-            return Collections.singletonList(InterfaceAddressEx.of(ipAddress, prefix));
+            return InterfaceAddressEx.of(ipAddress, prefix);
         } finally {
             close(fd);
         }
     }
 
-    private static InetAddress toInetAddress(final byte[] sinAddr) {
+    public void setInterfaceAddress4(final Inet4Address addr, final int networkPrefixLength) {
+        final int fd = fd4();
         try {
-            return InetAddress.getByAddress(sinAddr);
-        } catch (final UnknownHostException e) {
-            throw new IllegalStateException(e);
+            setInterfaceIpAddress4(fd, ifname, addr);
+
+            final byte[] netmask = cidrPrefixToNetmask(addr.getAddress().clone(), networkPrefixLength);
+            setInterfaceNetmask4(fd, ifname, netmask);
+        } finally {
+            close(fd);
         }
+    }
+
+    @Override
+    public List<InterfaceAddressEx> getInterfaceAddresses() {
+        return getInterfaceAddresses(ifname, AF_UNSPEC);
     }
 
     @Override
@@ -76,14 +85,15 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         if (addr instanceof Inet4Address) {
             final int fd = fd4();
             try {
-                setInterfaceAddress4(fd, ifname, (Inet4Address) addr, networkPrefixLength);
+                flushInterfaceAddresses4(fd, ifname);
+                addInterfaceAddress4(fd, ifname, (Inet4Address) addr, networkPrefixLength);
             } finally {
                 close(fd);
             }
         } else if (addr instanceof Inet6Address) {
             final int fd = fd6();
             try {
-                // FIXME flushInterfaceAddress6
+                flushInterfaceAddresses6(fd, ifname);
                 addInterfaceAddress6(fd, ifname, (Inet6Address) addr, networkPrefixLength);
             } finally {
                 close(fd);
@@ -91,13 +101,6 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         } else {
             throw new UnsupportedOperationException();
         }
-    }
-
-    private void setInterfaceAddress4(final int fd, final String ifname, final Inet4Address addr, final int networkPrefixLength) {
-        setInterfaceIpAddress4(fd, ifname, (Inet4Address) addr);
-
-        final byte[] netmask = cidrPrefixToNetmask(addr.getAddress().clone(), networkPrefixLength);
-        setInterfaceNetmask4(fd, ifname, (Inet4Address) toInetAddress(netmask));
     }
 
     @Override
@@ -146,7 +149,29 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
 
     @Override
     public void flushInterfaceAddresses() {
-        // FIXME
+        final List<InterfaceAddressEx> addresses = getInterfaceAddresses(ifname, AF_UNSPEC);
+        final List<InterfaceAddressEx> ipv4 = addresses.stream()
+                .filter(a -> a.getAddress() instanceof Inet4Address)
+                .collect(Collectors.toList());
+        final List<InterfaceAddressEx> ipv6 = addresses.stream()
+                .filter(a -> a.getAddress() instanceof Inet6Address)
+                .collect(Collectors.toList());
+        if (!ipv4.isEmpty()) {
+            final int fd = fd4();
+            try {
+                ipv4.forEach(addr -> deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) addr.getAddress()));
+            } finally {
+                close(fd);
+            }
+        }
+        if (!ipv6.isEmpty()) {
+            final int fd = fd6();
+            try {
+                ipv6.forEach(addr -> deleteInterfaceAddress6(fd, ifname, (Inet6Address) addr.getAddress(), addr.getNetworkPrefixLength()));
+            } finally {
+                close(fd);
+            }
+        }
     }
 
     @Override
@@ -183,6 +208,64 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
     }
 
     // ------------------------ END Interface related ------------------------
+
+    static List<InterfaceAddressEx> getInterfaceAddresses(final String ifname, final int family) {
+        final ifaddrs ifa = new ifaddrs();
+        LibC2.INSTANCE.getifaddrs(ifa);
+
+        try {
+            final List<InterfaceAddressEx> interfaceAddresses = Lists.newArrayList();
+            for (If.ifaddrs n = ifa; null != n; n = n.ifa_next) {
+                // IFF_UP ?
+                if (null == n.ifa_addr) {
+                    continue;
+                }
+
+                final String ifaName = n.ifa_name;
+                final short sa_family = n.ifa_addr.sa_family;
+                if ((AF_UNSPEC != family && family != sa_family) || (null != ifname && !ifname.equals(ifaName))) {
+                    continue;
+                }
+
+                if (AF_INET == sa_family) {
+                    final sockaddr_in sockaddr = new sockaddr_in(n.ifa_addr.getPointer());
+                    final sockaddr_in netmask = null != n.ifa_netmask ? new sockaddr_in(n.ifa_netmask.getPointer()): null;
+                    final int prefix = null != netmask ? netmaskToPrefixLength(netmask.sin_addr) : 0;
+
+                    interfaceAddresses.add(InterfaceAddressEx.of(toInetAddress(sockaddr.sin_addr), prefix));
+                } else if (AF_INET6 == sa_family) {
+                    final sockaddr_in6 sockaddr = new sockaddr_in6(n.ifa_addr.getPointer());
+                    final sockaddr_in6 netmask = null != n.ifa_netmask ? new sockaddr_in6(n.ifa_netmask.getPointer()) : null;
+                    final int prefix = null != netmask ? netmaskToPrefixLength(netmask.sin6_addr) : 0;
+
+                    interfaceAddresses.add(InterfaceAddressEx.of(toInetAddress(sockaddr.sin6_addr), prefix));
+                }
+            }
+            return interfaceAddresses;
+        } finally {
+            LibC2.INSTANCE.freeifaddrs(ifa);
+        }
+    }
+
+    private static InetAddress toInetAddress(final byte[] sinAddr) {
+        try {
+            return InetAddress.getByAddress(sinAddr);
+        } catch (final UnknownHostException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static void flushInterfaceAddresses4(final int fd, final String ifname) {
+        for (final InterfaceAddressEx remove : getInterfaceAddresses(ifname, AF_INET)) {
+            deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) remove.getAddress());
+        }
+    }
+
+    private static void flushInterfaceAddresses6(final int fd, final String ifname) {
+        for (final InterfaceAddressEx remove : getInterfaceAddresses(ifname, AF_INET6)) {
+            deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) remove.getAddress());
+        }
+    }
 
     // ------------------------ START IPv4 related ------------------------
 
@@ -228,7 +311,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         return netmask.sin_addr;
     }
 
-    private static void setInterfaceNetmask4(final int fd, final String ifname, final Inet4Address addr) {
+    private static void setInterfaceNetmask4(final int fd, final String ifname, final byte[] addr) {
         /*-
          Wrong:
          -> Wrong 1: address: 1.2.3.4 netmask: 255.255.255.0
@@ -242,7 +325,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
         ifr.ifr_ifru.setType("ifru_addr");
         ifr.ifr_ifru.ifru_addr.sin_family = AF_INET;
         ifr.ifr_ifru.ifru_addr.sin_port = 0;
-        ifr.ifr_ifru.ifru_addr.sin_addr = addr.getAddress();
+        ifr.ifr_ifru.ifru_addr.sin_addr = addr;
 
         ioctl(fd, SIOCSIFNETMASK, ifr);
     }
@@ -361,8 +444,17 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
 
     public static void main(String[] args) throws Exception {
 //        InetAddress byAddress = (InetAddress) Inet4Address.getByName("192.168.1.1");
-        Inet6Address byAddress = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
-        byte[] netmask = cidrPrefixToNetmask(byAddress.getAddress(), 64);
-        System.out.println(NetUtil.bytesToIpAddress(netmask));
+//        Inet6Address byAddress = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
+//        byte[] netmask = cidrPrefixToNetmask(byAddress.getAddress(), 64);
+//        System.out.println(NetUtil.bytesToIpAddress(netmask));
+
+        final MacOsNetworkInterfaceEx nix = new MacOsNetworkInterfaceEx("en0");
+        System.out.println(nix.getInterfaceAddress4());
+        System.out.println(nix.getInterfaceAddresses());
+
+//        List<InterfaceAddressEx> interfaceAddresses = nix.getInterfaceAddresses();
+//        for (InterfaceAddressEx interfaceAddress : interfaceAddresses) {
+//            System.out.println(interfaceAddress);
+//        }
     }
 }

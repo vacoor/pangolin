@@ -13,10 +13,9 @@ import java.net.InetAddress;
 import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.beta.macos.KernControl.CTLIOCGINFO;
+import static com.github.pangolin.routing.beta.macos.Socket.*;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 import static org.drasyl.channel.tun.jna.shared.LibC.*;
-import static org.drasyl.channel.tun.jna.shared.Socket.AF_SYSTEM;
-import static org.drasyl.channel.tun.jna.shared.Socket.SOCK_DGRAM;
 
 public class MacTunUtils {
     static final int SYSPROTO_CONTROL = 2;
@@ -28,20 +27,18 @@ public class MacTunUtils {
 
     public static void main(String[] args) throws Exception {
         final String ifname = createDarwinTun("utun9");
-        System.out.println("IFNAME:" + ifname);
+        System.out.println("ifname: " + ifname);
 
-//        System.out.println("MTU=" + getMtu(ifname));
+        MacOsNetworkInterfaceEx mix = new MacOsNetworkInterfaceEx(ifname);
+        System.out.println("MTU -> " + mix.getMTU());
+
         Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("192.168.3.1");
         Inet4Address ipv4_2 = (Inet4Address) InetAddress.getByName("192.168.3.2");
-        MacOsNetworkInterfaceEx mix = new MacOsNetworkInterfaceEx(ifname);
-//        mix.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 16));
-        mix.addInterfaceAddress(InterfaceAddressEx.of(ipv4, 16));
+
+        mix.setInterfaceAddress4(ipv4, 16);
         mix.addInterfaceAddress(InterfaceAddressEx.of(ipv4_2, 24));
 
-//        MacOsNetworkInterfaceEx.setInterfaceAddress(ifname, ipv4);
-
         System.out.println("IPv4 -> " + mix.getInterfaceAddresses());
-        System.out.println("MTU -> " + mix.getMTU());
         System.out.println("OK");
 
         Inet6Address ipv6 = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
@@ -49,7 +46,11 @@ public class MacTunUtils {
 
         System.out.println("IPv6 -> OK");
 
-        System.out.println(MacOsNetworkInterfaceEx.getInterfaceIpAddress6(ifname));
+        TimeUnit.SECONDS.sleep(10);
+
+        mix.flushInterfaceAddresses();
+
+        System.out.println("Cleanup -> OK");
 
         TimeUnit.SECONDS.sleep(30);
     }

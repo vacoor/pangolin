@@ -18,6 +18,8 @@ public interface If {
      */
     @Structure.FieldOrder({"sin_family", "sin_port", "sin_addr", "sin_zero"})
     class sockaddr extends Structure {
+        public static class ByRef extends sockaddr implements ByReference {}
+
         public short sin_family;
         public short sin_port;
         public byte[] sin_addr = new byte[4];
@@ -32,6 +34,16 @@ public interface If {
         }
     }
 
+    @Structure.FieldOrder({"sa_len", "sa_family", "sa_data"})
+    class sockaddr2 extends Structure {
+        public static class ByRef extends sockaddr2 implements ByReference {}
+
+        public byte sa_len;
+        public byte sa_family;
+        public byte[] sa_data = new byte[14];
+//        public Pointer sa_data;
+
+    }
 
     @Structure.FieldOrder({ "ifr_name", "ifr_ifru" })
     class Ifreq extends Structure {
@@ -82,6 +94,14 @@ public interface If {
         public short sin_port;
         public byte[] sin_addr = new byte[4];
         public byte[] sin_zero = new byte[8];
+
+        public sockaddr_in() {
+        }
+
+        public sockaddr_in(Pointer p) {
+            super(p);
+            read();
+        }
     }
 
     @Structure.FieldOrder({"ifra_name", "ifra_addr", "ifra_broadaddr", "ifra_mask"})
@@ -148,7 +168,7 @@ public interface If {
             "sin6_len", "sin6_family", "sin6_port",
             "sin6_flowinfo", "sin6_addr", "sin6_scope_id"
     })
-    public static class sockaddr_in6 extends Structure {
+    class sockaddr_in6 extends Structure {
 
         public sockaddr_in6() {
         }
@@ -214,5 +234,20 @@ public interface If {
          * prefix lifetime.
          */
         public int ia6t_pltime = ND6_INFINITE_LIFETIME;
+    }
+
+    @Structure.FieldOrder({"ifa_next", "ifa_name", "ifa_flags", "ifa_addr", "ifa_netmask", "ifa_dstaddr", "ifa_data"})
+    class ifaddrs extends Structure {
+        public static class ByRef extends ifaddrs implements ByReference {}
+        public ByRef ifa_next = null;
+        public String ifa_name;
+        public int ifa_flags;
+        public sockaddr2.ByRef ifa_addr;
+        public sockaddr2.ByRef ifa_netmask;
+        public sockaddr2.ByRef ifa_dstaddr;
+        public Pointer ifa_data;
+
+        public ifaddrs() {}
+
     }
 }

@@ -226,7 +226,7 @@ public class RouteApplication {
         }
         app.await();
         */
-        LinuxTunUtils.main(args);
-//        MacTunUtils.main(args);
+//        LinuxTunUtils.main(args);
+        MacTunUtils.main(args);
     }
 }
