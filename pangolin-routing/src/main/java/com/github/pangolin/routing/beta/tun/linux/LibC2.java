@@ -1,6 +1,5 @@
-package com.github.pangolin.routing.beta.linux;
+package com.github.pangolin.routing.beta.tun.linux;
 
-import com.github.pangolin.routing.beta.linux.If.ifaddrs;
 import com.sun.jna.Native;
 import com.sun.jna.Structure;
 import com.sun.jna.platform.linux.LibC;

@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.macos;
+package com.github.pangolin.routing.beta.tun.macos;
 
 import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.sun.jna.Native;
@@ -12,8 +12,8 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.util.concurrent.TimeUnit;
 
-import static com.github.pangolin.routing.beta.macos.KernControl.CTLIOCGINFO;
-import static com.github.pangolin.routing.beta.macos.Socket.*;
+import static com.github.pangolin.routing.beta.tun.macos.KernControl.CTLIOCGINFO;
+import static com.github.pangolin.routing.beta.tun.macos.Socket.*;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 import static org.drasyl.channel.tun.jna.shared.LibC.*;
 

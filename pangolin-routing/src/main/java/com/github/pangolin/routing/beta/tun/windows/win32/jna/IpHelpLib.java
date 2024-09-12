@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.tun.wintun.win32.jna;
+package com.github.pangolin.routing.beta.tun.windows.win32.jna;
 
 import com.sun.jna.*;
 import com.sun.jna.platform.win32.Guid;

@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.tun.wintun;
+package com.github.pangolin.routing.beta.tun.windows;
 
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Pointer;
@@ -8,7 +8,7 @@ import com.sun.jna.ptr.IntByReference;
 
 import java.io.IOException;
 
-import static com.github.pangolin.routing.tun.wintun.WintunLib.*;
+import static com.github.pangolin.routing.beta.tun.windows.WintunLib.*;
 import static org.drasyl.channel.tun.jna.windows.WinBase.INFINITE;
 import static org.drasyl.channel.tun.jna.windows.WinError.ERROR_NO_MORE_ITEMS;
 

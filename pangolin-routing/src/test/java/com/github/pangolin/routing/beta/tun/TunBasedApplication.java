@@ -7,7 +7,7 @@ import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramDnsProxyServ
 import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramFakeDnsServerHandler;
 import com.github.pangolin.routing.beta.tun.tun2socks.WindowsTun2Socks;
 import com.github.pangolin.routing.context.RouteContext;
-import com.github.pangolin.routing.tun.wintun.win32.WindowsNetworkInterfaceEx;
+import com.github.pangolin.routing.beta.tun.windows.win32.WindowsNetworkInterfaceEx;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;

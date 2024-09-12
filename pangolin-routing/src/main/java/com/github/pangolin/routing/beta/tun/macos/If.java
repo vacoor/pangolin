@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.macos;
+package com.github.pangolin.routing.beta.tun.macos;
 
 import com.sun.jna.Pointer;
 import com.sun.jna.Structure;

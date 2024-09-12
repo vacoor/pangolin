@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.tun.wintun.win32;
+package com.github.pangolin.routing.beta.tun.windows.win32;
 
 import com.github.pangolin.routing.beta.InterfaceAddressEx;
 import com.sun.jna.*;

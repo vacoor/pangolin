@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.macos;
+package com.github.pangolin.routing.beta.tun.macos;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/socket.h">socket.h</a>

@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.linux;
+package com.github.pangolin.routing.beta.tun.linux;
 
 import com.sun.jna.NativeLong;
 

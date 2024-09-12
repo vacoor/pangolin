@@ -1,6 +1,6 @@
-package com.github.pangolin.routing.tun.wintun;
+package com.github.pangolin.routing.beta.tun.windows;
 
-import com.github.pangolin.routing.tun.wintun.win32.jna.IpHelpLib;
+import com.github.pangolin.routing.beta.tun.windows.win32.jna.IpHelpLib;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
@@ -9,7 +9,7 @@ import com.sun.jna.ptr.LongByReference;
 
 import java.io.IOException;
 
-import static com.github.pangolin.routing.tun.wintun.WintunLib.*;
+import static com.github.pangolin.routing.beta.tun.windows.WintunLib.*;
 import static com.sun.jna.platform.win32.Guid.GUID;
 
 public class WintunAdapter {

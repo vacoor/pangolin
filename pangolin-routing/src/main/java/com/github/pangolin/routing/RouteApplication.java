@@ -2,8 +2,6 @@ package com.github.pangolin.routing;
 
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
-import com.github.pangolin.routing.beta.linux.LinuxTunUtils;
-import com.github.pangolin.routing.beta.macos.MacTunUtils;
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.context.RouteContextFactory;
@@ -44,7 +42,9 @@ import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.system.ApplicationHome;
 
+import java.io.File;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URL;
@@ -210,11 +210,11 @@ public class RouteApplication {
     }
 
     public static void main(String[] args) throws Exception {
-        /*
         final ApplicationHome home = new ApplicationHome(RouteApplication.class);
         final URL conf = new File(home.getDir(), "conf/default.conf").toURI().toURL();
         final RouteApplication app = new RouteApplication();
         RouteContext context = app.run(conf);
+        /*
         for (Route<InetSocketAddress> route : context.routes()) {
             for (RoutePredicate predicate : route.getPredicates()) {
                 if (predicate instanceof SubnetRoutePredicate) {
@@ -224,9 +224,9 @@ public class RouteApplication {
                 }
             }
         }
-        app.await();
         */
-        LinuxTunUtils.main(args);
+        app.await();
+//        LinuxTunUtils.main(args);
 //        MacTunUtils.main(args);
     }
 }
