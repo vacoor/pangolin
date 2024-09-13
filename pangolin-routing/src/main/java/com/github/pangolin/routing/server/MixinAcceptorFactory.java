@@ -1,17 +1,19 @@
 package com.github.pangolin.routing.server;
 
 import com.github.pangolin.routing.context.RouteContext;
+import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
+import com.github.pangolin.routing.handler.internal.server.Socks5ServerDatagramDemultiplexer;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelInitializer;
+import io.netty.bootstrap.Bootstrap;
+import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioDatagramChannel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
@@ -82,6 +84,7 @@ public class MixinAcceptorFactory implements AcceptorFactory {
                             final Channel ch = future.channel();
                             final InetSocketAddress localAddress = (InetSocketAddress) ch.localAddress();
                             log.info("Mixed upstream {} started on port {}, bound to {}", proxyName, localAddress.getPort(), localAddress);
+                            ch.attr(Socks5ProxyServerHandler.UDP_CHANNEL_KEY).set(c(ch.eventLoop(), datagramChannelFactory));
                         } else {
                             future.cause().printStackTrace();
                         }
@@ -90,6 +93,33 @@ public class MixinAcceptorFactory implements AcceptorFactory {
             }
         };
     }
+
+    private static ChannelFuture c(final EventLoopGroup group, final DatagramChannelFactory datagramChannelFactory) {
+        return new Bootstrap()
+//                .group(new NioEventLoopGroup())
+//            .group(parent.eventLoop())
+                .group(group)
+                .channel(NioDatagramChannel.class)
+                .option(ChannelOption.SO_BROADCAST, false)
+                .handler(new ChannelInitializer<Channel>() {
+                    @Override
+                    protected void initChannel(final Channel ch) throws Exception {
+                        ch.pipeline().addLast(new Socks5ServerDatagramDemultiplexer(datagramChannelFactory));
+                    }
+                }).bind(0).addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(ChannelFuture future) throws Exception {
+                        if (future.isSuccess()) {
+                            InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
+                            log.info("[SOCKS5] UDP started on port: {} ({})", localAddress.getPort(), localAddress);
+                        } else {
+                            Throwable cause = future.cause();
+                            log.info("[SOCKS5] UDP started failed: {}", cause.getMessage(), cause);
+                        }
+                    }
+                });
+    }
+
 
     protected SocketChannelFactory createSocketChannelFactory(final RouteContext context, final String upstream) {
         return "DEFAULT".equals(upstream) ? context.newSocketChannelFactory() : context.newSocketChannelFactory(upstream);

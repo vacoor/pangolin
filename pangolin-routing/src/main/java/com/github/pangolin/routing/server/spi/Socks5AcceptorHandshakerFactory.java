@@ -1,7 +1,5 @@
 package com.github.pangolin.routing.server.spi;
 
-import com.github.pangolin.routing.handler.internal.server.DefaultSocks5DatagramServerFactory;
-import com.github.pangolin.routing.handler.internal.server.Socks5DatagramServerFactory;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
@@ -18,8 +16,7 @@ public class Socks5AcceptorHandshakerFactory implements MixinAcceptorHandshakerF
 
     @Override
     public MixinServerHandshaker createHandshaker(final SocketChannelFactory socketFactory, final DatagramChannelFactory datagramFactory) {
-//        final Socks5DatagramServerFactory datagramServerFactory = new DefaultSocks5DatagramServerFactory(datagramFactory);
-        return Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, socketFactory, null));
+        return Socks5MixinServerHandshaker.of(new Socks5ProxyServerHandler(null, null, socketFactory));
     }
 
 }

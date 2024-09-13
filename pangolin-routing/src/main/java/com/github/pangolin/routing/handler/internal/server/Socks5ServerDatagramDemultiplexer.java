@@ -136,6 +136,7 @@ public class Socks5ServerDatagramDemultiplexer extends ChannelInboundHandlerAdap
                 @Override
                 public void operationComplete(ChannelFuture future) throws Exception {
                   if (future.isSuccess()) {
+                      final Channel channel = future.channel();
                       final Socks5ServerDatagramDemultiplexer demultiplexer = future.channel().pipeline()
                           .get(Socks5ServerDatagramDemultiplexer.class);
                       System.out.println(demultiplexer);

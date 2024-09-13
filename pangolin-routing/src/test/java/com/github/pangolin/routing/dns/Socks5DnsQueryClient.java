@@ -27,22 +27,23 @@ public class Socks5DnsQueryClient {
 
     public static void main(String[] args) throws Exception {
 
-        final InetSocketAddress proxyAddress = new InetSocketAddress("127.0.0.1", 1082);
+        final InetSocketAddress proxyAddress = new InetSocketAddress("127.0.0.1", 2081);
 //        final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
-//        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
 //        final InetSocketAddress dnsAddress = new InetSocketAddress("8.8.8.8", 53);
-        final InetSocketAddress dnsAddress = new InetSocketAddress("10.188.207.9", 53);
+        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
+//        final InetSocketAddress dnsAddress = new InetSocketAddress("10.188.207.9", 53);
         final DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
 //        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
         query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
+        query.setRecursionDesired(true);
 
         DatagramChannelFactory factory = new StandardDatagramChannelFactory();
         final EventLoopGroup proxyGroup = new NioEventLoopGroup();
         factory.open(proxyAddress, 0, proxyGroup, new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
-//                        ch.pipeline().addLast(new Socks5DatagramProxyHandler(proxyAddress));
-                        ch.pipeline().addLast(new Socks5ClientDatagramPacketCodec(proxyAddress));
+                        ch.pipeline().addLast(new Socks5DatagramProxyHandler(proxyAddress));
+//                        ch.pipeline().addLast(new Socks5ClientDatagramPacketCodec(proxyAddress));
 //                        ch.pipeline().addLast(new SsDatagramProxyHandler(ssProxyAddress, cipher, password));
                         ch.pipeline().addLast(new DatagramDnsResponseDecoder());
                         ch.pipeline().addLast(new DatagramDnsQueryEncoder());

@@ -1,6 +1,5 @@
 package com.github.pangolin.routing.server;
 
-import com.github.pangolin.routing.handler.internal.server.DefaultSocks5DatagramServerFactory;
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelInitializer;
@@ -15,7 +14,7 @@ public class SocksServerTest {
         server.start(true, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(final SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new Socks5ProxyServerHandler(new DefaultSocks5DatagramServerFactory()));
+                ch.pipeline().addLast(new Socks5ProxyServerHandler());
             }
         }).channel().closeFuture().sync();
 
