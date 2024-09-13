@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.handler.internal.server.socks5.server;
 
 import com.github.pangolin.routing.handler.internal.server.Socks5DatagramServerFactory;
-import com.github.pangolin.routing.handler.internal.server.Socks5DatagramServerHandler;
+import com.github.pangolin.routing.handler.internal.server.Socks5ServerDatagramHandler;
 import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
 import com.google.common.collect.Maps;
 import io.netty.bootstrap.Bootstrap;
@@ -23,10 +23,8 @@ import io.netty.channel.EventLoop;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
-import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
-import io.netty.util.internal.RecyclableArrayList;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -49,7 +47,7 @@ public class SharableSocks5DatagramServerFactory implements Socks5DatagramServer
                 .handler(new ChannelInitializer<Channel>() {
                     @Override
                     protected void initChannel(final Channel ch) throws Exception {
-//                        ch.pipeline().addLast(new Socks5DatagramServerHandler());
+//                        ch.pipeline().addLast(new Socks5ServerDatagramHandler());
                         ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                             @Override
                             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
@@ -66,7 +64,7 @@ public class SharableSocks5DatagramServerFactory implements Socks5DatagramServer
             SharedDatagramChannel c = new SharedDatagramChannel((DatagramChannel) channel.channel(), own);
             DefaultChannelPromise p = new DefaultChannelPromise(c, channel.channel().eventLoop());
             ChannelPipeline cp = channel.channel().pipeline();
-            cp.addLast(c.id().toString(), new Socks5DatagramServerHandler(owner, new StandardDatagramChannelFactory()));
+            cp.addLast(c.id().toString(), new Socks5ServerDatagramHandler(owner, new StandardDatagramChannelFactory()));
             channel.addListener(new GenericFutureListener<Future<? super Void>>() {
                 @Override
                 public void operationComplete(final Future<? super Void> future) throws Exception {

@@ -23,12 +23,12 @@ import java.util.concurrent.ConcurrentMap;
 /**
  */
 @Slf4j
-public class Socks5DatagramServerHandler extends ChannelInboundHandlerAdapter {
+public class Socks5ServerDatagramHandler extends ChannelInboundHandlerAdapter {
     private final InetSocketAddress owner;
     private final DatagramChannelFactory datagramChannelFactory;
     private final ConcurrentMap<Route, ChannelFuture> natMap = Maps.newConcurrentMap();
 
-    public Socks5DatagramServerHandler(final InetSocketAddress owner, final DatagramChannelFactory datagramChannelFactory) {
+    public Socks5ServerDatagramHandler(final InetSocketAddress owner, final DatagramChannelFactory datagramChannelFactory) {
         this.owner = owner;
         this.datagramChannelFactory = datagramChannelFactory;
     }

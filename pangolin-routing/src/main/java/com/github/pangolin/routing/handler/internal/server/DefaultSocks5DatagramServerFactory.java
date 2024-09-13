@@ -13,6 +13,7 @@ import io.netty.util.concurrent.GenericFutureListener;
 
 import java.net.InetSocketAddress;
 
+@Deprecated
 public class DefaultSocks5DatagramServerFactory implements Socks5DatagramServerFactory {
     private final DatagramChannelFactory factory;
 
@@ -34,7 +35,7 @@ public class DefaultSocks5DatagramServerFactory implements Socks5DatagramServerF
                 .handler(new ChannelInitializer<Channel>() {
                     @Override
                     protected void initChannel(final Channel ch) throws Exception {
-                        ch.pipeline().addLast(new Socks5DatagramServerHandler(sender, factory));
+                        ch.pipeline().addLast(new Socks5ServerDatagramHandler(sender, factory));
                     }
                 }).bind(0);
     }

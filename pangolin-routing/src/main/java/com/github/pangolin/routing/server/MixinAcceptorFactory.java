@@ -7,6 +7,7 @@ import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
 import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInitializer;
@@ -78,7 +79,8 @@ public class MixinAcceptorFactory implements AcceptorFactory {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
                         if (future.isSuccess()) {
-                            final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
+                            final Channel ch = future.channel();
+                            final InetSocketAddress localAddress = (InetSocketAddress) ch.localAddress();
                             log.info("Mixed upstream {} started on port {}, bound to {}", proxyName, localAddress.getPort(), localAddress);
                         } else {
                             future.cause().printStackTrace();
