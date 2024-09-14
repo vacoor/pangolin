@@ -3,6 +3,7 @@ package com.github.pangolin.routing.beta.tun.windows.win32.jna;
 import com.sun.jna.*;
 import com.sun.jna.platform.win32.Guid;
 import com.sun.jna.platform.win32.IPHlpAPI;
+import com.sun.jna.platform.win32.WinDef;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
 import com.sun.jna.ptr.PointerByReference;
@@ -828,4 +829,32 @@ public interface IpHelpLib extends IPHlpAPI {
 
     // ------------------------ END AdapterAddresses related ------------------------
 
+
+    @Structure.FieldOrder({"Prefix", "PrefixLength"})
+    class IP_ADDRESS_PREFIX extends Structure {
+        public SOCKADDR_INET Prefix;
+        public byte PrefixLength;
+    }
+
+
+    class MIB_IPFORWARD_ROW2 extends Structure {
+        public long InterfaceLuid;
+        public int InterfaceIndex;
+        public IP_ADDRESS_PREFIX DestinationPrefix;
+        public SOCKADDR_INET NextHop;
+        public byte SitePrefixLength;
+        public int ValidLifetime;
+        public int PreferredLifetime;
+        public int Metric;
+
+//        NL_ROUTE_PROTOCOL Protocol;
+        public int Protocol;
+        public WinDef.BOOL Loopback;
+        public WinDef.BOOL AutoconfigureAddress;
+        public WinDef.BOOL Publish;
+        public WinDef.BOOL Immortal;
+        public int Age;
+//        NL_ROUTE_ORIGIN   Origin;
+        public int Origin;
+    }
 }
