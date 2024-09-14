@@ -8,6 +8,7 @@ import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramFakeDnsServe
 import com.github.pangolin.routing.beta.tun.tun2socks.WindowsTun2Socks;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.beta.tun.windows.win32.WindowsNetworkInterfaceEx;
+import com.github.pangolin.routing.route.Route;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
@@ -87,7 +88,10 @@ public class TunBasedApplication {
                 .handler(new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
-                        ch.pipeline().addLast(new DatagramFakeDnsServerHandler(fakeDns, context));
+                        ch.pipeline().addLast(new DatagramFakeDnsServerHandler(fakeDns, domain -> {
+                            Route route = context.getRoute(InetSocketAddress.createUnresolved(domain, 0));
+                            return null != route && !"DIRECT".equals(route.getUpstream());
+                        }));
                         ch.pipeline().addLast(new DatagramDnsProxyServerHandler(resolver));
                     }
                 }).option(ChannelOption.SO_BROADCAST, true).bind(53).addListener(new GenericFutureListener<Future<? super Void>>() {

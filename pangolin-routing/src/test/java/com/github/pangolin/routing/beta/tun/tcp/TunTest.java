@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.tun;
+package com.github.pangolin.routing.beta.tun.tcp;
 
 import com.github.pangolin.routing.beta.tun.tcp.RawSocket;
 import com.github.pangolin.routing.beta.InterfaceAddressEx;

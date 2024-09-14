@@ -9,14 +9,15 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.dns.*;
 
 import java.net.InetSocketAddress;
+import java.util.function.Predicate;
 
 public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<DatagramDnsQuery> {
     private final DnsEngine engine;
-    private final RouteContext routeContext;
+    private final Predicate<String> checker;
 
-    public DatagramFakeDnsServerHandler(final DnsEngine engine, final RouteContext routeContext) {
+    public DatagramFakeDnsServerHandler(final DnsEngine engine, final Predicate<String> checker) {
         this.engine = engine;
-        this.routeContext = routeContext;
+        this.checker = checker;
     }
 
     @Override
@@ -32,19 +33,22 @@ public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<Da
 
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final DatagramDnsQuery query) throws Exception {
+        int count = query.count(DnsSection.QUESTION);
+        for (int i = 0; i < count; i++) {
+            DnsRecord question = query.recordAt(DnsSection.QUESTION, i);
+            System.out.println(question.name() + "->" + question.type());
+        }
         final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
         final String domain = dnsQuestion.name();
-        final Route route = routeContext.getRoute(InetSocketAddress.createUnresolved(domain, 0));
-        if (null == route || "DIRECT".equalsIgnoreCase(route.getUpstream())) {
-            ctx.fireChannelRead(query.retain());
-        } else {
-            DatagramDnsResponse lookup = engine.lookup(query);
+        if (checker.test(domain)) {
+            DatagramDnsResponse lookup = null; //engine.lookup(query);
             if (null != lookup) {
                 ctx.writeAndFlush(lookup);
-            } else {
-                ctx.fireChannelRead(query.retain());
+                return;
             }
         }
+
+        ctx.fireChannelRead(query.retain());
     }
 
 }

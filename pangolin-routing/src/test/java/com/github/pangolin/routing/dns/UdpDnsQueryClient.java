@@ -25,22 +25,23 @@ public class UdpDnsQueryClient {
 
     public static void main(String[] args) throws Exception {
 
-        final InetSocketAddress proxyAddress = new InetSocketAddress("127.0.0.1", 1082);
-//        final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
-        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
+//        final InetSocketAddress proxyAddress = new InetSocketAddress("127.0.0.1", 1082);
+        final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
+//        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
 //        final InetSocketAddress dnsAddress = new InetSocketAddress("8.8.8.8", 53);
         final DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
-        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
+        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("aliyun.com.", DnsRecordType.AAAA));
+        query.setRecursionDesired(true);
 //        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
 
-        DnsNameResolver resolver = new DnsNameResolverBuilder()
+//        DnsNameResolver resolver = new DnsNameResolverBuilder()
 //                .nameServerProvider()
-                .recursionDesired(true)
-                .build();
+//                .recursionDesired(true)
+//                .build();
 
         DatagramChannelFactory factory = new StandardDatagramChannelFactory();
         final EventLoopGroup proxyGroup = new NioEventLoopGroup();
-        factory.open(proxyAddress, 0, proxyGroup, new ChannelInitializer<DatagramChannel>() {
+        factory.open(dnsAddress, 0, proxyGroup, new ChannelInitializer<DatagramChannel>() {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
 //                        ch.pipeline().addLast(new Socks5DatagramProxyHandler(proxyAddress));
@@ -58,8 +59,8 @@ public class UdpDnsQueryClient {
                                 }
                                 for (int i = 0, count = datagramDnsResponse.count(DnsSection.ANSWER); i < count; i++) {
                                     final DnsRawRecord dnsQuestionAnswer = datagramDnsResponse.recordAt(DnsSection.ANSWER, i);
-                                    if (DnsRecordType.A.equals(dnsQuestionAnswer.type())) {
-                                        System.out.print(NetUtil.bytesToIpAddress(ByteBufUtil.getBytes(dnsQuestionAnswer.content())));
+                                    if (DnsRecordType.A.equals(dnsQuestionAnswer.type()) || DnsRecordType.AAAA.equals(dnsQuestionAnswer.type())) {
+                                        System.out.println(NetUtil.bytesToIpAddress(ByteBufUtil.getBytes(dnsQuestionAnswer.content())));
                                     }
                                 }
                                 System.out.println();
