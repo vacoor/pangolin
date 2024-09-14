@@ -86,11 +86,15 @@ public class NettyServer {
      * @return 服务通道
      */
     public ChannelFuture start(final boolean autoRead, final ChannelHandler initializer) throws InterruptedException, CertificateException, SSLException {
+      return start(autoRead, null, initializer);
+    }
+
+    public ChannelFuture start(final boolean autoRead, final ChannelHandler serverHandler, final ChannelHandler initializer) throws InterruptedException, CertificateException, SSLException {
         if (!startup.compareAndSet(false, true)) {
             return serverChannelFuture;
         }
 
-        final ChannelFuture cf = Channels.listen(listenHost, listenPort, autoRead, bossGroup, workerGroup, initializer);
+        final ChannelFuture cf = Channels.listen(listenHost, listenPort, autoRead, bossGroup, workerGroup, serverHandler, initializer);
         Channels.shutdownGroupOnClose(cf.channel(), bossGroup);
         Channels.shutdownGroupOnClose(cf.channel(), workerGroup);
 

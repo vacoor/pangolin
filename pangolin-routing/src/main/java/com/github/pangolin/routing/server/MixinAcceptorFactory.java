@@ -11,9 +11,9 @@ import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
+import java.net.SocketAddress;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
@@ -68,7 +68,7 @@ public class MixinAcceptorFactory implements AcceptorFactory {
                 final DatagramChannelFactory datagramChannelFactory = createDatagramChannelFactory(context, proxyName);
 
                 final NettyServer server = new NettyServer(listenPort);
-                return server.start(true, new ChannelInitializer<SocketChannel>() {
+                return server.start(true, new Socks5ServerInitializer(datagramChannelFactory), new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(final SocketChannel channel) throws Exception {
                         final MixinServerHandshaker[] handshakers = factories
@@ -84,7 +84,6 @@ public class MixinAcceptorFactory implements AcceptorFactory {
                             final Channel ch = future.channel();
                             final InetSocketAddress localAddress = (InetSocketAddress) ch.localAddress();
                             log.info("Mixed upstream {} started on port {}, bound to {}", proxyName, localAddress.getPort(), localAddress);
-                            ch.attr(Socks5ProxyServerHandler.UDP_CHANNEL_KEY).set(c(ch.eventLoop(), datagramChannelFactory));
                         } else {
                             future.cause().printStackTrace();
                         }
@@ -94,11 +93,32 @@ public class MixinAcceptorFactory implements AcceptorFactory {
         };
     }
 
-    private static ChannelFuture c(final EventLoopGroup group, final DatagramChannelFactory datagramChannelFactory) {
+    private class Socks5ServerInitializer extends ChannelOutboundHandlerAdapter {
+        private final DatagramChannelFactory datagramChannelFactory;
+
+        private Socks5ServerInitializer(DatagramChannelFactory datagramChannelFactory) {
+            this.datagramChannelFactory = datagramChannelFactory;
+        }
+
+        @Override
+        public void bind(ChannelHandlerContext ctx, SocketAddress localAddress, ChannelPromise promise) throws Exception {
+            promise.addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(ChannelFuture future) throws Exception {
+                    if (future.isSuccess()) {
+                        final Channel ch = future.channel();
+                        ch.attr(Socks5ProxyServerHandler.UDP_CHANNEL_KEY).set(startSocks5UdpServer(ch, datagramChannelFactory));
+                    }
+                }
+            });
+            super.bind(ctx, localAddress, promise);
+        }
+
+    }
+
+    private static ChannelFuture startSocks5UdpServer(final Channel tcpServerChannel, final DatagramChannelFactory datagramChannelFactory) {
         return new Bootstrap()
-//                .group(new NioEventLoopGroup())
-//            .group(parent.eventLoop())
-                .group(group)
+                .group(tcpServerChannel.eventLoop())
                 .channel(NioDatagramChannel.class)
                 .option(ChannelOption.SO_BROADCAST, false)
                 .handler(new ChannelInitializer<Channel>() {
@@ -111,10 +131,10 @@ public class MixinAcceptorFactory implements AcceptorFactory {
                     public void operationComplete(ChannelFuture future) throws Exception {
                         if (future.isSuccess()) {
                             InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                            log.info("[SOCKS5] UDP started on port: {} ({})", localAddress.getPort(), localAddress);
+                            log.info("[SOCKS5] UDP started on port: {} ({}) -> TCP: {}", localAddress.getPort(), localAddress, tcpServerChannel.localAddress());
                         } else {
                             Throwable cause = future.cause();
-                            log.info("[SOCKS5] UDP started failed: {}", cause.getMessage(), cause);
+                            log.info("[SOCKS5] UDP started failed: {} -> TCP: {}", cause.getMessage(), tcpServerChannel.localAddress(), cause);
                         }
                     }
                 });

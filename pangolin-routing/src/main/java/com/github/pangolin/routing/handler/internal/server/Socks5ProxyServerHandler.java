@@ -12,6 +12,7 @@ import io.netty.util.AttributeKey;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
+import java.net.SocketAddress;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.Inet4Address;
@@ -182,62 +183,6 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         log.error("[SOCKS5] Software caused connection abort: {}", cause.getMessage(), cause);
     }
 
-    protected boolean udpAssociate(final ChannelHandlerContext ctx, final Socks5CommandRequest request) {
-        final InetSocketAddress clientAddress = (InetSocketAddress) ctx.channel().remoteAddress();
-        final InetSocketAddress serverAddress = (InetSocketAddress) ctx.channel().localAddress();
-
-        ChannelFuture udpServer = ctx.channel().parent().attr(UDP_CHANNEL_KEY).get();
-        if (null != udpServer) {
-            final Socks5ServerDatagramDemultiplexer demultiplexer = udpServer.channel().pipeline().get(Socks5ServerDatagramDemultiplexer.class);
-            if (null != demultiplexer) {
-                demultiplexer.join(clientAddress);
-                ctx.channel().closeFuture().addListener(new GenericFutureListener<Future<? super Void>>() {
-                    @Override
-                    public void operationComplete(final Future<? super Void> future) throws Exception {
-                        demultiplexer.leave(clientAddress);
-                    }
-                });
-                v(udpServer, ctx);
-                return true;
-            }
-            return false;
-        }
-        return false;
-    }
-
-    private void v(final ChannelFuture datagramServer, final ChannelHandlerContext ctx) {
-        datagramServer.addListener(new GenericFutureListener<Future<? super Void>>() {
-            @Override
-            public void operationComplete(final Future<? super Void> future) throws Exception {
-                final InetSocketAddress clientAddress = (InetSocketAddress) ctx.channel().remoteAddress();
-                final InetSocketAddress serverAddress = (InetSocketAddress) ctx.channel().localAddress();
-
-                final String udpServerHost = serverAddress.getHostString();
-                final int udpServerPort = ((InetSocketAddress) datagramServer.channel().localAddress()).getPort();
-                if (future.isSuccess()) {
-                    ctx.pipeline().remove(ctx.handler());
-                    log.info("[SOCKS5] UDP server started on port {}, {}@{}", udpServerPort, clientAddress, datagramServer.channel().localAddress());
-                    if (serverAddress.isUnresolved()) {
-                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.DOMAIN, udpServerHost, udpServerPort));
-                        return;
-                    }
-                    InetAddress inetAddress = serverAddress.getAddress();
-                    if (inetAddress instanceof Inet4Address) {
-                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv4, udpServerHost, udpServerPort));
-                        return;
-                    }
-                    if (inetAddress instanceof Inet6Address) {
-                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv6, udpServerHost, udpServerPort));
-                        return;
-                    }
-                } else {
-                    ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.FAILURE, Socks5AddressType.IPv4));
-                }
-            }
-        });
-    }
-
-
     protected ChannelFuture connect(final ChannelHandlerContext ctx, final Socks5CommandRequest request) throws Exception {
         final int port = request.dstPort();
         final String address = request.dstAddr();
@@ -262,4 +207,63 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     private static boolean nullSafeEquals(Object a, Object b) {
         return (a == b) || (a != null && a.equals(b));
     }
+
+    protected boolean udpAssociate(final ChannelHandlerContext ctx, final Socks5CommandRequest request) {
+        final ChannelFuture udpServer = ctx.channel().parent().attr(UDP_CHANNEL_KEY).get();
+        if (null != udpServer) {
+            udpServer.addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(ChannelFuture future) throws Exception {
+                    if (!future.isSuccess()) {
+                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.FAILURE, request.dstAddrType()));
+                        return;
+                    }
+
+                    final Channel udpChannel = future.channel();
+                    final Socks5ServerDatagramDemultiplexer demultiplexer = udpChannel.pipeline().get(Socks5ServerDatagramDemultiplexer.class);
+                    if (null == demultiplexer) {
+                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.FAILURE, request.dstAddrType()));
+                        // CLOSE ?
+                        return;
+                    }
+
+                    final InetSocketAddress tcpServerAddress = (InetSocketAddress) ctx.channel().localAddress();
+                    final InetSocketAddress tcpClientAddress = (InetSocketAddress) ctx.channel().remoteAddress();
+                    final InetSocketAddress udpServerAddress = (InetSocketAddress) udpChannel.localAddress();
+                    final String udpServerHost = tcpServerAddress.getHostString();
+                    final int udpServerPort = udpServerAddress.getPort();
+
+                    ctx.pipeline().remove(ctx.handler());
+                    demultiplexer.join(tcpClientAddress);
+
+                    ctx.channel().closeFuture().addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(ChannelFuture future) throws Exception {
+                            demultiplexer.leave(tcpClientAddress);
+                        }
+                    });
+                    if (tcpServerAddress.isUnresolved()) {
+                        log.info("[SOCKS5] UDP server {}:{} -> {}", udpServerHost, udpServerPort, tcpClientAddress);
+                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.DOMAIN, udpServerHost, udpServerPort));
+                        return;
+                    }
+                    InetAddress inetAddress = tcpServerAddress.getAddress();
+                    if (inetAddress instanceof Inet4Address) {
+                        log.info("[SOCKS5] UDP server {}:{} -> {}", udpServerHost, udpServerPort, tcpClientAddress);
+                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv4, udpServerHost, udpServerPort));
+                        return;
+                    }
+                    if (inetAddress instanceof Inet6Address) {
+                        log.info("[SOCKS5] UDP server {}:{} -> {}", udpServerHost, udpServerPort, tcpClientAddress);
+                        ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, Socks5AddressType.IPv6, udpServerHost, udpServerPort));
+                        return;
+                    }
+                    ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.FAILURE, request.dstAddrType()));
+                }
+            });
+            return true;
+        }
+        return false;
+    }
+
 }

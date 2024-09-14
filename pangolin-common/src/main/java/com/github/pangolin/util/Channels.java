@@ -3,10 +3,14 @@ package com.github.pangolin.util;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
@@ -26,10 +30,22 @@ public class Channels {
     public static ChannelFuture listen(final String listenHost, final int listenPort, final boolean autoRead,
                                        final EventLoopGroup bossGroup, final EventLoopGroup workerGroup,
                                        final ChannelHandler initializer) throws InterruptedException {
-        return listen(createSocketAddress(listenHost, listenPort), autoRead, bossGroup, workerGroup, initializer);
+        return listen(listenHost, listenPort, autoRead, bossGroup, workerGroup, null, initializer);
+    }
+
+    public static ChannelFuture listen(final String listenHost, final int listenPort, final boolean autoRead,
+        final EventLoopGroup bossGroup, final EventLoopGroup workerGroup,
+        final ChannelHandler serverHandler, final ChannelHandler initializer) throws InterruptedException {
+        return listen(createSocketAddress(listenHost, listenPort), autoRead, bossGroup, workerGroup, serverHandler, initializer);
     }
 
     public static ChannelFuture listen(final SocketAddress listenAddr, final boolean autoRead, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup, final ChannelHandler initializer) throws InterruptedException {
+      return listen(listenAddr, autoRead, bossGroup, workerGroup, null, initializer);
+    }
+
+    public static ChannelFuture listen(final SocketAddress listenAddr, final boolean autoRead,
+                                       final EventLoopGroup bossGroup, final EventLoopGroup workerGroup,
+                                       final ChannelHandler serverHandler, final ChannelHandler initializer) throws InterruptedException {
         final ServerBootstrap serverBootstrap = new ServerBootstrap();
         serverBootstrap.option(ChannelOption.SO_REUSEADDR, true);
 //        serverBootstrap.option(ChannelOption.SO_RCVBUF, 32 * 1024);// 读缓冲区为32k
@@ -37,6 +53,9 @@ public class Channels {
         serverBootstrap.childOption(ChannelOption.SO_KEEPALIVE, true);
         serverBootstrap.childOption(ChannelOption.AUTO_READ, autoRead);
         serverBootstrap.group(bossGroup, workerGroup).channel(NioServerSocketChannel.class);
+        if (null != serverHandler) {
+            serverBootstrap.handler(serverHandler);
+        }
         serverBootstrap.childHandler(initializer);
         return serverBootstrap.bind(listenAddr);
     }

@@ -29,12 +29,12 @@ public class Socks5DnsQueryClient {
 
         final InetSocketAddress proxyAddress = new InetSocketAddress("127.0.0.1", 2081);
 //        final InetSocketAddress dnsAddress = new InetSocketAddress("114.114.114.114", 53);
-//        final InetSocketAddress dnsAddress = new InetSocketAddress("8.8.8.8", 53);
-        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
+        final InetSocketAddress dnsAddress = new InetSocketAddress("8.8.8.8", 53);
+//        final InetSocketAddress dnsAddress = new InetSocketAddress("192.168.1.1", 53);
 //        final InetSocketAddress dnsAddress = new InetSocketAddress("10.188.207.9", 53);
         final DatagramDnsQuery query = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);
-//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
-        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
+        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("google.com.", DnsRecordType.A));
+//        query.addRecord(DnsSection.QUESTION, new DefaultDnsQuestion("baidu.com.", DnsRecordType.A));
         query.setRecursionDesired(true);
 
         DatagramChannelFactory factory = new StandardDatagramChannelFactory();
