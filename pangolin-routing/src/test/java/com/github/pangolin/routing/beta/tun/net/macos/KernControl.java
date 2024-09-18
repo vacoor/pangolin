@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.tun.macos;
+package com.github.pangolin.routing.beta.tun.net.macos;
 
 import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;

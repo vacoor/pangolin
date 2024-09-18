@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.tun.windows;
+package com.github.pangolin.routing.beta.tun.net.windows;
 
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Pointer;

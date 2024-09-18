@@ -1,15 +1,18 @@
-package com.github.pangolin.routing.beta.tun.windows;
+package com.github.pangolin.routing.beta.tun.net.windows;
 
-import com.github.pangolin.routing.beta.tun.windows.win32.jna.IpHelpLib;
+import com.github.pangolin.routing.beta.tun.net.InterfaceAddressEx;
+import com.github.pangolin.routing.beta.tun.net.windows.win32.WindowsNetworkInterfaceEx;
+import com.github.pangolin.routing.beta.tun.net.windows.win32.jna.IpHelpLib;
 import com.sun.jna.LastErrorException;
-import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.*;
 import com.sun.jna.ptr.LongByReference;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.util.concurrent.locks.LockSupport;
 
-import static com.github.pangolin.routing.beta.tun.windows.WintunLib.*;
+import static com.github.pangolin.routing.beta.tun.net.windows.WintunLib.*;
 import static com.sun.jna.platform.win32.Guid.GUID;
 
 public class WintunAdapter {
@@ -110,10 +113,23 @@ public class WintunAdapter {
 
 
     public static void main(String[] args) throws IOException {
-        WintunAdapter adapter = WintunAdapter.open("wintun", "wintun", GUID.newGuid());
-        Pointer pointer = Pointer.createConstant(adapter.getLuid());
-        LongByReference r = new LongByReference(adapter.getLuid());
+        // final GUID guid = GUID.newGuid();
+        final GUID guid = GUID.fromString("{E3E33B4A-2E25-4168-A732-52BBDFD9EE57}");
+        final String guidStr = guid.toGuidString();
+
+        final WintunAdapter adapter = WintunAdapter.open("wintun", "wintun", guid);
+
+        final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByLuid(adapter.getLuid());
+        nix.addInterfaceAddress(InterfaceAddressEx.of("198.18.0.1", 24));
+        nix.setInterfaceDns(new InetAddress[]{InetAddress.getByName("127.0.0.1")});
+
+        System.out.println(guidStr);
+        System.out.println(adapter.adapter);
+
+        LockSupport.park();
+//        Pointer pointer = Pointer.createConstant(adapter.getLuid());
+//        LongByReference r = new LongByReference(adapter.getLuid());
 //        adapter.setIpAddress(InetAddress.getByName("192.168.1.1"), (byte) 24);
-        WintunSession session = adapter.newSession();
+//        WintunSession session = adapter.newSession();
     }
 }

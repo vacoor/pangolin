@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.tun.linux;
+package com.github.pangolin.routing.beta.tun.net.linux;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
 

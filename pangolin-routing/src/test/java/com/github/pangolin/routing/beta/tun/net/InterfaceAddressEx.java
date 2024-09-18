@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta;
+package com.github.pangolin.routing.beta.tun.net;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;

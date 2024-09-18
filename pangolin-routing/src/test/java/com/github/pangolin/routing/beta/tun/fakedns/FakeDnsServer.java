@@ -3,10 +3,9 @@ package com.github.pangolin.routing.beta.tun.fakedns;
 import com.github.pangolin.routing.beta.tun.fakedns.beta.SimpleInet4FakeDns;
 import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramDnsProxyServerHandler;
 import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramFakeDnsServerHandler;
-import com.github.pangolin.routing.beta.tun.windows.win32.WindowsNetworkInterfaceEx;
+import com.github.pangolin.routing.beta.tun.net.windows.win32.WindowsNetworkInterfaceEx;
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
-import com.github.pangolin.routing.context.spi.DefaultRouteContextFactory;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
@@ -26,15 +25,15 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class FakeDnsServer {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         final DnsEngine fakeDns = SimpleInet4FakeDns.create("198.18.0.0/15", 60).asDnsEngine();
         List<InetSocketAddress> dnsServers = Arrays.asList(new InetSocketAddress("192.168.1.1", 53));
 
 
 
-//        if (isWindows) {
-//            dnsServers = WindowsNetworkInterfaceEx.allDns().stream().map(a -> new InetSocketAddress(a, 53)).collect(Collectors.toList());
-//        }
+        if (System.getProperty("os.name").toLowerCase().contains("windows")) {
+            dnsServers = WindowsNetworkInterfaceEx.allDns().stream().map(a -> new InetSocketAddress(a, 53)).collect(Collectors.toList());
+        }
         final EventLoopGroup loop = new NioEventLoopGroup();
 //        final List<InetSocketAddress> addresses = Arrays.asList(new InetSocketAddress("192.168.1.1", 53));
         final DnsNameResolver resolver =

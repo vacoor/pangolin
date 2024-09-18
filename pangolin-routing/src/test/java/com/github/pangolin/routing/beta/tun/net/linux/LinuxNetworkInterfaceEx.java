@@ -1,11 +1,11 @@
-package com.github.pangolin.routing.beta.tun.linux;
+package com.github.pangolin.routing.beta.tun.net.linux;
 
-import com.github.pangolin.routing.beta.InterfaceAddressEx;
-import com.github.pangolin.routing.beta.NetworkInterfaceEx;
-import com.github.pangolin.routing.beta.tun.linux.If.Ifreq;
-import com.github.pangolin.routing.beta.tun.linux.If.in6_ifreq;
-import com.github.pangolin.routing.beta.tun.linux.If.sockaddr_in;
-import com.github.pangolin.routing.beta.tun.linux.If.sockaddr_in6;
+import com.github.pangolin.routing.beta.tun.net.InterfaceAddressEx;
+import com.github.pangolin.routing.beta.tun.net.NetworkInterfaceEx;
+import com.github.pangolin.routing.beta.tun.net.linux.If.Ifreq;
+import com.github.pangolin.routing.beta.tun.net.linux.If.in6_ifreq;
+import com.github.pangolin.routing.beta.tun.net.linux.If.sockaddr_in;
+import com.github.pangolin.routing.beta.tun.net.linux.If.sockaddr_in6;
 import com.google.common.collect.Lists;
 
 import java.net.Inet4Address;
@@ -16,8 +16,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static com.github.pangolin.routing.beta.tun.linux.Socket.*;
-import static com.github.pangolin.routing.beta.tun.linux.Sockios.*;
+import static com.github.pangolin.routing.beta.tun.net.linux.Socket.*;
+import static com.github.pangolin.routing.beta.tun.net.linux.Sockios.*;
 import static org.drasyl.channel.tun.jna.shared.LibC.*;
 
 /**

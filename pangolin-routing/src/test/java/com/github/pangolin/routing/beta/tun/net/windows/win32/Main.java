@@ -1,6 +1,6 @@
-package com.github.pangolin.routing.beta.tun.windows.win32;
+package com.github.pangolin.routing.beta.tun.net.windows.win32;
 
-import com.github.pangolin.routing.beta.InterfaceAddressEx;
+import com.github.pangolin.routing.beta.tun.net.InterfaceAddressEx;
 import com.sun.jna.*;
 import lombok.extern.slf4j.Slf4j;
 import org.drasyl.channel.tun.jna.windows.Guid;

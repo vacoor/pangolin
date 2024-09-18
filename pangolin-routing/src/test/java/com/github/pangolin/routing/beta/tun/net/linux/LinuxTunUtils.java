@@ -1,11 +1,11 @@
-package com.github.pangolin.routing.beta.tun.linux;
+package com.github.pangolin.routing.beta.tun.net.linux;
 
 
 import static com.sun.jna.platform.linux.Fcntl.O_RDWR;
 import static org.drasyl.channel.tun.jna.shared.LibC.ioctl;
 
-import com.github.pangolin.routing.beta.tun.linux.If.Ifreq;
-import com.github.pangolin.routing.beta.InterfaceAddressEx;
+import com.github.pangolin.routing.beta.tun.net.linux.If.Ifreq;
+import com.github.pangolin.routing.beta.tun.net.InterfaceAddressEx;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 

@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.tun.windows;
+package com.github.pangolin.routing.beta.tun.net.windows;
 
 import com.sun.jna.Native;
 import io.netty.util.internal.SystemPropertyUtil;

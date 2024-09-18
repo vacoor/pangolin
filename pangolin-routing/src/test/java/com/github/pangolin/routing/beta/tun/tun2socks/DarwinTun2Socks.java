@@ -1,9 +1,7 @@
 package com.github.pangolin.routing.beta.tun.tun2socks;
 
-import com.github.pangolin.routing.beta.InterfaceAddressEx;
-import com.github.pangolin.routing.beta.tun.macos.MacOsNetworkInterfaceEx;
-import org.drasyl.channel.tun.jna.TunDevice;
-import org.drasyl.channel.tun.jna.darwin.DarwinTunDevice;
+import com.github.pangolin.routing.beta.tun.net.InterfaceAddressEx;
+import com.github.pangolin.routing.beta.tun.net.macos.MacOsNetworkInterfaceEx;
 
 import java.io.File;
 import java.io.IOException;
