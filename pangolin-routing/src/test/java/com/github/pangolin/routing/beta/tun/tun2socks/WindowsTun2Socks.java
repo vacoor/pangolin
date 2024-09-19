@@ -10,11 +10,14 @@ import java.net.URISyntaxException;
 import java.net.URL;
 
 public class WindowsTun2Socks extends AbstractTun2Socks {
-    private static final String TUN2SOCKS_READY_PATTERN = ".*tun://.* <-> .*";
+    private final String device;
+    private final String proxy;
+    private final String bindInterface;
 
-    @Override
-    protected String tun2socksReadyPattern() {
-        return TUN2SOCKS_READY_PATTERN;
+    public WindowsTun2Socks(final String device, final String proxy, final String bindInterface) {
+        this.device = device;
+        this.proxy = proxy;
+        this.bindInterface = bindInterface;
     }
 
     @Override
@@ -26,16 +29,19 @@ public class WindowsTun2Socks extends AbstractTun2Socks {
          */
         return new ProcessBuilder().command(
                 executable.getAbsolutePath(),
-                "-device", "tun://iTun?guid={1999b35f-70e1-45e9-ad0f-29eb0e06ee2b}",
-                "-proxy", "socks5://127.0.0.1:3081",
-                "-interface", "以太网 2"
+                // "-device", "tun://iTun?guid={1999b35f-70e1-45e9-ad0f-29eb0e06ee2b}",
+//                "-proxy", "socks5://127.0.0.1:3081",
+//                "-interface", "以太网 2"
+                "-device", String.format("tun://%s", device),
+                "-proxy", String.format("socks5://%s", proxy),
+                "-interface", bindInterface
         ).directory(executable.getParentFile());
     }
 
     @Override
     protected void onReady() throws IOException, InterruptedException {
         // Add Interface address
-        final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias("iTun");
+        final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias(getDevice());
         nix.addInterfaceAddress(InterfaceAddressEx.of("198.18.0.1", (short) 24));
 
         // Set Interface DNS
@@ -45,10 +51,4 @@ public class WindowsTun2Socks extends AbstractTun2Socks {
         WindowsNetworkInterfaceEx.flushDnsCache();
     }
 
-    public static void main(String[] args) throws Exception {
-        WindowsTun2Socks tun2Socks = new WindowsTun2Socks();
-        tun2Socks.start();
-        tun2Socks.stop();
-        System.out.println();
-    }
 }
