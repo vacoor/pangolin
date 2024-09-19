@@ -17,7 +17,7 @@ import java.util.Collections;
 import java.util.zip.GZIPInputStream;
 
 public class GeoIpRoutePredicateFactory implements RoutePredicateFactory<InetSocketAddress, String> {
-    private static final String DEFAULT_DB_PATH = "/Country.mmdb.gz";
+    private static final String DEFAULT_DB_PATH = "/META-INF/Country.mmdb.gz";
     private static final NodeCache DEFAULT_CACHE = new CHMCache();
 
     /**
