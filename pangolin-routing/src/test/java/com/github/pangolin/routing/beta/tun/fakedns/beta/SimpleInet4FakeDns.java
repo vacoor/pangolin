@@ -143,6 +143,7 @@ public class SimpleInet4FakeDns extends AbstractFakeDns<Inet4Address> {
                         final DatagramDnsResponse response = new DatagramDnsResponse(query.recipient(), query.sender(), query.id());
                         response.addRecord(DnsSection.QUESTION, dnsQuestion);
                         response.addRecord(DnsSection.ANSWER, dnsQuestionAnswer);
+                        System.out.println(String.format("%s -> %s", domain, NetUtil.bytesToIpAddress(bytes)));
                         return response;
                     }
                 }

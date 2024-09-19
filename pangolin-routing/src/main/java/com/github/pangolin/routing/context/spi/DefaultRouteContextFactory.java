@@ -7,14 +7,14 @@ import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.server.AcceptorFactory;
 import com.github.pangolin.routing.server.MixinAcceptorFactory;
 import com.github.pangolin.routing.support.AliasRegistry;
-import com.github.pangolin.routing.support.SimpleAliasRegistry;
-import com.google.common.collect.Maps;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URL;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.ServiceLoader;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -22,7 +22,9 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
     private final AcceptorFactory acceptorFactory = createAcceptorFactory();
 
     protected AcceptorFactory createAcceptorFactory() {
-        return new MixinAcceptorFactory();
+        final Iterable<AcceptorFactory> factories = ServiceLoader.load(AcceptorFactory.class);
+        final Iterator<AcceptorFactory> it = factories.iterator();
+        return it.hasNext() ? it.next() : new MixinAcceptorFactory();
     }
 
     @Override

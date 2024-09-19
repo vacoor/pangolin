@@ -46,7 +46,9 @@ public class WindowsTun2Socks extends AbstractTun2Socks {
     }
 
     public static void main(String[] args) throws Exception {
-        new WindowsTun2Socks().start();
+        WindowsTun2Socks tun2Socks = new WindowsTun2Socks();
+        tun2Socks.start();
+        tun2Socks.stop();
         System.out.println();
     }
 }

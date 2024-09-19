@@ -10,13 +10,20 @@ import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelOutboundHandlerAdapter;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
-import java.net.SocketAddress;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -148,12 +155,4 @@ public class MixinAcceptorFactory implements AcceptorFactory {
     protected DatagramChannelFactory createDatagramChannelFactory(final RouteContext context, final String upstream) {
         return "DEFAULT".equals(upstream) ? context.newDatagramChannelFactory() : context.newDatagramChannelFactory(upstream);
     }
-
-    /*
-    public static void main(String[] args) throws Exception {
-        final Acceptor acceptor = new MixinAcceptorFactory().apply(1089);
-        acceptor.start(new InMemoryRouteContext(null)).sync().channel().closeFuture().sync();
-    }
-    */
-
 }

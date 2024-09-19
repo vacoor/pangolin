@@ -42,7 +42,7 @@ public class TunBasedApplication {
 //        acceptor.start(new InMemoryRouteContext(null)).sync().channel().closeFuture().sync();
 //        RouteApplication.main(new String[0]);
 
-        final boolean isWindows = System.getProperty("os.name").toLowerCase().contains("windows");
+//        final boolean isWindows = System.getProperty("os.name").toLowerCase().contains("windows");
 
         final ApplicationHome home = new ApplicationHome(TunBasedApplication.class);
         final URL conf = new File(home.getDir(), "conf/default.conf").toURI().toURL();
@@ -51,27 +51,28 @@ public class TunBasedApplication {
         /*-
          * benchmark RFC1544.
          */
-        final DnsEngine fakeDns = SimpleInet4FakeDns.create("198.18.0.0/15", 60).asDnsEngine();
+//        final DnsEngine fakeDns = SimpleInet4FakeDns.create("198.18.0.0/15", 60).asDnsEngine();
 //        final DnsEngine fakeDns = SimpleInet6FakeDns.create("2001:2::/48", 60).asDnsEngine();
 
-        List<InetSocketAddress> dnsServers = Arrays.asList(new InetSocketAddress("192.168.1.1", 53));
+//        List<InetSocketAddress> dnsServers = Arrays.asList(new InetSocketAddress("192.168.1.1", 53));
 
 
 
-        if (isWindows) {
-            dnsServers = WindowsNetworkInterfaceEx.allDns().stream().map(a -> new InetSocketAddress(a, 53)).collect(Collectors.toList());
-        }
+//        if (isWindows) {
+//            dnsServers = WindowsNetworkInterfaceEx.allDns().stream().map(a -> new InetSocketAddress(a, 53)).collect(Collectors.toList());
+//        }
 
         final RouteApplication app = new RouteApplication() {
             @Override
             protected RouteContext createParentContext(final URL configLocation) throws Exception {
                 RouteContext ctx = super.createParentContext(configLocation);
-                ctx.attr(DnsEngine.class.getName(), fakeDns);
+//                ctx.attr(DnsEngine.class.getName(), fakeDns);
                 return ctx;
             }
         };
         final RouteContext context = app.run(conf);
 
+        /*
         final EventLoopGroup loop = new NioEventLoopGroup();
 //        final List<InetSocketAddress> addresses = Arrays.asList(new InetSocketAddress("192.168.1.1", 53));
         final DnsNameResolver resolver =
@@ -104,6 +105,7 @@ public class TunBasedApplication {
         if (isWindows) {
             new WindowsTun2Socks().start();
         }
+        */
 
         app.await();
     }

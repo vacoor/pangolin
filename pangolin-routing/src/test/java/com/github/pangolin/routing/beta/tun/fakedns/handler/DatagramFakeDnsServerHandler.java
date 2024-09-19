@@ -41,7 +41,7 @@ public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<Da
         final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
         final String domain = dnsQuestion.name();
         if (checker.test(domain)) {
-            DatagramDnsResponse lookup = null; //engine.lookup(query);
+            DatagramDnsResponse lookup = engine.lookup(query);
             if (null != lookup) {
                 ctx.writeAndFlush(lookup);
                 return;
