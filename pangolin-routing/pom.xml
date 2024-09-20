@@ -176,7 +176,8 @@
                     </execution>
                 </executions>
                 <configuration>
-                    <mainClass>${start-class}</mainClass>
+                    <!--<mainClass>${start-class}</mainClass>-->
+                    <mainClass>com.github.pangolin.routing.RouteApplication</mainClass>
                 </configuration>
             </plugin>
         </plugins>
