@@ -6,7 +6,13 @@ import com.github.pangolin.routing.util.SocketUtils;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 
+/**
+ * GeoIP predicate.
+ */
 public class GeoIpRoutePredicate implements RoutePredicate<InetSocketAddress> {
+    /**
+     * Country code, eg: US.
+     */
     private final String country;
     private final GeoIpRoutePredicateFactory dictionary;
 
@@ -25,6 +31,9 @@ public class GeoIpRoutePredicate implements RoutePredicate<InetSocketAddress> {
         return country.equals(lookupCountry);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public String toString() {
         return "GEOIP," + country;

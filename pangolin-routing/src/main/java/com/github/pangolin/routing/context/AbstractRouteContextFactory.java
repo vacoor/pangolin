@@ -1,12 +1,15 @@
 package com.github.pangolin.routing.context;
 
 import com.github.pangolin.routing.route.Route;
+import com.github.pangolin.routing.route.RoutePredicateFactoriesAware;
 import com.github.pangolin.routing.route.predicate.RoutePredicate;
 import com.github.pangolin.routing.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.route.predicate.UnknownRoutePredicate;
 import com.github.pangolin.routing.support.AliasRegistry;
 import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.upstream.UpstreamCombiner;
+import com.github.pangolin.routing.upstream.UpstreamCombinersAware;
+import com.github.pangolin.routing.upstream.UpstreamFactoriesAware;
 import com.github.pangolin.routing.upstream.UpstreamFactory;
 import com.github.pangolin.routing.upstream.UpstreamRegistry;
 import com.google.common.collect.Maps;

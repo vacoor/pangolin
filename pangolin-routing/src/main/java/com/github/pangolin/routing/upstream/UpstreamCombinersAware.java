@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.context;
+package com.github.pangolin.routing.upstream;
 
 import com.github.pangolin.routing.upstream.UpstreamCombiner;
 

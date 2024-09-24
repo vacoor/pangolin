@@ -57,10 +57,12 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
 
     @Override
     public Route getRoute(final InetSocketAddress destination) {
+        // TODO get from cache.
         for (final Route<InetSocketAddress> route : routes) {
             final Iterable<RoutePredicate<InetSocketAddress>> predicates = route.getPredicates();
             for (final RoutePredicate<InetSocketAddress> predicate : predicates) {
                 if (predicate.test(destination)) {
+                    // TODO put to cache
                     return route;
                 }
             }
