@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.tun;
+package com.github.pangolin.routing.beta.tun.fakedns;
 
 import com.github.pangolin.routing.beta.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.beta.tun.fakedns.beta.SimpleInet4FakeDns;
@@ -105,7 +105,7 @@ public class FakeDnsMixinAcceptorFactory extends MixinAcceptorFactory {
 //                            context.attr(DnsEngine.class.getName(), fakeDns);
 
                             if (IS_WINDOWS) {
-                                new WindowsTun2Socks("Panglin", socks5Server, "以太网 2").start();
+                                // new WindowsTun2Socks("Panglin", socks5Server, "以太网 2").start();
                             }
                         }
                     }

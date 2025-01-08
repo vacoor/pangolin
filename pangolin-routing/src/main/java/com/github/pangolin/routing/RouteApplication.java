@@ -5,6 +5,7 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.context.RouteContextFactory;
+import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.route.RoutePredicateFactoriesAware;
 import com.github.pangolin.routing.upstream.UpstreamCombinersAware;
 import com.github.pangolin.routing.upstream.UpstreamFactoriesAware;
@@ -37,6 +38,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
@@ -213,7 +215,11 @@ public class RouteApplication {
         final ApplicationHome home = new ApplicationHome(RouteApplication.class);
         final URL conf = new File(home.getDir(), "conf/default.conf").toURI().toURL();
         final RouteApplication app = new RouteApplication();
-        RouteContext context = app.run(conf);
+        final RouteContext context = app.run(conf);
+
+        final SocketChannelFactory factory = context.newSocketChannelFactory();
+        final Forwarder forwarder = new Forwarder(factory, new NioEventLoopGroup(), new NioEventLoopGroup());
+//        forwarder.addForwarding(2222, InetSocketAddress.createUnresolved("127.0.0.1", 22));
         /*
         for (Route<InetSocketAddress> route : context.routes()) {
             for (RoutePredicate predicate : route.getPredicates()) {

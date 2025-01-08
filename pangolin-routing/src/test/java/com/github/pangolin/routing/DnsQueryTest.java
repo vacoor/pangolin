@@ -34,6 +34,7 @@ public class DnsQueryTest {
 
     public static void main(String[] args) throws Exception {
 
+
         final InetSocketAddress proxyAddress = new InetSocketAddress("127.0.0.1", 2081);
         final InetSocketAddress dnsAddress = new InetSocketAddress("8.8.8.8", 53);
         final DatagramDnsQuery dnsQuery = new DatagramDnsQuery(new InetSocketAddress(0), dnsAddress, 1);

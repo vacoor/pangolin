@@ -33,11 +33,6 @@ public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<Da
 
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final DatagramDnsQuery query) throws Exception {
-        int count = query.count(DnsSection.QUESTION);
-        for (int i = 0; i < count; i++) {
-            DnsRecord question = query.recordAt(DnsSection.QUESTION, i);
-            System.out.println(question.name() + "->" + question.type());
-        }
         final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
         final String domain = dnsQuestion.name();
         if (checker.test(domain)) {

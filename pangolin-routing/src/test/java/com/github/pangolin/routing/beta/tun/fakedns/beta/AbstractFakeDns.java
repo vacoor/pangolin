@@ -10,6 +10,11 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Fake DNS.
+ * @param <T>
+ * @see <a href="https://www.rfc-editor.org/rfc/rfc3089">Fake IP</a>
+ */
 public abstract class AbstractFakeDns<T> {
     protected final int leaseTime;
 
