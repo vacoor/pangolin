@@ -6,7 +6,7 @@ import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramDnsProxyServ
 import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramFakeDnsServerHandler;
 import com.github.pangolin.routing.beta.tun.fakedns.support.FakeDnsDatagramChannelFactory;
 import com.github.pangolin.routing.beta.tun.fakedns.support.FakeDnsSocketChannelFactory;
-import com.github.pangolin.routing.beta.tun.net.windows.win32.WindowsNetworkInterfaceEx;
+import com.github.pangolin.tun.net.windows.win32.WindowsNetworkInterfaceEx;
 import com.github.pangolin.routing.beta.tun.tun2socks.WindowsTun2Socks;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
@@ -29,7 +29,6 @@ import io.netty.resolver.dns.SequentialDnsServerAddressStreamProvider;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;

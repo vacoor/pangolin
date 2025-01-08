@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.beta.tun.tcp;
 
-import com.github.pangolin.routing.beta.tun.net.InterfaceAddressEx;
-import com.github.pangolin.routing.beta.tun.net.windows.win32.WindowsNetworkInterfaceEx;
+import com.github.pangolin.tun.net.InterfaceAddressEx;
+import com.github.pangolin.tun.net.windows.win32.WindowsNetworkInterfaceEx;
 import com.google.common.collect.Maps;
 import com.sun.jna.WString;
 import io.netty.bootstrap.Bootstrap;

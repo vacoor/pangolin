@@ -165,6 +165,11 @@
             <artifactId>pcap4j-packetfactory-static</artifactId>
             <version>1.7.6</version>
         </dependency>
+        <dependency>
+            <groupId>com.github.nomou.pangolin</groupId>
+            <artifactId>pangolin-tun</artifactId>
+            <version>0.0.3-SNAPSHOT</version>
+        </dependency>
         <!--
         <dependency>
             <groupId>org.springframework.boot</groupId>
