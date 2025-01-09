@@ -98,7 +98,6 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
 
             registry.addAcceptors(acceptorFactory.apply(listenPort, segments));
         }
-        ;
 
         return registry;
     }

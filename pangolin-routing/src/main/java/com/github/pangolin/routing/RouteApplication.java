@@ -56,13 +56,13 @@ import java.util.ServiceLoader;
 
 @Slf4j
 public class RouteApplication {
-    private final LoadBalancerStats stats = new LoadBalancerStats();
-    private final Iterable<UpstreamFactory> upstreamFactories;
-    private final Map<String, UpstreamCombiner> upstreamCombiners = Maps.newLinkedHashMap();
-    private final Map<String, RoutePredicateFactory> predicateFactories = Maps.newLinkedHashMap();
+    protected final LoadBalancerStats stats = new LoadBalancerStats();
+    protected final Iterable<UpstreamFactory> upstreamFactories;
+    protected final Map<String, UpstreamCombiner> upstreamCombiners = Maps.newLinkedHashMap();
+    protected final Map<String, RoutePredicateFactory> predicateFactories = Maps.newLinkedHashMap();
 
     //    private final List<Acceptor> acceptors = Lists.newLinkedList();
-    private final ChannelGroup channelGroup = new DefaultChannelGroup("acceptor-channels", GlobalEventExecutor.INSTANCE);
+    protected final ChannelGroup channelGroup = new DefaultChannelGroup("acceptor-channels", GlobalEventExecutor.INSTANCE);
 
 
     public RouteApplication() {
