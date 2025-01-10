@@ -18,12 +18,16 @@ import java.util.Arrays;
 import java.util.List;
 
 public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<DatagramDnsQuery> {
+
     private final DnsNameResolver resolver;
 
     public DatagramDnsProxyServerHandler(final DnsNameResolver resolver) {
         this.resolver = resolver;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         final ChannelPipeline cp = ctx.pipeline();
@@ -35,18 +39,16 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
         }
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final DatagramDnsQuery query) throws Exception {
         final DnsQuestion question = query.recordAt(DnsSection.QUESTION);
         resolver.query(question).addListener(f -> {
             if (f.isSuccess()) {
                 final AddressedEnvelope<DnsResponse, InetSocketAddress> envelope = (AddressedEnvelope<DnsResponse, InetSocketAddress>) f.getNow();
-                try {
-                    ctx.writeAndFlush(getResponse(envelope.content(), query));
-                }finally {
-//                    ReferenceCountUtil.release(envelope);
-                }
-
+                ctx.writeAndFlush(getResponse(envelope.content(), query));
             }
         });
     }
@@ -58,7 +60,7 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
     }
 
     private void copySections(DnsResponse r1, DnsResponse r2) {
-        for(DnsSection section : DnsSection.values()) {
+        for (DnsSection section : DnsSection.values()) {
             copySection(r1, r2, section);
         }
     }
@@ -76,8 +78,7 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
         );
 
         final EventLoopGroup loop = new NioEventLoopGroup();
-        final DnsNameResolver resolver =
-        new DnsNameResolverBuilder()
+        final DnsNameResolver resolver = new DnsNameResolverBuilder()
                 .nameServerProvider(new SequentialDnsServerAddressStreamProvider(addresses))
                 .channelFactory(NioDatagramChannel::new)
                 .eventLoop(loop.next())

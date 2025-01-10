@@ -13,11 +13,7 @@ import com.github.pangolin.routing.server.Acceptor;
 import com.github.pangolin.routing.server.MixinAcceptorFactory;
 import com.github.pangolin.tun.net.windows.win32.WindowsNetworkInterfaceEx;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
@@ -30,11 +26,11 @@ import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 @Slf4j
 public class FakeDnsMixinAcceptorFactory extends MixinAcceptorFactory {
-    public static final boolean IS_WINDOWS = System.getProperty("os.name").toLowerCase().contains("windows");
 
     @Override
     public Acceptor apply(final int listenPort, final String... args) {
@@ -58,8 +54,8 @@ public class FakeDnsMixinAcceptorFactory extends MixinAcceptorFactory {
                     public void operationComplete(final ChannelFuture future) throws Exception {
                         if (future.isSuccess() && 3081 == listenPort) {
                             final InetSocketAddress addr = (InetSocketAddress) future.channel().localAddress();
-                            final List<InetSocketAddress> upstreamDnsServers = determineDnsServers();
-                            startFakeDnsIfNecessary(fakeDns2, context, upstreamDnsServers).addListener(new ChannelFutureListener() {
+                            final Predicate<String> domainFakePredicate = domain -> !isDirect(context, domain);
+                            startFakeDnsIfNecessary(fakeDns2, domainFakePredicate).addListener(new ChannelFutureListener() {
                                 @Override
                                 public void operationComplete(final ChannelFuture future) throws Exception {
                                     if (future.isSuccess()) {
@@ -78,46 +74,16 @@ public class FakeDnsMixinAcceptorFactory extends MixinAcceptorFactory {
         };
     }
 
-    private ChannelFuture startFakeDnsIfNecessary(final DnsEngine fakeDns, final RouteContext context, final List<InetSocketAddress> upstreamDnsServers) throws Exception {
-        /*-
-         * benchmark RFC1544.
-         */
-//        final DnsEngine fakeDns = SimpleInet6FakeDns.create("2001:2::/48", 60).asDnsEngine();
-
-        final EventLoopGroup loop = new NioEventLoopGroup();
-        final DnsNameResolver resolver = new DnsNameResolverBuilder()
-                .eventLoop(loop.next())
-                .recursionDesired(true)
-                .channelFactory(NioDatagramChannel::new)
-                .nameServerProvider(new SequentialDnsServerAddressStreamProvider(upstreamDnsServers))
-                .build();
-
-        final Bootstrap b = new Bootstrap();
-        return b.group(new NioEventLoopGroup())
-                .channel(NioDatagramChannel.class)
-                .handler(new ChannelInitializer<DatagramChannel>() {
-                    @Override
-                    protected void initChannel(DatagramChannel ch) {
-                        ch.pipeline().addLast(new DatagramFakeDnsServerHandler(fakeDns, domain -> {
-                            final Route r = context.getRoute(InetSocketAddress.createUnresolved(domain, 0));
-                            return null != r && !"DIRECT".equalsIgnoreCase(r.getUpstream());
-                        }));
-                        ch.pipeline().addLast(new DatagramDnsProxyServerHandler(resolver));
-                    }
-                }).option(ChannelOption.SO_BROADCAST, true).bind(53);
+    private boolean isDirect(final RouteContext context, final String domain) {
+        final Route r = context.getRoute(InetSocketAddress.createUnresolved(domain, 0));
+        return null == r || "DIRECT".equalsIgnoreCase(r.getUpstream());
     }
 
-    private List<InetSocketAddress> determineDnsServers() throws SocketException {
-        if (IS_WINDOWS) {
-            return WindowsNetworkInterfaceEx.allDns()
-                    .stream()
-                    .filter(a -> !a.isAnyLocalAddress())
-                    .filter(a -> !a.isLoopbackAddress())
-                    .map(a -> new InetSocketAddress(a, 53))
-                    .collect(Collectors.toList());
-        }
-        return Collections.singletonList(new InetSocketAddress("192.168.1.1", 53));
+    private ChannelFuture startFakeDnsIfNecessary(final DnsEngine fakeDns,
+                                                  final Predicate<String> domainFakePredicate) throws Exception {
+        return FakeDnsServer.startFakeDns(fakeDns, domainFakePredicate);
     }
+
 
     private void startTunIfNecessary(final String tunIp, final String tunNetmask, final String socksServer) {
 //        if (IS_WINDOWS) {
