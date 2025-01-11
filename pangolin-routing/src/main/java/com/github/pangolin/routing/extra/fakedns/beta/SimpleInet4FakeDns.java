@@ -1,6 +1,6 @@
-package com.github.pangolin.routing.beta.tun.fakedns.beta;
+package com.github.pangolin.routing.extra.fakedns.beta;
 
-import com.github.pangolin.routing.beta.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.extra.fakedns.DnsEngine;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.dns.*;

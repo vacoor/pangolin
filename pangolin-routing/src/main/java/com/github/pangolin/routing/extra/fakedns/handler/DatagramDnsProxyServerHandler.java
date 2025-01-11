@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.tun.fakedns.handler;
+package com.github.pangolin.routing.extra.fakedns.handler;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;

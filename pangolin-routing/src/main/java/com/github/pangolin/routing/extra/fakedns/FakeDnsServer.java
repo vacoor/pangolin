@@ -1,8 +1,8 @@
-package com.github.pangolin.routing.beta.tun.fakedns;
+package com.github.pangolin.routing.extra.fakedns;
 
-import com.github.pangolin.routing.beta.tun.fakedns.beta.SimpleInet4FakeDns;
-import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramDnsProxyServerHandler;
-import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramFakeDnsServerHandler;
+import com.github.pangolin.routing.extra.fakedns.beta.SimpleInet4FakeDns;
+import com.github.pangolin.routing.extra.fakedns.handler.DatagramDnsProxyServerHandler;
+import com.github.pangolin.routing.extra.fakedns.handler.DatagramFakeDnsServerHandler;
 import com.github.pangolin.tun.net.windows.win32.WindowsNetworkInterfaceEx;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
@@ -28,7 +28,9 @@ public class FakeDnsServer {
 
     public static ChannelFuture startFakeDns(final DnsEngine fakeDns,
                                              final Predicate<String> domainFakePredicate) throws SocketException {
+        log.info("FakeDNS Starting...");
         final List<InetSocketAddress> dnsServers = determineDnsServers();
+        log.info("FakeDNS detect DNS: {}", dnsServers);
         return startFakeDns(fakeDns, domainFakePredicate, dnsServers);
     }
 
@@ -71,7 +73,15 @@ public class FakeDnsServer {
                         ch.pipeline().addLast(new DatagramDnsProxyServerHandler(resolver));
                     }
                 }).option(ChannelOption.SO_BROADCAST, true)
-                .bind(53);
+                .bind(53).addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(final ChannelFuture future) throws Exception {
+                        if (!future.isSuccess()) {
+                            final Throwable cause = future.cause();
+                            log.warn("FakeDNS error: {}", cause.getMessage(), cause);
+                        }
+                    }
+                });
     }
 
     public static void main(String[] args) throws Exception {

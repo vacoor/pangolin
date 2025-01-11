@@ -53,8 +53,23 @@
       <groupId>log4j</groupId>
       <artifactId>log4j</artifactId>
     </dependency>
+    <dependency>
+      <groupId>org.pcap4j</groupId>
+      <artifactId>pcap4j-core</artifactId>
+      <version>1.7.6</version>
+    </dependency>
+    <dependency>
+      <groupId>org.pcap4j</groupId>
+      <artifactId>pcap4j-packetfactory-static</artifactId>
+      <version>1.7.6</version>
+    </dependency>
+    <dependency>
+      <groupId>com.github.nomou</groupId>
+      <artifactId>nougat-lang</artifactId>
+    </dependency>
   </dependencies>
 
+  <!--
   <build>
     <plugins>
       <plugin>
@@ -69,10 +84,10 @@
           </execution>
         </executions>
         <configuration>
-          <!--<mainClass>${start-class}</mainClass>-->
           <mainClass>com.github.pangolin.tun.Main</mainClass>
         </configuration>
       </plugin>
     </plugins>
   </build>
+  -->
 </project>

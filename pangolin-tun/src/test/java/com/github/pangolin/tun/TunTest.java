@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.tun.tcp;
+package com.github.pangolin.tun;
 
 import com.github.pangolin.tun.net.InterfaceAddressEx;
 import com.github.pangolin.tun.net.windows.win32.WindowsNetworkInterfaceEx;

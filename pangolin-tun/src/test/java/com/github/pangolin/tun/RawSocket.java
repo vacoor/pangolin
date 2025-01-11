@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.tun.tcp;
+package com.github.pangolin.tun;
 
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;

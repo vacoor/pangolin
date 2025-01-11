@@ -1,14 +1,11 @@
-package com.github.pangolin.routing.beta.tun.fakedns.handler;
+package com.github.pangolin.routing.extra.fakedns.handler;
 
-import com.github.pangolin.routing.beta.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.context.RouteContext;
-import com.github.pangolin.routing.route.Route;
+import com.github.pangolin.routing.extra.fakedns.DnsEngine;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.dns.*;
 
-import java.net.InetSocketAddress;
 import java.util.function.Predicate;
 
 public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<DatagramDnsQuery> {

@@ -1,33 +1,20 @@
-package com.github.pangolin.routing.beta.tun.fakedns;
+package com.github.pangolin.routing.extra.fakedns;
 
-import com.github.pangolin.routing.beta.tun.fakedns.beta.SimpleInet4FakeDns;
-import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramDnsProxyServerHandler;
-import com.github.pangolin.routing.beta.tun.fakedns.handler.DatagramFakeDnsServerHandler;
-import com.github.pangolin.routing.beta.tun.fakedns.support.FakeDnsDatagramChannelFactory;
-import com.github.pangolin.routing.beta.tun.fakedns.support.FakeDnsSocketChannelFactory;
+import com.github.pangolin.routing.extra.fakedns.beta.SimpleInet4FakeDns;
+import com.github.pangolin.routing.extra.fakedns.support.FakeDnsDatagramChannelFactory;
+import com.github.pangolin.routing.extra.fakedns.support.FakeDnsSocketChannelFactory;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.server.Acceptor;
 import com.github.pangolin.routing.server.MixinAcceptorFactory;
-import com.github.pangolin.tun.net.windows.win32.WindowsNetworkInterfaceEx;
-import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.DatagramChannel;
-import io.netty.channel.socket.nio.NioDatagramChannel;
-import io.netty.resolver.dns.DnsNameResolver;
-import io.netty.resolver.dns.DnsNameResolverBuilder;
-import io.netty.resolver.dns.SequentialDnsServerAddressStreamProvider;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
-import java.net.SocketException;
-import java.util.Collections;
-import java.util.List;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 
 @Slf4j
 public class FakeDnsMixinAcceptorFactory extends MixinAcceptorFactory {
@@ -35,7 +22,7 @@ public class FakeDnsMixinAcceptorFactory extends MixinAcceptorFactory {
     @Override
     public Acceptor apply(final int listenPort, final String... args) {
         final Acceptor acceptor = super.apply(listenPort, args);
-        final String fakeSubnet = "198.18.0.1/24";
+        final String fakeSubnet = "198.18.0.1/15";
         final String fakeIp = "198.18.0.1";
         final String fakeNetmask = "255.255.255.0";
 
@@ -52,21 +39,25 @@ public class FakeDnsMixinAcceptorFactory extends MixinAcceptorFactory {
                 return acceptor.start(context).addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
-                        if (future.isSuccess() && 3081 == listenPort) {
+                        if (future.isSuccess()) {
                             final InetSocketAddress addr = (InetSocketAddress) future.channel().localAddress();
-                            final Predicate<String> domainFakePredicate = domain -> !isDirect(context, domain);
-                            startFakeDnsIfNecessary(fakeDns2, domainFakePredicate).addListener(new ChannelFutureListener() {
-                                @Override
-                                public void operationComplete(final ChannelFuture future) throws Exception {
-                                    if (future.isSuccess()) {
-                                        log.info("Fake DNS startup on {}", future.channel().localAddress());
+                            final int listenPort = addr.getPort();
+                            log.info("ACCEPTOR: {}", addr);
+                            if (1081 == listenPort) {
+                                final Predicate<String> domainFakePredicate = domain -> !isDirect(context, domain);
+                                startFakeDnsIfNecessary(fakeDns2, domainFakePredicate).addListener(new ChannelFutureListener() {
+                                    @Override
+                                    public void operationComplete(final ChannelFuture future) throws Exception {
+                                        if (future.isSuccess()) {
+                                            log.info("Fake DNS startup on {}", future.channel().localAddress());
 
-                                        // final String socks5Server = "127.0.0.1:" + addr.getPort();
-                                        final String socks5Server = "127.0.0.1:" + listenPort;
-                                        startTunIfNecessary(fakeIp, fakeNetmask, socks5Server);
+                                            // final String socks5Server = "127.0.0.1:" + addr.getPort();
+                                            final String socks5Server = "127.0.0.1:" + listenPort;
+                                            startTunIfNecessary(fakeIp, fakeNetmask, socks5Server);
+                                        }
                                     }
-                                }
-                            });
+                                });
+                            }
                         }
                     }
                 });

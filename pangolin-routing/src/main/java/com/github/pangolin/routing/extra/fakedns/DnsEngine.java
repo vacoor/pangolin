@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.tun.fakedns;
+package com.github.pangolin.routing.extra.fakedns;
 
 import io.netty.handler.codec.dns.DatagramDnsQuery;
 import io.netty.handler.codec.dns.DatagramDnsResponse;
