@@ -6,7 +6,7 @@
 # In macOS, we need to start tun2socks first so that it will create TUN interface for us.
 # In this example, "en0" is the default primary network interface.
 function tun_create() {
-    sudo ./tun2socks-darwin-amd64-v3 -device utun123 -proxy socks5://127.0.0.1:2081 -interface en0
+    sudo ./tun2socks-darwin-amd64-v3 -device utun123 -proxy socks5://192.168.1.201:1081 -interface en0
 }
 
 # Use ifconfig to bring the TUN interface up and assign addresses for it.
@@ -28,6 +28,7 @@ function tun_setup_route() {
    # sudo route add -net 64.0.0.0/2 198.18.0.1
    # sudo route add -net 128.0.0.0/1 198.18.0.1
    sudo route add -net 198.18.0.0/15 198.18.0.1
+   sudo route add -net 10.188.71.0/15 198.18.0.1
 
    # Mode 2: Route default traffic to TUN interface.
    # sudo route delete -inet default
@@ -48,7 +49,8 @@ function tun_cleanup_route() {
    # sudo route delete -net 32.0.0.0/3
    # sudo route delete -net 64.0.0.0/2
    # sudo route delete -net 128.0.0.0/1
-   sudo route delete -net 198.18.0.0/15 198.18.0.1
+   sudo route delete -net 198.18.0.0/15
+   sudo route delete -net 10.188.71.0/15
 
    # Mode 2: Restore default routes
    # sudo route delete -inet default
@@ -73,3 +75,14 @@ function tun_init() {
 # sudo sysctl -w net.inet.ip.forwarding=0
 
 # sudo killall -HUP mDNSResponder;
+
+function tun_start() {
+   # sudo ./tun2socks-darwin-amd64-v3 -device utun123 -proxy socks5://192.168.1.201:1081 -interface en0
+   sudo ifconfig utun123 inet 198.18.0.1 netmask 255.255.0.0 198.18.0.1 up
+   sudo route add -net 198.18.0.0/15 198.18.0.1
+   sudo route add -net 10.188.71.0/15 198.18.0.1
+
+   networksetup -setdnsservers "Wi-Fi" 192.168.1.201 192.168.1.1
+   sudo killall -HUP mDNSResponder;
+}
+
