@@ -32,19 +32,20 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
         return load(url, parent);
     }
 
-    public RouteContext load(final URL url, final RouteContext parent) throws Exception {
+    public RouteContext load(final URL configLocation, final RouteContext parent) throws Exception {
         final Ini ini = new Ini();
-        ini.load(url.openStream());
+        ini.load(configLocation.openStream());
 
         final Ini.Section external = ini.getSection("External");
-        RouteContext parentToUse = parent;
+
+        RouteContext externalCtx = parent;
         if (null != external) {
             for (String urlToUse : external.values()) {
-                parentToUse = load(urlToUse, parentToUse);
+                externalCtx = loadExternal(urlToUse, externalCtx);
             }
         }
 
-        final InMemoryRouteContext registry = new InMemoryRouteContext(parentToUse);
+        final InMemoryRouteContext registry = new InMemoryRouteContext(externalCtx);
         final AliasRegistry aliasRegistry = registry;
 
         final Ini.Section proxy = ini.getSection("Proxy");
@@ -76,7 +77,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
 
         Ini.Section rule = ini.getSection("Rule");
         if (null != rule) {
-            rule.keySet().stream().map(route -> apply(route, url, aliasRegistry)).forEach(registry::addRoute);
+            rule.keySet().stream().map(route -> apply(route, configLocation, aliasRegistry)).forEach(registry::addRoute);
         }
 
 
@@ -103,7 +104,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
     }
 
 
-    private RouteContext load(final String url, final RouteContext parent) throws Exception {
+    private RouteContext loadExternal(final String url, final RouteContext parent) throws Exception {
         final ExternalRouteContextFactory reader = new ExternalRouteContextFactory();
         reader.setUpstreamFactories(upstreamFactories);
         reader.setUpstreamCombiners(upstreamCombiners);

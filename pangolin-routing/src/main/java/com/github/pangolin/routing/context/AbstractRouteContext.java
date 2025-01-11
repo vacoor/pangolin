@@ -34,7 +34,7 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
     private final Map<String, Object> attributes = Maps.newLinkedHashMap();
 
     private final List<Acceptor> acceptors = Lists.newLinkedList();
-    private final Upstream contextUpstream = new ContextUpstream(UUID.randomUUID().toString(), this);
+    private final Upstream self = new ContextUpstream(UUID.randomUUID().toString(), this);
 
     public AbstractRouteContext(final RouteContext parent) {
         this.parent = parent;
@@ -115,7 +115,7 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
 
     @Override
     public SocketChannelFactory newSocketChannelFactory() {
-        return newSocketChannelFactory(contextUpstream);
+        return newSocketChannelFactory(self);
     }
 
     @Override
@@ -125,7 +125,7 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
 
     @Override
     public DatagramChannelFactory newDatagramChannelFactory() {
-        return newDatagramChannelFactory(contextUpstream);
+        return newDatagramChannelFactory(self);
     }
 
     @Override
