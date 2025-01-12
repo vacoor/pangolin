@@ -21,6 +21,7 @@ import com.google.common.collect.Maps;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -73,6 +74,16 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
     @Override
     public void addUpstream(final String name, final Upstream upstream) {
         upstreams.put(name, upstream);
+    }
+
+    @Override
+    public List<Upstream> upstreams() {
+        final List<Upstream> upstreams = Lists.newLinkedList();
+        if (null != parent) {
+            upstreams.addAll(parent.upstreams());
+        }
+        upstreams.addAll(this.upstreams.values());
+        return Collections.unmodifiableList(upstreams);
     }
 
     @Override
@@ -151,6 +162,16 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
         public ContextUpstream(final String name, final RouteContext context) {
             super(name);
             this.context = context;
+        }
+
+        @Override
+        public SocketAddress address() {
+            return null;
+        }
+
+        @Override
+        public boolean isVirtual() {
+            return true;
         }
 
         @Override

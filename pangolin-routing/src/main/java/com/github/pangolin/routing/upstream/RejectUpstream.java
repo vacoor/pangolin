@@ -18,6 +18,16 @@ public class RejectUpstream extends AbstractUpstream {
     }
 
     @Override
+    public SocketAddress address() {
+        return null;
+    }
+
+    @Override
+    public boolean isVirtual() {
+        return true;
+    }
+
+    @Override
     public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
         return new RejectChannelHandler(destination);
     }

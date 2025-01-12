@@ -14,6 +14,7 @@ import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -43,11 +44,22 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
         lb.setLoadBalancerStats(stats);
 
         return new AbstractUpstream(name) {
+
+            @Override
+            public SocketAddress address() {
+                return null;
+            }
+
+            @Override
+            public boolean isVirtual() {
+                return true;
+            }
+
             @Override
             public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
                 final Upstream upstream = (Upstream) lb.chooseServer();
                 if (null != upstream) {
-                    log.info("[{}/TCP] -> [{}] -> {}", name, upstream.getName(), destination);
+                    log.info("[{}/TCP] -> [{}] -> {}", name, upstream.name(), destination);
                 }
                 return null != upstream ? upstream.newSocketProxyHandler(destination) : null;
             }
@@ -56,7 +68,7 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
             public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
                 final Upstream upstream = (Upstream) lb.chooseServer();
                 if (null != upstream) {
-                    log.info("[{}/UDP] -> [{}] -> {}", name, upstream.getName(), destination);
+                    log.info("[{}/UDP] -> [{}] -> {}", name, upstream.name(), destination);
                 }
                 return null != upstream ? upstream.newDatagramProxyHandler(destination) : null;
             }

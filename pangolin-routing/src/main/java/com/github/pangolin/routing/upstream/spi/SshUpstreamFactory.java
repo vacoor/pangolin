@@ -6,6 +6,7 @@ import com.github.pangolin.routing.upstream.AbstractUpstream;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.URI;
 
 public class SshUpstreamFactory extends AbstractUpstreamFactory {
@@ -46,6 +47,16 @@ public class SshUpstreamFactory extends AbstractUpstreamFactory {
             this.port = port;
             this.username = username;
             this.password = password;
+        }
+
+        @Override
+        public SocketAddress address() {
+            return new InetSocketAddress(hostname, port);
+        }
+
+        @Override
+        public boolean isVirtual() {
+            return false;
         }
 
         /**

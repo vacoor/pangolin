@@ -9,6 +9,7 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.stream.StreamSupport;
 
 public class UpstreamChainFactory implements UpstreamCombiner {
@@ -21,6 +22,17 @@ public class UpstreamChainFactory implements UpstreamCombiner {
     @Override
     public Upstream combine(final String name, final Iterable<String> names, final UpstreamRegistry registry) {
         return new AbstractUpstream(name) {
+
+            @Override
+            public SocketAddress address() {
+                return null;
+            }
+
+            @Override
+            public boolean isVirtual() {
+                return true;
+            }
+
             @Override
             public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
                 final ChannelHandler[] handlers = StreamSupport.stream(names.spliterator(), false)

@@ -58,6 +58,16 @@ public class HttpUpstreamFactory extends AbstractUpstreamFactory {
         }
 
         @Override
+        public SocketAddress address() {
+            return address;
+        }
+
+        @Override
+        public boolean isVirtual() {
+            return false;
+        }
+
+        @Override
         public ChannelHandler newSocketProxyHandler(InetSocketAddress destination) {
             final DefaultHttpHeaders headers = new DefaultHttpHeaders();
             /*-

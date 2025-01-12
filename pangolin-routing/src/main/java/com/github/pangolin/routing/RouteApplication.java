@@ -28,7 +28,9 @@ import com.github.pangolin.routing.upstream.UpstreamFactory;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.netflix.loadbalancer.LoadBalancerStats;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -53,6 +55,7 @@ import java.net.URL;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
+import java.util.Set;
 
 @Slf4j
 public class RouteApplication {
@@ -125,7 +128,7 @@ public class RouteApplication {
                 new RejectUpstream()
         };
         for (final Upstream embeddedUpstream : embeddedUpstreams) {
-            contextToUse.addUpstream(embeddedUpstream.getName(), embeddedUpstream);
+            contextToUse.addUpstream(embeddedUpstream.name(), embeddedUpstream);
         }
 
         int port = 0;
@@ -216,6 +219,21 @@ public class RouteApplication {
         final URL conf = new File(home.getDir(), "conf/default.conf").toURI().toURL();
         final RouteApplication app = new RouteApplication();
         final RouteContext context = app.run(conf);
+
+        final Set<String> bypass = Sets.newTreeSet();
+        for (Upstream upstream : context.upstreams()) {
+            final SocketAddress address = upstream.address();
+            if (!upstream.isVirtual() && address instanceof InetSocketAddress) {
+                final InetSocketAddress addr = (InetSocketAddress) address;
+                if (!addr.isUnresolved()) {
+                    final String hostAddress = addr.getAddress().getHostAddress();
+//                    System.out.println(upstream.name() + " -> " + addr);
+                    bypass.add(hostAddress);
+                }
+            }
+        }
+
+        System.out.println("Bypass = " + bypass);
 
         final SocketChannelFactory factory = context.newSocketChannelFactory();
         final Forwarder forwarder = new Forwarder(factory, new NioEventLoopGroup(), new NioEventLoopGroup());

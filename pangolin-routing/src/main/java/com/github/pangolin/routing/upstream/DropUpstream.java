@@ -7,12 +7,23 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 
 @Slf4j
 public class DropUpstream extends AbstractUpstream {
 
     public DropUpstream() {
         super("DROP");
+    }
+
+    @Override
+    public SocketAddress address() {
+        return null;
+    }
+
+    @Override
+    public boolean isVirtual() {
+        return true;
     }
 
     @Override

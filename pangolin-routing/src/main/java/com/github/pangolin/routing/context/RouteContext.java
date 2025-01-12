@@ -6,6 +6,7 @@ import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.upstream.Upstream;
 
 import java.net.InetSocketAddress;
+import java.util.List;
 
 public interface RouteContext {
 
@@ -14,6 +15,8 @@ public interface RouteContext {
     Iterable<Route> routes();
 
     Route getRoute(final InetSocketAddress destination);
+
+    List<Upstream> upstreams();
 
     Upstream getUpstream(final String name);
 

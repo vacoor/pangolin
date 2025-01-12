@@ -104,7 +104,7 @@ public class TrojanProxyHandshakeHandler extends ChannelDuplexHandler {
             buffer.writeByte(Socks5AddressType.DOMAIN.byteValue());
             Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.DOMAIN, sa.getHostString(), buffer);
         } else {
-            final String host = sa.getAddress().getHostAddress();
+            final String host = sa.address().getHostAddress();
             if (NetUtil.isValidIpV4Address(host)) {
                 buffer.writeByte(Socks5AddressType.IPv4.byteValue());
                 Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.IPv4, host, buffer);
@@ -112,7 +112,7 @@ public class TrojanProxyHandshakeHandler extends ChannelDuplexHandler {
                 buffer.writeByte(Socks5AddressType.IPv6.byteValue());
                 Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.IPv6, host, buffer);
             } else {
-                throw new ConnectException("unknown address type: " + sa.getClass().getName());
+                throw new ConnectException("unknown address type: " + sa.getClass().name());
             }
         }
         buffer.writeShort(sa.getPort());

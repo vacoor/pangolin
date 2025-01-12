@@ -4,9 +4,7 @@ import com.github.pangolin.routing.context.AbstractRouteContextFactory;
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.support.AliasRegistry;
-import com.github.pangolin.routing.support.SimpleAliasRegistry;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Maps;
 import freework.net.Http;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
@@ -17,7 +15,6 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -41,12 +38,12 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
         proxyDefinitions.stream()
                 .filter(d -> !"0.0.0.0".equals(d.getServer()))
                 .map(d -> apply(d.getName(), asServerUrl(d)))
-                .forEach(d -> context.addUpstream(d.getName(), d));
+                .forEach(d -> context.addUpstream(d.name(), d));
 
         /*
         proxyGroupDefinitions.stream()
-                .map(g -> apply(g.getName(), g.getType(), g.getProxies(), context))
-                .forEach(g -> context.addUpstream(g.getName(), g));
+                .map(g -> apply(g.name(), g.getType(), g.getProxies(), context))
+                .forEach(g -> context.addUpstream(g.name(), g));
                 */
         final AliasRegistry aliasRegistry = context;
         for (ClashConfiguration.ProxyGroupDefinition g : proxyGroupDefinitions) {

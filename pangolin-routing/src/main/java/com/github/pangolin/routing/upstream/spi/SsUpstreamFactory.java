@@ -77,6 +77,16 @@ public class SsUpstreamFactory extends AbstractUpstreamFactory {
         }
 
         @Override
+        public SocketAddress address() {
+            return address;
+        }
+
+        @Override
+        public boolean isVirtual() {
+            return false;
+        }
+
+        @Override
         public ChannelHandler newSocketProxyHandler(InetSocketAddress destination) {
             return new SsProxyHandler(address, algorithm, password);
         }

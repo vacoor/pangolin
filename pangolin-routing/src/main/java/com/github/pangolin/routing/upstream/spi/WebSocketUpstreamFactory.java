@@ -1,11 +1,12 @@
 package com.github.pangolin.routing.upstream.spi;
 
 import com.github.pangolin.routing.handler.internal.client.WebSocketProxyHandler;
-import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.upstream.AbstractUpstream;
+import com.github.pangolin.routing.upstream.Upstream;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.URI;
 
 /**
@@ -42,8 +43,18 @@ public class WebSocketUpstreamFactory extends AbstractUpstreamFactory {
         }
 
         @Override
-        public String getName() {
+        public String name() {
             return name;
+        }
+
+        @Override
+        public SocketAddress address() {
+            return new InetSocketAddress(uri.getHost(), uri.getPort());
+        }
+
+        @Override
+        public boolean isVirtual() {
+            return false;
         }
 
         @Override

@@ -9,20 +9,31 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 
 public class StatsUpstream extends Server implements Upstream {
     private final Upstream delegate;
     private final LoadBalancerStats stats;
 
     public StatsUpstream(final Upstream delegate, final LoadBalancerStats stats) {
-        super(delegate.getName());
+        super(delegate.name());
         this.delegate = delegate;
         this.stats = stats;
     }
 
     @Override
-    public String getName() {
-        return delegate.getName();
+    public String name() {
+        return delegate.name();
+    }
+
+    @Override
+    public SocketAddress address() {
+        return delegate.address();
+    }
+
+    @Override
+    public boolean isVirtual() {
+        return delegate.isVirtual();
     }
 
     @Override

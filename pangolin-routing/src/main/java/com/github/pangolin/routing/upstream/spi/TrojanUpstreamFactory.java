@@ -9,6 +9,7 @@ import com.github.pangolin.routing.upstream.AbstractUpstream;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.URI;
 
 /**
@@ -60,6 +61,16 @@ public class TrojanUpstreamFactory extends AbstractUpstreamFactory {
             this.address = address;
             this.password = password;
             this.socketChannelFactory = socketChannelFactory;
+        }
+
+        @Override
+        public SocketAddress address() {
+            return address;
+        }
+
+        @Override
+        public boolean isVirtual() {
+            return false;
         }
 
         @Override
