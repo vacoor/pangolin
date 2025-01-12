@@ -7,6 +7,7 @@
 # In this example, "en0" is the default primary network interface.
 function tun_create() {
     sudo ./tun2socks-darwin-amd64-v3 -device utun123 -proxy socks5://192.168.1.201:1081 -interface en0
+    # sudo su root -c "`pwd`/tun2socks-darwin-amd64-v3 -device utun3 -proxy socks5://192.168.1.201:1081 -interface en0 &"
 }
 
 function tun_start() {

@@ -4,13 +4,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import lombok.extern.slf4j.Slf4j;
 import org.drasyl.channel.tun.Tun4Packet;
-import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.IpV4Packet;
-import org.pcap4j.packet.Packet;
-import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
-import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.TcpWindowScaleOption;
-import org.pcap4j.packet.UnknownPacket;
+import org.pcap4j.packet.*;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.TcpOptionKind;
@@ -19,15 +13,11 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
-public class RawSocket {
+public class TcpSession {
 
     enum State {
         CLOSED,
@@ -46,7 +36,7 @@ public class RawSocket {
     private final ChannelHandlerContext ctx;
     private final AtomicReference<State> state = new AtomicReference<>(State.LISTEN);
 
-    public RawSocket(final ChannelHandlerContext ctx) {
+    public TcpSession(final ChannelHandlerContext ctx) {
         this.ctx = ctx;
     }
 
@@ -127,7 +117,7 @@ public class RawSocket {
     private int ssthresh;
 
 
-    private int incr(final TcpPacket packet) {
+    private int size(final TcpPacket packet) {
         final TcpPacket.TcpHeader h = packet.getHeader();
         if (h.getSyn() || h.getFin()) {
             return 1;
@@ -138,20 +128,6 @@ public class RawSocket {
 
     private IpPacket.IpHeader ipHeader;
 
-    private void initSession(final TcpPacket.TcpHeader header) {
-        sndWnd = header.getWindowAsInt();
-        sndMss = 576 - 20 - 20;
-        List<TcpPacket.TcpOption> options = header.getOptions();
-        for (TcpPacket.TcpOption option : options) {
-            final TcpOptionKind kind = option.getKind();
-            if (TcpOptionKind.MAXIMUM_SEGMENT_SIZE.equals(kind)) {
-                sndMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
-            } else if (TcpOptionKind.WINDOW_SCALE.equals(kind)) {
-                sndWnd <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
-            }
-        }
-        cwnd = sndMss;
-    }
 
     private int determineSndWnd(final TcpPacket.TcpHeader header) {
         int sndWnd = header.getWindowAsInt();
@@ -175,18 +151,7 @@ public class RawSocket {
 
         if (State.LISTEN.equals(state)) {
             if (header.getSyn() && !header.getAck()) {
-                initSession(header);
-                this.ipHeader = ipHeader;
-
-                rcvIsn = header.getSequenceNumber();
-                rcvNxt = rcvIsn;
-
-                sndIsn = header.getSequenceNumber();
-                sndNxt = sndIsn;
-                sndUna = sndIsn;
-
-                rcvNxt += incr(packet);
-                write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader);
+                initSession(packet, ipHeader);
 
                 log.warn("[S] LISTEN -> SYN_RECV");
                 this.state.compareAndSet(State.LISTEN, State.SYN_RCVD);
@@ -194,44 +159,13 @@ public class RawSocket {
                 throw new IllegalStateException();
             }
         } else if (State.SYN_RCVD.equals(state)) {
-            if (rcvNxt != header.getSequenceNumber()) {
-                /*-
-                 * tcp_data_queue
-                 * https://blog.csdn.net/wuyongmao/article/details/126265842
-                 */
-                log.warn("[Out-Of-Order], expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
-                if (rcvNxt < header.getSequenceNumber()) {
-                    log.warn("[Out-Of-Order] TCP Previous segment not captured, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
-                } else {
-                    if (header.getSequenceNumber() >= rcvNxt + rcvWnd) {
-                        log.warn("[Out-Of-Window]");
-                    } else {
-                        // tcp_data_queue_ofo(sk, skb)
-                    }
-                }
-                return;
-            }
-            rcvNxt += incr(packet);
-            if (header.getAck()) {
-                log.warn("[S] SYN_RECV -> ESTABLISHED");
-
-                sndUna = header.getAcknowledgmentNumber();
-                sndWnd = determineSndWnd(header);
-                cwnd = cwnd < ssthresh ? cwnd + sndMss  : cwnd + sndMss / cwnd;
-                // add to queue
-                this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED);
-            } else if (header.getSyn()) {
-                // TODO
-                System.out.println("!ACK");
-            } else {
-                System.out.println("!ACK !SYN");
-            }
+            onMessage(packet);
         } else if (State.ESTABLISHED.equals(state)) {
             if (rcvNxt != header.getSequenceNumber()) {
                 log.warn("No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
                 return;
             }
-            rcvNxt += incr(packet);
+            rcvNxt += size(packet);
             if (header.getAck()) {
                 sndUna = header.getAcknowledgmentNumber();
                 sndWnd = determineSndWnd(header);
@@ -286,7 +220,7 @@ public class RawSocket {
                 log.warn("No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
                 return;
             }
-            rcvNxt += incr(packet);
+            rcvNxt += size(packet);
             if (header.getAck()) {
                 sndUna = header.getAcknowledgmentNumber();
                 sndWnd = determineSndWnd(header);
@@ -302,7 +236,7 @@ public class RawSocket {
                 log.warn("No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
                 return;
             }
-            rcvNxt += incr(packet);
+            rcvNxt += size(packet);
             if (header.getAck()) {
                 // close.
                 sndUna = header.getAcknowledgmentNumber();
@@ -314,12 +248,128 @@ public class RawSocket {
         }
     }
 
+    private void initSession(final TcpPacket syn, final IpPacket.IpHeader ipHeader) {
+        final InetAddress srcAddr = ipHeader.getSrcAddr();
+        final InetAddress dstAddr = ipHeader.getDstAddr();
+
+        final TcpPacket.TcpHeader header = syn.getHeader();
+
+        sndWnd = header.getWindowAsInt();
+        // - TCP HEADER SIZE - IP HEADER SIZE
+        sndMss = 576 - 20 - 20;
+        List<TcpPacket.TcpOption> options = header.getOptions();
+        for (TcpPacket.TcpOption option : options) {
+            final TcpOptionKind kind = option.getKind();
+            if (TcpOptionKind.MAXIMUM_SEGMENT_SIZE.equals(kind)) {
+                sndMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
+            } else if (TcpOptionKind.WINDOW_SCALE.equals(kind)) {
+                sndWnd <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
+            }
+        }
+        cwnd = sndMss;
+
+        this.ipHeader = ipHeader;
+
+        rcvIsn = header.getSequenceNumber();
+        rcvNxt = rcvIsn;
+
+        sndIsn = header.getSequenceNumber();
+        sndNxt = sndIsn;
+        sndUna = sndIsn;
+
+        rcvNxt += size(syn);
+        write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader);
+    }
+
+    private void onMessageNew(final TcpPacket packet) {
+        /*-
+         * tcp_data_queue
+         * https://www.cnblogs.com/wanpengcoder/p/11752133.html
+         * https://blog.51cto.com/key3feng/8728313
+         */
+        final TcpPacket.TcpHeader header = packet.getHeader();
+        final int sequence = header.getSequenceNumber();
+        final int size = size(packet);
+        if (sequence == rcvNxt) {
+            /*-
+             * 数据段序号正是期望的序号,
+             * 如果窗口=0, Out-Of-Window, 立即 ACK.
+             * 如果窗口>0, 拷贝到用户进程或写入 sk_receive_queue.
+             */
+            // XXX 没有处理 established.
+            rcvNxt += size;
+            // FIN 处理
+            // CHECK 乱序队列, 是否可以移动到 sk_receive_queue.
+        } else if (sequence + size <= rcvNxt) {
+            /*-
+             * 数据段整段在期望的序号之前(客户端重传), ACK 客户端未正确收到.
+             * Out-Of-Window, 立即 ACK.
+             */
+        } else if (sequence >= rcvNxt + rcvWnd) {
+            /*-
+             * 数据段序号在期望的序号之后但超出接收窗口(Out-Of-Window), 比如零窗口探测报文段.
+             * Out-Of-Window, 立即 ACK.
+             */
+        } else if (sequence < rcvNxt && sequence + size > rcvNxt) {
+            /*-
+             * 数据段序号在期望日的序号之前, 结束序号在期望序号之后(数据重叠),
+             * sequence ~ rcvNxt ACK 客户端未正确收到.
+             * 如果窗口=0, Out-Of-Window??
+             * 如果窗口>0, 直接放入 sk_receive_queue
+             * ... 同期望序号.
+             */
+            rcvNxt += size;
+        } else {
+            /*-
+             * 数据段序号在期望的序号之后且在窗口内的乱序数据.
+             * 放入乱序队列.
+             */
+        }
+    }
+
+    private void onMessage(final TcpPacket packet) {
+        final TcpPacket.TcpHeader header = packet.getHeader();
+        final int sequence = header.getSequenceNumber();
+        if (rcvNxt != sequence) {
+            /*-
+             * 期望接收的序号和实际接收的序号不一样, 需要乱序(Out-of-order)处理.
+             * tcp_data_queue: https://blog.csdn.net/wuyongmao/article/details/126265842
+             */
+            log.warn("[Out-Of-Order], expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
+            if (rcvNxt < sequence && rcvNxt + rcvWnd >= sequence) {
+                /*-
+                 * 收到了期望序号之后且在接收窗口之内的数据.
+                 */
+                log.warn("[Out-Of-Order] TCP Previous segment not captured, expected: {}, actual: {}", rcvNxt, sequence);
+                // tcp_data_queue_ofo(sk, skb)
+            } else {
+                log.warn("[Out-Of-Window]");
+            }
+            return;
+        }
+        rcvNxt += size(packet);
+        if (header.getAck()) {
+            log.warn("[S] SYN_RECV -> ESTABLISHED");
+
+            sndUna = header.getAcknowledgmentNumber();
+            sndWnd = determineSndWnd(header);
+            cwnd = cwnd < ssthresh ? cwnd + sndMss : cwnd + sndMss / cwnd;
+            // add to queue
+            this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED);
+        } else if (header.getSyn()) {
+            // TODO
+            System.out.println("!ACK");
+        } else {
+            System.out.println("!ACK !SYN");
+        }
+    }
+
     /**
      * https://ty-chen.github.io/linux-kernel-tcp-receive/
      */
     private void tcp_data_queue(TcpPacket skb) {
         final TcpPacket.TcpHeader skbh = skb.getHeader();
-        final RawSocket tp = this;
+        final TcpSession tp = this;
         if (skbh.getSequenceNumber() == this.rcvNxt) {
             if (tcp_receive_window(tp) == 0) {
                 //
@@ -332,7 +382,7 @@ public class RawSocket {
         }
     }
 
-    private int tcp_receive_window(RawSocket tp) {
+    private int tcp_receive_window(TcpSession tp) {
         return 0;
     }
 
@@ -360,7 +410,7 @@ public class RawSocket {
         /*
         packet.sequenceNumber(sndNxt).acknowledgmentNumber(rcvNxt);
         log(packet.build().getHeader(), ipHeader, false);
-        sndNxt += incr(packet.build());
+        sndNxt += size(packet.build());
 
 //        int avaWnd = rcvWnd - (rcvNxt - rcvUna);
         log.warn("[RCV-WND] {}", rcvWnd);
@@ -374,14 +424,14 @@ public class RawSocket {
 //            delayAckTask = scheduler.schedule(new Runnable() {
 //                @Override
 //                public void run() {
-        write0();
+        writeNext();
 //                    delayAckTask = null;
 //                }
 //            }, 1000, TimeUnit.MILLISECONDS);
 //        }
     }
 
-    private void write0() {
+    private void writeNext() {
         final int usableWnd = sndUna + sndWnd - sndNxt;
         final int cwndToUse = sndUna + cwnd - sndNxt;
         final int wndToUse = Math.min(usableWnd, cwndToUse);
@@ -411,7 +461,7 @@ public class RawSocket {
         if (null != prev) {
             prev.sequenceNumber(sndNxt);
             prev.acknowledgmentNumber(rcvNxt);
-            sndNxt += incr(prev.build());
+            sndNxt += size(prev.build());
 
             log(prev.build().getHeader(), ipHeader, false);
             ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(prev).build().getRawData())));

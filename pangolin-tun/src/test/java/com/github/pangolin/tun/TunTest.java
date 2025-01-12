@@ -1,22 +1,10 @@
 package com.github.pangolin.tun;
 
-import com.github.pangolin.tun.net.InterfaceAddressEx;
-import com.github.pangolin.tun.net.windows.win32.WindowsNetworkInterfaceEx;
 import com.google.common.collect.Maps;
-import com.sun.jna.WString;
-import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
-import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.DefaultEventLoopGroup;
-import io.netty.channel.EventLoopGroup;
-import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
-import org.drasyl.channel.tun.TunAddress;
-import org.drasyl.channel.tun.TunChannel;
 import org.drasyl.channel.tun.TunPacket;
-import org.drasyl.channel.tun.jna.windows.WindowsTunDevice;
 import org.pcap4j.packet.IcmpV6CommonPacket;
 import org.pcap4j.packet.IllegalRawDataException;
 import org.pcap4j.packet.IpPacket;
@@ -27,7 +15,6 @@ import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.TcpPort;
 import org.pcap4j.packet.namednumber.UdpPort;
 
-import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.util.Map;
 
@@ -47,7 +34,7 @@ public class TunTest {
                 */
     }
 
-    private static final Map<String, RawSocket> socketMap = Maps.newConcurrentMap();
+    private static final Map<String, TcpSession> sessionMap = Maps.newConcurrentMap();
 
     public static void channelRead0(final ChannelHandlerContext ctx, final IpPacket ipPacket) {
         final IpPacket.IpHeader ipHeader = ipPacket.getHeader();
@@ -63,16 +50,16 @@ public class TunTest {
 
             String key = srcAddr.toString() + tcpSrcPort + dstAddr + tcpDstPort;
             if (!tcpHeader.getAck() && tcpHeader.getSyn()) {
-                socketMap.putIfAbsent(key, new RawSocket(ctx) {
+                sessionMap.putIfAbsent(key, new TcpSession(ctx) {
                     @Override
                     protected void onClosed() {
-                        socketMap.remove(key);
+                        sessionMap.remove(key);
                     }
                 });
             }
-            RawSocket rawSocket = socketMap.get(key);
-            if (null != rawSocket) {
-                rawSocket.receive(tcpPacket, ipHeader);
+            TcpSession tcpSession = sessionMap.get(key);
+            if (null != tcpSession) {
+                tcpSession.receive(tcpPacket, ipHeader);
             } else {
                 // RST
                 throw new IllegalStateException();
@@ -94,6 +81,7 @@ public class TunTest {
     }
 
     public static void main(String[] args) throws Exception {
+        /*
       Runtime.getRuntime().addShutdownHook(new Thread() {
           @Override
           public void run() {
@@ -129,5 +117,9 @@ public class TunTest {
         } finally {
             group.shutdownGracefully();
         }
+        */
+
+//        final PcapNetworkInterface nif = Pcaps.getDevByName("en0");
+//        final PcapHandle handle = nif.openLive(65536, PcapNetworkInterface.PromiscuousMode.PROMISCUOUS, 10);
     }
 }
