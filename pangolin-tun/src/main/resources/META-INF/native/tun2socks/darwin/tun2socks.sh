@@ -77,6 +77,8 @@ function tun_stop() {
 
    # Flush dns cache
    sudo killall -HUP mDNSResponder;
+
+   sudo kill `ps -ef | grep tun2socks-darwin-amd64-v3 | grep -v grep | awk '{print $2}'`
 }
 
 # Gateway mode
