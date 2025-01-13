@@ -67,7 +67,6 @@ public class MixinAcceptorFactory implements AcceptorFactory {
             return factory;
         }).collect(Collectors.toList()) : Collections.emptyList();
 
-        final List<String> bypass = Arrays.asList("::1", "127.0.0.1", "localhost");
         return new Acceptor() {
             @Override
             public ChannelFuture start(final RouteContext context) throws Exception {

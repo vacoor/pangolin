@@ -1,10 +1,21 @@
 package com.github.pangolin.tun;
 
+import com.github.pangolin.tun.net.InterfaceAddressEx;
+import com.github.pangolin.tun.net.windows.win32.WindowsNetworkInterfaceEx;
 import com.google.common.collect.Maps;
+import com.sun.jna.WString;
+import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.DefaultEventLoopGroup;
+import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
+import org.drasyl.channel.tun.TunAddress;
+import org.drasyl.channel.tun.TunChannel;
 import org.drasyl.channel.tun.TunPacket;
+import org.drasyl.channel.tun.jna.windows.WindowsTunDevice;
 import org.pcap4j.packet.IcmpV6CommonPacket;
 import org.pcap4j.packet.IllegalRawDataException;
 import org.pcap4j.packet.IpPacket;
@@ -15,6 +26,7 @@ import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.TcpPort;
 import org.pcap4j.packet.namednumber.UdpPort;
 
+import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.util.Map;
 
@@ -90,6 +102,7 @@ public class TunTest {
       });
         TimeUnit.SECONDS.sleep(1000);
         System.exit(0);
+        */
 
         final Field innerString = WString.class.getDeclaredField("string");
         innerString.setAccessible(true);
@@ -117,7 +130,6 @@ public class TunTest {
         } finally {
             group.shutdownGracefully();
         }
-        */
 
 //        final PcapNetworkInterface nif = Pcaps.getDevByName("en0");
 //        final PcapHandle handle = nif.openLive(65536, PcapNetworkInterface.PromiscuousMode.PROMISCUOUS, 10);
