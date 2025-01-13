@@ -6,8 +6,15 @@
 # In macOS, we need to start tun2socks first so that it will create TUN interface for us.
 # In this example, "en0" is the default primary network interface.
 function tun_create() {
-    sudo ./tun2socks-darwin-amd64-v3 -device utun123 -proxy socks5://192.168.1.201:1081 -interface en0
-    # sudo su root -c "`pwd`/tun2socks-darwin-amd64-v3 -device utun3 -proxy socks5://192.168.1.201:1081 -interface en0 &"
+    # sudo ./tun2socks-darwin-amd64-v3 -device utun123 -proxy socks5://192.168.1.201:1081 -interface en0
+cat > .tun_post_up.sh << EOF
+#/bin/sh
+source $0 env
+tun_start
+EOF
+   chmod +x .tun_post_up.sh
+    sudo ./tun2socks-darwin-amd64-v3 -device utun123 -proxy socks5://192.168.1.201:1081 -interface en0 -tun-post-up 'sh -c "./.tun_post_up.sh"'
+    rm -rf .tun_post_up.sh
 }
 
 function tun_start() {
@@ -77,4 +84,16 @@ function tun_stop() {
 # sudo sysctl -w net.inet.ip.forwarding=1
 # sudo sysctl -w net.inet.ip.forwarding=0
 
-
+case $1 in
+   start)
+      tun_create
+      ;;
+   stop)
+      tun_stop
+      ;;
+   env)
+      ;;
+   *)
+      echo $"Usage $0 {start|stop}"
+      exit 1
+esac
