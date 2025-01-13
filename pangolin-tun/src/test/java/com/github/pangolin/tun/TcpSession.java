@@ -15,7 +15,6 @@ import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.TcpOptionKind;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -23,6 +22,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
@@ -100,7 +100,7 @@ public class TcpSession {
      *          left edge                        right edge
      *          (snd.una)                    (snd.una + snd.wnd)
      *
-     * Usable window = snd.una + snd.wnd + snd.nxt
+     * Usable window = snd.una + snd.wnd - snd.nxt
      */
 
     /**
@@ -143,6 +143,9 @@ public class TcpSession {
         if (h.getSyn() || h.getFin()) {
             return 1;
         }
+//        if (h.getSyn()) {
+//            return 1;
+//        }
         return size;
     }
 
@@ -188,7 +191,7 @@ public class TcpSession {
             tcpDataQueue(packet, ipHeader);
         } else if (State.CLOSE_WAIT.equals(state)) {
             if (rcvNxt != header.getSequenceNumber()) {
-                log.warn("No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
+                log.warn("[CLOSE_WAIT] No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
                 return;
             }
             rcvNxt += size(packet);
@@ -204,7 +207,7 @@ public class TcpSession {
 //            lastSeq = header.getSequenceNumber();
         } else if (State.LAST_ACK.equals(state)) {
             if (rcvNxt != header.getSequenceNumber()) {
-                log.warn("No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
+                log.warn("[LAST_ACK] No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
                 return;
             }
             rcvNxt += size(packet);
@@ -250,29 +253,12 @@ public class TcpSession {
 
         rcvNxt += size(syn);
 
-        write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader);
+        write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader, true);
     }
 
 
     private void onMessage(final TcpPacket packet, final IpPacket.IpHeader ipHeader) {
         final TcpPacket.TcpHeader header = packet.getHeader();
-        final int sequence = header.getSequenceNumber();
-        /*
-        if (rcvNxt != sequence) {
-             // 期望接收的序号和实际接收的序号不一样, 需要乱序(Out-of-order)处理.
-             // tcp_data_queue: https://blog.csdn.net/wuyongmao/article/details/126265842
-            log.warn("[Out-Of-Order], expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
-            if (rcvNxt < sequence && rcvNxt + rcvWnd >= sequence) {
-                 //收到了期望序号之后且在接收窗口之内的数据.
-                log.warn("[Out-Of-Order] TCP Previous segment not captured, expected: {}, actual: {}", rcvNxt, sequence);
-                // tcp_data_queue_ofo(sk, skb)
-            } else {
-                log.warn("[Out-Of-Window]");
-            }
-            return;
-        }
-        rcvNxt += size(packet);
-        */
         if (header.getAck()) {
             if (this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED)) {
                 log.warn("[S] SYN_RECV -> ESTABLISHED");
@@ -283,15 +269,15 @@ public class TcpSession {
             sndWnd = determineSndWnd(header);
             cwnd = cwnd < ssthresh ? cwnd + sndMss : cwnd + sndMss / cwnd;
 
-            onStart();
+            onReceiveStart();
 
             // add to queue
             tcpDataQueue(packet, ipHeader);
         } else if (header.getSyn()) {
             // TODO
-            System.out.println("!ACK");
+            System.err.println("!ACK");
         } else {
-            System.out.println("!ACK !SYN");
+            System.err.println("!ACK !SYN");
         }
     }
 
@@ -313,20 +299,20 @@ public class TcpSession {
              * 如果窗口>0, 拷贝到用户进程或写入 sk_receive_queue.
              */
 
+            System.err.println(rcvNxt + " -> " + (rcvNxt + size));
             rcvNxt += size;
 
-            sndUna = Math.max(sndUna, header.getAcknowledgmentNumber());
+            sndUna = header.getAcknowledgmentNumber();
             sndWnd = determineSndWnd(header);
-
 
             if (header.getAck() && !header.getSyn()) {
                 Packet payload = packet.getPayload();
                 if (null == payload) {
-                    write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader);
+                    write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, false);
                 } else {
                     final byte[] rawData = packet.getPayload().getRawData();
                     // System.out.println(new String(rawData, StandardCharsets.UTF_8));
-                    onData(rawData);
+                    onReceiveData(rawData);
 
                     String data = ("<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\r\n"
                             + "<html><head>\r\n"
@@ -343,20 +329,20 @@ public class TcpSession {
                     ).getBytes(StandardCharsets.UTF_8);
 
                     UnknownPacket.Builder builder = UnknownPacket.newPacket(bytes, 0, bytes.length).getBuilder();
-                    write(ack(header, srcAddr, dstAddr, payload.length()).ack(true).psh(true).payloadBuilder(builder), ipHeader);
+                    write(ack(header, srcAddr, dstAddr, payload.length()).ack(true).psh(true).payloadBuilder(builder), ipHeader, false);
                     // write(ack(header, srcAddr, dstAddr, payload.length()).ack(true).psh(true).payloadBuilder(builder), ipHeader);
                 }
             }
 
             // FIN 处理
             if (header.getFin()) {
-                onFin();
+                onReceiveFin();
                 // ACK
-                write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader);
+                write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, false);
                 log.warn("[S] ESTABLISHED -> CLOSE_WAIT");
                 this.state.compareAndSet(State.ESTABLISHED, State.CLOSE_WAIT);
 
-                write(ack(header, srcAddr, dstAddr, 0).ack(true).fin(true), ipHeader);
+                write(ack(header, srcAddr, dstAddr, 0).ack(true).fin(true), ipHeader, false);
                 this.state.compareAndSet(State.CLOSE_WAIT, State.LAST_ACK);
                 log.warn("[S] CLOSE_WAIT -> LAST_ACK");
             }
@@ -364,17 +350,18 @@ public class TcpSession {
 
         } else if (sequence + size <= rcvNxt) {
             /*-
-             * 数据段整段在期望的序号之前(客户端重传), ACK 客户端未正确收到.
+             * 数据段超出接收窗口左沿(客户端重传), ACK 客户端未正确收到.
              * Out-Of-Window, 立即 ACK.
              */
             System.err.println("[OOW] Retransmit");
-            write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader);
+            write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, true);
         } else if (sequence >= rcvNxt + rcvWnd) {
             /*-
-             * 数据段序号在期望的序号之后但超出接收窗口(Out-Of-Window), 比如零窗口探测报文段.
+             * 数据段超出接收窗口右沿(Out-Of-Window), 比如零窗口探测报文段.
              * Out-Of-Window, 立即 ACK.
              */
             System.err.println("[OOW] ");
+            write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, true);
         } else if (sequence < rcvNxt && sequence + size > rcvNxt) {
             /*-
              * 数据段序号在期望日的序号之前, 结束序号在期望序号之后(数据重叠),
@@ -384,27 +371,33 @@ public class TcpSession {
              * ... 同期望序号.
              */
             rcvNxt = sequence + size;
+            Packet payload = packet.getPayload();
+            final byte[] rawBytes = null != payload ? payload.getRawData() : new byte[0];
+            // (rcvNxt - sequence, sequence + size - rcvNxt);
+            final byte[] bytes = Arrays.copyOfRange(rawBytes, rcvNxt - sequence, sequence + rawBytes.length - rcvNxt);
+            onReceiveData(bytes);
             System.err.println("[XX]");
         } else {
             /*-
              * 数据段序号在期望的序号之后且在窗口内的乱序数据.
              * 放入乱序队列.
              */
+            // FIXME
             System.err.println("[OFO]");
         }
     }
 
     OutputStream out;
 
-    private void onStart() {
+    private void onReceiveStart() {
         try {
-            out = new FileOutputStream(new File("tcp." + System.currentTimeMillis() +  ".txt"));
+            out = new FileOutputStream(new File("tcp." + System.currentTimeMillis() + ".txt"));
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         }
     }
 
-    private void onData(final byte[] bytes) {
+    private void onReceiveData(final byte[] bytes) {
         try {
             out.write(bytes);
         } catch (IOException e) {
@@ -412,7 +405,7 @@ public class TcpSession {
         }
     }
 
-    private void onFin() {
+    private void onReceiveFin() {
         try {
             out.flush();
             out.close();
@@ -420,32 +413,6 @@ public class TcpSession {
         } catch (IOException e) {
             e.printStackTrace();
         }
-    }
-
-    /**
-     * https://ty-chen.github.io/linux-kernel-tcp-receive/
-     */
-    private void tcp_data_queue(TcpPacket skb) {
-        final TcpPacket.TcpHeader skbh = skb.getHeader();
-        final TcpSession tp = this;
-        if (skbh.getSequenceNumber() == this.rcvNxt) {
-            if (tcp_receive_window(tp) == 0) {
-                //
-                out_of_window();
-                return;
-            }
-
-            /* Ok, In sequence. In window. */
-
-        }
-    }
-
-    private int tcp_receive_window(TcpSession tp) {
-        return 0;
-    }
-
-    private void out_of_window() {
-
     }
 
     protected void onClosed() {
@@ -464,7 +431,7 @@ public class TcpSession {
     });
     private volatile Future<?> delayAckTask;
 
-    protected void write(TcpPacket.Builder packet, IpPacket.IpHeader ipHeader) {
+    protected void write(TcpPacket.Builder packet, IpPacket.IpHeader ipHeader, boolean now) {
         /*
         packet.sequenceNumber(sndNxt).acknowledgmentNumber(rcvNxt);
         log(packet.build().getHeader(), ipHeader, false);
@@ -475,25 +442,49 @@ public class TcpSession {
 
         ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(packet).build().getRawData())));
         */
+        if (now) {
+            writeNow(packet);
+            return;
+        }
+
         if (!sndQueue.offer(packet)) {
             throw new IllegalStateException();
         }
-        if (null == delayAckTask) {
+        if (null == delayAckTask && !now) {
             delayAckTask = scheduler.schedule(new Runnable() {
                 @Override
                 public void run() {
                     writeNext();
                     delayAckTask = null;
                 }
-            }, 1000, TimeUnit.MILLISECONDS);
+            }, 500, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private void writeNow(final TcpPacket.Builder prev) {
+        final int usableSndWnd = sndUna + sndWnd - sndNxt;
+        final int cwndToUse = sndUna + cwnd - sndNxt;
+        final int wndToUse = Math.min(usableSndWnd, cwndToUse);
+        log.info("USABLE-WND = {}, CWND-To-USE = {}, USABLE-CWND = {}", usableSndWnd, cwndToUse, wndToUse);
+        if (wndToUse <= 0) {
+            return;
+        }
+
+        if (null != prev) {
+            prev.sequenceNumber(sndNxt);
+            prev.acknowledgmentNumber(rcvNxt);
+            sndNxt += size(prev.build());
+
+            log(prev.build().getHeader(), ipHeader, false);
+            ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(prev).build().getRawData())));
         }
     }
 
     private void writeNext() {
-        final int usableWnd = sndUna + sndWnd - sndNxt;
+        final int usableSndWnd = sndUna + sndWnd - sndNxt;
         final int cwndToUse = sndUna + cwnd - sndNxt;
-        final int wndToUse = Math.min(usableWnd, cwndToUse);
-        log.info("USABLE-WND = {}, CWND-To-USE = {}, USABLE-CWND = {}", usableWnd, cwndToUse, wndToUse);
+        final int wndToUse = Math.min(usableSndWnd, cwndToUse);
+        log.info("USABLE-WND = {}, CWND-To-USE = {}, USABLE-CWND = {}", usableSndWnd, cwndToUse, wndToUse);
         if (wndToUse <= 0) {
             return;
         }

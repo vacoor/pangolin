@@ -39,11 +39,6 @@ public class TunTest {
     static IpPacket parsePacket(final TunPacket packet) throws IllegalRawDataException {
         final byte[] bytes = ByteBufUtil.getBytes(packet.content());
         return (IpPacket) IpSelector.newPacket(bytes, 0, bytes.length);
-        /*
-        return INET6 == packet.version()
-                ? IpV6Packet.newPacket(bytes, 0, bytes.length)
-                : IpV4Packet.newPacket(bytes, 0, bytes.length);
-                */
     }
 
     private static final Map<String, TcpSession> sessionMap = Maps.newConcurrentMap();
