@@ -1,8 +1,8 @@
-package com.github.pangolin.routing.extra.fakedns;
+package com.github.pangolin.routing.server.fakedns;
 
-import com.github.pangolin.routing.extra.fakedns.beta.SimpleInet4FakeDns;
-import com.github.pangolin.routing.extra.fakedns.support.FakeDnsDatagramChannelFactory;
-import com.github.pangolin.routing.extra.fakedns.support.FakeDnsSocketChannelFactory;
+import com.github.pangolin.routing.server.fakedns.beta.SimpleInet4FakeDns;
+import com.github.pangolin.routing.server.fakedns.support.FakeDnsDatagramChannelFactory;
+import com.github.pangolin.routing.server.fakedns.support.FakeDnsSocketChannelFactory;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;

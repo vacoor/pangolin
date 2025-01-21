@@ -13,11 +13,9 @@ import static org.drasyl.channel.tun.jna.windows.WinBase.INFINITE;
 import static org.drasyl.channel.tun.jna.windows.WinError.ERROR_NO_MORE_ITEMS;
 
 public class WintunSession {
-    private final WintunAdapter adapter;
     private final WINTUN_SESSION_HANDLE session;
 
     public WintunSession(final WintunAdapter adapter, final WINTUN_SESSION_HANDLE session) {
-        this.adapter = adapter;
         this.session = session;
     }
 
@@ -74,4 +72,9 @@ public class WintunSession {
 
         WintunSendPacket(session, packetPointer);
     }
+
+    public void close() {
+        WintunEndSession(session);
+    }
+
 }

@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.extra;
+package com.github.pangolin.routing.server.extra;
 
 import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.route.RouteRegistry;

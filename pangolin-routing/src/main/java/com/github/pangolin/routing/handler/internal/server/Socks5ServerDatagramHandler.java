@@ -66,9 +66,11 @@ public class Socks5ServerDatagramHandler extends ChannelInboundHandlerAdapter {
         if (msg instanceof DatagramPacket) {
             DatagramPacket packet = (DatagramPacket) msg;
             InetSocketAddress sender = packet.sender();
+            InetSocketAddress recipient = packet.recipient();
             InetAddress address = sender.getAddress();
+
             if (owner.getAddress().equals(address)) {
-                final ChannelFuture cf = getChannel(sender, packet.recipient(), ctx);
+                final ChannelFuture cf = getChannel(sender, recipient, ctx);
                 cf.sync().channel().writeAndFlush(packet);
                 return;
             } else {

@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.extra.fakedns.beta;
+package com.github.pangolin.routing.server.fakedns.beta;
 
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;

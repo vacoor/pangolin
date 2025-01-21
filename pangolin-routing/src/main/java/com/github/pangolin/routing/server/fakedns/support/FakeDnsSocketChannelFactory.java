@@ -1,29 +1,30 @@
-package com.github.pangolin.routing.extra.fakedns.support;
+package com.github.pangolin.routing.server.fakedns.support;
 
-import com.github.pangolin.routing.extra.fakedns.DnsEngine;
-import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
+import com.github.pangolin.routing.server.fakedns.DnsEngine;
+import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.EventLoopGroup;
 import io.netty.util.NetUtil;
 
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 
-public class FakeDnsDatagramChannelFactory implements DatagramChannelFactory {
+public class FakeDnsSocketChannelFactory implements SocketChannelFactory {
     private final DnsEngine fakeDns;
-    private final DatagramChannelFactory delegate;
+    private final SocketChannelFactory delegate;
 
-    public FakeDnsDatagramChannelFactory(final DnsEngine fakeDns, final DatagramChannelFactory delegate) {
+    public FakeDnsSocketChannelFactory(final DnsEngine fakeDns, final SocketChannelFactory delegate) {
         this.fakeDns = fakeDns;
         this.delegate = delegate;
     }
 
     @Override
-    public ChannelFuture open(final InetSocketAddress remoteAddress, final int connTimeoutMs, final EventLoopGroup group, final ChannelHandler handler) {
-        return delegate.open(resolve(remoteAddress), connTimeoutMs, group, handler);
+    public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs, final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
+        return delegate.open(resolve(remoteAddress), connTimeoutMs, autoRead, group, handler);
     }
 
-    private InetSocketAddress resolve(final InetSocketAddress remoteAddress) {
+    private SocketAddress resolve(final SocketAddress remoteAddress) {
         InetSocketAddress destination = (InetSocketAddress) remoteAddress;
         if (null != fakeDns) {
             byte[] address;

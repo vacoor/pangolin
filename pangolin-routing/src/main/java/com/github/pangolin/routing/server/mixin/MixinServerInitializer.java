@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.mixin;
+package com.github.pangolin.routing.server.mixin;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;

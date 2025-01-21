@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.extra.fakedns;
+package com.github.pangolin.routing.server.fakedns;
 
 import com.github.pangolin.routing.context.RouteContext;
 

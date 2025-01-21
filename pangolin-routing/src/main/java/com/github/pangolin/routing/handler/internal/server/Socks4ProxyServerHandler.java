@@ -67,23 +67,23 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final String requestUid = request.userId();
                 final Socks4CommandType type = request.type();
 
-                final int port = request.dstPort();
-                final String address = request.dstAddr();
+                final InetSocketAddress destAddress = SocketUtils.toSocketAddress(request.dstAddr(), request.dstPort(), false);
+                final String destAddressName = String.format("%s:%s", destAddress.getHostString(), destAddress.getPort());
 
-                log.info("[SOCKS4a] Received {} {} request => {}:{}", clientAddress, type.toString(), address, port);
+                log.info("[SOCKS4a] Received {} {} request => {}", clientAddress, type.toString(), destAddressName);
 
                 if (!nullSafeEquals(uid, requestUid)) {
                     log.warn("[SOCKS4a] Respond not permitted to {}", clientAddress);
                     ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_AUTH_FAILURE)).addListener(ChannelFutureListener.CLOSE);
                 } else if (Socks4CommandType.CONNECT.equals(type)) {
-                    this.connect(ctx, request).addListener(new ChannelFutureListener() {
+                    this.connect(ctx, destAddress).addListener(new ChannelFutureListener() {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
                             if (future.isSuccess()) {
-                                log.debug("[SOCKS4a] Connection established => {}:{}", address, port);
+                                log.debug("[SOCKS4a] Connection established => {}", destAddress);
                                 ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.SUCCESS)).addListener(removeOnComplete(ctx, Socks4ServerEncoder.INSTANCE));
                             } else {
-                                log.error("[SOCKS4a] Error: {}/{} => {}:{}", future.cause().getMessage(), future.cause().getClass().getSimpleName(), address, port);
+                                log.error("[SOCKS4a] Error: {}/{} => {}", future.cause().getMessage(), future.cause().getClass().getSimpleName(), destAddressName);
                                 ctx.writeAndFlush(new DefaultSocks4CommandResponse(Socks4CommandStatus.IDENTD_UNREACHABLE)).addListener(ChannelFutureListener.CLOSE);
                             }
                         }
@@ -93,7 +93,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
                             if (ctx.channel().isActive()) {
                                 ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                             }
-                            log.info("[SOCKS4a] Connection closed => {}:{}", address, port);
+                            log.info("[SOCKS4a] Connection closed => {}", destAddressName);
                         }
                     });
                 } else {
@@ -123,13 +123,9 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
         ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
     }
 
-    protected ChannelFuture connect(final ChannelHandlerContext ctx, final Socks4CommandRequest request) throws Exception {
-        final int port = request.dstPort();
-        final String address = request.dstAddr();
-
+    protected ChannelFuture connect(final ChannelHandlerContext ctx, final InetSocketAddress addr) throws Exception {
         ctx.channel().config().setAutoRead(false);
 
-        final InetSocketAddress addr = SocketUtils.toSocketAddress(address, port, false);
         return factory.open(addr, ctx.channel().config().getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {

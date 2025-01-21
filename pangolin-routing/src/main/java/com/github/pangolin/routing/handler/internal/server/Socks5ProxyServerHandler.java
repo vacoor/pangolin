@@ -10,9 +10,6 @@ import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.socksx.v5.*;
 import io.netty.util.AttributeKey;
 import io.netty.util.ReferenceCountUtil;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.GenericFutureListener;
-import java.net.SocketAddress;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.Inet4Address;
@@ -121,23 +118,23 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final Socks5CommandRequest request = (Socks5CommandRequest) msg;
                 final Socks5CommandType type = request.type();
 
-                final int port = request.dstPort();
-                final String address = request.dstAddr();
                 final Socks5AddressType addressType = request.dstAddrType();
+                final InetSocketAddress destAddress = SocketUtils.toSocketAddress(request.dstAddr(), request.dstPort(), false);
+                final String destAddressName = String.format("%s:%s", destAddress.getHostString(), destAddress.getPort());
 
-                log.info("[SOCKS5] Received {} {} request => {}:{}", clientAddress, type.toString(), address, port);
+                log.info("[SOCKS5] Received {} {} request => {}", clientAddress, type.toString(), destAddressName);
 
                 if (Socks5CommandType.CONNECT.equals(type)) {
-                    connect(ctx, request).addListener(new ChannelFutureListener() {
+                    connect(ctx, destAddress).addListener(new ChannelFutureListener() {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
                             if (future.isSuccess()) {
-                                log.debug("[SOCKS5] Connection established => {}:{}", address, port);
+                                log.debug("[SOCKS5] Connection established => {}", destAddressName);
                                 ctx.writeAndFlush(
                                         new DefaultSocks5CommandResponse(Socks5CommandStatus.SUCCESS, addressType)
                                 ).addListener(removeOnComplete(ctx, Socks5ServerEncoder.DEFAULT));
                             } else {
-                                log.error("[SOCKS5] Error: {}/{} => {}:{}", future.cause().getMessage(), future.cause().getClass().getSimpleName(), address, port);
+                                log.error("[SOCKS5] Error: {}/{} => {}", future.cause().getMessage(), future.cause().getClass().getSimpleName(), destAddressName);
                                 ctx.writeAndFlush(
                                         new DefaultSocks5CommandResponse(Socks5CommandStatus.HOST_UNREACHABLE, addressType)
                                 ).addListener(ChannelFutureListener.CLOSE);
@@ -149,11 +146,11 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
                             if (ctx.channel().isActive()) {
                                 ctx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                             }
-                            log.info("[SOCKS5] Connection closed => {}:{}", address, port);
+                            log.info("[SOCKS5] Connection closed => {}", destAddressName);
                         }
                     });
                 } else if (!Socks5CommandType.UDP_ASSOCIATE.equals(type) || !udpAssociate(ctx, request)) {
-                    log.warn("[SOCKS5] Connection closed: '{}' unsupported => {}:{}", type, address, port);
+                    log.warn("[SOCKS5] Connection closed: '{}' unsupported => {}", type, destAddressName);
                     ctx.writeAndFlush(new DefaultSocks5CommandResponse(Socks5CommandStatus.COMMAND_UNSUPPORTED, addressType)).addListener(ChannelFutureListener.CLOSE);
                 }
             } else {
@@ -183,15 +180,10 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
         log.error("[SOCKS5] Software caused connection abort: {}", cause.getMessage(), cause);
     }
 
-    protected ChannelFuture connect(final ChannelHandlerContext ctx, final Socks5CommandRequest request) throws Exception {
-        final int port = request.dstPort();
-        final String address = request.dstAddr();
-        final Socks5AddressType addressType = request.dstAddrType();
-
+    protected ChannelFuture connect(final ChannelHandlerContext ctx, final InetSocketAddress addr) throws Exception {
         ctx.channel().config().setAutoRead(false);
 
         final ChannelConfig c = ctx.channel().config();
-        final InetSocketAddress addr = SocketUtils.toSocketAddress(address, port, false);
         return socketChannelFactory.open(addr, c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRegistered(final ChannelHandlerContext delegateCtx) throws Exception {

@@ -9,8 +9,8 @@ import com.github.pangolin.routing.handler.internal.server.support.SocketChannel
 import com.github.pangolin.routing.route.RoutePredicateFactoriesAware;
 import com.github.pangolin.routing.upstream.UpstreamCombinersAware;
 import com.github.pangolin.routing.upstream.UpstreamFactoriesAware;
-import com.github.pangolin.routing.handler.extra.ProxyAutoConfigurationServerHandler;
-import com.github.pangolin.routing.handler.extra.SwitchyRuleConfigurationServerHandler;
+import com.github.pangolin.routing.server.extra.ProxyAutoConfigurationServerHandler;
+import com.github.pangolin.routing.server.extra.SwitchyRuleConfigurationServerHandler;
 import com.github.pangolin.routing.route.RouteRegistry;
 import com.github.pangolin.routing.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.route.predicate.RoutePredicateSetFactory;
@@ -28,7 +28,6 @@ import com.github.pangolin.routing.upstream.UpstreamFactory;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.netflix.loadbalancer.LoadBalancerStats;

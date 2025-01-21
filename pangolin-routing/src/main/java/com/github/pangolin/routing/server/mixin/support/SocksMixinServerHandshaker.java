@@ -1,6 +1,6 @@
-package com.github.pangolin.routing.handler.mixin.support;
+package com.github.pangolin.routing.server.mixin.support;
 
-import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
+import com.github.pangolin.routing.server.mixin.MixinServerHandshaker;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.socksx.SocksVersion;

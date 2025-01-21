@@ -30,11 +30,11 @@ public class WintunAdapter {
         this.adapter = adapter;
     }
 
-    public WintunSession newSession() throws IOException {
-        return newSession(0x400000);
+    public WintunSession startSession() throws IOException {
+        return startSession(0x400000);
     }
 
-    public WintunSession newSession(final int capacity) throws IOException {
+    public WintunSession startSession(final int capacity) throws IOException {
         WINTUN_SESSION_HANDLE session = null;
         try {
             session = WintunStartSession(adapter, new WinDef.DWORD(capacity));
@@ -78,6 +78,10 @@ public class WintunAdapter {
 
         row.NlMtu = mtu;
         IpHelpLib.INSTANCE.SetIpInterfaceEntry(row);
+    }
+
+    public void close() {
+        WintunCloseAdapter(adapter);
     }
 
     public static WintunAdapter open(String name, final String type, final String guid) throws IOException {
@@ -130,12 +134,12 @@ public class WintunAdapter {
         System.out.println(guidStr);
         System.out.println(adapter.adapter);
 
-        final WintunSession session = adapter.newSession();
+        final WintunSession session = adapter.startSession();
 
         LockSupport.park();
 //        Pointer pointer = Pointer.createConstant(adapter.getLuid());
 //        LongByReference r = new LongByReference(adapter.getLuid());
 //        adapter.setIpAddress(InetAddress.getByName("192.168.1.1"), (byte) 24);
-//        WintunSession session = adapter.newSession();
+//        WintunSession session = adapter.startSession();
     }
 }
