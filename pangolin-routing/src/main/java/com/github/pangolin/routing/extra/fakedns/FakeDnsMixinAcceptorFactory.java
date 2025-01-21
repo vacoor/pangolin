@@ -9,6 +9,7 @@ import com.github.pangolin.routing.handler.internal.server.support.SocketChannel
 import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.server.Acceptor;
 import com.github.pangolin.routing.server.MixinAcceptorFactory;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +41,8 @@ public class FakeDnsMixinAcceptorFactory extends MixinAcceptorFactory {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
                         if (future.isSuccess()) {
-                            final InetSocketAddress addr = (InetSocketAddress) future.channel().localAddress();
+                            final Channel channel = future.channel();
+                            final InetSocketAddress addr = (InetSocketAddress) channel.localAddress();
                             final int listenPort = addr.getPort();
                             log.info("ACCEPTOR: {}", addr);
                             if (1081 == listenPort) {

@@ -67,6 +67,16 @@
       <groupId>com.github.nomou</groupId>
       <artifactId>nougat-lang</artifactId>
     </dependency>
+    <dependency>
+      <groupId>commons-codec</groupId>
+      <artifactId>commons-codec</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.netty</groupId>
+      <artifactId>netty-codec</artifactId>
+      <version>4.1.96.Final</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <!--

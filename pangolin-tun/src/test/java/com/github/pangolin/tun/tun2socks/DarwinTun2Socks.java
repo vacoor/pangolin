@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.beta.tun.tun2socks;
+package com.github.pangolin.tun.tun2socks;
 
 import com.github.pangolin.tun.net.InterfaceAddressEx;
 import com.github.pangolin.tun.net.macos.MacOsNetworkInterfaceEx;

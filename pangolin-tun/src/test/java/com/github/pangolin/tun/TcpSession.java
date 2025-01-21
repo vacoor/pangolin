@@ -1,7 +1,16 @@
 package com.github.pangolin.tun;
 
+import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.drasyl.channel.tun.Tun4Packet;
 import org.pcap4j.packet.IpPacket;
@@ -21,6 +30,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
@@ -30,6 +40,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -133,36 +144,10 @@ public class TcpSession {
     private int ssthresh;
 
 
-    private int size(final TcpPacket packet) {
-        final TcpPacket.TcpHeader h = packet.getHeader();
-        final Packet payload = packet.getPayload();
-        final int size = null != payload ? payload.length() : 0;
-        if (size > 0) {
-            return size;
-        }
-        if (h.getSyn() || h.getFin()) {
-            return 1;
-        }
-//        if (h.getSyn()) {
-//            return 1;
-//        }
-        return size;
-    }
-
     private IpPacket.IpHeader ipHeader;
 
+    private final AtomicBoolean initiliazed = new AtomicBoolean();
 
-    private int determineSndWnd(final TcpPacket.TcpHeader header) {
-        int sndWnd = header.getWindowAsInt();
-        List<TcpPacket.TcpOption> options = header.getOptions();
-        for (TcpPacket.TcpOption option : options) {
-            final TcpOptionKind kind = option.getKind();
-            if (TcpOptionKind.WINDOW_SCALE.equals(kind)) {
-                sndWnd <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
-            }
-        }
-        return sndWnd;
-    }
 
     public synchronized void receive(final TcpPacket packet, final IpPacket.IpHeader ipHeader) {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
@@ -172,21 +157,56 @@ public class TcpSession {
 
         log(header, ipHeader, true);
 
+        final boolean syn = header.getSyn();
+        final boolean ack = header.getAck();
+        final boolean fin = header.getFin();
+        final boolean rst = header.getRst();
+        final boolean psh = header.getPsh();
+        final boolean urg = header.getUrg();
+
         if (State.LISTEN.equals(state)) {
-            if (header.getSyn() && !header.getAck()) {
+            if (syn && !ack) {
                 /*-
                  * SYN
                  */
-                initSession(packet, ipHeader);
+                final boolean initialized = initSession(packet, ipHeader);
+                if (initialized) {
+                    log.warn("[S] LISTEN -> SYN_RECV");
+                    this.state.compareAndSet(State.LISTEN, State.SYN_RCVD);
 
-                log.warn("[S] LISTEN -> SYN_RECV");
-                this.state.compareAndSet(State.LISTEN, State.SYN_RCVD);
+                    writeNew(ack(header, srcAddr, dstAddr).ack(true).syn(true), true);
+//                    write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader, true);
+                } else {
+                    this.state.compareAndSet(State.LISTEN, State.CLOSING);
+                    writeNew(ack(header, srcAddr, dstAddr).ack(true).rst(true), true);
+//                    write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true).rst(true), ipHeader, true);
+                }
+
             } else {
                 // write(ack(header, srcAddr, dstAddr, 0).ack(true).rst(true), ipHeader);
                 throw new IllegalStateException();
             }
         } else if (State.SYN_RCVD.equals(state)) {
-            onMessage(packet, ipHeader);
+            if (ack) {
+                if (this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED)) {
+                    log.warn("[S] SYN_RECV -> ESTABLISHED");
+                }
+
+                // XXX 应该按序号处理吧?
+                sndUna = header.getAcknowledgmentNumber();
+                sndWnd = determineSndWnd(header);
+                cwnd = cwnd < ssthresh ? cwnd + sndMss : cwnd + sndMss / cwnd;
+
+                onOpened();
+
+                // add to queue
+                tcpDataQueue(packet, ipHeader);
+            } else if (header.getSyn()) {
+                // TODO
+                System.err.println("!ACK");
+            } else {
+                System.err.println("!ACK !SYN");
+            }
         } else if (State.ESTABLISHED.equals(state)) {
             tcpDataQueue(packet, ipHeader);
         } else if (State.CLOSE_WAIT.equals(state)) {
@@ -194,9 +214,9 @@ public class TcpSession {
                 log.warn("[CLOSE_WAIT] No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
                 return;
             }
-            rcvNxt += size(packet);
+            rcvNxt += determinePacketSize(packet);
             if (header.getAck()) {
-                sndUna = Math.max(sndUna, header.getAcknowledgmentNumber());
+                sndUna = header.getAcknowledgmentNumber();
                 sndWnd = determineSndWnd(header);
             }
             // 发送数据完毕后发送 FIN
@@ -210,10 +230,10 @@ public class TcpSession {
                 log.warn("[LAST_ACK] No Ordered, expected: {}, actual: {}", rcvNxt, header.getSequenceNumber());
                 return;
             }
-            rcvNxt += size(packet);
+            rcvNxt += determinePacketSize(packet);
             if (header.getAck()) {
                 // close.
-                sndUna = Math.max(sndUna, header.getAcknowledgmentNumber());
+                sndUna = header.getAcknowledgmentNumber();
                 sndWnd = determineSndWnd(header);
                 log.warn("[S] LAST_ACK -> CLOSED");
                 this.state.compareAndSet(State.LAST_ACK, State.CLOSED);
@@ -222,24 +242,19 @@ public class TcpSession {
         }
     }
 
-    private void initSession(final TcpPacket syn, final IpPacket.IpHeader ipHeader) {
+    private boolean initSession(final TcpPacket syn, final IpPacket.IpHeader ipHeader) {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
 
         final TcpPacket.TcpHeader header = syn.getHeader();
 
-        sndWnd = header.getWindowAsInt();
-        // - TCP HEADER SIZE - IP HEADER SIZE
-        sndMss = 576 - 20 - 20;
-        List<TcpPacket.TcpOption> options = header.getOptions();
-        for (TcpPacket.TcpOption option : options) {
-            final TcpOptionKind kind = option.getKind();
-            if (TcpOptionKind.MAXIMUM_SEGMENT_SIZE.equals(kind)) {
-                sndMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
-            } else if (TcpOptionKind.WINDOW_SCALE.equals(kind)) {
-                sndWnd <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
-            }
-        }
+        sndWnd = determineSndWnd(header);
+        sndMss = determineSndMss(header);
+
+        sndIsn = header.getSequenceNumber();
+        sndNxt = sndIsn;
+        sndUna = sndIsn;
+
         cwnd = sndMss;
 
         this.ipHeader = ipHeader;
@@ -247,41 +262,31 @@ public class TcpSession {
         rcvIsn = header.getSequenceNumber();
         rcvNxt = rcvIsn;
 
-        sndIsn = header.getSequenceNumber();
-        sndNxt = sndIsn;
-        sndUna = sndIsn;
 
-        rcvNxt += size(syn);
+        rcvNxt += determinePacketSize(syn);
 
-        write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader, true);
+        log.info("Initialize:\n"
+                        + "snd.wnd: {}\n"
+                        + "snd.mss: {}\n"
+                        + "snd.isn: {}\n"
+                        + "snd.nxt: {}\n"
+                        + "snd.una: {}\n"
+                        + "cwnd: {}\n"
+                        + "rcv.isn: {}\n"
+                        + "rcv.nxt: {}",
+                sndWnd, sndMss, sndIsn, sndNxt, sndUna, cwnd, rcvIsn, rcvNxt);
+
+        // TODO 打开 TCP 连接
+        return onOpen(new InetSocketAddress(srcAddr, header.getSrcPort().valueAsInt()), new InetSocketAddress(dstAddr, header.getDstPort().valueAsInt()), header);
     }
 
-
-    private void onMessage(final TcpPacket packet, final IpPacket.IpHeader ipHeader) {
-        final TcpPacket.TcpHeader header = packet.getHeader();
-        if (header.getAck()) {
-            if (this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED)) {
-                log.warn("[S] SYN_RECV -> ESTABLISHED");
-            }
-
-            // XXX 应该按序号处理吧?
-            sndUna = header.getAcknowledgmentNumber();
-            sndWnd = determineSndWnd(header);
-            cwnd = cwnd < ssthresh ? cwnd + sndMss : cwnd + sndMss / cwnd;
-
-            onReceiveStart();
-
-            // add to queue
-            tcpDataQueue(packet, ipHeader);
-        } else if (header.getSyn()) {
-            // TODO
-            System.err.println("!ACK");
-        } else {
-            System.err.println("!ACK !SYN");
-        }
+    private void adjustUnaAndSndWnd(final TcpPacket.TcpHeader tcpHeader) {
+        sndUna = tcpHeader.getAcknowledgmentNumber();
+        sndWnd = determineSndWnd(tcpHeader);
+        cwnd = cwnd < ssthresh ? cwnd + sndMss : cwnd + sndMss / cwnd;
     }
 
-    private void tcpDataQueue(final TcpPacket packet, IpPacket.IpHeader ipHeader) {
+    private synchronized void tcpDataQueue(final TcpPacket packet, IpPacket.IpHeader ipHeader) {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         /*-
@@ -291,29 +296,27 @@ public class TcpSession {
          */
         final TcpPacket.TcpHeader header = packet.getHeader();
         final int sequence = header.getSequenceNumber();
-        final int size = size(packet);
+        final int size = determinePacketSize(packet);
         if (sequence == rcvNxt) {
             /*-
              * 数据段序号正是期望的序号,
              * 如果窗口=0, Out-Of-Window, 立即 ACK.
              * 如果窗口>0, 拷贝到用户进程或写入 sk_receive_queue.
              */
-
-            System.err.println(rcvNxt + " -> " + (rcvNxt + size));
             rcvNxt += size;
-
             sndUna = header.getAcknowledgmentNumber();
             sndWnd = determineSndWnd(header);
 
             if (header.getAck() && !header.getSyn()) {
                 Packet payload = packet.getPayload();
-                if (null == payload) {
-                    write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, false);
+                if (null == payload || payload.length() < 1) {
+//                    write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, false);
                 } else {
                     final byte[] rawData = packet.getPayload().getRawData();
                     // System.out.println(new String(rawData, StandardCharsets.UTF_8));
-                    onReceiveData(rawData);
+                    onMessage(rawData);
 
+                    /*
                     String data = ("<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\r\n"
                             + "<html><head>\r\n"
                             + "<title>404 Not Found</title>\r\n"
@@ -324,12 +327,15 @@ public class TcpSession {
                     final int len = data.getBytes(StandardCharsets.UTF_8).length;
                     byte[] bytes = ("HTTP/1.1 200 Not Found\r\n"
                             + "Content-Length: " + len + "\r\n"
+//                            + "Transfer-Encoding: chunked\r\n"
                             + "Date: Wed, 21 Aug 2024 01:55:25 GMT\n"
                             + "Server: Apache\r\n\r\n" + data
                     ).getBytes(StandardCharsets.UTF_8);
 
                     UnknownPacket.Builder builder = UnknownPacket.newPacket(bytes, 0, bytes.length).getBuilder();
-                    write(ack(header, srcAddr, dstAddr, payload.length()).ack(true).psh(true).payloadBuilder(builder), ipHeader, false);
+                    writeNew(ack(header, srcAddr, dstAddr, payload.length()).ack(true).psh(true).payloadBuilder(builder), false);
+                    */
+//                    write(ack(header, srcAddr, dstAddr, payload.length()).ack(true).psh(true).payloadBuilder(builder), ipHeader, false);
                     // write(ack(header, srcAddr, dstAddr, payload.length()).ack(true).psh(true).payloadBuilder(builder), ipHeader);
                 }
             }
@@ -338,11 +344,11 @@ public class TcpSession {
             if (header.getFin()) {
                 onReceiveFin();
                 // ACK
-                write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, false);
+//                write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, false);
                 log.warn("[S] ESTABLISHED -> CLOSE_WAIT");
                 this.state.compareAndSet(State.ESTABLISHED, State.CLOSE_WAIT);
 
-                write(ack(header, srcAddr, dstAddr, 0).ack(true).fin(true), ipHeader, false);
+//                write(ack(header, srcAddr, dstAddr, 0).ack(true).fin(true), ipHeader, false);
                 this.state.compareAndSet(State.CLOSE_WAIT, State.LAST_ACK);
                 log.warn("[S] CLOSE_WAIT -> LAST_ACK");
             }
@@ -353,15 +359,17 @@ public class TcpSession {
              * 数据段超出接收窗口左沿(客户端重传), ACK 客户端未正确收到.
              * Out-Of-Window, 立即 ACK.
              */
-            System.err.println("[OOW] Retransmit");
-            write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, true);
+            System.err.println("[OOW] TCP Retransmission");
+//            write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, true);
+            writeNew(ack(header, srcAddr, dstAddr).ack(true), true);
         } else if (sequence >= rcvNxt + rcvWnd) {
             /*-
              * 数据段超出接收窗口右沿(Out-Of-Window), 比如零窗口探测报文段.
              * Out-Of-Window, 立即 ACK.
              */
             System.err.println("[OOW] ");
-            write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, true);
+//            write(ack(header, srcAddr, dstAddr, 0).ack(true), ipHeader, true);
+            writeNew(ack(header, srcAddr, dstAddr).ack(true), true);
         } else if (sequence < rcvNxt && sequence + size > rcvNxt) {
             /*-
              * 数据段序号在期望日的序号之前, 结束序号在期望序号之后(数据重叠),
@@ -370,26 +378,74 @@ public class TcpSession {
              * 如果窗口>0, 直接放入 sk_receive_queue
              * ... 同期望序号.
              */
-            rcvNxt = sequence + size;
             Packet payload = packet.getPayload();
             final byte[] rawBytes = null != payload ? payload.getRawData() : new byte[0];
-            // (rcvNxt - sequence, sequence + size - rcvNxt);
-            final byte[] bytes = Arrays.copyOfRange(rawBytes, rcvNxt - sequence, sequence + rawBytes.length - rcvNxt);
-            onReceiveData(bytes);
-            System.err.println("[XX]");
+            // (rcvNxt - sequence, sequence + determinePacketSize - rcvNxt);
+            try {
+                final byte[] bytes = Arrays.copyOfRange(rawBytes, rcvNxt - sequence, rawBytes.length);
+
+                onMessage(bytes);
+                System.err.println("[XX]");
+            } catch (RuntimeException ex) {
+                throw ex;
+            }
+            rcvNxt = sequence + size;
         } else {
             /*-
              * 数据段序号在期望的序号之后且在窗口内的乱序数据.
              * 放入乱序队列.
              */
             // FIXME
-            System.err.println("[OFO]");
+            log.warn("[OFO]");
+            // write(ack(header, srcAddr, dstAddr, 0).ack(true).rst(true))
         }
     }
 
-    OutputStream out;
 
-    private void onReceiveStart() {
+    OutputStream out;
+    volatile Channel channel;
+
+    private boolean onOpen(final InetSocketAddress src, final InetSocketAddress dst, TcpPacket.TcpHeader header) {
+        Bootstrap b = new Bootstrap();
+        b.group(new NioEventLoopGroup());
+        b.channel(NioSocketChannel.class);
+        b.handler(new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+//                super.channelRead(ctx, msg);
+                try {
+                    final ByteBuf buf = (ByteBuf) msg;
+                    byte[] payload = ByteBufUtil.getBytes(buf);
+                    System.out.println(System.currentTimeMillis() + ": " + new String(payload, StandardCharsets.UTF_8));
+
+                    UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, 0, payload.length).getBuilder();
+                    writeNew(ack(header, src.getAddress(), dst.getAddress()).ack(true).psh(true).payloadBuilder(builder), true);
+                } finally {
+                    ReferenceCountUtil.release(msg);
+                }
+            }
+        });
+        try {
+            final InetSocketAddress resolved = resolve(dst);
+            channel = b.connect(resolved).sync().channel();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        return true;
+    }
+
+    private InetSocketAddress resolve(final InetSocketAddress dst) {
+        final String host = dst.getHostString();
+        if ("192.168.1.2".equals(host)) {
+            return new InetSocketAddress("153.3.238.102", dst.getPort());
+        }
+        if ("192.168.1.3".equals(host)) {
+            return new InetSocketAddress("139.196.84.154", dst.getPort());
+        }
+        return dst;
+    }
+
+    private void onOpened() {
         try {
             out = new FileOutputStream(new File("tcp." + System.currentTimeMillis() + ".txt"));
         } catch (FileNotFoundException e) {
@@ -397,7 +453,11 @@ public class TcpSession {
         }
     }
 
-    private void onReceiveData(final byte[] bytes) {
+    private void onMessage(final byte[] bytes) {
+        System.out.println(new String(bytes, StandardCharsets.UTF_8));
+        if (null != channel) {
+            channel.writeAndFlush(Unpooled.wrappedBuffer(bytes));
+        }
         try {
             out.write(bytes);
         } catch (IOException e) {
@@ -407,16 +467,21 @@ public class TcpSession {
 
     private void onReceiveFin() {
         try {
-            out.flush();
-            out.close();
-            out = null;
+            if (null != channel && channel.isActive()) {
+                channel.close();
+            }
+            if (null != out) {
+                out.flush();
+                out.close();
+                out = null;
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
     protected void onClosed() {
-
+        onReceiveFin();
     }
 
     private ConcurrentLinkedQueue<TcpPacket.Builder> sndQueue = new ConcurrentLinkedQueue<>();
@@ -431,93 +496,77 @@ public class TcpSession {
     });
     private volatile Future<?> delayAckTask;
 
-    protected void write(TcpPacket.Builder packet, IpPacket.IpHeader ipHeader, boolean now) {
-        /*
-        packet.sequenceNumber(sndNxt).acknowledgmentNumber(rcvNxt);
-        log(packet.build().getHeader(), ipHeader, false);
-        sndNxt += size(packet.build());
-
-//        int avaWnd = rcvWnd - (rcvNxt - rcvUna);
-        log.warn("[RCV-WND] {}", rcvWnd);
-
-        ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(packet).build().getRawData())));
-        */
-        if (now) {
-            writeNow(packet);
-            return;
-        }
-
+    protected void writeNew(TcpPacket.Builder packet, boolean now) {
         if (!sndQueue.offer(packet)) {
             throw new IllegalStateException();
         }
-        if (null == delayAckTask && !now) {
+        if (now) {
+            if (null != delayAckTask) {
+                delayAckTask.cancel(true);
+                delayAckTask = null;
+            }
+            flushNew();
+        }
+        if (null == delayAckTask) {
             delayAckTask = scheduler.schedule(new Runnable() {
                 @Override
                 public void run() {
-                    writeNext();
+                    flushNew();
                     delayAckTask = null;
                 }
-            }, 500, TimeUnit.MILLISECONDS);
+            }, 100, TimeUnit.MILLISECONDS);
         }
     }
 
-    private void writeNow(final TcpPacket.Builder prev) {
+    protected synchronized void flushNew() {
         final int usableSndWnd = sndUna + sndWnd - sndNxt;
         final int cwndToUse = sndUna + cwnd - sndNxt;
         final int wndToUse = Math.min(usableSndWnd, cwndToUse);
         log.info("USABLE-WND = {}, CWND-To-USE = {}, USABLE-CWND = {}", usableSndWnd, cwndToUse, wndToUse);
-        if (wndToUse <= 0) {
+
+        TcpPacket.Builder current = sndQueue.poll();
+        if (null == current) {
             return;
         }
 
-        if (null != prev) {
-            prev.sequenceNumber(sndNxt);
-            prev.acknowledgmentNumber(rcvNxt);
-            sndNxt += size(prev.build());
-
-            log(prev.build().getHeader(), ipHeader, false);
-            ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(prev).build().getRawData())));
-        }
-    }
-
-    private void writeNext() {
-        final int usableSndWnd = sndUna + sndWnd - sndNxt;
-        final int cwndToUse = sndUna + cwnd - sndNxt;
-        final int wndToUse = Math.min(usableSndWnd, cwndToUse);
-        log.info("USABLE-WND = {}, CWND-To-USE = {}, USABLE-CWND = {}", usableSndWnd, cwndToUse, wndToUse);
-        if (wndToUse <= 0) {
-            return;
-        }
-
-        TcpPacket.Builder prev = null;
-        for (TcpPacket.Builder next = sndQueue.poll(); null != next; next = sndQueue.poll()) {
-            if (null == prev) {
-                prev = next;
-            } else {
-                /*
-                final Packet.Builder prevPayload = prev.getPayloadBuilder();
-                final Packet.Builder nextPayload = next.getPayloadBuilder();
-                if (null == prevPayload) {
-                    prev.payloadBuilder(nextPayload);
-                } else if (null != nextPayload) {
-                    byte[] rawData1 = prevPayload.build().getRawData();
-                    byte[] rawData2 = nextPayload.build().getRawData();
-                    byte[] bytes = Arrays.copyOfRange(rawData1, 0, rawData1.length + rawData2.length);
-                    System.arraycopy(rawData2, 0, bytes, rawData1.length, rawData2.length);
-                    prev.payloadBuilder(new UnknownPacket.Builder().rawData(bytes));
+        byte[] payload = null != current.getPayloadBuilder() ? current.getPayloadBuilder().build().getRawData() : new byte[0];
+        for (;; ) {
+            final TcpPacket.Builder next = sndQueue.peek();
+            if (null != next) {
+                final byte[] np = null != next.getPayloadBuilder() ? next.getPayloadBuilder().build().getRawData() : new byte[0];
+                if (payload.length >= wndToUse && np.length > 0) {
+                    break;
                 }
-                */
-                prev = next;
+                if (payload.length + np.length <= wndToUse) {
+                    sndQueue.poll();
+                    if (np.length > 0) {
+                        payload = Arrays.copyOf(payload, payload.length + np.length);
+                        System.arraycopy(np, 0, payload, payload.length - np.length, np.length);
+                    }
+                    TcpPacket cpkg = current.build();
+                    TcpPacket npkg = next.build();
+                    current.ack(cpkg.getHeader().getAck() || npkg.getHeader().getAck());
+                    current.syn(cpkg.getHeader().getSyn() || npkg.getHeader().getSyn());
+                    current.psh(cpkg.getHeader().getPsh() || npkg.getHeader().getPsh());
+                    current.fin(cpkg.getHeader().getFin() || npkg.getHeader().getFin());
+                } else {
+                    int size = wndToUse - payload.length;
+                    payload = Arrays.copyOf(payload, payload.length + size);
+                    System.arraycopy(np, 0, payload, payload.length - size, size);
+                    next.payloadBuilder(UnknownPacket.newPacket(np, size, np.length - size).getBuilder());
+                }
+            } else {
+                break;
             }
         }
-        if (null != prev) {
-            prev.sequenceNumber(sndNxt);
-            prev.acknowledgmentNumber(rcvNxt);
-            sndNxt += size(prev.build());
+        current.sequenceNumber(sndNxt)
+                .acknowledgmentNumber(rcvNxt)
+                .payloadBuilder(payload.length > 0 ? UnknownPacket.newPacket(payload, 0, payload.length).getBuilder() : null);
 
-            log(prev.build().getHeader(), ipHeader, false);
-            ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(prev).build().getRawData())));
-        }
+        sndNxt += determinePacketSize(current.build());
+
+        log(current.build().getHeader(), ipHeader, false);
+        ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(current).build().getRawData())));
     }
 
     private static IpPacket.Builder ack(final IpPacket.Header ipHeader) {
@@ -535,9 +584,7 @@ public class TcpSession {
                 .correctChecksumAtBuild(true);
     }
 
-    private static TcpPacket.Builder ack(final TcpPacket.TcpHeader header, final InetAddress srcAddr, final InetAddress dstAddr, final int receivedPayloadLength) {
-//        List<TcpPacket.TcpOption> options = Lists.newArrayList();
-//        options.addAll(header.getOptions());
+    private static TcpPacket.Builder ack(final TcpPacket.TcpHeader header, final InetAddress srcAddr, final InetAddress dstAddr) {
 
         return new TcpPacket.Builder()
                 .srcAddr(dstAddr)
@@ -552,6 +599,67 @@ public class TcpSession {
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true);
+    }
+
+    /**
+     * 确定 TCP 包的大小, 用于计算序列增长.
+     *
+     * @param packet TCP packet
+     * @return TCP 用于计算序列增长的大小
+     */
+    private int determinePacketSize(final TcpPacket packet) {
+        final TcpPacket.TcpHeader h = packet.getHeader();
+        final Packet payload = packet.getPayload();
+        final int size = null != payload ? payload.length() : 0;
+        if (size > 0) {
+            return size;
+        }
+        if (h.getSyn() || h.getFin()) {
+//        if (h.getSyn() || h.getRst()) {
+            return 1;
+        }
+        return size;
+    }
+
+
+    /**
+     * 确定发送最大片段(Max-Segment-Size)大小.
+     *
+     * @param header TCP header.
+     * @return 发送窗口大小
+     */
+    private int determineSndMss(final TcpPacket.TcpHeader header) {
+        // - TCP HEADER SIZE - IP HEADER SIZE
+        int sndMss = 576 - 20 - 20;
+        final List<TcpPacket.TcpOption> options = header.getOptions();
+        for (TcpPacket.TcpOption option : options) {
+            final TcpOptionKind kind = option.getKind();
+            if (TcpOptionKind.MAXIMUM_SEGMENT_SIZE.equals(kind)) {
+                sndMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
+            }
+        }
+
+        return sndMss;
+    }
+
+    /**
+     * 确定发送窗口大小.
+     *
+     * @param header TCP header.
+     * @return 发送窗口大小
+     */
+    private int determineSndWnd(final TcpPacket.TcpHeader header) {
+        int sndWnd = header.getWindowAsInt();
+
+        final List<TcpPacket.TcpOption> options = header.getOptions();
+        for (TcpPacket.TcpOption option : options) {
+            final TcpOptionKind kind = option.getKind();
+            if (TcpOptionKind.WINDOW_SCALE.equals(kind)) {
+                sndWnd <<= ((TcpWindowScaleOption) option).getShiftCountAsInt();
+            }
+        }
+
+        return sndWnd;
     }
 
     private static void log(final TcpPacket.TcpHeader tcpHeader, final IpPacket.IpHeader ipHeader, boolean inbound) {
