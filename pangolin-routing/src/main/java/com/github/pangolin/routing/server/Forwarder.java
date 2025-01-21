@@ -1,4 +1,4 @@
-package com.github.pangolin.routing;
+package com.github.pangolin.routing.server;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;

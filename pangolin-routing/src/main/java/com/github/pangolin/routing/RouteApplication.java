@@ -7,6 +7,7 @@ import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.context.RouteContextFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.route.RoutePredicateFactoriesAware;
+import com.github.pangolin.routing.server.Forwarder;
 import com.github.pangolin.routing.upstream.UpstreamCombinersAware;
 import com.github.pangolin.routing.upstream.UpstreamFactoriesAware;
 import com.github.pangolin.routing.server.extra.ProxyAutoConfigurationServerHandler;
