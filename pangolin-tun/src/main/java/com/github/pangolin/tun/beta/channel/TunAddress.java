@@ -1,7 +1,6 @@
-package com.github.pangolin.tun.channel;
+package com.github.pangolin.tun.beta.channel;
 
 import java.net.SocketAddress;
-import java.util.Objects;
 
 public class TunAddress extends SocketAddress {
     private static final long serialVersionUID = -584786182484350484L; // NOSONAR

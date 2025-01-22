@@ -1,13 +1,5 @@
 package com.github.pangolin.tun.net.darwin;
 
-import static com.github.pangolin.tun.net.darwin.jna.KernControl.CTLIOCGINFO;
-import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_INET;
-import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_INET6;
-import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_SYSTEM;
-import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_UNSPEC;
-import static com.github.pangolin.tun.net.darwin.jna.Socket.SOCK_DGRAM;
-import static java.nio.charset.StandardCharsets.US_ASCII;
-
 import com.github.pangolin.tun.net.AbstractTunAdapter;
 import com.github.pangolin.tun.net.InterfaceAddressEx;
 import com.github.pangolin.tun.net.darwin.jna.KernControl.CtlInfo;
@@ -17,17 +9,19 @@ import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
 import com.sun.jna.ptr.IntByReference;
+import freework.codec.Hex;
 import org.pcap4j.packet.IpSelector;
 import org.pcap4j.packet.Packet;
 
 import java.io.IOException;
 import java.net.Inet4Address;
-import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.concurrent.TimeUnit;
+
+import static com.github.pangolin.tun.net.darwin.jna.KernControl.CTLIOCGINFO;
+import static com.github.pangolin.tun.net.darwin.jna.Socket.*;
+import static java.nio.charset.StandardCharsets.US_ASCII;
 
 public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceEx> {
     public static final int ADDRESS_FAMILY_SIZE = 4;
@@ -105,7 +99,15 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
         }
 
         final ByteBuffer buffer = ByteBuffer.allocate(ADDRESS_FAMILY_SIZE + bytes.length);
-        buffer.putInt(addressFamily).put(bytes);
+        buffer.put(new byte[] {
+                (byte) (addressFamily >> 24),
+                (byte) (addressFamily >> 16),
+                (byte) (addressFamily >> 8),
+                (byte) addressFamily
+        });
+        buffer.put(bytes);
+        buffer.flip();
+        System.out.println("PUT: " + Hex.encode(buffer.array()));
         LibC2.INSTANCE.write(fd, buffer, buffer.capacity());
     }
 

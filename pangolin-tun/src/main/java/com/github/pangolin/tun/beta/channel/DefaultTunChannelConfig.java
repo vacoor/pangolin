@@ -1,6 +1,6 @@
-package com.github.pangolin.tun.channel;
+package com.github.pangolin.tun.beta.channel;
 
-import static com.github.pangolin.tun.channel.TunChannelOption.TUN_MTU;
+import static com.github.pangolin.tun.beta.channel.TunChannelOption.TUN_MTU;
 
 import io.netty.channel.ChannelOption;
 import io.netty.channel.DefaultChannelConfig;

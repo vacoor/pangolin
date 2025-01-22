@@ -1,4 +1,4 @@
-package com.github.pangolin.tun.channel;
+package com.github.pangolin.tun.beta.channel;
 
 import io.netty.channel.ChannelConfig;
 

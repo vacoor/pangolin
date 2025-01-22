@@ -1,5 +1,7 @@
-package com.github.pangolin.tun.channel;
+package com.github.pangolin.tun.beta.channel;
 
+import com.github.pangolin.tun.net.AbstractTunAdapter;
+import com.github.pangolin.tun.net.InterfaceAddressEx;
 import com.github.pangolin.tun.net.TunAdapter;
 import com.github.pangolin.tun.net.darwin.DarwinTunAdapter;
 import com.github.pangolin.tun.net.linux.LinuxTunAdapter;
@@ -89,6 +91,7 @@ public class TunChannel extends AbstractChannel {
         else {
             device = LinuxTunAdapter.open(((TunAddress) localAddress).ifName());
         }
+        ((AbstractTunAdapter) device).setInterfaceAddress(InterfaceAddressEx.of("192.168.3.1", 24));
     }
 
     @Override

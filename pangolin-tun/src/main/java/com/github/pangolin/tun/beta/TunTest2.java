@@ -1,27 +1,19 @@
-package com.github.pangolin.tun;
+package com.github.pangolin.tun.beta;
 
-import com.github.pangolin.tun.beta.TcpPacketHandler;
-import com.github.pangolin.tun.net.InterfaceAddressEx;
-import com.github.pangolin.tun.net.windows.WindowsNetworkInterfaceEx;
-import com.sun.jna.WString;
+import com.github.pangolin.tun.beta.channel.TunAddress;
+import com.github.pangolin.tun.beta.channel.TunChannel;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.DefaultEventLoopGroup;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
-import org.drasyl.channel.tun.TunAddress;
-import org.drasyl.channel.tun.TunChannel;
-import org.drasyl.channel.tun.jna.windows.WindowsTunDevice;
-
-import java.lang.reflect.Field;
-import java.net.InetAddress;
 
 /**
  *
  */
 @Slf4j
-public class TunTest {
+public class TunTest2 {
 
     public static void main(String[] args) throws Exception {
         /*
@@ -35,9 +27,9 @@ public class TunTest {
         System.exit(0);
         */
 
-        final Field innerString = WString.class.getDeclaredField("string");
-        innerString.setAccessible(true);
-        innerString.set(WindowsTunDevice.TUNNEL_TYPE, "PAN");
+//        final Field innerString = WString.class.getDeclaredField("string");
+//        innerString.setAccessible(true);
+//        innerString.set(WindowsTunDevice.TUNNEL_TYPE, "PAN");
 
         EventLoopGroup group = new DefaultEventLoopGroup(1);
         try {
@@ -47,15 +39,15 @@ public class TunTest {
                     .handler(new ChannelInitializer<Channel>() {
                         @Override
                         protected void initChannel(final Channel ch) throws Exception {
-                            ch.pipeline().addLast(new IpPacketDecoder());
+                            ch.pipeline().addLast(new IpPacketCodec());
                             ch.pipeline().addLast(new TcpPacketHandler());
                         }
                     });
-            final Channel ch = b.bind(new TunAddress("iTCP")).sync().channel();
+            final Channel ch = b.bind(new TunAddress("utun9")).sync().channel();
             // int code = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "address", "name=\"utun99\"", "source=static", "address=192.168.1.1", "mask=255.255.255.0").start().waitFor();
             // send/receive messages of type TunPacket...
-            WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias("iTCP");
-            nix.setInterfaceAddress(InterfaceAddressEx.of(InetAddress.getByName("192.168.1.1"), (short) 24));
+//            WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias("iTCP");
+//            nix.setInterfaceAddress(InterfaceAddressEx.of(InetAddress.getByName("192.168.1.1"), (short) 24));
             ch.closeFuture().sync();
         } finally {
             group.shutdownGracefully();

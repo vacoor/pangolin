@@ -1,5 +1,6 @@
 package com.github.pangolin.tun;
 
+import com.github.pangolin.tun.beta.IpPacketHandler;
 import io.netty.channel.ChannelHandlerContext;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.UdpPacket;

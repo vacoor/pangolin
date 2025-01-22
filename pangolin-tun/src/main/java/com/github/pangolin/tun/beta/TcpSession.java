@@ -1,4 +1,4 @@
-package com.github.pangolin.tun;
+package com.github.pangolin.tun.beta;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
@@ -442,6 +442,9 @@ public class TcpSession {
         if ("192.168.1.3".equals(host)) {
             return new InetSocketAddress("139.196.84.154", dst.getPort());
         }
+        if ("192.168.3.1".equals(host) || "192.168.3.2".equals(host)) {
+            return new InetSocketAddress("139.196.84.154", dst.getPort());
+        }
         return dst;
     }
 
@@ -566,7 +569,8 @@ public class TcpSession {
         sndNxt += determinePacketSize(current.build());
 
         log(current.build().getHeader(), ipHeader, false);
-        ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(current).build().getRawData())));
+        // ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(current).build().getRawData())));
+        ctx.writeAndFlush(ack(ipHeader).payloadBuilder(current).build());
     }
 
     private static IpPacket.Builder ack(final IpPacket.Header ipHeader) {

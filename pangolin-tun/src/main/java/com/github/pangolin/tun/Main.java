@@ -1,5 +1,6 @@
 package com.github.pangolin.tun;
 
+import com.github.pangolin.tun.beta.TunTest2;
 import com.github.pangolin.tun.net.darwin.DarwinTunAdapter;
 import com.github.pangolin.tun.net.linux.LinuxNetworkInterfaceEx;
 import com.github.pangolin.tun.net.linux.LinuxTunAdapter;
@@ -16,8 +17,9 @@ import java.net.InetAddress;
 
 public class Main {
     public static void main(String[] args) throws Exception {
+        TunTest2.main(args);
 //        LinuxTunAdapter.main(args);
-        DarwinTunAdapter.main(args);
+//        DarwinTunAdapter.main(args);
         /*
         TunDevice tun = LinuxTunDevice.open("tun9", 1500);
         String ifname = tun.localAddress().ifName();
