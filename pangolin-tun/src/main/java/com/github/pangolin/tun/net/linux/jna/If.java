@@ -1,4 +1,4 @@
-package com.github.pangolin.tun.net.linux;
+package com.github.pangolin.tun.net.linux.jna;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
 

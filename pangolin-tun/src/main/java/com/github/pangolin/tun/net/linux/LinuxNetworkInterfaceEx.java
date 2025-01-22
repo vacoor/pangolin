@@ -2,10 +2,13 @@ package com.github.pangolin.tun.net.linux;
 
 import com.github.pangolin.tun.net.InterfaceAddressEx;
 import com.github.pangolin.tun.net.NetworkInterfaceEx;
-import com.github.pangolin.tun.net.linux.If.Ifreq;
-import com.github.pangolin.tun.net.linux.If.in6_ifreq;
-import com.github.pangolin.tun.net.linux.If.sockaddr_in;
-import com.github.pangolin.tun.net.linux.If.sockaddr_in6;
+import com.github.pangolin.tun.net.linux.jna.If;
+import com.github.pangolin.tun.net.linux.jna.If.Ifreq;
+import com.github.pangolin.tun.net.linux.jna.If.in6_ifreq;
+import com.github.pangolin.tun.net.linux.jna.If.sockaddr_in;
+import com.github.pangolin.tun.net.linux.jna.If.sockaddr_in6;
+import com.github.pangolin.tun.net.linux.jna.LibC2;
+import com.github.pangolin.tun.net.linux.jna.Sockios;
 import com.google.common.collect.Lists;
 
 import java.net.Inet4Address;
@@ -16,8 +19,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static com.github.pangolin.tun.net.linux.Socket.*;
-import static com.github.pangolin.tun.net.linux.Sockios.*;
+import static com.github.pangolin.tun.net.linux.jna.Socket.*;
+import static com.github.pangolin.tun.net.linux.jna.Sockios.*;
 import static org.drasyl.channel.tun.jna.shared.LibC.*;
 
 /**
@@ -164,6 +167,15 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         final int fd = fd4();
         try {
             return getMtu(fd, ifname);
+        } finally {
+            close(fd);
+        }
+    }
+
+    public void setMTU(final int mtu) {
+        final int fd = fd4();
+        try {
+            setMtu(fd, ifname, mtu);
         } finally {
             close(fd);
         }

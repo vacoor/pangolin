@@ -1,4 +1,4 @@
-package com.github.pangolin.tun.net.macos;
+package com.github.pangolin.tun.net.darwin.jna;
 
 import com.sun.jna.NativeLong;
 

@@ -3,7 +3,7 @@ package com.github.pangolin.routing.extra.fakedns;
 import com.github.pangolin.routing.extra.fakedns.beta.SimpleInet4FakeDns;
 import com.github.pangolin.routing.extra.fakedns.handler.DatagramDnsProxyServerHandler;
 import com.github.pangolin.routing.extra.fakedns.handler.DatagramFakeDnsServerHandler;
-import com.github.pangolin.tun.net.windows.win32.WindowsNetworkInterfaceEx;
+import com.github.pangolin.tun.net.windows.WindowsNetworkInterfaceEx;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;

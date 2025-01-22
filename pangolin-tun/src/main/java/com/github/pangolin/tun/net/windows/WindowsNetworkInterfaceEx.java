@@ -1,8 +1,8 @@
-package com.github.pangolin.tun.net.windows.win32;
+package com.github.pangolin.tun.net.windows;
 
 import com.github.pangolin.tun.net.InterfaceAddressEx;
 import com.github.pangolin.tun.net.NetworkInterfaceEx;
-import com.github.pangolin.tun.net.windows.win32.jna.DnsLib;
+import com.github.pangolin.tun.net.windows.jna.DnsLib;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.sun.jna.Memory;
@@ -22,7 +22,7 @@ import java.util.Enumeration;
 import java.util.LinkedList;
 import java.util.List;
 
-import static com.github.pangolin.tun.net.windows.win32.jna.IpHelpLib.*;
+import static com.github.pangolin.tun.net.windows.jna.IpHelpLib.*;
 import static com.sun.jna.platform.win32.Guid.GUID;
 import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
 import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;

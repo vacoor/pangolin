@@ -1,4 +1,4 @@
-package com.github.pangolin.tun.net.linux;
+package com.github.pangolin.tun.net.linux.jna;
 
 import com.sun.jna.NativeLong;
 

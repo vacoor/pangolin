@@ -1,4 +1,4 @@
-package com.github.pangolin.tun.net.windows;
+package com.github.pangolin.tun.net.windows.jna;
 
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Pointer;

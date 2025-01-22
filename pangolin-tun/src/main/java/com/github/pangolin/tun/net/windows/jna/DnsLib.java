@@ -1,4 +1,4 @@
-package com.github.pangolin.tun.net.windows.win32.jna;
+package com.github.pangolin.tun.net.windows.jna;
 
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Library;

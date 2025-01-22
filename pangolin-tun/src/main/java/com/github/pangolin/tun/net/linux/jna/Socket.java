@@ -1,4 +1,4 @@
-package com.github.pangolin.tun.net.linux;
+package com.github.pangolin.tun.net.linux.jna;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/socket.h">socket.h</a>

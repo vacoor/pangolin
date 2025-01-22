@@ -1,35 +1,36 @@
-package com.github.pangolin.tun.net.macos;
+package com.github.pangolin.tun.net.darwin;
 
 
-import static com.github.pangolin.tun.net.macos.Socket.AF_INET;
-import static com.github.pangolin.tun.net.macos.Socket.AF_INET6;
-import static com.github.pangolin.tun.net.macos.Socket.AF_UNSPEC;
-import static com.github.pangolin.tun.net.macos.Socket.SOCK_DGRAM;
-import static com.github.pangolin.tun.net.macos.Sockio.SIOCAIFADDR;
-import static com.github.pangolin.tun.net.macos.Sockio.SIOCAIFADDR_IN6;
-import static com.github.pangolin.tun.net.macos.Sockio.SIOCDIFADDR;
-import static com.github.pangolin.tun.net.macos.Sockio.SIOCDIFADDR_IN6;
-import static com.github.pangolin.tun.net.macos.Sockio.SIOCGIFADDR;
-import static com.github.pangolin.tun.net.macos.Sockio.SIOCGIFMTU;
-import static com.github.pangolin.tun.net.macos.Sockio.SIOCGIFNETMASK;
-import static com.github.pangolin.tun.net.macos.Sockio.SIOCSIFADDR;
-import static com.github.pangolin.tun.net.macos.Sockio.SIOCSIFMTU;
-import static com.github.pangolin.tun.net.macos.Sockio.SIOCSIFNETMASK;
+import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_INET;
+import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_INET6;
+import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_UNSPEC;
+import static com.github.pangolin.tun.net.darwin.jna.Socket.SOCK_DGRAM;
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCAIFADDR;
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCAIFADDR_IN6;
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCDIFADDR;
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCDIFADDR_IN6;
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCGIFADDR;
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCGIFMTU;
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCGIFNETMASK;
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCSIFADDR;
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCSIFMTU;
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCSIFNETMASK;
 import static org.drasyl.channel.tun.jna.shared.LibC.close;
 import static org.drasyl.channel.tun.jna.shared.LibC.ioctl;
 import static org.drasyl.channel.tun.jna.shared.LibC.socket;
 
 import com.github.pangolin.tun.net.InterfaceAddressEx;
 import com.github.pangolin.tun.net.NetworkInterfaceEx;
-import com.github.pangolin.tun.net.linux.LibC2;
-import com.github.pangolin.tun.net.macos.If.Ifreq;
-import com.github.pangolin.tun.net.macos.If.ifaddrs;
-import com.github.pangolin.tun.net.macos.If.in6_addrlifetime;
-import com.github.pangolin.tun.net.macos.If.in6_aliasreq;
-import com.github.pangolin.tun.net.macos.If.in_aliasreq;
-import com.github.pangolin.tun.net.macos.If.sockaddr;
-import com.github.pangolin.tun.net.macos.If.sockaddr_in;
-import com.github.pangolin.tun.net.macos.If.sockaddr_in6;
+import com.github.pangolin.tun.net.linux.jna.LibC2;
+import com.github.pangolin.tun.net.darwin.jna.If;
+import com.github.pangolin.tun.net.darwin.jna.If.Ifreq;
+import com.github.pangolin.tun.net.darwin.jna.If.ifaddrs;
+import com.github.pangolin.tun.net.darwin.jna.If.in6_addrlifetime;
+import com.github.pangolin.tun.net.darwin.jna.If.in6_aliasreq;
+import com.github.pangolin.tun.net.darwin.jna.If.in_aliasreq;
+import com.github.pangolin.tun.net.darwin.jna.If.sockaddr;
+import com.github.pangolin.tun.net.darwin.jna.If.sockaddr_in;
+import com.github.pangolin.tun.net.darwin.jna.If.sockaddr_in6;
 import com.google.common.collect.Lists;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -43,10 +44,10 @@ import java.util.stream.Collectors;
 /**
  *
  */
-public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
+public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
     private final String ifname;
 
-    public MacOsNetworkInterfaceEx(final String ifname) {
+    public DarwinNetworkInterfaceEx(final String ifname) {
         this.ifname = ifname;
     }
 
@@ -436,7 +437,7 @@ public class MacOsNetworkInterfaceEx implements NetworkInterfaceEx {
 //        byte[] netmask = cidrPrefixToNetmask(byAddress.getAddress(), 64);
 //        System.out.println(NetUtil.bytesToIpAddress(netmask));
 
-        final MacOsNetworkInterfaceEx nix = new MacOsNetworkInterfaceEx("en0");
+        final DarwinNetworkInterfaceEx nix = new DarwinNetworkInterfaceEx("en0");
         System.out.println(nix.getInterfaceAddress4());
         System.out.println(nix.getInterfaceAddresses());
 

@@ -1,9 +1,9 @@
 package com.github.pangolin.tun;
 
-import com.github.pangolin.tun.net.linux.LinuxTunUtils;
+import com.github.pangolin.tun.net.linux.LinuxTunAdapter;
 
 public class Main {
     public static void main(String[] args) throws Exception {
-        LinuxTunUtils.main(args);
+        LinuxTunAdapter.main(args);
     }
 }

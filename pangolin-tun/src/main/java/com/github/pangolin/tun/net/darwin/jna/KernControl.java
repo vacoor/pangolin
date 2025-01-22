@@ -1,12 +1,12 @@
-package com.github.pangolin.tun.net.macos;
+package com.github.pangolin.tun.net.darwin.jna;
 
 import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
 
-final class KernControl {
-    static final NativeLong CTLIOCGINFO = new NativeLong(0xc0644e03L);
+public final class KernControl {
+    public static final NativeLong CTLIOCGINFO = new NativeLong(0xc0644e03L);
     public static final int MAX_KCTL_NAME = 96;
 
     private KernControl() {

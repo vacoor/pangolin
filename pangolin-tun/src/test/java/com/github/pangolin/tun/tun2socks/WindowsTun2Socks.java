@@ -1,7 +1,7 @@
 package com.github.pangolin.tun.tun2socks;
 
 import com.github.pangolin.tun.net.InterfaceAddressEx;
-import com.github.pangolin.tun.net.windows.win32.WindowsNetworkInterfaceEx;
+import com.github.pangolin.tun.net.windows.WindowsNetworkInterfaceEx;
 
 import java.io.File;
 import java.io.IOException;

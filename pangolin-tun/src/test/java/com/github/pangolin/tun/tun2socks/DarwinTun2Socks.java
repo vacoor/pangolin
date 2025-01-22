@@ -1,7 +1,7 @@
 package com.github.pangolin.tun.tun2socks;
 
 import com.github.pangolin.tun.net.InterfaceAddressEx;
-import com.github.pangolin.tun.net.macos.MacOsNetworkInterfaceEx;
+import com.github.pangolin.tun.net.darwin.DarwinNetworkInterfaceEx;
 
 import java.io.File;
 import java.io.IOException;
@@ -30,7 +30,7 @@ public class DarwinTun2Socks extends AbstractTun2Socks {
     @Override
     protected void onReady() throws IOException, InterruptedException {
         // Add Interface address
-        final MacOsNetworkInterfaceEx nix = new MacOsNetworkInterfaceEx("utun123");
+        final DarwinNetworkInterfaceEx nix = new DarwinNetworkInterfaceEx("utun123");
         nix.addInterfaceAddress(InterfaceAddressEx.of("198.18.0.1", (short) 24));
         // new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "address", "name=\"wintun\"", "source=static", "address=198.18.0.1", "mask=255.255.255.0").start().waitFor();
 

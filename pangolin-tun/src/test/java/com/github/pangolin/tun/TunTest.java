@@ -1,7 +1,7 @@
 package com.github.pangolin.tun;
 
 import com.github.pangolin.tun.net.InterfaceAddressEx;
-import com.github.pangolin.tun.net.windows.win32.WindowsNetworkInterfaceEx;
+import com.github.pangolin.tun.net.windows.WindowsNetworkInterfaceEx;
 import com.sun.jna.WString;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
