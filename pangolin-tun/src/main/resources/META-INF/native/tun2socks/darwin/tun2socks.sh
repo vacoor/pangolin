@@ -44,7 +44,8 @@ function tun_start() {
 
    # Set DNS servers
    # networksetup -listnetworkserviceorder | grep 'Hardware Port'
-   networksetup -setdnsservers "Wi-Fi" 192.168.1.201 192.168.1.1
+   # networksetup -setdnsservers "Wi-Fi" 192.168.1.201 192.168.1.1
+   networksetup -setdnsservers "Wi-Fi" 192.168.1.201
    # networksetup -setdnsservers "Wi-Fi" 192.168.1.1
 
    # Flush dns cache

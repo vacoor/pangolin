@@ -5,8 +5,8 @@ import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHand
 import com.github.pangolin.routing.handler.internal.server.Socks5ServerDatagramDemultiplexer;
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
-import com.github.pangolin.routing.handler.mixin.MixinServerHandshaker;
-import com.github.pangolin.routing.handler.mixin.MixinServerInitializer;
+import com.github.pangolin.routing.server.mixin.MixinServerHandshaker;
+import com.github.pangolin.routing.server.mixin.MixinServerInitializer;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
 import io.netty.bootstrap.Bootstrap;

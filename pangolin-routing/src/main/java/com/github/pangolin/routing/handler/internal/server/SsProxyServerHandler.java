@@ -57,6 +57,7 @@ public class SsProxyServerHandler extends ChannelDuplexHandler {
 
         final ChannelConfig c = ctx.channel().config();
         final InetSocketAddress addr = SocketUtils.toSocketAddress(address, port, false);
+
         factory.open(addr, c.getConnectTimeoutMillis(), false, ctx.channel().eventLoop(), new ChannelDuplexHandler() {
 
             @Override
