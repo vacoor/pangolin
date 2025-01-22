@@ -64,6 +64,7 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
         final int bytesRead = LibC2.INSTANCE.read(fd, buffer, mtu);
 
         final byte[] bytes = new byte[bytesRead];
+        final int ipVersion = bytes[0] >> 4;
 //        buffer.flip();
         buffer.get(bytes);
         System.out.println("OVER...");

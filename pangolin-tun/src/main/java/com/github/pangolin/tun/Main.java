@@ -1,10 +1,12 @@
 package com.github.pangolin.tun;
 
+import com.github.pangolin.tun.net.darwin.DarwinTunAdapter;
 import com.github.pangolin.tun.net.linux.LinuxNetworkInterfaceEx;
 import com.github.pangolin.tun.net.linux.LinuxTunAdapter;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.drasyl.channel.tun.jna.TunDevice;
+import org.drasyl.channel.tun.jna.darwin.DarwinTunDevice;
 import org.drasyl.channel.tun.jna.linux.LinuxTunDevice;
 import org.pcap4j.packet.IpSelector;
 import org.pcap4j.packet.Packet;
@@ -14,7 +16,8 @@ import java.net.InetAddress;
 
 public class Main {
     public static void main(String[] args) throws Exception {
-        LinuxTunAdapter.main(args);
+//        LinuxTunAdapter.main(args);
+        DarwinTunAdapter.main(args);
         /*
         TunDevice tun = LinuxTunDevice.open("tun9", 1500);
         String ifname = tun.localAddress().ifName();

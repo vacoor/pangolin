@@ -13,7 +13,6 @@ import com.github.pangolin.tun.net.InterfaceAddressEx;
 import com.github.pangolin.tun.net.darwin.jna.KernControl.CtlInfo;
 import com.github.pangolin.tun.net.darwin.jna.KernControl.SockaddrCtl;
 import com.github.pangolin.tun.net.linux.jna.LibC2;
-import com.github.pangolin.tun.net.linux.jna.Socket;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
@@ -27,6 +26,7 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceEx> {
@@ -62,10 +62,13 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
 
     @Override
     public byte[] readPacket() throws IOException {
+        System.out.println("001");
         final int packetSize = getPacketSize();
-        final ByteBuffer buffer = ByteBuffer.allocateDirect(packetSize);
+        final ByteBuffer buffer = ByteBuffer.allocate(packetSize);
 
+        System.out.println("002");
         final int bytesRead = LibC2.INSTANCE.read(fd, buffer, packetSize);
+        System.out.println("003");
 
         // skip 4-bytes address family
         final int addressFamily = buffer.getInt();
@@ -73,8 +76,19 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
             throw new IOException("Unknown address family: " + addressFamily);
         }
 
+        System.out.println("004");
+
+        System.out.println(buffer.capacity());
+        System.out.println(buffer.remaining());
+
         final byte[] actual = new byte[buffer.remaining()];
         buffer.get(actual);
+        buffer.clear();
+
+        final int ipVersion = actual[0] >> 4;
+
+//        System.out.println(Arrays.toString(actual));
+        System.out.println("005:" + addressFamily + " -> " + ipVersion);
         return actual;
     }
 
@@ -82,15 +96,15 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
     public void writePacket(byte[] bytes) throws IOException {
         final int ipVersion = bytes[0] >> 4;
         int addressFamily = AF_UNSPEC;
-        if (Socket.AF_INET == ipVersion) {
+        if (4 == ipVersion) {
             addressFamily = AF_INET;
-        } else if (Socket.AF_INET6 == ipVersion) {
+        } else if (6 == ipVersion) {
             addressFamily = AF_INET6;
         } else {
             throw new IOException("Unknown address family: " + addressFamily);
         }
 
-        final ByteBuffer buffer = ByteBuffer.allocateDirect(ADDRESS_FAMILY_SIZE + bytes.length);
+        final ByteBuffer buffer = ByteBuffer.allocate(ADDRESS_FAMILY_SIZE + bytes.length);
         buffer.putInt(addressFamily).put(bytes);
         LibC2.INSTANCE.write(fd, buffer, buffer.capacity());
     }
@@ -159,18 +173,18 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
         System.out.println("MTU -> " + adapter.getMTU());
 
         Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("192.168.3.1");
-        Inet4Address ipv4_2 = (Inet4Address) InetAddress.getByName("192.168.3.2");
+//        Inet4Address ipv4_2 = (Inet4Address) InetAddress.getByName("192.168.3.2");
 
         adapter.setInterfaceAddress(InterfaceAddressEx.of(ipv4, 16));
-        adapter.addInterfaceAddress(InterfaceAddressEx.of(ipv4_2, 24));
+//        adapter.addInterfaceAddress(InterfaceAddressEx.of(ipv4_2, 24));
 
         System.out.println("IPv4 -> " + adapter.getInterfaceAddresses());
         System.out.println("OK");
 
-        Inet6Address ipv6 = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
-        adapter.addInterfaceAddress(InterfaceAddressEx.of(ipv6, 64));
+//        Inet6Address ipv6 = (Inet6Address) InetAddress.getByName("fd2c:8ee9:8bc:3a49:49ca:e99b:fc86:7fa2");
+//        adapter.addInterfaceAddress(InterfaceAddressEx.of(ipv6, 64));
 
-        System.out.println("IPv6 -> OK");
+//        System.out.println("IPv6 -> OK");
 
 //        TimeUnit.SECONDS.sleep(10);
 //

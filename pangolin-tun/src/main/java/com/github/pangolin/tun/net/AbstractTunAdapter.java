@@ -28,4 +28,5 @@ public abstract class AbstractTunAdapter<T extends NetworkInterfaceEx> implement
     public void flushInterfaceAddresses() {
         nix.flushInterfaceAddresses();
     }
+
 }
