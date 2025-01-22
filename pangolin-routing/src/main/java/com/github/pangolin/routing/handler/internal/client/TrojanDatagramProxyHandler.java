@@ -45,7 +45,7 @@ public class TrojanDatagramProxyHandler extends ChannelDuplexHandler {
     private volatile ChannelFuture udpOverTcp;
 
     public TrojanDatagramProxyHandler(final InetSocketAddress proxyAddress, final String proxyPassword) {
-        this(proxyAddress, proxyPassword, new StandardSocketChannelFactory());
+        this(proxyAddress, proxyPassword, new StandardSocketChannelFactory(null));
     }
 
     public TrojanDatagramProxyHandler(final InetSocketAddress proxyAddress,

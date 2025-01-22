@@ -34,7 +34,7 @@ public class Socks5DatagramProxyHandler extends ChannelDuplexHandler {
     }
 
     public Socks5DatagramProxyHandler(final InetSocketAddress proxyAddress, final String username, final String password) {
-        this(proxyAddress, username, password, new StandardSocketChannelFactory());
+        this(proxyAddress, username, password, new StandardSocketChannelFactory(null));
     }
 
     public Socks5DatagramProxyHandler(final InetSocketAddress proxyAddress,

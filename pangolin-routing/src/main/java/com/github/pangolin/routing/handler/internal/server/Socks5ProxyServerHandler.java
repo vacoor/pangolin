@@ -37,7 +37,7 @@ public class Socks5ProxyServerHandler extends ChannelInboundHandlerAdapter {
     }
 
     public Socks5ProxyServerHandler(final String username, final String password) {
-        this(username, password, new StandardSocketChannelFactory());
+        this(username, password, new StandardSocketChannelFactory(null));
     }
 
 

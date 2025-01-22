@@ -25,7 +25,7 @@ public class Socks4ProxyServerHandler extends ChannelInboundHandlerAdapter {
     }
 
     public Socks4ProxyServerHandler(final String uid) {
-        this(uid, new StandardSocketChannelFactory());
+        this(uid, new StandardSocketChannelFactory(null));
     }
 
     public Socks4ProxyServerHandler(final String uid, final SocketChannelFactory factory) {

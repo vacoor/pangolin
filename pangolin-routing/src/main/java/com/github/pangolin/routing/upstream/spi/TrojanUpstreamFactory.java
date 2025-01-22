@@ -27,7 +27,7 @@ public class TrojanUpstreamFactory extends AbstractUpstreamFactory {
     @Override
     protected Upstream apply0(final String name, final String url) {
         // FIXME
-        return resolve(name, url, new StandardSocketChannelFactory());
+        return resolve(name, url, new StandardSocketChannelFactory(null));
     }
 
     private Upstream resolve(final String name, final String serverUrl, final SocketChannelFactory factory) {
@@ -43,7 +43,7 @@ public class TrojanUpstreamFactory extends AbstractUpstreamFactory {
                 determinePort(uri.getPort())
         );
 
-        final SocketChannelFactory factoryToUse = null != factory ? factory : new StandardSocketChannelFactory();
+        final SocketChannelFactory factoryToUse = null != factory ? factory : new StandardSocketChannelFactory(null);
         return new TrojanUpstream(nameToUse, address, password, factoryToUse);
     }
 

@@ -19,10 +19,14 @@ import java.util.List;
 public class ProxySocketChannelFactory implements SocketChannelFactory {
     private final Upstream upstream;
     private final List<String> bypass;
+    private final SocketAddress localAddress;
 
-    public ProxySocketChannelFactory(final Upstream upstream, final List<String> bypass) {
+    public ProxySocketChannelFactory(final Upstream upstream,
+                                     final List<String> bypass,
+                                     final SocketAddress localAddress) {
         this.upstream = ObjectUtil.checkNotNull(upstream, "upstream");
         this.bypass = null != bypass ? bypass : Collections.emptyList();
+        this.localAddress = localAddress;
     }
 
     /**
@@ -52,7 +56,7 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
                         ch.pipeline().addLast(handler);
                     }
                 });
-        return b.connect(destination);
+        return b.connect(destination, localAddress);
     }
 
     private ChannelHandler newSocketProxyHandler(final SocketAddress destination) {

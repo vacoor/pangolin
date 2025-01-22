@@ -12,6 +12,11 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 
 public class StandardSocketChannelFactory implements SocketChannelFactory {
+    private final SocketAddress localAddress;
+
+    public StandardSocketChannelFactory(final SocketAddress localAddress) {
+        this.localAddress = localAddress;
+    }
 
     @Override
     public ChannelFuture open(final SocketAddress remoteAddress, final int connTimeoutMs,
@@ -23,7 +28,7 @@ public class StandardSocketChannelFactory implements SocketChannelFactory {
         b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connTimeoutMs);
         b.option(ChannelOption.SO_RCVBUF, 32 * 1024);// 读缓冲区为32k
         b.group(group).channel(NioSocketChannel.class).handler(handler);
-        return b.connect(remoteAddress);
+        return b.connect(remoteAddress, localAddress);
     }
 
 }

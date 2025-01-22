@@ -55,7 +55,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
     }
 
     public HttpProxyServerHandler(final String username, final String password) {
-        this(username, password, new StandardSocketChannelFactory());
+        this(username, password, new StandardSocketChannelFactory(null));
     }
 
     public HttpProxyServerHandler(final String username, final String password, final SocketChannelFactory factory) {

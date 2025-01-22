@@ -39,7 +39,7 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
     private final SocketChannelFactory factory;
 
     public WebSocketProxyServerHandler(boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch) {
-        this(allowExtensions, maxFrameSize, allowMaskMismatch, new StandardSocketChannelFactory());
+        this(allowExtensions, maxFrameSize, allowMaskMismatch, new StandardSocketChannelFactory(null));
     }
 
     public WebSocketProxyServerHandler(boolean allowExtensions, int maxFrameSize, boolean allowMaskMismatch, final SocketChannelFactory factory) {
