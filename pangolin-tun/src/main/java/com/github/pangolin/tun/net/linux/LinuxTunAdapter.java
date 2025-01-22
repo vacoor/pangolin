@@ -1,8 +1,12 @@
 package com.github.pangolin.tun.net.linux;
 
 
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCSIFFLAGS;
 import static com.github.pangolin.tun.net.linux.jna.If.IFNAMSIZ;
 import static com.sun.jna.platform.linux.Fcntl.O_RDWR;
+import static org.drasyl.channel.tun.jna.shared.LibC.socket;
+import static org.drasyl.channel.tun.jna.shared.Socket.AF_INET;
+import static org.drasyl.channel.tun.jna.shared.Socket.SOCK_DGRAM;
 
 import com.github.pangolin.tun.net.AbstractTunAdapter;
 import com.github.pangolin.tun.net.InterfaceAddressEx;
@@ -11,6 +15,8 @@ import com.github.pangolin.tun.net.linux.jna.LibC2;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 import io.netty.util.NetUtil;
+import org.pcap4j.packet.IpSelector;
+import org.pcap4j.packet.Packet;
 
 import java.io.IOException;
 import java.net.Inet4Address;
@@ -46,7 +52,9 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
         nix.setMTU(mtu);
     }
 
+    @Override
     public byte[] readPacket() throws IOException {
+        System.out.println("READ...");
         final int mtu = nix.getMTU();
         final int capacity = mtu;
 
@@ -56,9 +64,15 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
         final int bytesRead = LibC2.INSTANCE.read(fd, buffer, mtu);
 
         final byte[] bytes = new byte[bytesRead];
-        buffer.flip();
+//        buffer.flip();
         buffer.get(bytes);
+        System.out.println("OVER...");
         return bytes;
+    }
+
+    @Override
+    public void writePacket(byte[] packet) {
+        writePacket(packet, packet.length);
     }
 
     public void writePacket(byte[] packet, int len) {
@@ -66,6 +80,7 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
     }
 
 
+    @Override
     public void close() {
         // close tun device.
         LibC2.INSTANCE.close(fd);
@@ -91,6 +106,21 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
         }
 
         final String ifname = Native.toString(ifr.ifr_name, StandardCharsets.US_ASCII);
+
+        //
+        /*
+        short IFF_UP = 0x1;
+        final int s = socket(AF_INET, SOCK_DGRAM, 0);
+        final Ifreq ifr2 = new Ifreq(nameToUse);
+        ifr2.ifr_ifru.setType("ifru_flags");
+        ifr2.ifr_ifru.ifru_flags = IFF_UP;
+        final int code2 = LibC2.INSTANCE.ioctl(s, SIOCSIFFLAGS, ifr2);
+        if (0 != code2) {
+            throw new IOException("Create tun device: " + code);
+        }
+        */
+
+
         return new LinuxTunAdapter(fd, ifname);
     }
 
@@ -102,23 +132,8 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
     }
 
     public static void main(String[] args) throws Exception {
-        final Enumeration<NetworkInterface> ifs = NetworkInterface.getNetworkInterfaces();
-        while (ifs.hasMoreElements()) {
-            final NetworkInterface ni = ifs.nextElement();
-            System.out.println(ni.getName());
-            LinuxNetworkInterfaceEx nix = new LinuxNetworkInterfaceEx(ni.getName());
-            System.out.println(nix.getMTU());
-            for (InterfaceAddressEx addr : nix.getInterfaceAddresses()) {
-                System.out.println(NetUtil.toAddressString(addr.getAddress()) + "/" + addr.getNetworkPrefixLength());
-            }
-            System.out.println("---------------");
-        }
-
-
         final LinuxTunAdapter adapter = open("tun9");
-        final String ifname = adapter.name;
-        System.out.println(ifname);
-
+        adapter.setMTU(1500);
         System.out.println("MTU -> " + adapter.getMTU());
 
         Inet4Address ipv4 = (Inet4Address) InetAddress.getByName("192.168.3.1");
@@ -137,14 +152,20 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
 
         System.out.println("IPv6 -> OK");
 
-        TimeUnit.SECONDS.sleep(10);
+//        TimeUnit.SECONDS.sleep(10);
 
-        adapter.flushInterfaceAddresses();
+//        adapter.flushInterfaceAddresses();
 
-        System.out.println("Cleanup -> OK");
+//        System.out.println("Cleanup -> OK");
 
-        TimeUnit.SECONDS.sleep(30);
+//        TimeUnit.SECONDS.sleep(30);
 
+
+        while (true) {
+            final byte[] bytes = adapter.readPacket();
+            Packet packet = IpSelector.newPacket(bytes, 0, bytes.length);
+            System.out.println(packet);
+        }
     }
 
 }

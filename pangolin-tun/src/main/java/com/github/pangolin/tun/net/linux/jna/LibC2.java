@@ -26,6 +26,8 @@ public interface LibC2 extends LibC {
 
   int write(final int fd, final byte[] buf, final int nBytes) throws LastErrorException;
 
+  int write(final int fd, final ByteBuffer buf, final int nBytes) throws LastErrorException;
+
 
   int socket(final int domain,
                                   final int type,

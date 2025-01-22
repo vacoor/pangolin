@@ -1,7 +1,10 @@
 package com.github.pangolin.tun.net.darwin;
 
 import static com.github.pangolin.tun.net.darwin.jna.KernControl.CTLIOCGINFO;
+import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_INET;
+import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_INET6;
 import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_SYSTEM;
+import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_UNSPEC;
 import static com.github.pangolin.tun.net.darwin.jna.Socket.SOCK_DGRAM;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 
@@ -10,19 +13,25 @@ import com.github.pangolin.tun.net.InterfaceAddressEx;
 import com.github.pangolin.tun.net.darwin.jna.KernControl.CtlInfo;
 import com.github.pangolin.tun.net.darwin.jna.KernControl.SockaddrCtl;
 import com.github.pangolin.tun.net.linux.jna.LibC2;
+import com.github.pangolin.tun.net.linux.jna.Socket;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
 import com.sun.jna.ptr.IntByReference;
+import org.pcap4j.packet.IpSelector;
+import org.pcap4j.packet.Packet;
 
 import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.SocketException;
+import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
 
 public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceEx> {
+    public static final int ADDRESS_FAMILY_SIZE = 4;
+
     static final int SYSPROTO_CONTROL = 2;
     static final String UTUN_CONTROL_NAME = "com.apple.net.utun_control";
     static final int UTUN_OPT_IFNAME = 2;
@@ -46,11 +55,51 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
         return nix.getMTU();
     }
 
+    @Override
     public void close() {
         LibC2.INSTANCE.close(fd);
     }
 
-    private static DarwinTunAdapter open(String name) throws IOException, InterruptedException {
+    @Override
+    public byte[] readPacket() throws IOException {
+        final int packetSize = getPacketSize();
+        final ByteBuffer buffer = ByteBuffer.allocateDirect(packetSize);
+
+        final int bytesRead = LibC2.INSTANCE.read(fd, buffer, packetSize);
+
+        // skip 4-bytes address family
+        final int addressFamily = buffer.getInt();
+        if (AF_INET != addressFamily && AF_INET6 != addressFamily) {
+            throw new IOException("Unknown address family: " + addressFamily);
+        }
+
+        final byte[] actual = new byte[buffer.remaining()];
+        buffer.get(actual);
+        return actual;
+    }
+
+    @Override
+    public void writePacket(byte[] bytes) throws IOException {
+        final int ipVersion = bytes[0] >> 4;
+        int addressFamily = AF_UNSPEC;
+        if (Socket.AF_INET == ipVersion) {
+            addressFamily = AF_INET;
+        } else if (Socket.AF_INET6 == ipVersion) {
+            addressFamily = AF_INET6;
+        } else {
+            throw new IOException("Unknown address family: " + addressFamily);
+        }
+
+        final ByteBuffer buffer = ByteBuffer.allocateDirect(ADDRESS_FAMILY_SIZE + bytes.length);
+        buffer.putInt(addressFamily).put(bytes);
+        LibC2.INSTANCE.write(fd, buffer, buffer.capacity());
+    }
+
+    private int getPacketSize() throws SocketException {
+        return getMTU() + ADDRESS_FAMILY_SIZE;
+    }
+
+    public static DarwinTunAdapter open(String name) throws IOException, InterruptedException {
         final int index = checkName(name);
 
         // create socket
@@ -102,6 +151,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
     }
 
     public static void main(String[] args) throws Exception {
+
         final DarwinTunAdapter adapter = open("utun9");
         final String ifname = adapter.ifname;
         System.out.println("ifname: " + ifname);
@@ -122,12 +172,18 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
 
         System.out.println("IPv6 -> OK");
 
-        TimeUnit.SECONDS.sleep(10);
+//        TimeUnit.SECONDS.sleep(10);
+//
+//        adapter.flushInterfaceAddresses();
+//
+//        System.out.println("Cleanup -> OK");
+//
+//        TimeUnit.SECONDS.sleep(30);
 
-        adapter.flushInterfaceAddresses();
-
-        System.out.println("Cleanup -> OK");
-
-        TimeUnit.SECONDS.sleep(30);
+        while (true) {
+            final byte[] bytes = adapter.readPacket();
+            Packet packet = IpSelector.newPacket(bytes, 0, bytes.length);
+            System.out.println(packet);
+        }
     }
 }

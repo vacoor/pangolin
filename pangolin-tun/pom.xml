@@ -39,7 +39,7 @@
     <dependency>
       <groupId>org.drasyl</groupId>
       <artifactId>netty-tun</artifactId>
-      <version>1.2.2</version>
+      <version>1.2.4</version>
     </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
@@ -79,7 +79,6 @@
     </dependency>
   </dependencies>
 
-  <!--
   <build>
     <plugins>
       <plugin>
@@ -99,5 +98,4 @@
       </plugin>
     </plugins>
   </build>
-  -->
 </project>

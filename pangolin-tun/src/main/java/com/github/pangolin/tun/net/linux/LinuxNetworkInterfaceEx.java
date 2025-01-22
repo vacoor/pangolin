@@ -69,8 +69,9 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         if (addr instanceof Inet4Address) {
             final int fd = fd4();
             try {
-                flushInterfaceAddresses4(fd, ifname);
-                addInterfaceAddress4(fd, ifname, (Inet4Address) addr, networkPrefixLength);
+                setInterfaceAddress4((Inet4Address) addr, networkPrefixLength);
+                // flushInterfaceAddresses4(fd, ifname);
+                // addInterfaceAddress4(fd, ifname, (Inet4Address) addr, networkPrefixLength);
             } finally {
                 close(fd);
             }

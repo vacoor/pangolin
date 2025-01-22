@@ -17,10 +17,9 @@ public final class KernControl {
     @Structure.FieldOrder({ "ctl_id", "ctl_name" })
     public static class CtlInfo extends Structure {
         public int ctl_id;
-        public byte[] ctl_name;
+        public byte[] ctl_name = new byte[MAX_KCTL_NAME];
 
         public CtlInfo(final String name) {
-            ctl_name = new byte[MAX_KCTL_NAME];
             final byte[] bytes = name.getBytes(US_ASCII);
             System.arraycopy(bytes, 0, ctl_name, 0, bytes.length);
         }

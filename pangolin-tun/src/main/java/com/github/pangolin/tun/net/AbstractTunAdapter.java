@@ -2,7 +2,7 @@ package com.github.pangolin.tun.net;
 
 import java.util.List;
 
-public abstract class AbstractTunAdapter<T extends NetworkInterfaceEx> {
+public abstract class AbstractTunAdapter<T extends NetworkInterfaceEx> implements TunAdapter {
     protected final T nix;
 
     protected AbstractTunAdapter(final T nix) {
