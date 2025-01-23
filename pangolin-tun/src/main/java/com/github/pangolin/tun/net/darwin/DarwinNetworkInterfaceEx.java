@@ -1,45 +1,20 @@
 package com.github.pangolin.tun.net.darwin;
 
 
-import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_INET;
-import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_INET6;
-import static com.github.pangolin.tun.net.darwin.jna.Socket.AF_UNSPEC;
-import static com.github.pangolin.tun.net.darwin.jna.Socket.SOCK_DGRAM;
-import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCAIFADDR;
-import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCAIFADDR_IN6;
-import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCDIFADDR;
-import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCDIFADDR_IN6;
-import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCGIFADDR;
-import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCGIFMTU;
-import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCGIFNETMASK;
-import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCSIFADDR;
-import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCSIFMTU;
-import static com.github.pangolin.tun.net.darwin.jna.Sockio.SIOCSIFNETMASK;
-import static org.drasyl.channel.tun.jna.shared.LibC.close;
-import static org.drasyl.channel.tun.jna.shared.LibC.ioctl;
-import static org.drasyl.channel.tun.jna.shared.LibC.socket;
-
 import com.github.pangolin.tun.net.InterfaceAddressEx;
 import com.github.pangolin.tun.net.NetworkInterfaceEx;
-import com.github.pangolin.tun.net.linux.jna.LibC2;
 import com.github.pangolin.tun.net.darwin.jna.If;
-import com.github.pangolin.tun.net.darwin.jna.If.Ifreq;
-import com.github.pangolin.tun.net.darwin.jna.If.ifaddrs;
-import com.github.pangolin.tun.net.darwin.jna.If.in6_addrlifetime;
-import com.github.pangolin.tun.net.darwin.jna.If.in6_aliasreq;
-import com.github.pangolin.tun.net.darwin.jna.If.in_aliasreq;
-import com.github.pangolin.tun.net.darwin.jna.If.sockaddr;
-import com.github.pangolin.tun.net.darwin.jna.If.sockaddr_in;
-import com.github.pangolin.tun.net.darwin.jna.If.sockaddr_in6;
+import com.github.pangolin.tun.net.darwin.jna.If.*;
 import com.google.common.collect.Lists;
-import java.net.Inet4Address;
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.SocketException;
-import java.net.UnknownHostException;
+
+import java.net.*;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static com.github.pangolin.tun.net.darwin.jna.Socket.*;
+import static com.github.pangolin.tun.net.darwin.jna.Sockio.*;
+import static com.github.pangolin.tun.net.linux.jna.LibC.*;
 
 /**
  *
@@ -196,13 +171,13 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
 
     // ------------------------ START Interface related ------------------------
 
-    private static int getMtu(final int fd, final String ifname) {
+    static int getMtu(final int fd, final String ifname) {
         final Ifreq ifr = new Ifreq(ifname);
         final int code = ioctl(fd, SIOCGIFMTU, ifr);
         return ifr.ifr_ifru.ifru_mtu;
     }
 
-    private static void setMtu(final int fd, final String ifname, final int mtu) {
+    static void setMtu(final int fd, final String ifname, final int mtu) {
         final Ifreq ifr = new Ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_mtu");
         ifr.ifr_ifru.ifru_mtu = mtu;
@@ -213,7 +188,7 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
 
     static List<InterfaceAddressEx> getInterfaceAddresses(final String ifname, final int family) {
         final ifaddrs ifa = new ifaddrs();
-        LibC2.INSTANCE.getifaddrs(ifa);
+        getifaddrs(ifa);
 
         try {
             final List<InterfaceAddressEx> interfaceAddresses = Lists.newArrayList();
@@ -231,7 +206,7 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
 
                 if (AF_INET == sa_family) {
                     final sockaddr_in sockaddr = new sockaddr_in(n.ifa_addr.getPointer());
-                    final sockaddr_in netmask = null != n.ifa_netmask ? new sockaddr_in(n.ifa_netmask.getPointer()): null;
+                    final sockaddr_in netmask = null != n.ifa_netmask ? new sockaddr_in(n.ifa_netmask.getPointer()) : null;
                     final int prefix = null != netmask ? netmaskToPrefixLength(netmask.sin_addr) : 0;
 
                     interfaceAddresses.add(InterfaceAddressEx.of(toInetAddress(sockaddr.sin_addr), prefix));
@@ -245,7 +220,7 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
             }
             return interfaceAddresses;
         } finally {
-            LibC2.INSTANCE.freeifaddrs(ifa);
+            freeifaddrs(ifa);
         }
     }
 
@@ -323,7 +298,7 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
     }
 
     private static void addInterfaceAddress4(final int fd, final String ifname,
-        final Inet4Address address, final int prefixLength) {
+                                             final Inet4Address address, final int prefixLength) {
         final byte[] ipAddress = address.getAddress();
 
         final in_aliasreq ifr = new in_aliasreq(ifname);
@@ -359,7 +334,7 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
 
 
     private static void addInterfaceAddress6(final int fd, final String ifname,
-                                            final Inet6Address address, final int prefixLength) {
+                                             final Inet6Address address, final int prefixLength) {
         final byte[] ipAddress = address.getAddress();
 
         final in6_aliasreq ifr6 = new in6_aliasreq(ifname);

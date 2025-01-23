@@ -1,70 +1,124 @@
 package com.github.pangolin.tun.net.windows;
 
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WINTUN_ADAPTER_HANDLE;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WINTUN_SESSION_HANDLE;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WintunAllocateSendPacket;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WintunCloseAdapter;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WintunCreateAdapter;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WintunEndSession;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WintunGetAdapterLUID;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WintunGetReadWaitEvent;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WintunOpenAdapter;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WintunReceivePacket;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WintunReleaseReceivePacket;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WintunSendPacket;
-import static com.github.pangolin.tun.net.windows.jna.WintunLib.WintunStartSession;
-import static com.sun.jna.platform.win32.Guid.GUID;
-
 import com.github.pangolin.tun.net.AbstractTunAdapter;
-import com.github.pangolin.tun.net.InterfaceAddressEx;
 import com.sun.jna.LastErrorException;
-import com.sun.jna.NativeLong;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Kernel32;
 import com.sun.jna.platform.win32.WinDef;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
-import io.netty.buffer.UnpooledByteBufAllocator;
-import io.netty.channel.PreferHeapByteBufAllocator;
-import org.pcap4j.packet.IllegalRawDataException;
-import org.pcap4j.packet.IpSelector;
-import org.pcap4j.packet.Packet;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.InetAddress;
-import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.concurrent.locks.LockSupport;
+
+import static com.github.pangolin.tun.net.windows.jna.WintunLib.*;
+import static com.sun.jna.platform.win32.Guid.GUID;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
 
 /**
  * Windows tun adapter based on <a href="https://www.wintun.net/">wintun</a>.
  */
+@Slf4j
 public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfaceEx> {
     private static final int INFINITE = 0xFFFFFFFF;
     private static final int ERROR_NO_MORE_ITEMS = 259;
 
+    private final long luid;
+    private final String ifname;
+    private final int mtu;
     private final WINTUN_ADAPTER_HANDLE adapter;
     private final WINTUN_SESSION_HANDLE session;
 
-    public WindowsTunAdapter(final WINTUN_ADAPTER_HANDLE adapter, final WINTUN_SESSION_HANDLE session) {
-        super(new WindowsNetworkInterfaceEx(getLuid(adapter)));
+    private WindowsTunAdapter(final long luid,
+                              final String ifname, final int mtu,
+                              final WINTUN_ADAPTER_HANDLE adapter,
+                              final WINTUN_SESSION_HANDLE session) {
+        super(new WindowsNetworkInterfaceEx(luid));
+        this.luid = luid;
+        this.ifname = ifname;
+        this.mtu = mtu;
         this.adapter = adapter;
         this.session = session;
     }
 
-
-    public int getMTU() throws SocketException {
-        return nix.getMTU();
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public String name() {
+        return ifname;
     }
 
-    public void setMTU(final int mtu) {
-        throw new UnsupportedOperationException();
+    public long luid() {
+        return luid;
     }
 
+    public int getMTU() {
+        return mtu;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected ByteBuffer read0() {
+        do {
+            try {
+                // read from wintun
+                final IntByReference packetSizeRef = new IntByReference();
+                final Pointer packetPointer = WintunReceivePacket(session, packetSizeRef);
+                try {
+                    final int ipVersion = packetPointer.getByte(0) >> 4;
+                    log.trace("IPv{} packet read.", ipVersion);
+
+                    final int size = packetSizeRef.getValue();
+                    return packetPointer.getByteBuffer(0, size);
+                } finally {
+                    WintunReleaseReceivePacket(session, packetPointer);
+                }
+            } catch (final LastErrorException e) {
+                if (e.getErrorCode() == ERROR_NO_MORE_ITEMS) {
+                    Kernel32.INSTANCE.WaitForSingleObject(WintunGetReadWaitEvent(session), INFINITE);
+                } else {
+                    throw e;
+                }
+            }
+        } while (true);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void write0(final ByteBuffer packet) {
+        final WinDef.DWORD size = new WinDef.DWORD(packet.remaining());
+        final Pointer packetPointer = WintunAllocateSendPacket(session, size);
+
+        // packetPointer.write(0, packet, offset, len);
+        for (int offset = 0; packet.hasRemaining(); offset++) {
+            packetPointer.setByte(offset, packet.get());
+        }
+
+        WintunSendPacket(session, packetPointer);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void destroy0() {
+        if (null != session) {
+            WintunEndSession(session);
+        }
+        if (null != adapter) {
+            WintunCloseAdapter(adapter);
+        }
+    }
 
     public List<InetAddress> getInterfaceDns(final boolean manualSetOnly) {
         return nix.getInterfaceDns(manualSetOnly);
@@ -78,107 +132,52 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
         nix.flushInterfaceDns();
     }
 
-    @Override
-    public byte[] readPacket() throws IOException {
-//        if (closed) {
-//            throw new IOException("Device is closed.");
-//        }
+    /* ********************** */
 
-        while (true) {
-            try {
-                // read bytes
-//                 final Pointer packetSizePointer = new Memory(Native.POINTER_SIZE);
-                final IntByReference packetSizePointer = new IntByReference();
-                final Pointer packetPointer = WintunReceivePacket(session, packetSizePointer);
-
-                // extract ip version
-                final int ipVersion = packetPointer.getByte(0) >> 4;
-
-                // shrink bytebuf to actual required size
-                final int PacketSize = packetSizePointer.getValue();
-                final byte[] packet = packetPointer.getByteArray(0, PacketSize);
-//                final ByteBuf byteBuf = alloc.buffer(PacketSize);
-//                byteBuf.writeBytes(packetPointer.getByteArray(0, PacketSize));
-                WintunReleaseReceivePacket(session, packetPointer);
-
-                /*
-                if (ipVersion == 4) {
-                    return new Tun4Packet(byteBuf);
-                } else {
-                    return new Tun6Packet(byteBuf);
-                }
-                */
-                return packet;
-            } catch (final LastErrorException e) {
-                if (e.getErrorCode() == ERROR_NO_MORE_ITEMS) {
-                    Kernel32.INSTANCE.WaitForSingleObject(WintunGetReadWaitEvent(session), INFINITE);
-                } else {
-                    throw e;
-                }
-            }
-        }
+    public static WindowsTunAdapter open(final String name, final String type, final int mtu) throws IOException {
+        return open(name, type, GUID.newGuid(), mtu);
     }
 
-    @Override
-    public void writePacket(final byte[] packet) throws IOException {
-        writePacket(packet, 0, packet.length);
-    }
-    //    @Override
-    public void writePacket(final byte[] packet, int offset, int len) throws IOException {
-//        if (closed) {
-//            throw new IOException("Device is closed.");
-//        }
-
-        final WinDef.DWORD packetSize = new WinDef.DWORD(len);
-        final Pointer packetPointer = WintunAllocateSendPacket(session, packetSize);
-        packetPointer.write(0, packet, offset, len);
-
-        WintunSendPacket(session, packetPointer);
-    }
-
-    @Override
-    public void close() throws IOException {
-        if (null != session) {
-            WintunEndSession(session);
-        }
-        if (null != adapter) {
-            WintunCloseAdapter(adapter);
-        }
-    }
-
-    public static WindowsTunAdapter open(String name, final String type) throws IOException {
-        return open(name, type, GUID.newGuid());
-    }
-
-    public static WindowsTunAdapter open(String name, final String type, final String guid) throws IOException {
-        return open(name, type, GUID.fromString(guid));
+    public static WindowsTunAdapter open(final String name, final String type,
+                                         final String guid, final int mtu) throws IOException {
+        return open(name, type, GUID.fromString(guid), mtu);
     }
 
     /**
-     * @param tunName the name of the tun adapter
-     * @param tunType the type of the tun adapter, null for open existing one, required when creating new adapter.
-     * @param guid    the GUID of the tun adapter
+     * @param name the name of the tun adapter
+     * @param type the type of the tun adapter, null for open existing one, required when creating new adapter.
+     * @param guid the GUID of the tun adapter
+     * @param mtu  the maximum transmission unit
      * @return the tun adapter
      * @throws IOException
      */
-    public static WindowsTunAdapter open(String tunName, final String tunType, final GUID guid) throws IOException {
-        if (tunName == null) {
-            tunName = "tun";
-        }
-
+    public static WindowsTunAdapter open(final String name,
+                                         final String type,
+                                         final GUID guid, final int mtu) throws IOException {
         WINTUN_ADAPTER_HANDLE adapter = null;
         WINTUN_SESSION_HANDLE session = null;
         try {
             if (null == guid) {
-                adapter = WintunOpenAdapter(new WString(tunName));
+                adapter = WintunOpenAdapter(new WString(name));
                 if (null == adapter) {
-                    throw new IOException("Failed to open tun device " + tunName);
+                    throw new IOException("Failed to open tun device " + name);
                 }
             } else {
-                adapter = WintunCreateAdapter(new WString(tunName), new WString(tunType), guid);
+                adapter = WintunCreateAdapter(new WString(name), new WString(type), guid);
             }
             session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));
-            return new WindowsTunAdapter(adapter, session);
+
+            final long luid = getLuid(adapter);
+
+            int mtuToUse = mtu;
+            if (0 < mtuToUse) {
+                WindowsNetworkInterfaceEx.setMTU(luid, AF_INET, mtuToUse);
+                WindowsNetworkInterfaceEx.setMTU(luid, AF_INET6, mtuToUse);
+            } else {
+                mtuToUse = WindowsNetworkInterfaceEx.getMTU(luid, AF_INET);
+            }
+
+            return new WindowsTunAdapter(luid, name, mtuToUse, adapter, session);
         } catch (final LastErrorException e) {
             if (null != session) {
                 WintunEndSession(session);
@@ -196,47 +195,4 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
         return luidRef.getValue();
     }
 
-    public static void main(String[] args) throws IOException, IllegalRawDataException {
-        /*
-        final int ADDRESS_FAMILY_SIZE = 4;
-        NativeLong readBytes = new NativeLong(1500 + ADDRESS_FAMILY_SIZE);
-        ByteBufAllocator alloc = new PreferHeapByteBufAllocator(new UnpooledByteBufAllocator(true));
-        final ByteBuf maxByteBuf = alloc.buffer(readBytes.intValue()).writerIndex(readBytes.intValue());
-        final ByteBuffer byteBuffer = maxByteBuf.nioBuffer();
-        // final int bytesRead = read(fd, byteBuffer, readBytes);
-        byteBuffer.put(new byte[]{1, 2, 3, 4, 5});
-        final int bytesRead = 5;
-
-        // extract address family
-        final int addressFamily = maxByteBuf.getInt(0);
-
-        // shrink bytebuf to actual required size
-        final ByteBuf actualByteBuf = maxByteBuf
-                .setIndex(ADDRESS_FAMILY_SIZE, bytesRead)
-                .capacity(bytesRead)
-                .slice();
-                */
-
-        final GUID guid = GUID.newGuid();
-        // final GUID guid = GUID.fromString("{E3E33B4A-2E25-4168-A732-52BBDFD9EE57}");
-        final String guidStr = guid.toGuidString();
-
-        final WindowsTunAdapter adapter = WindowsTunAdapter.open("wintun", "wintun", guid);
-        adapter.addInterfaceAddress(InterfaceAddressEx.of("172.16.0.1", 24));
-        adapter.setInterfaceDns(new InetAddress[]{InetAddress.getByName("127.0.0.1")});
-
-        System.out.println(guidStr);
-        System.out.println(adapter.adapter);
-
-        while (true) {
-            final byte[] bytes = adapter.readPacket();
-            Packet packet = IpSelector.newPacket(bytes, 0, bytes.length);
-            System.out.println(packet);
-        }
-
-//        Pointer pointer = Pointer.createConstant(adapter.getLuid());
-//        LongByReference r = new LongByReference(adapter.getLuid());
-//        adapter.setIpAddress(InetAddress.getByName("192.168.1.1"), (byte) 24);
-//        WintunSession session = adapter.newSession();
-    }
 }

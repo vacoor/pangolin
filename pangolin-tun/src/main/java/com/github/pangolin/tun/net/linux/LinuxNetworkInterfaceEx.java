@@ -7,7 +7,6 @@ import com.github.pangolin.tun.net.linux.jna.If.Ifreq;
 import com.github.pangolin.tun.net.linux.jna.If.in6_ifreq;
 import com.github.pangolin.tun.net.linux.jna.If.sockaddr_in;
 import com.github.pangolin.tun.net.linux.jna.If.sockaddr_in6;
-import com.github.pangolin.tun.net.linux.jna.LibC2;
 import com.github.pangolin.tun.net.linux.jna.Sockios;
 import com.google.common.collect.Lists;
 
@@ -19,9 +18,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static com.github.pangolin.tun.net.linux.jna.LibC.*;
 import static com.github.pangolin.tun.net.linux.jna.Socket.*;
 import static com.github.pangolin.tun.net.linux.jna.Sockios.*;
-import static org.drasyl.channel.tun.jna.shared.LibC.*;
 
 /**
  *
@@ -192,13 +191,13 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
 
     // ------------------------ START Interface related ------------------------
 
-    private static int getMtu(final int fd, final String ifname) {
+    static int getMtu(final int fd, final String ifname) {
         final Ifreq ifr = new Ifreq(ifname);
         final int code = ioctl(fd, SIOCGIFMTU, ifr);
         return ifr.ifr_ifru.ifru_mtu;
     }
 
-    private static void setMtu(final int fd, final String ifname, final int mtu) {
+    static void setMtu(final int fd, final String ifname, final int mtu) {
         final Ifreq ifr = new Ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_mtu");
         ifr.ifr_ifru.ifru_mtu = mtu;
@@ -209,7 +208,7 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
 
     static List<InterfaceAddressEx> getInterfaceAddresses(final String ifname, final int family) {
         final If.ifaddrs ifa = new If.ifaddrs();
-        LibC2.INSTANCE.getifaddrs(ifa);
+        getifaddrs(ifa);
 
         try {
             final List<InterfaceAddressEx> interfaceAddresses = Lists.newArrayList();
@@ -242,7 +241,7 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
             }
             return interfaceAddresses;
         } finally {
-            LibC2.INSTANCE.freeifaddrs(ifa);
+            freeifaddrs(ifa);
         }
     }
 

@@ -22,6 +22,7 @@ import java.util.Enumeration;
 import java.util.LinkedList;
 import java.util.List;
 
+import static com.github.pangolin.tun.net.windows.jna.DnsLib.DnsFlushResolverCache;
 import static com.github.pangolin.tun.net.windows.jna.IpHelpLib.*;
 import static com.sun.jna.platform.win32.Guid.GUID;
 import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
@@ -183,7 +184,7 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
     }
 
     public static void flushDnsCache() {
-        DnsLib.INSTANCE.DnsFlushResolverCache();
+        DnsFlushResolverCache();
     }
 
 
@@ -265,7 +266,7 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
     // ------------------------ START Interface related ------------------------
 
 
-    private static int getMTU(final long interfaceLuid, final int family) {
+    static int getMTU(final long interfaceLuid, final int family) {
         return getInterfaceRow(interfaceLuid, family).NlMtu;
     }
 
@@ -283,7 +284,7 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         return row;
     }
 
-    private static void setMTU(final long interfaceLuid, final int family, final int mtu) {
+    static void setMTU(final long interfaceLuid, final int family, final int mtu) {
         final MIB_IPINTERFACE_ROW row = new MIB_IPINTERFACE_ROW();
         INSTANCE.InitializeIpInterfaceEntry(row);
         row.Family = family;

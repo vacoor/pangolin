@@ -8,6 +8,16 @@ import com.sun.jna.NativeLong;
 public interface Sockios {
 
   /**
+   * get flags.
+   */
+  NativeLong SIOCGIFFLAGS = new NativeLong(0x8913);
+
+  /**
+   * set flags.
+   */
+  NativeLong SIOCSIFFLAGS = new NativeLong(0x8914);
+
+  /**
    * get PA address.
    */
   NativeLong SIOCGIFADDR = new NativeLong(0x8915);

@@ -1,17 +1,84 @@
 package com.github.pangolin.tun.net.linux.jna;
 
-import static java.nio.charset.StandardCharsets.US_ASCII;
-
 import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
 import com.sun.jna.Union;
+
+import static java.nio.charset.StandardCharsets.US_ASCII;
 
 
 /**
  * JNA mapping for <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/if.h">if.h</a>.
  */
 public interface If {
+
     int IFNAMSIZ = 16;
+
+    /**
+     * interface is up. Can be toggled through sysfs.
+     */
+    int IFF_UP = 1 << 0;
+    /**
+     * broadcast address valid.
+     */
+    int IFF_BROADCAST = 1 << 1;
+    /**
+     * turn on debugging. Can be toggled through sysfs.
+     */
+    int IFF_DEBUG = 1 << 2;
+    /**
+     * is a loopback net.
+     */
+    int IFF_LOOPBACK = 1 << 3;
+    /**
+     * interface is has p-p link.
+     */
+    int IFF_POINTOPOINT = 1 << 4;
+    /**
+     * avoid use of trailers. Can be toggled through sysfs.
+     */
+    int IFF_NOTRAILERS = 1 << 5;
+    /**
+     * interface RFC2863 OPER_UP.
+     */
+    int IFF_RUNNING = 1 << 6;
+    /**
+     * no ARP protocol. Can be toggled through sysfs.
+     */
+    int IFF_NOARP = 1 << 7;
+    /**
+     * receive all packets. Can be toggled through sysfs.
+     */
+    int IFF_PROMISC = 1 << 8;
+    /**
+     * receive all multicast packets. Can be toggled through sysfs.
+     */
+    int IFF_ALLMULTI = 1 << 9;
+    /**
+     * master of a load balancer.
+     */
+    int IFF_MASTER = 1 << 10;
+    /**
+     * slave of a load balancer.
+     */
+    int IFF_SLAVE = 1 << 11;
+    /**
+     * Supports multicast. Can be toggled through sysfs.
+     */
+    int IFF_MULTICAST = 1 << 12;
+    /**
+     * can set media type. Can be toggled through sysfs.
+     */
+    int IFF_PORTSEL = 1 << 13;
+    /**
+     * auto media select active. Can be toggled through sysfs.
+     */
+    int IFF_AUTOMEDIA = 1 << 14;
+    /**
+     * dialup device with changing addresses. Can be toggled through sysfs.
+     */
+    int IFF_DYNAMIC = 1 << 15;
+
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/in.h">in.h</a>
@@ -36,7 +103,7 @@ public interface If {
      * https://github.com/torvalds/linux/blob/master/include/uapi/linux/in6.h
      */
 
-    @Structure.FieldOrder({ "ifr_name", "ifr_ifru" })
+    @Structure.FieldOrder({"ifr_name", "ifr_ifru"})
     class Ifreq extends Structure {
         public byte[] ifr_name = new byte[IFNAMSIZ];
         public IfrIfru ifr_ifru;
@@ -80,9 +147,9 @@ public interface If {
             public sockaddr_in ifru_broadaddr;
             public sockaddr_in ifru_netmask;
             public sockaddr_in ifru_hwaddr;
-            public short	ifru_flags;
+            public short ifru_flags;
             public int ifru_ifindex;
-            public int	ifru_mtu;
+            public int ifru_mtu;
 
             public byte[] ifru_slave = new byte[IFNAMSIZ];
             public byte[] ifru_newname = new byte[IFNAMSIZ];
@@ -93,7 +160,7 @@ public interface If {
     /**
      * https://github.com/torvalds/linux/blob/b31c4492884252a8360f312a0ac2049349ddf603/include/uapi/linux/ipv6.h#L36
      */
-    @Structure.FieldOrder({ "ifr6_addr", "ifr6_prefixlen", "ifr6_ifindex" })
+    @Structure.FieldOrder({"ifr6_addr", "ifr6_prefixlen", "ifr6_ifindex"})
     class in6_ifreq extends Structure {
         public byte[] ifr6_addr = new byte[16];
         public int ifr6_prefixlen;
@@ -102,7 +169,9 @@ public interface If {
 
     @Structure.FieldOrder({"ifa_next", "ifa_name", "ifa_flags", "ifa_addr", "ifa_netmask", "ifa_ifu", "ifa_data"})
     class ifaddrs extends Structure {
-        public static class ByRef extends ifaddrs implements ByReference {}
+        public static class ByRef extends ifaddrs implements ByReference {
+        }
+
         public ByRef ifa_next = null;
         public String ifa_name;
         public int ifa_flags;
@@ -111,7 +180,8 @@ public interface If {
         public IfaIfu ifa_ifu;
         public Pointer ifa_data;
 
-        public ifaddrs() {}
+        public ifaddrs() {
+        }
 
         /*
         public ifaddrs(final String name) {
@@ -123,7 +193,7 @@ public interface If {
         }
         */
 
-      public static class IfaIfu extends Union {
+        public static class IfaIfu extends Union {
             public sockaddr ifu_broadaddr;
             public sockaddr ifu_dstaddr;
         }
@@ -139,7 +209,8 @@ public interface If {
     }
 
     class sockaddr extends Union {
-      public static class ByRef extends sockaddr implements ByReference {}
+        public static class ByRef extends sockaddr implements ByReference {
+        }
 
         public short sa_family;
         public sockaddr_in ipv4;

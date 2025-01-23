@@ -1,13 +1,16 @@
 package com.github.pangolin.tun.net;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 public interface TunAdapter {
 
-    byte[] readPacket() throws IOException;
+    String name();
 
-    void writePacket(byte[] bytes) throws IOException;
+    ByteBuffer read() throws IOException;
 
-    void close() throws IOException;
+    void write(final ByteBuffer packet) throws IOException;
+
+    void destroy() throws IOException;
 
 }

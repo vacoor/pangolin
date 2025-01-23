@@ -1,8 +1,8 @@
-package com.github.pangolin.routing.extra.fakedns;
+package com.github.pangolin.routing.server.fakedns;
 
-import com.github.pangolin.routing.extra.fakedns.beta.SimpleInet4FakeDns;
-import com.github.pangolin.routing.extra.fakedns.handler.DatagramDnsProxyServerHandler;
-import com.github.pangolin.routing.extra.fakedns.handler.DatagramFakeDnsServerHandler;
+import com.github.pangolin.routing.server.fakedns.beta.SimpleInet4FakeDns;
+import com.github.pangolin.routing.server.fakedns.handler.DatagramDnsProxyServerHandler;
+import com.github.pangolin.routing.server.fakedns.handler.DatagramFakeDnsServerHandler;
 import com.github.pangolin.tun.net.windows.WindowsNetworkInterfaceEx;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;

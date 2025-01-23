@@ -1,15 +1,11 @@
-package com.github.pangolin.tun.beta;
+package com.github.pangolin.tun.beta.handler;
 
-import com.google.common.collect.Maps;
 import io.netty.channel.SimpleChannelInboundHandler;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 
-import java.util.Map;
-
 public abstract class IpPacketHandler extends SimpleChannelInboundHandler<IpPacket> {
     private final IpNumber inboundProtocol;
-    private final Map<String, TcpSession> sessionMap = Maps.newConcurrentMap();
 
     public IpPacketHandler(final IpNumber inboundProtocol) {
         this.inboundProtocol = inboundProtocol;

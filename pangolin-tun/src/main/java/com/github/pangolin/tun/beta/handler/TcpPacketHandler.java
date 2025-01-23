@@ -1,5 +1,6 @@
-package com.github.pangolin.tun.beta;
+package com.github.pangolin.tun.beta.handler;
 
+import com.github.pangolin.tun.beta.TcpSession;
 import com.google.common.collect.Maps;
 import io.netty.channel.ChannelHandlerContext;
 import org.pcap4j.packet.IpPacket;

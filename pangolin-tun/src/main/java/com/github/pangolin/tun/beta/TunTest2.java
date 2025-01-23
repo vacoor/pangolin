@@ -2,6 +2,8 @@ package com.github.pangolin.tun.beta;
 
 import com.github.pangolin.tun.beta.channel.TunAddress;
 import com.github.pangolin.tun.beta.channel.TunChannel;
+import com.github.pangolin.tun.beta.handler.IpPacketCodec;
+import com.github.pangolin.tun.beta.handler.TcpPacketHandler;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
@@ -16,21 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 public class TunTest2 {
 
     public static void main(String[] args) throws Exception {
-        /*
-      Runtime.getRuntime().addShutdownHook(new Thread() {
-          @Override
-          public void run() {
-            System.out.println("Bye");
-          }
-      });
-        TimeUnit.SECONDS.sleep(1000);
-        System.exit(0);
-        */
-
-//        final Field innerString = WString.class.getDeclaredField("string");
-//        innerString.setAccessible(true);
-//        innerString.set(WindowsTunDevice.TUNNEL_TYPE, "PAN");
-
+        final String ifname = args.length > 0 ? args[0] : "utun8";
         EventLoopGroup group = new DefaultEventLoopGroup(1);
         try {
             final Bootstrap b = new Bootstrap()
@@ -43,7 +31,7 @@ public class TunTest2 {
                             ch.pipeline().addLast(new TcpPacketHandler());
                         }
                     });
-            final Channel ch = b.bind(new TunAddress("utun9")).sync().channel();
+            final Channel ch = b.bind(new TunAddress(ifname)).sync().channel();
             // int code = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "address", "name=\"utun99\"", "source=static", "address=192.168.1.1", "mask=255.255.255.0").start().waitFor();
             // send/receive messages of type TunPacket...
 //            WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias("iTCP");

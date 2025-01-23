@@ -5,9 +5,6 @@ import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Guid.GUID;
 import com.sun.jna.platform.win32.WinDef;
-import static com.sun.jna.platform.win32.WinDef.*;
-import static com.sun.jna.platform.win32.WinNT.*;
-
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
 import io.netty.util.internal.SystemPropertyUtil;
@@ -15,6 +12,8 @@ import org.drasyl.channel.tun.jna.windows.loader.LibraryLoader;
 
 import java.io.IOException;
 
+import static com.sun.jna.platform.win32.WinDef.DWORD;
+import static com.sun.jna.platform.win32.WinNT.HANDLE;
 import static org.drasyl.channel.tun.jna.windows.loader.LibraryLoader.PREFER_SYSTEM;
 
 /**
@@ -22,7 +21,6 @@ import static org.drasyl.channel.tun.jna.windows.loader.LibraryLoader.PREFER_SYS
  */
 @SuppressWarnings({"java:S100", "java:S117"})
 public final class WintunLib {
-    private static final String DEFAULT_MODE = SystemPropertyUtil.get("tun.native.mode", PREFER_SYSTEM);
 
     /**
      * Minimum ring capacity: 128kiB.
@@ -40,8 +38,10 @@ public final class WintunLib {
     public static final int WINTUN_MAX_IP_PACKET_SIZE = 0xFFFF;
 
     static {
+        // FIXME
         try {
-            new LibraryLoader(WintunLib.class).loadLibrary(DEFAULT_MODE, "wintun");
+            final String mode = SystemPropertyUtil.get("tun.native.mode", PREFER_SYSTEM);
+            new LibraryLoader(WintunLib.class).loadLibrary(mode, "wintun");
         } catch (final IOException e) {
             throw new RuntimeException(e); // NOSONAR
         }
@@ -67,6 +67,7 @@ public final class WintunLib {
      * @return If the function succeeds, the return value is the adapter handle. Must be released
      * with WintunCloseAdapter. If the function fails, the return value is NULL. To get extended
      * error information, call GetLastError.
+     * @throws LastErrorException a non-zero error code returned in either
      * @see <a href="https://git.zx2c4.com/wintun/about/#wintuncreateadapter">WintunCreateAdapter()</a>
      */
     public static native WINTUN_ADAPTER_HANDLE WintunCreateAdapter(final WString Name,
@@ -79,31 +80,34 @@ public final class WintunLib {
      * @param Name The requested name of the adapter. Zero-terminated string of up to MAX_ADAPTER_NAME-1 characters.
      * @return If the function succeeds, the return value is adapter handle. Must be released with WintunCloseAdapter.
      * If the function fails, the return value is NULL. To get extended error information, call GetLastError.
+     * @throws LastErrorException a non-zero error code returned in either
      */
-    public static native WINTUN_ADAPTER_HANDLE WintunOpenAdapter(final WString Name);
+    public static native WINTUN_ADAPTER_HANDLE WintunOpenAdapter(final WString Name) throws LastErrorException;
 
     /**
      * Releases Wintun adapter resources and, if adapter was created with WintunCreateAdapter,
      * removes adapter.
      *
      * @param Adapter Adapter handle obtained with WintunCreateAdapter or WintunOpenAdapter.
-     * @throws LastErrorException
+     * @throws LastErrorException a non-zero error code returned in either
      */
     public static native void WintunCloseAdapter(final WINTUN_ADAPTER_HANDLE Adapter) throws LastErrorException;
 
     /**
      * Deletes the Wintun driver if there are no more adapters in use.
      *
-     * @return If the function succeeds, the return value is nonzero. If the function fails, the return value is zero. To get extended error information, call GetLastError.
+     * @return If the function succeeds, the return value is nonzero. If the function fails, the return value is zero.
+     * To get extended error information, call GetLastError.
+     * @throws LastErrorException a non-zero error code returned in either
      */
-    public static native boolean WintunDeleteDriver();
+    public static native boolean WintunDeleteDriver() throws LastErrorException;
 
     /**
      * Returns the LUID of the adapter.
      *
      * @param Adapter Adapter handle obtained with WintunOpenAdapter or WintunCreateAdapter.
      * @param Luid    Pointer to LUID to receive adapter LUID.
-     * @throws LastErrorException
+     * @throws LastErrorException a non-zero error code returned in either
      */
     public static native void WintunGetAdapterLUID(final WINTUN_ADAPTER_HANDLE Adapter,
                                                    final LongByReference Luid) throws LastErrorException;
@@ -114,7 +118,7 @@ public final class WintunLib {
      * @return If the function succeeds, the return value is the version number. If the function
      * fails, the return value is zero. To get extended error information, call GetLastError.
      * Possible errors include the following: ERROR_FILE_NOT_FOUND Wintun not loaded
-     * @throws LastErrorException
+     * @throws LastErrorException a non-zero error code returned in either
      */
     public static native DWORD WintunGetRunningDriverVersion() throws LastErrorException;
 
@@ -126,7 +130,7 @@ public final class WintunLib {
      *                 WINTUN_MAX_RING_CAPACITY (incl.) Must be a power of two.
      * @return Wintun session handle. Must be released with WintunEndSession. If the function fails,
      * the return value is NULL. To get extended error information, call GetLastError.
-     * @throws LastErrorException
+     * @throws LastErrorException a non-zero error code returned in either
      */
     public static native WINTUN_SESSION_HANDLE WintunStartSession(final WINTUN_ADAPTER_HANDLE Adapter,
                                                                   final WinDef.DWORD Capacity) throws LastErrorException;
@@ -135,7 +139,7 @@ public final class WintunLib {
      * Ends Wintun session.
      *
      * @param Session Wintun session handle obtained with WintunStartSession.
-     * @throws LastErrorException
+     * @throws LastErrorException a non-zero error code returned in either
      */
     public static native void WintunEndSession(final WINTUN_SESSION_HANDLE Session) throws LastErrorException;
 
@@ -147,9 +151,9 @@ public final class WintunLib {
      * WintunReceivePackets return ERROR_NO_MORE_ITEMS (after spinning on it for a while under heavy
      * load), wait for this event to become signaled before retrying WintunReceivePackets. Do not
      * call CloseHandle on this event - it is managed by the session.
-     * @throws LastErrorException
+     * @throws LastErrorException a non-zero error code returned in either
      */
-    public static native HANDLE WintunGetReadWaitEvent(WINTUN_SESSION_HANDLE Session) throws LastErrorException;
+    public static native HANDLE WintunGetReadWaitEvent(final WINTUN_SESSION_HANDLE Session) throws LastErrorException;
 
     /**
      * Retrieves one or packet. After the packet content is consumed, call
@@ -163,7 +167,7 @@ public final class WintunLib {
      * GetLastError. Possible errors include the following: ERROR_HANDLE_EOF Wintun adapter is
      * terminating; ERROR_NO_MORE_ITEMS Wintun buffer is exhausted; ERROR_INVALID_DATA Wintun buffer
      * is corrupt.
-     * @throws LastErrorException
+     * @throws LastErrorException a non-zero error code returned in either
      */
     public static native Pointer WintunReceivePacket(final WINTUN_SESSION_HANDLE Session,
                                                      final IntByReference PacketSize) throws LastErrorException;
@@ -174,7 +178,7 @@ public final class WintunLib {
      *
      * @param Session Wintun session handle obtained with WintunStartSession.
      * @param Packet  Packet obtained with WintunReceivePacket.
-     * @throws LastErrorException
+     * @throws LastErrorException a non-zero error code returned in either
      */
     public static native void WintunReleaseReceivePacket(final WINTUN_SESSION_HANDLE Session,
                                                          final Pointer Packet) throws LastErrorException;
@@ -186,8 +190,8 @@ public final class WintunLib {
      *
      * @param Session    Wintun session handle obtained with WintunStartSession.
      * @param PacketSize Exact packet size. Must be less or equal to WINTUN_MAX_IP_PACKET_SIZE.
-     * @return
-     * @throws LastErrorException
+     * @return ..
+     * @throws LastErrorException a non-zero error code returned in either
      */
     public static native Pointer WintunAllocateSendPacket(final WINTUN_SESSION_HANDLE Session,
                                                           final DWORD PacketSize) throws LastErrorException;
@@ -199,9 +203,9 @@ public final class WintunLib {
      *
      * @param Session Wintun session handle obtained with WintunStartSession.
      * @param Packet  Packet obtained with WintunAllocateSendPacket.
-     * @throws LastErrorException
+     * @throws LastErrorException a non-zero error code returned in either
      */
-    public static native void WintunSendPacket(WINTUN_SESSION_HANDLE Session,
+    public static native void WintunSendPacket(final WINTUN_SESSION_HANDLE Session,
                                                final Pointer Packet) throws LastErrorException;
 
     /**

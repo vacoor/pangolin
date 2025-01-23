@@ -7,22 +7,14 @@ import com.github.pangolin.tun.net.darwin.DarwinTunAdapter;
 import com.github.pangolin.tun.net.linux.LinuxTunAdapter;
 import com.github.pangolin.tun.net.windows.WindowsTunAdapter;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.AbstractChannel;
-import io.netty.channel.ChannelConfig;
-import io.netty.channel.ChannelMetadata;
-import io.netty.channel.ChannelOutboundBuffer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ChannelPromise;
-import io.netty.channel.DefaultEventLoop;
-import io.netty.channel.EventLoop;
-import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.*;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
 
 import java.io.IOException;
 import java.net.SocketAddress;
+import java.nio.ByteBuffer;
 import java.nio.channels.AlreadyConnectedException;
 import java.util.ArrayList;
 import java.util.List;
@@ -69,8 +61,7 @@ public class TunChannel extends AbstractChannel {
             // FIXME
             // return device.localAddress();
             return null;
-        }
-        else {
+        } else {
             return null;
         }
     }
@@ -82,14 +73,14 @@ public class TunChannel extends AbstractChannel {
 
     @Override
     protected void doBind(final SocketAddress localAddress) throws Exception {
+        final int mtu = config.getMtu();
+        final String ifname = ((TunAddress) localAddress).ifName();
         if (PlatformDependent.isOsx()) {
-            device = DarwinTunAdapter.open(((TunAddress) localAddress).ifName());
-        }
-        else if (PlatformDependent.isWindows()) {
-            device = WindowsTunAdapter.open(((TunAddress) localAddress).ifName(), "X");
-        }
-        else {
-            device = LinuxTunAdapter.open(((TunAddress) localAddress).ifName());
+            device = DarwinTunAdapter.open(ifname, mtu);
+        } else if (PlatformDependent.isWindows()) {
+            device = WindowsTunAdapter.open(ifname, "P", mtu);
+        } else {
+            device = LinuxTunAdapter.open(ifname, mtu);
         }
         ((AbstractTunAdapter) device).setInterfaceAddress(InterfaceAddressEx.of("192.168.3.1", 24));
     }
@@ -104,7 +95,7 @@ public class TunChannel extends AbstractChannel {
         if (!closed) {
             closed = true;
             if (device != null) {
-                device.close();
+                device.destroy();
             }
         }
     }
@@ -114,9 +105,8 @@ public class TunChannel extends AbstractChannel {
      */
     @SuppressWarnings("java:S112")
     protected int doReadMessages(List<Object> msgs) throws Exception {
-        byte[] bytes = device.readPacket();
-        ByteBuf byteBuf = Unpooled.wrappedBuffer(bytes);
-        msgs.add(byteBuf);
+        final ByteBuffer packet = device.read();
+        msgs.add(Unpooled.wrappedBuffer(packet));
         return 1;
     }
 
@@ -129,10 +119,8 @@ public class TunChannel extends AbstractChannel {
             }
 
             try {
-                byte[] bytes = ByteBufUtil.getBytes((ByteBuf) msg);
-                device.writePacket(bytes);
-            }
-            finally {
+                device.write(((ByteBuf) msg).nioBuffer());
+            } finally {
                 in.remove();
             }
         }
@@ -148,7 +136,7 @@ public class TunChannel extends AbstractChannel {
                 "unsupported message type: " + StringUtil.simpleClassName(msg) + EXPECTED_TYPES);
     }
 
-    @SuppressWarnings({ "java:S135", "java:S1117", "java:S1181", "java:S1874", "java:S3776" })
+    @SuppressWarnings({"java:S135", "java:S1117", "java:S1181", "java:S1874", "java:S3776"})
     private void doRead() {
         if (!readPending) {
             return;
@@ -176,8 +164,7 @@ public class TunChannel extends AbstractChannel {
 
                 allocHandle.incMessagesRead(localRead);
             } while (allocHandle.continueReading());
-        }
-        catch (final Throwable t) {
+        } catch (final Throwable t) {
             exception = t;
         }
 
@@ -209,8 +196,7 @@ public class TunChannel extends AbstractChannel {
             if (isOpen()) {
                 unsafe().close(unsafe().voidPromise());
             }
-        }
-        else if (readPending || config.isAutoRead() || !readData && isActive()) {
+        } else if (readPending || config.isAutoRead() || !readData && isActive()) {
             read();
         }
     }
