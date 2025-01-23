@@ -1,7 +1,7 @@
 package com.github.pangolin.tun.tun2socks;
 
-import com.github.pangolin.tun.net.InterfaceAddressEx;
-import com.github.pangolin.tun.net.windows.WindowsNetworkInterfaceEx;
+//import com.github.pangolin.routing.server.tun.net.InterfaceAddressEx;
+//import com.github.pangolin.routing.server.tun.net.windows.WindowsNetworkInterfaceEx;
 
 import java.io.File;
 import java.io.IOException;
@@ -41,14 +41,14 @@ public class WindowsTun2Socks extends AbstractTun2Socks {
     @Override
     protected void onReady() throws IOException, InterruptedException {
         // Add Interface address
-        final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias(getDevice());
-        nix.addInterfaceAddress(InterfaceAddressEx.of("198.18.0.1", (short) 24));
+//        final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias(getDevice());
+//        nix.addInterfaceAddress(InterfaceAddressEx.of("198.18.0.1", (short) 24));
 
         // Set Interface DNS
-        nix.setInterfaceDns(new InetAddress[]{InetAddress.getByName("127.0.0.1")});
+//        nix.setInterfaceDns(new InetAddress[]{InetAddress.getByName("127.0.0.1")});
 
         // Flush DNS cache.
-        WindowsNetworkInterfaceEx.flushDnsCache();
+//        WindowsNetworkInterfaceEx.flushDnsCache();
     }
 
 }
