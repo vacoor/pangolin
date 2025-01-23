@@ -158,13 +158,10 @@ public class TcpSession {
                     this.state.compareAndSet(State.LISTEN, State.SYN_RCVD);
 
                     writeNew(ack(header, srcAddr, dstAddr).ack(true).syn(true), true);
-//                    write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true), ipHeader, true);
                 } else {
                     this.state.compareAndSet(State.LISTEN, State.CLOSING);
                     writeNew(ack(header, srcAddr, dstAddr).ack(true).rst(true), true);
-//                    write(ack(header, srcAddr, dstAddr, 0).ack(true).syn(true).rst(true), ipHeader, true);
                 }
-
             } else {
                 // write(ack(header, srcAddr, dstAddr, 0).ack(true).rst(true), ipHeader);
                 throw new IllegalStateException();
@@ -516,7 +513,7 @@ public class TcpSession {
         }
 
         byte[] payload = null != current.getPayloadBuilder() ? current.getPayloadBuilder().build().getRawData() : new byte[0];
-        for (;; ) {
+        for (; ; ) {
             final TcpPacket.Builder next = sndQueue.peek();
             if (null != next) {
                 final byte[] np = null != next.getPayloadBuilder() ? next.getPayloadBuilder().build().getRawData() : new byte[0];
@@ -552,7 +549,6 @@ public class TcpSession {
         sndNxt += determinePacketSize(current.build());
 
         log(current.build().getHeader(), ipHeader, false);
-        // ctx.writeAndFlush(new Tun4Packet(Unpooled.wrappedBuffer(ack(ipHeader).payloadBuilder(current).build().getRawData())));
         ctx.writeAndFlush(ack(ipHeader).payloadBuilder(current).build());
     }
 
@@ -572,7 +568,6 @@ public class TcpSession {
     }
 
     private static TcpPacket.Builder ack(final TcpPacket.TcpHeader header, final InetAddress srcAddr, final InetAddress dstAddr) {
-
         return new TcpPacket.Builder()
                 .srcAddr(dstAddr)
                 .dstAddr(srcAddr)
@@ -676,4 +671,5 @@ public class TcpSession {
             log.info("{} - {}:{} <- {}:{}", type, ipHeader.getDstAddr(), tcpHeader.getDstPort().valueAsInt(), ipHeader.getSrcAddr(), tcpHeader.getSrcPort().valueAsInt());
         }
     }
+
 }
