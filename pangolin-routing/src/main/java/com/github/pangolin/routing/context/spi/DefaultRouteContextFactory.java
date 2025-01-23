@@ -4,6 +4,7 @@ import com.github.pangolin.routing.context.AbstractRouteContextFactory;
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.Ini;
 import com.github.pangolin.routing.context.RouteContext;
+import com.github.pangolin.routing.server.Acceptor;
 import com.github.pangolin.routing.server.AcceptorFactory;
 import com.github.pangolin.routing.server.MixinAcceptorFactory;
 import com.github.pangolin.routing.support.AliasRegistry;
@@ -97,7 +98,10 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
                 throw new IllegalArgumentException("Unable to create Acceptor with definition " + definition);
             }
 
-            registry.addAcceptors(acceptorFactory.apply(listenPort, segments));
+            final Acceptor acceptor = acceptorFactory.apply(listenPort, segments);
+            if (null != acceptor) {
+                registry.addAcceptors(acceptor);
+            }
         }
 
         return registry;

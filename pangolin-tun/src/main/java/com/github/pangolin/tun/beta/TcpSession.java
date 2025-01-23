@@ -16,7 +16,7 @@ import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.TcpOptionKind;
 
-import java.io.*;
+import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -128,9 +128,6 @@ public class TcpSession {
 
 
     private IpPacket.IpHeader ipHeader;
-
-    private final AtomicBoolean initiliazed = new AtomicBoolean();
-
 
     public synchronized void receive(final TcpPacket packet, final IpPacket.IpHeader ipHeader) {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
@@ -332,8 +329,8 @@ public class TcpSession {
                 this.state.compareAndSet(State.CLOSE_WAIT, State.LAST_ACK);
                 log.warn("[S] CLOSE_WAIT -> LAST_ACK");
             }
-            // CHECK 乱序队列, 是否可以移动到 sk_receive_queue.
 
+            // CHECK 乱序队列, 是否可以移动到 sk_receive_queue.
         } else if (sequence + size <= rcvNxt) {
             /*-
              * 数据段超出接收窗口左沿(客户端重传), ACK 客户端未正确收到.
@@ -382,86 +379,6 @@ public class TcpSession {
     }
 
 
-    OutputStream out;
-    volatile Channel channel;
-
-    private boolean onOpen(final InetSocketAddress src, final InetSocketAddress dst, TcpPacket.TcpHeader header) {
-        Bootstrap b = new Bootstrap();
-        b.group(new NioEventLoopGroup());
-        b.channel(NioSocketChannel.class);
-        b.handler(new ChannelInboundHandlerAdapter() {
-            @Override
-            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-//                super.channelRead(ctx, msg);
-                try {
-                    final ByteBuf buf = (ByteBuf) msg;
-                    byte[] payload = ByteBufUtil.getBytes(buf);
-                    System.out.println(System.currentTimeMillis() + ": " + new String(payload, StandardCharsets.UTF_8));
-
-                    UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, 0, payload.length).getBuilder();
-                    writeNew(ack(header, src.getAddress(), dst.getAddress()).ack(true).psh(true).payloadBuilder(builder), true);
-                } finally {
-                    ReferenceCountUtil.release(msg);
-                }
-            }
-        });
-        try {
-            final InetSocketAddress resolved = resolve(dst);
-            channel = b.connect(resolved).sync().channel();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-        return true;
-    }
-
-    private InetSocketAddress resolve(final InetSocketAddress dst) {
-        final String host = dst.getHostString();
-        if ("192.168.1.2".equals(host)) {
-            return new InetSocketAddress("153.3.238.102", dst.getPort());
-        }
-        if ("192.168.1.3".equals(host)) {
-            return new InetSocketAddress("139.196.84.154", dst.getPort());
-        }
-        if ("192.168.3.1".equals(host) || "192.168.3.2".equals(host)) {
-            return new InetSocketAddress("139.196.84.154", dst.getPort());
-        }
-        return dst;
-    }
-
-    private void onOpened() {
-        try {
-            out = new FileOutputStream(new File("tcp." + System.currentTimeMillis() + ".txt"));
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void onMessage(final byte[] bytes) {
-        System.out.println(new String(bytes, StandardCharsets.UTF_8));
-        if (null != channel) {
-            channel.writeAndFlush(Unpooled.wrappedBuffer(bytes));
-        }
-        try {
-            out.write(bytes);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void onReceiveFin() {
-        try {
-            if (null != channel && channel.isActive()) {
-                channel.close();
-            }
-            if (null != out) {
-                out.flush();
-                out.close();
-                out = null;
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
 
     protected void onClosed() {
         onReceiveFin();
@@ -672,4 +589,63 @@ public class TcpSession {
         }
     }
 
+
+    volatile Channel channel;
+
+    private boolean onOpen(final InetSocketAddress src, final InetSocketAddress dst, TcpPacket.TcpHeader header) {
+        Bootstrap b = new Bootstrap();
+        b.group(new NioEventLoopGroup());
+        b.channel(NioSocketChannel.class);
+        b.handler(new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+                try {
+                    final ByteBuf buf = (ByteBuf) msg;
+                    byte[] payload = ByteBufUtil.getBytes(buf);
+                    System.out.println(System.currentTimeMillis() + ": " + new String(payload, StandardCharsets.UTF_8));
+
+                    UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, 0, payload.length).getBuilder();
+                    writeNew(ack(header, src.getAddress(), dst.getAddress()).ack(true).psh(true).payloadBuilder(builder), true);
+                } finally {
+                    ReferenceCountUtil.release(msg);
+                }
+            }
+        });
+        try {
+            final InetSocketAddress resolved = resolve(dst);
+            channel = b.connect(resolved).sync().channel();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        return true;
+    }
+
+    private InetSocketAddress resolve(final InetSocketAddress dst) {
+        final String host = dst.getHostString();
+        if ("192.168.1.2".equals(host)) {
+            return new InetSocketAddress("153.3.238.102", dst.getPort());
+        }
+        if ("192.168.1.3".equals(host)) {
+            return new InetSocketAddress("139.196.84.154", dst.getPort());
+        }
+        if ("192.168.3.1".equals(host) || "192.168.3.2".equals(host)) {
+            return new InetSocketAddress("139.196.84.154", dst.getPort());
+        }
+        return dst;
+    }
+
+    private void onOpened() {
+    }
+
+    private void onMessage(final byte[] bytes) {
+        if (null != channel) {
+            channel.writeAndFlush(Unpooled.wrappedBuffer(bytes));
+        }
+    }
+
+    private void onReceiveFin() {
+        if (null != channel && channel.isActive()) {
+            channel.close();
+        }
+    }
 }
