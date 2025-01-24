@@ -2,10 +2,10 @@ package com.github.pangolin.routing.upstream.spi;
 
 import com.github.pangolin.routing.stats.StatsAware;
 import com.github.pangolin.routing.stats.StatsUpstream;
-import com.github.pangolin.routing.upstream.Upstream;
-import com.github.pangolin.routing.upstream.UpstreamRegistry;
 import com.github.pangolin.routing.upstream.AbstractUpstream;
+import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.upstream.UpstreamCombiner;
+import com.github.pangolin.routing.upstream.UpstreamRegistry;
 import com.netflix.client.config.IClientConfig;
 import com.netflix.client.config.PropertyResolver;
 import com.netflix.client.config.ReloadableClientConfig;
@@ -59,7 +59,7 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
             public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
                 final Upstream upstream = (Upstream) lb.chooseServer();
                 if (null != upstream) {
-                    log.info("[{}/TCP] -> [{}] -> {}", name, upstream.name(), destination);
+                    log.info("[SELECT] [{}]: [{}] => {}", name, upstream.name(), stringify(destination));
                 }
                 return null != upstream ? upstream.newSocketProxyHandler(destination) : null;
             }
@@ -68,7 +68,7 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
             public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
                 final Upstream upstream = (Upstream) lb.chooseServer();
                 if (null != upstream) {
-                    log.info("[{}/UDP] -> [{}] -> {}", name, upstream.name(), destination);
+                    log.info("[SELECT] [{}]: [{}] => {}", name, upstream.name(), stringify(destination));
                 }
                 return null != upstream ? upstream.newDatagramProxyHandler(destination) : null;
             }
@@ -78,6 +78,10 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
                 return name + "/select," + names;
             }
         };
+    }
+
+    private String stringify(final InetSocketAddress destination) {
+        return String.format("%s:%s", destination.getHostString(), destination.getPort());
     }
 
     @Override

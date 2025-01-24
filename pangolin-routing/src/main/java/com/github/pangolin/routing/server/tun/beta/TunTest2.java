@@ -33,16 +33,10 @@ public class TunTest2 {
                         }
                     });
             final Channel ch = b.bind(new TunAddress(ifname)).sync().channel();
-            // int code = new ProcessBuilder().command("netsh", "interface", "ipv4", "set", "address", "name=\"utun99\"", "source=static", "address=192.168.1.1", "mask=255.255.255.0").start().waitFor();
-            // send/receive messages of type TunPacket...
-//            WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias("iTCP");
-//            nix.setInterfaceAddress(InterfaceAddressEx.of(InetAddress.getByName("192.168.1.1"), (short) 24));
             ch.closeFuture().sync();
         } finally {
             group.shutdownGracefully();
         }
-
-//        final PcapNetworkInterface nif = Pcaps.getDevByName("en0");
-//        final PcapHandle handle = nif.openLive(65536, PcapNetworkInterface.PromiscuousMode.PROMISCUOUS, 10);
     }
+
 }
