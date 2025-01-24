@@ -2,7 +2,7 @@ package com.github.pangolin.routing.server.tun.beta.handler;
 
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
-import com.github.pangolin.routing.server.tun.beta.TcpSession;
+import com.github.pangolin.routing.server.tun.beta.TcpConnection;
 import com.google.common.collect.Maps;
 import io.netty.channel.ChannelHandlerContext;
 import org.pcap4j.packet.IpPacket;
@@ -17,7 +17,7 @@ public class TcpPacketHandler extends IpPacketHandler {
     private final DnsEngine dnsEngine;
     private final SocketChannelFactory socketChannelFactory;
 
-    private final Map<String, TcpSession> sessionMap = Maps.newConcurrentMap();
+    private final Map<String, TcpConnection> sessionMap = Maps.newConcurrentMap();
 
     public TcpPacketHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
         super(IpNumber.TCP);
@@ -37,17 +37,17 @@ public class TcpPacketHandler extends IpPacketHandler {
         final TcpPort tcpDstPort = tcpHeader.getDstPort();
 
         final String sockKey = srcAddr.toString() + tcpSrcPort + dstAddr + tcpDstPort;
-        if (!tcpHeader.getAck() && tcpHeader.getSyn()) {
-            sessionMap.putIfAbsent(sockKey, new TcpSession(ctx, dnsEngine, socketChannelFactory) {
+        if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
+            sessionMap.putIfAbsent(sockKey, new TcpConnection(ctx, dnsEngine, socketChannelFactory) {
                 @Override
-                protected void onClosed() {
+                protected void onDestroy() {
                     sessionMap.remove(sockKey);
                 }
             });
         }
-        TcpSession tcpSession = sessionMap.get(sockKey);
-        if (null != tcpSession) {
-            tcpSession.receive(tcpPacket, ipHeader);
+        TcpConnection tcpConnection = sessionMap.get(sockKey);
+        if (null != tcpConnection) {
+            tcpConnection.receive(tcpPacket, ipHeader);
         } else {
             // RST
 //            throw new IllegalStateException();
