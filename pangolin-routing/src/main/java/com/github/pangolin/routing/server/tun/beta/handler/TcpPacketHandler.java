@@ -38,7 +38,7 @@ public class TcpPacketHandler extends IpPacketHandler {
 
         final String sockKey = srcAddr.toString() + tcpSrcPort + dstAddr + tcpDstPort;
         if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
-            sessionMap.putIfAbsent(sockKey, new TcpConnection(ctx, dnsEngine, socketChannelFactory) {
+            sessionMap.putIfAbsent(sockKey, new TcpConnection(ctx.channel(), dnsEngine, socketChannelFactory) {
                 @Override
                 protected void onDestroy() {
                     sessionMap.remove(sockKey);
