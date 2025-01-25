@@ -133,7 +133,7 @@ public class TcpConnection {
     private int ssthresh;
 
 
-    private IpPacket.IpHeader ipHeader;
+    private IpHeader ipHeader;
     private final AtomicReference<State> state = new AtomicReference<>(State.LISTEN);
 
 
@@ -154,15 +154,15 @@ public class TcpConnection {
     private final DnsEngine dnsEngine;
     private final SocketChannelFactory socketChannelFactory;
 
-    public TcpConnection(final Channel parent, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+    protected TcpConnection(final Channel parent, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         this.parent = parent;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
     }
 
-    public synchronized void receive(final TcpPacket packet, final IpHeader ipHeader) {
+    public synchronized void receive(final IpHeader ipHeader, final TcpPacket tcpPacket) {
         try {
-            receive0(ipHeader, packet);
+            receive0(ipHeader, tcpPacket);
         } catch (final Throwable cause) {
             exceptionCaught(cause);
         }
@@ -173,7 +173,7 @@ public class TcpConnection {
         final InetAddress dstAddr = ipHeader.getDstAddr();
         final TcpHeader tcpHeader = tcpPacket.getHeader();
 
-        debug(ipHeader, tcpPacket, true);
+        trace(ipHeader, tcpPacket, true);
 
         if (tcpHeader.getRst()) {
             this.state.set(State.CLOSED);
@@ -182,29 +182,34 @@ public class TcpConnection {
         }
 
         final State state = this.state.get();
+        /*-
+         * Handshake.
+         */
         if (State.LISTEN.equals(state)) {
+            // XXX handshake
             check(tcpHeader, true, false);
             /*-
              * SYN: connection request.
              */
-            initialize(tcpPacket, ipHeader);
+            initialize(ipHeader, tcpPacket);
 
-            final boolean accepted = connectionRequest(new InetSocketAddress(srcAddr, tcpHeader.getSrcPort().valueAsInt()), new InetSocketAddress(dstAddr, tcpHeader.getDstPort().valueAsInt()), tcpHeader);
+            final boolean accepted = connectionRequest(
+                    new InetSocketAddress(srcAddr, tcpHeader.getSrcPort().valueAsInt()),
+                    new InetSocketAddress(dstAddr, tcpHeader.getDstPort().valueAsInt()),
+                    tcpHeader
+            );
             if (accepted) {
                 this.state.compareAndSet(State.LISTEN, State.SYN_RCVD);
 
                 // connection accept: send SYN-ACK
-                write(newPacket(tcpHeader, srcAddr, dstAddr).ack(true).syn(true), true);
+                write0(newPacket(tcpHeader, srcAddr, dstAddr).ack(true).syn(true), true);
             } else {
                 /*-
                  * 可以按照未打开端口处理:
                  * 1. 直接忽略
                  * 2. 响应 RST
                  */
-                if (this.state.compareAndSet(State.LISTEN, State.CLOSED)) {
-                    write(newPacket(tcpHeader, srcAddr, dstAddr).ack(true).rst(true), true);
-                    onDestroy();
-                }
+                close(true, tcpHeader);
             }
         } else if (State.SYN_RCVD.equals(state)) {
             /*-
@@ -217,16 +222,25 @@ public class TcpConnection {
             } else {
                 throw new IllegalStateException();
             }
-        } else if (State.ESTABLISHED.equals(state)) {
+        }
+        /*-
+         * 数据传输.
+         */
+        else if (State.ESTABLISHED.equals(state)) {
             /*-
              * ACK: transmission.
              */
             check(tcpHeader, false, true);
             tcpDataQueue(tcpPacket, ipHeader);
-        } else if (State.CLOSE_WAIT.equals(state)) {
+        }
+        /*-
+         * 被动关闭.
+         */
+        else if (State.CLOSE_WAIT.equals(state)) {
             throw new IllegalStateException("CLOSE WAIT");
         } else if (State.LAST_ACK.equals(state)) {
             /*-
+             * WAVEHAND
              * ACK: closed.
              */
             check(tcpHeader, false, true);
@@ -236,33 +250,34 @@ public class TcpConnection {
             }
 
             /* 意义不大了.
-            rcvNxt += determinePacketSize(packet);
+            rcvNxt += determineIncrement(packet);
             sndUna = header.getAcknowledgmentNumber();
             sndWnd = determineSndWnd(header);
             */
             this.state.compareAndSet(State.LAST_ACK, State.CLOSED);
             connectionInactive();
         }
-        // 完善服务器端主动关闭
-        /*else if (State.FIN_WAIT_1.equals(state)) {
-            check(header, false, true);
-            tcpDataQueue(packet, ipHeader);
-            if (!header.getFin()) {
-               this.state.compareAndSet(State.FIN_WAIT_1, State.FIN_WAIT_2);
-            } else {
-                this.state.compareAndSet(State.FIN_WAIT_1, State.TIME_WAIT);
-                // set timeout 2MSL: TIME_WAIT --> CLOSED
-            }
+        /*-
+         * 主动关闭.
+         */
+        else if (State.FIN_WAIT_1.equals(state)) {
+            check(tcpHeader, false, true);
+
+            // ACK for FIN-ACK
+            // FIN_WAIT_1 --> CLOSING ?
+            // https://github.com/steveLauwh/TCP-IP/blob/master/TCP/Open%20and%20Closed%20at%20the%20same%20time.md
+            // if (!tcpHeader.getFin()) {
+            log.info("[S] FIN_WAIT_1 -> FIN_WAIT_2");
+                this.state.compareAndSet(State.FIN_WAIT_1, State.FIN_WAIT_2);
+            // }
+
+            tcpDataQueue(tcpPacket, ipHeader);
         } else if (State.FIN_WAIT_2.equals(state)) {
-            check(header, false, true);
-            tcpDataQueue(packet, ipHeader);
-            if (header.getFin()) {
-                this.state.compareAndSet(State.FIN_WAIT_2, State.TIME_WAIT);
-                // set timeout 2MSL: TIME_WAIT --> CLOSED
-            }
+            check(tcpHeader, false, true);
+            tcpDataQueue(tcpPacket, ipHeader);
         } else if (State.TIME_WAIT.equals(state)) {
-            throw new IllegalStateException("CLOSE WAIT);
-        }*/
+            throw new IllegalStateException("CLOSE WAIT");
+        }
     }
 
     private TcpPacket.TcpHeader check(final TcpPacket.TcpHeader tcpHeader, final boolean syn, final boolean ack) {
@@ -303,8 +318,8 @@ public class TcpConnection {
     /**
      * https://github.com/romain-jacotin/quic/blob/master/doc/TCP.md#-segment-arrives
      */
-    private void initialize(final TcpPacket syn, final IpPacket.IpHeader ipHeader) {
-        final TcpPacket.TcpHeader header = syn.getHeader();
+    private void initialize(final IpHeader ipHeader, final TcpPacket tcpSynPacket) {
+        final TcpPacket.TcpHeader header = tcpSynPacket.getHeader();
 
         /*-
          * receive & send Initial Sequence Number.
@@ -312,29 +327,18 @@ public class TcpConnection {
         rcvIsn = header.getSequenceNumber();
         sndIsn = header.getSequenceNumber();  // XXX: generate it.
 
+        rcvNxt = rcvIsn + determineIncrement(tcpSynPacket);
+
         sndUna = sndIsn;
         sndNxt = sndIsn;
         sndWnd = determineSndWnd(header);
         sndMss = determineSndMss(header);
         cwnd = sndMss;
 
-        rcvNxt = rcvIsn;
-        rcvNxt += determinePacketSize(syn);
-
         this.ipHeader = ipHeader;
     }
 
-    private void adjustUnaAndWnd(final TcpPacket packet) {
-        final TcpPacket.TcpHeader tcpHeader = packet.getHeader();
-        sndUna = tcpHeader.getAcknowledgmentNumber();
-        sndWnd = determineSndWnd(tcpHeader);
-
-        rcvNxt += determinePacketSize(packet);
-
-        cwnd = cwnd < ssthresh ? cwnd + sndMss : cwnd + sndMss / cwnd;
-    }
-
-    private synchronized void tcpDataQueue(final TcpPacket packet, IpPacket.IpHeader ipHeader) {
+    private synchronized void tcpDataQueue(final TcpPacket packet, IpHeader ipHeader) {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         /*-
@@ -344,7 +348,7 @@ public class TcpConnection {
          */
         final TcpPacket.TcpHeader header = packet.getHeader();
         final int sequence = header.getSequenceNumber();
-        final int size = determinePacketSize(packet);
+        final int size = determineIncrement(packet);
         if (sequence == rcvNxt) {
             /*-
              * 数据段序号正是期望的序号,
@@ -358,7 +362,7 @@ public class TcpConnection {
 
             Packet payload = packet.getPayload();
             if (null == payload || payload.length() < 1) {
-//                    write(newPacket(header, srcAddr, dstAddr, 0).newPacket(true), ipHeader, false);
+//                    write0(newPacket(header, srcAddr, dstAddr, 0).newPacket(true), ipHeader, false);
             } else {
                 final byte[] rawData = packet.getPayload().getRawData();
                 connectionRead(rawData);
@@ -366,22 +370,36 @@ public class TcpConnection {
 
             // FIN 处理
             if (header.getFin()) {
-                connectionInactive();
 //                debug.warn("[CONNECTION FINISH] {}: CLOSE WAIT", connection);
-                // ACK
-                log.info("[S] ESTABLISHED -> CLOSE_WAIT");
                 if (this.state.compareAndSet(State.ESTABLISHED, State.CLOSE_WAIT)) {
-                    // client FIN-ACK
-                    write(newPacket(header, srcAddr, dstAddr).ack(true), true);
+                    // 对端请求关闭
+                    log.info("[S] ESTABLISHED -> CLOSE_WAIT");
+                    connectionFinish();
+                    // ACK for FIN-ACK
+                    write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
 
                     while (flush()) {
 
                     }
 
-                    // server FIN
-                    write(newPacket(header, srcAddr, dstAddr).ack(true).fin(true), true);
+                    // FIN-ACK
+                    write0(newPacket(header, srcAddr, dstAddr).ack(true).fin(true), true);
                     this.state.compareAndSet(State.CLOSE_WAIT, State.LAST_ACK);
                     log.info("[S] CLOSE_WAIT -> LAST_ACK");
+                } else if (this.state.compareAndSet(State.FIN_WAIT_2, State.TIME_WAIT)){
+                    write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
+
+                    while (flush()) {
+                    }
+
+                    // 本端请求关闭
+                    log.info("[S] FIN_WAIT_2 -> TIME_WAIT");
+                    connectionFinish();
+
+                    // wait 2MSL
+                    this.state.compareAndSet(State.TIME_WAIT, State.CLOSED);
+                    log.info("[S] TIME_WAIT -> CLOSED");
+                    connectionInactive();
                 }
             }
 
@@ -392,14 +410,14 @@ public class TcpConnection {
              * Out-Of-Window, 立即 ACK.
              */
             log.warn("[TCP Retransmission]");
-            write(newPacket(header, srcAddr, dstAddr).ack(true), true);
+            write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
         } else if (sequence >= rcvNxt + rcvWnd) {
             /*-
              * 数据段超出接收窗口右沿(Out-Of-Window), 比如零窗口探测报文段.
              * Out-Of-Window, 立即 ACK.
              */
             log.warn("[OOW] ");
-            write(newPacket(header, srcAddr, dstAddr).ack(true), true);
+            write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
         } else if (sequence < rcvNxt && sequence + size > rcvNxt) {
             /*-
              * 数据段序号在期望日的序号之前, 结束序号在期望序号之后(数据重叠),
@@ -410,11 +428,11 @@ public class TcpConnection {
              */
             Packet payload = packet.getPayload();
             final byte[] rawBytes = null != payload ? payload.getRawData() : new byte[0];
-            // (rcvNxt - sequence, sequence + determinePacketSize - rcvNxt);
+            // (rcvNxt - sequence, sequence + determineIncrement - rcvNxt);
             try {
                 final byte[] bytes = Arrays.copyOfRange(rawBytes, rcvNxt - sequence, rawBytes.length);
 
-                log.warn("XX");
+                log.warn("[TCP Retransmission] [TCP ACKed unseen segment]");
                 connectionRead(bytes);
             } catch (RuntimeException ex) {
                 throw ex;
@@ -427,11 +445,18 @@ public class TcpConnection {
              */
             // FIXME
             log.warn("[OFO]");
-            // write(newPacket(header, srcAddr, dstAddr, 0).newPacket(true).rst(true))
+            // write0(newPacket(header, srcAddr, dstAddr, 0).newPacket(true).rst(true))
         }
     }
 
-    protected void write(TcpPacket.Builder packet, boolean now) {
+    public void write(TcpPacket.Builder packet, boolean now) {
+        // XXX CHECK;
+        if (State.ESTABLISHED.equals(state.get())) {
+            write0(packet, now);
+        }
+    }
+
+    private void write0(TcpPacket.Builder packet, boolean now) {
         if (!sndQueue.offer(packet)) {
             throw new IllegalStateException();
         }
@@ -453,7 +478,7 @@ public class TcpConnection {
         }
     }
 
-    protected synchronized boolean flush() {
+    private synchronized boolean flush() {
         final int usableSndWnd = sndUna + sndWnd - sndNxt;
         final int cwndToUse = sndUna + cwnd - sndNxt;
         final int wndToUse = Math.min(usableSndWnd, cwndToUse);
@@ -498,9 +523,9 @@ public class TcpConnection {
                 .acknowledgmentNumber(rcvNxt)
                 .payloadBuilder(payload.length > 0 ? UnknownPacket.newPacket(payload, 0, payload.length).getBuilder() : null);
 
-        sndNxt += determinePacketSize(current.build());
+        sndNxt += determineIncrement(current.build());
 
-        debug(ipHeader, current.build(), false);
+        trace(ipHeader, current.build(), false);
 
         final IpV4Packet ipPacket = new IpV4Packet.Builder()
                 .version(IpVersion.IPV4)
@@ -516,7 +541,10 @@ public class TcpConnection {
                 .correctChecksumAtBuild(true)
                 .payloadBuilder(current)
                 .build();
-        parent.writeAndFlush(ipPacket);
+
+        final ChannelPromise promise = parent.newPromise();
+        parent.writeAndFlush(ipPacket, promise);
+//        promise.awaitUninterruptibly();
         return true;
     }
 
@@ -526,7 +554,7 @@ public class TcpConnection {
      * @param packet TCP packet
      * @return TCP 用于计算序列增长的大小
      */
-    private int determinePacketSize(final TcpPacket packet) {
+    private int determineIncrement(final TcpPacket packet) {
         final TcpPacket.TcpHeader h = packet.getHeader();
         final Packet payload = packet.getPayload();
         final int size = null != payload ? payload.length() : 0;
@@ -540,7 +568,7 @@ public class TcpConnection {
      * @param header TCP header.
      * @return 发送窗口大小
      */
-    private int determineSndMss(final TcpPacket.TcpHeader header) {
+    private int determineSndMss(final TcpHeader header) {
         int sndMss = mtu - IP_HEADER_SIZE - TCP_HEADER_SIZE;
         final List<TcpPacket.TcpOption> options = header.getOptions();
         for (TcpPacket.TcpOption option : options) {
@@ -558,7 +586,7 @@ public class TcpConnection {
      * @param header TCP header.
      * @return 发送窗口大小
      */
-    private int determineSndWnd(final TcpPacket.TcpHeader header) {
+    private int determineSndWnd(final TcpHeader header) {
         int sndWnd = header.getWindowAsInt();
         final List<TcpPacket.TcpOption> options = header.getOptions();
         for (TcpPacket.TcpOption option : options) {
@@ -587,7 +615,7 @@ public class TcpConnection {
     }
 
 
-    private void debug(final IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
+    private void trace(final IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         final TcpHeader tcpHeader = tcpPacket.getHeader();
@@ -639,10 +667,40 @@ public class TcpConnection {
             }
         }
 
-        buff.append("SEQ=").append(sequence)
-                .append(" ACK=").append(acknowledgment);
+        buff.append("Seq=").append(sequence);
+        if (tcpHeader.getAck()) {
+            buff.append(" Ack=").append(acknowledgment);
+        }
+
+        final Packet payload = tcpPacket.getPayload();
+        final int payloadLen = null != payload ? payload.length() : 0;
+        buff.append(" Len=").append(payloadLen);
 
         log.info(buff.toString());
+    }
+
+    /**
+     * 主动关闭.
+     *
+     * @param rst
+     */
+    private void close(final boolean rst, final TcpHeader tcpHeader) {
+        if (State.CLOSED.equals(state.get())) {
+            return;
+        }
+        if (rst || state.compareAndSet(State.LISTEN, State.CLOSED) || state.compareAndSet(State.SYN_RCVD, State.CLOSED)) {
+            TcpPacket.Builder rstPacket = newPacket(tcpHeader, ipHeader.getSrcAddr(), ipHeader.getDstAddr()).ack(true).rst(true);
+            write0(rstPacket, true);
+            // WRITE RST
+            connectionInactive();
+            return;
+        }
+
+        if (state.compareAndSet(State.ESTABLISHED, State.FIN_WAIT_1)) {
+            // WRITE FIN
+            TcpPacket.Builder rstPacket = newPacket(tcpHeader, ipHeader.getSrcAddr(), ipHeader.getDstAddr()).ack(true).fin(true);
+            write0(rstPacket, true);
+        }
     }
 
 
@@ -650,7 +708,7 @@ public class TcpConnection {
     int connTimeoutMs = 30 * 1000;
     EventLoopGroup group = new NioEventLoopGroup();
 
-    private boolean connectionRequest(final InetSocketAddress src, final InetSocketAddress dst, TcpPacket.TcpHeader header) {
+    private boolean connectionRequest(final InetSocketAddress src, final InetSocketAddress dst, TcpHeader header) {
         final InetSocketAddress resolved = resolve(dst);
         final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, true, group, new ChannelInboundHandlerAdapter() {
             @Override
@@ -673,8 +731,10 @@ public class TcpConnection {
                 @Override
                 public void operationComplete(final ChannelFuture future) throws Exception {
                     if (future.isSuccess()) {
-                        write(newPacket(header, src.getAddress(), dst.getAddress()).rst(true), true);
-                        onDestroy();
+                        if (State.ESTABLISHED.equals(state.get())) {
+                            write0(newPacket(header, src.getAddress(), dst.getAddress()).rst(true), true);
+                            onDestroy();
+                        }
                     }
                 }
             });
@@ -709,11 +769,25 @@ public class TcpConnection {
     }
 
     private void connectionRead(final byte[] bytes) {
-        if (null != channel) {
+        if (null != channel && channel.isOpen()) {
             channel.writeAndFlush(Unpooled.wrappedBuffer(bytes));
+        } else {
+            // throw ex -> close(RST)
         }
     }
 
+    /**
+     * 对端数据发送完成.
+     */
+    private void connectionFinish() {
+        if (null != channel && channel.isActive()) {
+            channel.close();
+        }
+    }
+
+    /**
+     * 正常关闭及异常关闭.
+     */
     private void connectionInactive() {
         if (null != channel && channel.isActive()) {
             channel.close();
@@ -721,7 +795,10 @@ public class TcpConnection {
         onDestroy();
     }
 
+
     private void exceptionCaught(final Throwable cause) {
+        log.warn("{}", cause.getMessage(), cause);
+        // 主动关闭, CLOSE
         connectionInactive();
     }
 
