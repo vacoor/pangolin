@@ -11,8 +11,8 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.NetUtil;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.*;
 import org.pcap4j.packet.IpPacket.IpHeader;
+import org.pcap4j.packet.*;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
@@ -135,7 +135,7 @@ public class TcpConnection {
 
 
     private IpHeader ipHeader;
-    private final AtomicReference<State> state = new AtomicReference<>(State.LISTEN);
+    private final AtomicReference<State> state = new AtomicReference<>(State.CLOSED);
 
 
     private ConcurrentLinkedQueue<TcpPacket.Builder> sndQueue = new ConcurrentLinkedQueue<>();
@@ -159,6 +159,15 @@ public class TcpConnection {
         this.parent = parent;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
+        this.listen();
+    }
+
+    private void listen() {
+        state.compareAndSet(State.CLOSED, State.LISTEN);
+    }
+
+    private void connect() {
+        throw new UnsupportedOperationException();
     }
 
     public synchronized void receive(final IpHeader ipHeader, final TcpPacket tcpPacket) {
@@ -177,6 +186,7 @@ public class TcpConnection {
         trace(ipHeader, tcpPacket, true);
 
         if (tcpHeader.getRst()) {
+            // 按道理 SYN_RCVD 应该回退到 LISTEN.
             this.state.set(State.CLOSED);
             connectionInactive();
             throw new IOException("Connection reset");
@@ -241,6 +251,7 @@ public class TcpConnection {
             throw new IllegalStateException("CLOSE WAIT");
         } else if (State.LAST_ACK.equals(state)) {
             /*-
+             * 被动关闭, 第四次挥手.
              * WAVEHAND
              * ACK: closed.
              */
@@ -262,18 +273,29 @@ public class TcpConnection {
          * 主动关闭.
          */
         else if (State.FIN_WAIT_1.equals(state)) {
-            check(tcpHeader, false, true);
+            if (tcpHeader.getFin() && !tcpHeader.getAck() && !tcpHeader.getSyn()) {
+                // XXX 无法重现该情况, 主动关闭只发送 FIN 对端无响应.
+                this.state.compareAndSet(State.FIN_WAIT_1, State.CLOSING);
 
-            // ACK for FIN-ACK
-            // FIN_WAIT_1 --> CLOSING ?
-            // https://github.com/steveLauwh/TCP-IP/blob/master/TCP/Open%20and%20Closed%20at%20the%20same%20time.md
-            // if (!tcpHeader.getFin()) {
-            log.info("[S] FIN_WAIT_1 -> FIN_WAIT_2");
+                // XXX 待完善 CLOSING 处理.
+                // XXX 没 ACK 标记不应该处理 sndUna
+                tcpDataQueue(tcpPacket, ipHeader);
+            } else {
+                // 主动关闭, 第二次挥手.
+                check(tcpHeader, false, true);
+
+                // ACK for FIN-ACK
+                // FIN_WAIT_1 --> CLOSING ?
+                // https://github.com/steveLauwh/TCP-IP/blob/master/TCP/Open%20and%20Closed%20at%20the%20same%20time.md
+                log.info("[S] FIN_WAIT_1 -> FIN_WAIT_2");
                 this.state.compareAndSet(State.FIN_WAIT_1, State.FIN_WAIT_2);
-            // }
+                tcpDataQueue(tcpPacket, ipHeader);
+            }
 
-            tcpDataQueue(tcpPacket, ipHeader);
         } else if (State.FIN_WAIT_2.equals(state)) {
+            check(tcpHeader, false, true);
+            tcpDataQueue(tcpPacket, ipHeader);
+        } else if (State.CLOSING.equals(state)) {
             check(tcpHeader, false, true);
             tcpDataQueue(tcpPacket, ipHeader);
         } else if (State.TIME_WAIT.equals(state)) {
@@ -357,6 +379,7 @@ public class TcpConnection {
              * 如果窗口>0, 拷贝到用户进程或写入 sk_receive_queue.
              */
             rcvNxt += size;
+            // XXX 待完善 CLOSING 处理.
             sndUna = header.getAcknowledgmentNumber();
             sndWnd = determineSndWnd(header);
             cwnd = cwnd < ssthresh ? cwnd + sndMss : cwnd + sndMss / cwnd;
@@ -368,27 +391,43 @@ public class TcpConnection {
                 final byte[] rawData = packet.getPayload().getRawData();
                 connectionRead(rawData);
             }
+            write0(newPacket(header, srcAddr, dstAddr).ack(true), false);
+
+            if (this.state.compareAndSet(State.CLOSING, State.TIME_WAIT)) {
+                // 本端请求关闭
+                log.info("[S] CLOSING -> TIME_WAIT");
+                connectionFinish();
+
+                // wait 2MSL
+                this.state.compareAndSet(State.TIME_WAIT, State.CLOSED);
+                log.info("[S] TIME_WAIT -> CLOSED");
+                connectionInactive();
+                return;
+            }
 
             // FIN 处理
             if (header.getFin()) {
-//                debug.warn("[CONNECTION FINISH] {}: CLOSE WAIT", connection);
                 if (this.state.compareAndSet(State.ESTABLISHED, State.CLOSE_WAIT)) {
-                    // 对端请求关闭
+                    // 被动关闭, 第一次挥手.
                     log.info("[S] ESTABLISHED -> CLOSE_WAIT");
                     connectionFinish();
-                    // ACK for FIN-ACK
-                    write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
 
+                    // 被动关闭, 第二次挥手, 上面已ACK.
+                    // write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
+
+                    // 被动关闭, 第三次挥手, 需要等待数据写入结束.
                     while (flush()) {
 
                     }
-
-                    // FIN-ACK
                     write0(newPacket(header, srcAddr, dstAddr).ack(true).fin(true), true);
                     this.state.compareAndSet(State.CLOSE_WAIT, State.LAST_ACK);
                     log.info("[S] CLOSE_WAIT -> LAST_ACK");
-                } else if (this.state.compareAndSet(State.FIN_WAIT_2, State.TIME_WAIT)){
-                    write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
+                } else if (this.state.compareAndSet(State.FIN_WAIT_2, State.TIME_WAIT)) {
+                    // 主动关闭, 第三次挥手
+                    // 触发到这里.
+
+                    // 主动关闭, 第四次挥手, 上面已ACK.
+                    // write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
 
                     while (flush()) {
                     }
@@ -435,6 +474,7 @@ public class TcpConnection {
 
                 log.warn("[TCP Retransmission] [TCP ACKed unseen segment]");
                 connectionRead(bytes);
+                write0(newPacket(header, srcAddr, dstAddr).ack(true), false);
             } catch (RuntimeException ex) {
                 throw ex;
             }
@@ -472,8 +512,8 @@ public class TcpConnection {
             delayAckTask = scheduler.schedule(new Runnable() {
                 @Override
                 public void run() {
-                    flush();
                     delayAckTask = null;
+                    flush();
                 }
             }, 100, TimeUnit.MILLISECONDS);
         }
@@ -626,9 +666,9 @@ public class TcpConnection {
         final int dstPort = tcpHeader.getDstPort().valueAsInt();
 
         final StringBuilder buff = new StringBuilder()
-                .append(srcHostName).append(":").append(srcPort)
+                .append(inbound ? srcHostName : dstHostName).append(":").append(srcPort)
                 .append(" => ")
-                .append(dstHostName).append(":").append(dstPort);
+                .append(inbound ? dstHostName : srcHostName).append(":").append(dstPort);
 
         final int len = buff.length();
         if (tcpHeader.getFin()) {
@@ -689,17 +729,19 @@ public class TcpConnection {
         if (State.CLOSED.equals(state.get())) {
             return;
         }
-        if (rst || state.compareAndSet(State.LISTEN, State.CLOSED) || state.compareAndSet(State.SYN_RCVD, State.CLOSED)) {
+        if (rst || state.compareAndSet(State.LISTEN, State.CLOSED)) {
+            // WRITE RST
             TcpPacket.Builder rstPacket = newPacket(tcpHeader, ipHeader.getSrcAddr(), ipHeader.getDstAddr()).ack(true).rst(true);
             write0(rstPacket, true);
-            // WRITE RST
             connectionInactive();
             return;
         }
 
-        if (state.compareAndSet(State.ESTABLISHED, State.FIN_WAIT_1)) {
-            // WRITE FIN
-            TcpPacket.Builder rstPacket = newPacket(tcpHeader, ipHeader.getSrcAddr(), ipHeader.getDstAddr()).ack(true).fin(true);
+        if (state.compareAndSet(State.ESTABLISHED, State.FIN_WAIT_1) || state.compareAndSet(State.SYN_RCVD, State.FIN_WAIT_1)) {
+            // 主动关闭, 第一次挥手.
+            // XXX WRITE FIN? FIN+ACK? 只发送 FIN 无 ACK 对端只会发送 ACK 不会有后续的FIN,无法关闭
+//            TcpPacket.Builder rstPacket = newPacket(tcpHeader, ipHeader.getSrcAddr(), ipHeader.getDstAddr()).ack(false).fin(true);
+             TcpPacket.Builder rstPacket = newPacket(tcpHeader, ipHeader.getSrcAddr(), ipHeader.getDstAddr()).ack(true).fin(true);
             write0(rstPacket, true);
         }
     }
