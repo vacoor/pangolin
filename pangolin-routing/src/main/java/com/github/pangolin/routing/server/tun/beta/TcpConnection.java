@@ -18,6 +18,7 @@ import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.TcpOptionKind;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Arrays;
@@ -164,11 +165,11 @@ public class TcpConnection {
         try {
             receive0(ipHeader, tcpPacket);
         } catch (final Throwable cause) {
-            exceptionCaught(cause);
+            exceptionCaught(tcpPacket.getHeader(), cause);
         }
     }
 
-    private synchronized void receive0(final IpHeader ipHeader, final TcpPacket tcpPacket) {
+    private synchronized void receive0(final IpHeader ipHeader, final TcpPacket tcpPacket) throws IOException {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         final TcpHeader tcpHeader = tcpPacket.getHeader();
@@ -178,7 +179,7 @@ public class TcpConnection {
         if (tcpHeader.getRst()) {
             this.state.set(State.CLOSED);
             connectionInactive();
-            throw new IllegalStateException("Connection reset");
+            throw new IOException("Connection reset");
         }
 
         final State state = this.state.get();
@@ -338,7 +339,7 @@ public class TcpConnection {
         this.ipHeader = ipHeader;
     }
 
-    private synchronized void tcpDataQueue(final TcpPacket packet, IpHeader ipHeader) {
+    private synchronized void tcpDataQueue(final TcpPacket packet, IpHeader ipHeader) throws IOException {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         /*-
@@ -768,12 +769,11 @@ public class TcpConnection {
     private void connectionActive() {
     }
 
-    private void connectionRead(final byte[] bytes) {
-        if (null != channel && channel.isOpen()) {
-            channel.writeAndFlush(Unpooled.wrappedBuffer(bytes));
-        } else {
-            // throw ex -> close(RST)
+    private void connectionRead(final byte[] bytes) throws IOException {
+        if (null == channel || !channel.isOpen()) {
+            throw new IOException("Remote already closed");
         }
+        channel.writeAndFlush(Unpooled.wrappedBuffer(bytes));
     }
 
     /**
@@ -796,10 +796,10 @@ public class TcpConnection {
     }
 
 
-    private void exceptionCaught(final Throwable cause) {
+    private void exceptionCaught(final TcpHeader tcpHeader, final Throwable cause) {
         log.warn("{}", cause.getMessage(), cause);
         // 主动关闭, CLOSE
-        connectionInactive();
+        close(true, tcpHeader);
     }
 
     protected void onDestroy() {
