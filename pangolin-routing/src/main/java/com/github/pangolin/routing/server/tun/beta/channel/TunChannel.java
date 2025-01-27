@@ -82,7 +82,7 @@ public class TunChannel extends AbstractChannel {
         } else {
             device = LinuxTunAdapter.open(ifname, mtu);
         }
-        ((AbstractTunAdapter) device).setInterfaceAddress(InterfaceAddressEx.of("198.18.0.1", 24));
+        ((AbstractTunAdapter) device).addInterfaceAddress(InterfaceAddressEx.of("198.18.0.1", 24));
     }
 
     @Override
