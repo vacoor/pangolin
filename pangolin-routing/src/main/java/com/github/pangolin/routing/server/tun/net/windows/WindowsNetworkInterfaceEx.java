@@ -324,6 +324,8 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
             }
             return addresses;
         } finally {
+            // FIXED when Structure.autoRead=true if the pointer is invalid, it will cause JVM crash
+            table.setAutoRead(false);
             INSTANCE.FreeMibTable(table.getPointer());
         }
     }
@@ -376,6 +378,8 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
                 }
             }
         } finally {
+            // FIXED when Structure.autoRead=true if the pointer is invalid, it will cause JVM crash
+            table.setAutoRead(false);
             INSTANCE.FreeMibTable(table.getPointer());
         }
     }

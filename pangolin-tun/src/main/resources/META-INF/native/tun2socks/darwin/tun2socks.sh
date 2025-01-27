@@ -48,7 +48,7 @@ function tun_start() {
    networksetup -setdnsservers "Wi-Fi" 192.168.1.201
    # networksetup -setdnsservers "Wi-Fi" 192.168.1.1
 
-   # Flush dns cache
+   # Flush dns cach
    sudo killall -HUP mDNSResponder;
 }
 

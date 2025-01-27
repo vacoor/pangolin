@@ -220,6 +220,8 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
             }
             return interfaceAddresses;
         } finally {
+            // FIXED when Structure.autoRead=true if the pointer is invalid, it will cause JVM crash
+            ifa.setAutoRead(false);
             freeifaddrs(ifa);
         }
     }
