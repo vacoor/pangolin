@@ -39,8 +39,8 @@ public class TcpConnection {
     private static final int DEFAULT_MTU = 1500;
     private static final int MINIMUM_MTU = 576;
 
-    private static final int IP_HEADER_SIZE = 20;
-    private static final int TCP_HEADER_SIZE = 20;
+    private static final short IP_HEADER_SIZE = 20;
+    private static final short TCP_HEADER_SIZE = 20;
 
     enum State {
         CLOSED,
@@ -56,7 +56,7 @@ public class TcpConnection {
         ESTABLISHED;
     }
 
-    private final int mtu = MINIMUM_MTU;
+    private final short mtu = MINIMUM_MTU;
 
     /*-
      *              |<------- TCP recv window ------->|
@@ -127,7 +127,9 @@ public class TcpConnection {
 
     private byte sndWndShiftCount;
 
-    private int sndMss;
+    private byte rcvWndShiftCount;
+
+    private short sndMss;
 
     private int cwnd;
 
@@ -217,7 +219,16 @@ public class TcpConnection {
                 this.state.compareAndSet(State.LISTEN, State.SYN_RCVD);
 
                 // connection accept: send SYN-ACK
-                write0(newPacket(tcpHeader, srcAddr, dstAddr).ack(true).syn(true), true);
+                final TcpPacket.Builder builder = newPacket(tcpHeader, srcAddr, dstAddr).ack(true).syn(true);
+                final List<TcpPacket.TcpOption> options = Lists.newArrayList();
+                if (windowScaleEnabled && sndWndShiftCount > 0 && rcvWndShiftCount > 0) {
+                    // 只能在接收到带window scale的SYN请求时才能发送.
+                    options.add(new TcpWindowScaleOption.Builder().shiftCount(rcvWndShiftCount).build());
+                }
+
+                options.add(new TcpMaximumSegmentSizeOption.Builder().maxSegSize((short) (mtu - IP_HEADER_SIZE - TCP_HEADER_SIZE)).build());
+                builder.options(options);
+                write0(builder, true);
             } else {
                 /*-
                  * 可以按照未打开端口处理:
@@ -359,9 +370,13 @@ public class TcpConnection {
         sndUna = sndIsn;
         sndNxt = sndIsn;
         sndWndShiftCount = determineWindowScale(header);
+        // 可以不一样, 最大14.
+        rcvWndShiftCount = sndWndShiftCount;
         sndWnd = determineSndWnd(header);
         sndMss = determineSndMss(header);
         cwnd = sndMss;
+
+        log.info("[SYN] snd.wnd = {}, snd.mss = {}", sndWnd, sndMss);
 
         this.ipHeader = ipHeader;
     }
@@ -527,75 +542,79 @@ public class TcpConnection {
     private synchronized boolean flush() {
         final int usableSndWnd = sndUna + sndWnd - sndNxt;
         final int cwndToUse = sndUna + cwnd - sndNxt;
-        final int wndToUse = Math.min(usableSndWnd, cwndToUse);
+        // FIXME
+        final int wndToUse = usableSndWnd;// Math.min(usableSndWnd, cwndToUse);
         log.debug("USABLE-WND = {}, CWND-To-USE = {}, USABLE-CWND = {}", usableSndWnd, cwndToUse, wndToUse);
 
-        TcpPacket.Builder current = sndQueue.poll();
-        if (null == current) {
+        if (sndQueue.isEmpty()) {
             return false;
         }
 
-        byte[] payload = null != current.getPayloadBuilder() ? current.getPayloadBuilder().build().getRawData() : new byte[0];
-        if (payload.length > wndToUse) {
-            log.warn("Payload.lenth({}) > wndToUse({})", payload.length, wndToUse);
-            // FIXME
-        } else {
-            for (; ; ) {
-                final TcpPacket.Builder next = sndQueue.peek();
-                if (null != next) {
-                    final byte[] np = null != next.getPayloadBuilder() ? next.getPayloadBuilder().build().getRawData() : new byte[0];
-                    if (payload.length >= wndToUse && np.length > 0) {
+        TcpPacket.Builder current;
+        // if (null != (current = sndQueue.poll())) {
+        while (null != (current = sndQueue.poll())) {
+            byte[] payload = null != current.getPayloadBuilder() ? current.getPayloadBuilder().build().getRawData() : new byte[0];
+            if (payload.length > wndToUse) {
+                log.warn("Payload.lenth({}) > wndToUse({})", payload.length, wndToUse);
+                // FIXME
+            } else {
+                for (; ; ) {
+                    final TcpPacket.Builder next = sndQueue.peek();
+                    if (null != next) {
+                        final byte[] np = null != next.getPayloadBuilder() ? next.getPayloadBuilder().build().getRawData() : new byte[0];
+                        if (payload.length >= wndToUse && np.length > 0) {
+                            break;
+                        }
+                        if (payload.length + np.length <= wndToUse) {
+                            sndQueue.poll();
+                            if (np.length > 0) {
+                                payload = Arrays.copyOf(payload, payload.length + np.length);
+                                System.arraycopy(np, 0, payload, payload.length - np.length, np.length);
+                            }
+                            TcpPacket cpkg = current.build();
+                            TcpPacket npkg = next.build();
+                            current.ack(cpkg.getHeader().getAck() || npkg.getHeader().getAck());
+                            current.syn(cpkg.getHeader().getSyn() || npkg.getHeader().getSyn());
+                            current.psh(cpkg.getHeader().getPsh() || npkg.getHeader().getPsh());
+                            current.fin(cpkg.getHeader().getFin() || npkg.getHeader().getFin());
+                        } else {
+                            int size = wndToUse - payload.length;
+                            payload = Arrays.copyOf(payload, payload.length + size);
+                            System.arraycopy(np, 0, payload, payload.length - size, size);
+                            next.payloadBuilder(UnknownPacket.newPacket(np, size, np.length - size).getBuilder());
+                        }
+                    } else {
                         break;
                     }
-                    if (payload.length + np.length <= wndToUse) {
-                        sndQueue.poll();
-                        if (np.length > 0) {
-                            payload = Arrays.copyOf(payload, payload.length + np.length);
-                            System.arraycopy(np, 0, payload, payload.length - np.length, np.length);
-                        }
-                        TcpPacket cpkg = current.build();
-                        TcpPacket npkg = next.build();
-                        current.ack(cpkg.getHeader().getAck() || npkg.getHeader().getAck());
-                        current.syn(cpkg.getHeader().getSyn() || npkg.getHeader().getSyn());
-                        current.psh(cpkg.getHeader().getPsh() || npkg.getHeader().getPsh());
-                        current.fin(cpkg.getHeader().getFin() || npkg.getHeader().getFin());
-                    } else {
-                        int size = wndToUse - payload.length;
-                        payload = Arrays.copyOf(payload, payload.length + size);
-                        System.arraycopy(np, 0, payload, payload.length - size, size);
-                        next.payloadBuilder(UnknownPacket.newPacket(np, size, np.length - size).getBuilder());
-                    }
-                } else {
-                    break;
                 }
             }
-        }
-        current.sequenceNumber(sndNxt)
-                .acknowledgmentNumber(rcvNxt)
-                .payloadBuilder(payload.length > 0 ? UnknownPacket.newPacket(payload, 0, payload.length).getBuilder() : null);
+            current.sequenceNumber(sndNxt)
+                    .acknowledgmentNumber(rcvNxt)
+                    .payloadBuilder(payload.length > 0 ? UnknownPacket.newPacket(payload, 0, payload.length).getBuilder() : null);
 
-        sndNxt += determineIncrement(current.build());
+            sndNxt += determineIncrement(current.build());
 
-        trace(ipHeader, current.build(), false);
+            trace(ipHeader, current.build(), false);
 
-        final IpV4Packet ipPacket = new IpV4Packet.Builder()
-                .version(IpVersion.IPV4)
-                .tos(((IpV4Packet.IpV4Header) ipHeader).getTos())
-                .ttl(((IpV4Packet.IpV4Header) ipHeader).getTtl())
-                .identification(((IpV4Packet.IpV4Header) ipHeader).getIdentification())
-                .fragmentOffset(((IpV4Packet.IpV4Header) ipHeader).getFragmentOffset())
-                .srcAddr(((IpV4Packet.IpV4Header) ipHeader).getDstAddr())
-                .dstAddr(((IpV4Packet.IpV4Header) ipHeader).getSrcAddr())
-                .protocol(IpNumber.TCP)
-                .paddingAtBuild(true)
-                .correctLengthAtBuild(true)
-                .correctChecksumAtBuild(true)
-                .payloadBuilder(current)
-                .build();
+            final IpV4Packet ipPacket = new IpV4Packet.Builder()
+                    .version(IpVersion.IPV4)
+                    .tos(((IpV4Packet.IpV4Header) ipHeader).getTos())
+                    .ttl(((IpV4Packet.IpV4Header) ipHeader).getTtl())
+                    .identification(((IpV4Packet.IpV4Header) ipHeader).getIdentification())
+                    .fragmentOffset(((IpV4Packet.IpV4Header) ipHeader).getFragmentOffset())
+                    .srcAddr(((IpV4Packet.IpV4Header) ipHeader).getDstAddr())
+                    .dstAddr(((IpV4Packet.IpV4Header) ipHeader).getSrcAddr())
+                    .protocol(IpNumber.TCP)
+                    .paddingAtBuild(true)
+                    .correctLengthAtBuild(true)
+                    .correctChecksumAtBuild(true)
+                    .payloadBuilder(current)
+                    .build();
 
-        final ChannelPromise promise = parent.newPromise();
-        parent.writeAndFlush(ipPacket, promise);
+            final ChannelPromise promise = parent.newPromise();
+            parent.writeAndFlush(ipPacket, promise);
 //        promise.awaitUninterruptibly();
+        }
         return true;
     }
 
@@ -619,20 +638,20 @@ public class TcpConnection {
      * @param header TCP header.
      * @return 发送窗口大小
      */
-    private int determineSndMss(final TcpHeader header) {
-        int sndMss = mtu - IP_HEADER_SIZE - TCP_HEADER_SIZE;
+    private short determineSndMss(final TcpHeader header) {
+        short sndMss = mtu - IP_HEADER_SIZE - TCP_HEADER_SIZE;
         final List<TcpPacket.TcpOption> options = header.getOptions();
         for (TcpPacket.TcpOption option : options) {
             final TcpOptionKind kind = option.getKind();
             if (TcpOptionKind.MAXIMUM_SEGMENT_SIZE.equals(kind)) {
-                sndMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
+                sndMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSize();
             }
         }
         return sndMss;
     }
 
     /**
-     * 只应该在握手阶段前两个请求中调用.
+     * 只应该在握手阶段SYN报文中出现window scale, 被动方只能在收到带window scale选项的SYN请求时才能发送.
      *
      * @param tcpHeader
      * @return
@@ -674,11 +693,6 @@ public class TcpConnection {
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true);
-        final List<TcpPacket.TcpOption> options = Lists.newArrayList();
-        if (windowScaleEnabled) {
-            options.add(new TcpWindowScaleOption.Builder().shiftCount(sndWndShiftCount).build());
-        }
-        builder.options(options);
 
         return builder;
     }
@@ -788,8 +802,21 @@ public class TcpConnection {
                     final ByteBuf buf = (ByteBuf) msg;
                     final byte[] payload = ByteBufUtil.getBytes(buf);
 
-                    UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, 0, payload.length).getBuilder();
-                    write(newPacket(header, src.getAddress(), dst.getAddress()).ack(true).psh(true).payloadBuilder(builder), true);
+                    // tcp data len = tcp snd.mss - tcp options.len
+                    // 超过 tcp data len 不切割, 会使用TSO功能通过网卡来分段.
+                    final int dataMaxLen = sndMss;
+                    for (int i = 0; i < payload.length - 1; i += dataMaxLen) {
+                        final int maxEndIndex = i + dataMaxLen;
+                        if (maxEndIndex >= payload.length) {
+                            final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, i, payload.length - i).getBuilder();
+                            write(newPacket(header, src.getAddress(), dst.getAddress()).ack(true).psh(true).payloadBuilder(builder), true);
+                        } else {
+                            UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, i, dataMaxLen).getBuilder();
+                            write(newPacket(header, src.getAddress(), dst.getAddress()).ack(true).payloadBuilder(builder), true);
+                        }
+                    }
+//                    UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, 0, payload.length).getBuilder();
+//                    write(newPacket(header, src.getAddress(), dst.getAddress()).ack(true).psh(true).payloadBuilder(builder), true);
                 } finally {
                     ReferenceCountUtil.release(msg);
                 }
