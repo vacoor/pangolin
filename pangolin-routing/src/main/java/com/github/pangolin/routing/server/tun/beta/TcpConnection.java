@@ -648,6 +648,10 @@ public class TcpConnection {
      * @return 发送窗口大小
      */
     private short determineSndMss(final TcpHeader header) {
+        /*-
+         * TODO This value can be based on the maximum transmission unit of the network, the path MTU discovery ( RFC1191, RFC4821 ) algorithm.
+         * if the MSS option is not used, it is 536 bytes ( RFC1122 ). The size does not include the TCP/IP headers and options.
+         */
         short sndMss = MINIMUM_MTU - IP_HEADER_SIZE - TCP_HEADER_SIZE;
         final List<TcpPacket.TcpOption> options = header.getOptions();
         for (TcpPacket.TcpOption option : options) {
