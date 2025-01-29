@@ -56,7 +56,7 @@ public class TcpConnection {
         ESTABLISHED;
     }
 
-    private final short mtu = MINIMUM_MTU;
+    private final short mtu = DEFAULT_MTU;
 
     /*-
      *              |<------- TCP recv window ------->|
@@ -221,12 +221,17 @@ public class TcpConnection {
                 // connection accept: send SYN-ACK
                 final TcpPacket.Builder builder = newPacket(tcpHeader, srcAddr, dstAddr).ack(true).syn(true);
                 final List<TcpPacket.TcpOption> options = Lists.newArrayList();
+                // FIXME
+                options.add(new TcpMaximumSegmentSizeOption.Builder().maxSegSize((short) (mtu - IP_HEADER_SIZE - TCP_HEADER_SIZE)).correctLengthAtBuild(true).build());
+
                 if (windowScaleEnabled && sndWndShiftCount > 0 && rcvWndShiftCount > 0) {
                     // 只能在接收到带window scale的SYN请求时才能发送.
-                    options.add(new TcpWindowScaleOption.Builder().shiftCount(rcvWndShiftCount).build());
+                    options.add(TcpNoOperationOption.getInstance());
+                    options.add(new TcpWindowScaleOption.Builder().shiftCount(rcvWndShiftCount).correctLengthAtBuild(true).build());
                 }
 
-                options.add(new TcpMaximumSegmentSizeOption.Builder().maxSegSize((short) (mtu - IP_HEADER_SIZE - TCP_HEADER_SIZE)).build());
+//                    options.add(TcpEndOfOptionList.getInstance());
+
                 builder.options(options);
                 write0(builder, true);
             } else {
@@ -523,7 +528,9 @@ public class TcpConnection {
         }
         if (now) {
             if (null != delayAckTask) {
-                delayAckTask.cancel(true);
+                // pointer being freed was not allocated
+//                delayAckTask.cancel(true);
+                delayAckTask.cancel(false);
                 delayAckTask = null;
             }
             flush();
@@ -605,9 +612,11 @@ public class TcpConnection {
                     .srcAddr(((IpV4Packet.IpV4Header) ipHeader).getDstAddr())
                     .dstAddr(((IpV4Packet.IpV4Header) ipHeader).getSrcAddr())
                     .protocol(IpNumber.TCP)
+
                     .paddingAtBuild(true)
                     .correctLengthAtBuild(true)
                     .correctChecksumAtBuild(true)
+
                     .payloadBuilder(current)
                     .build();
 
@@ -639,7 +648,7 @@ public class TcpConnection {
      * @return 发送窗口大小
      */
     private short determineSndMss(final TcpHeader header) {
-        short sndMss = mtu - IP_HEADER_SIZE - TCP_HEADER_SIZE;
+        short sndMss = MINIMUM_MTU - IP_HEADER_SIZE - TCP_HEADER_SIZE;
         final List<TcpPacket.TcpOption> options = header.getOptions();
         for (TcpPacket.TcpOption option : options) {
             final TcpOptionKind kind = option.getKind();
@@ -812,7 +821,7 @@ public class TcpConnection {
                             write(newPacket(header, src.getAddress(), dst.getAddress()).ack(true).psh(true).payloadBuilder(builder), true);
                         } else {
                             UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, i, dataMaxLen).getBuilder();
-                            write(newPacket(header, src.getAddress(), dst.getAddress()).ack(true).payloadBuilder(builder), true);
+                            write(newPacket(header, src.getAddress(), dst.getAddress()).ack(true).payloadBuilder(builder), false);
                         }
                     }
 //                    UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, 0, payload.length).getBuilder();
@@ -830,6 +839,7 @@ public class TcpConnection {
                 public void operationComplete(final ChannelFuture future) throws Exception {
                     if (future.isSuccess()) {
                         if (State.ESTABLISHED.equals(state.get())) {
+                            // write now ??
                             write0(newPacket(header, src.getAddress(), dst.getAddress()).rst(true), true);
                             onDestroy();
                         }
