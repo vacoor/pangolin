@@ -8,7 +8,6 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.NetUtil;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -161,8 +160,13 @@ public class TcpConnection {
     private final DnsEngine dnsEngine;
     private final SocketChannelFactory socketChannelFactory;
 
-    protected TcpConnection(final Channel parent, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+    volatile Channel channel;
+    int connTimeoutMs = 30 * 1000;
+    EventLoopGroup childGroup;
+
+    protected TcpConnection(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         this.parent = parent;
+        this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
         this.listen();
@@ -415,8 +419,8 @@ public class TcpConnection {
             } else {
                 final byte[] rawData = packet.getPayload().getRawData();
                 connectionRead(rawData);
+                write0(newPacket(header, srcAddr, dstAddr).ack(true), false);
             }
-            write0(newPacket(header, srcAddr, dstAddr).ack(true), false);
 
             if (this.state.compareAndSet(State.CLOSING, State.TIME_WAIT)) {
                 // 本端请求关闭
@@ -438,7 +442,7 @@ public class TcpConnection {
                     connectionFinish();
 
                     // 被动关闭, 第二次挥手, 上面已ACK.
-                    // write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
+                    write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
 
                     // 被动关闭, 第三次挥手, 需要等待数据写入结束.
                     while (flush()) {
@@ -452,7 +456,7 @@ public class TcpConnection {
                     // 触发到这里.
 
                     // 主动关闭, 第四次挥手, 上面已ACK.
-                    // write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
+                    write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
 
                     while (flush()) {
                     }
@@ -474,14 +478,14 @@ public class TcpConnection {
              * 数据段超出接收窗口左沿(客户端重传), ACK 客户端未正确收到.
              * Out-Of-Window, 立即 ACK.
              */
-            log.warn("[TCP Retransmission]");
+            log.warn("[TCP Retransmission] Seq={}, Size={}, rcv.nxt={}", sequence, size, rcvNxt);
             write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
         } else if (sequence >= rcvNxt + rcvWnd) {
             /*-
              * 数据段超出接收窗口右沿(Out-Of-Window), 比如零窗口探测报文段.
              * Out-Of-Window, 立即 ACK.
              */
-            log.warn("[OOW] ");
+            log.warn("[OOW] Seq={}, Size={}, rcv.nxt={}, rcv.wnd={}", sequence, size, rcvNxt, rcvWnd);
             write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
         } else if (sequence < rcvNxt && sequence + size > rcvNxt) {
             /*-
@@ -518,6 +522,9 @@ public class TcpConnection {
     public void write(TcpPacket.Builder packet, boolean now) {
         // XXX CHECK;
         if (State.ESTABLISHED.equals(state.get())) {
+            if (packet.build().length() == 0) {
+                log.warn("[WARN] XXXXXXXX");
+            }
             write0(packet, now);
         }
     }
@@ -698,9 +705,6 @@ public class TcpConnection {
                 .dstAddr(srcAddr)
                 .srcPort(header.getDstPort())
                 .dstPort(header.getSrcPort())
-//                .options(options)     // FIXME
-//                .newPacket(true)
-//                .syn(true)
                 .window((short) 65535)
 //                .window((short)1)
                 .paddingAtBuild(true)
@@ -802,13 +806,10 @@ public class TcpConnection {
     }
 
 
-    volatile Channel channel;
-    int connTimeoutMs = 30 * 1000;
-    EventLoopGroup group = new NioEventLoopGroup();
 
     private boolean connectionRequest(final InetSocketAddress src, final InetSocketAddress dst, TcpHeader header) {
         final InetSocketAddress resolved = resolve(dst);
-        final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, true, group, new ChannelInboundHandlerAdapter() {
+        final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, true, childGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                 try {
@@ -891,7 +892,7 @@ public class TcpConnection {
      * 对端数据发送完成.
      */
     private void connectionFinish() {
-        if (null != channel && channel.isActive()) {
+        if (null != channel && channel.isOpen()) {
             channel.close();
         }
     }
@@ -900,7 +901,7 @@ public class TcpConnection {
      * 正常关闭及异常关闭.
      */
     private void connectionInactive() {
-        if (null != channel && channel.isActive()) {
+        if (null != channel && channel.isOpen()) {
             channel.close();
         }
         onDestroy();

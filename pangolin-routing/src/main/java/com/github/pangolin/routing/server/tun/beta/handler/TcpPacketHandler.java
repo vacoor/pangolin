@@ -5,10 +5,14 @@ import com.github.pangolin.routing.server.fakedns.DnsEngine;
 import com.github.pangolin.routing.server.tun.beta.TcpConnection;
 import com.google.common.collect.Maps;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
+import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
+import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.net.InetAddress;
@@ -18,6 +22,7 @@ import java.util.Map;
 public class TcpPacketHandler extends IpPacketHandler {
     private final DnsEngine dnsEngine;
     private final SocketChannelFactory socketChannelFactory;
+    private final EventLoopGroup childGroup = new NioEventLoopGroup();
 
     private final Map<String, TcpConnection> sessionMap = Maps.newConcurrentMap();
 
@@ -40,7 +45,7 @@ public class TcpPacketHandler extends IpPacketHandler {
 
         final String sockKey = srcAddr.toString() + tcpSrcPort + dstAddr + tcpDstPort;
         if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
-            sessionMap.putIfAbsent(sockKey, new TcpConnection(ctx.channel(), dnsEngine, socketChannelFactory) {
+            sessionMap.putIfAbsent(sockKey, new TcpConnection(ctx.channel(), childGroup, dnsEngine, socketChannelFactory) {
                 @Override
                 protected void onDestroy() {
                     log.info("Destroy: {}", sockKey);
@@ -52,6 +57,33 @@ public class TcpPacketHandler extends IpPacketHandler {
         if (null != tcpConnection) {
             tcpConnection.receive(ipHeader, tcpPacket);
         } else {
+            final TcpPacket.Builder builder = new TcpPacket.Builder();
+            builder.srcAddr(dstAddr)
+                    .dstAddr(srcAddr)
+                    .srcPort(tcpDstPort)
+                    .dstPort(tcpSrcPort)
+                    .ack(true)
+                    .rst(true)
+                    .paddingAtBuild(true)
+                    .correctLengthAtBuild(true)
+                    .correctChecksumAtBuild(true);
+            final IpV4Packet ipPacket0 = new IpV4Packet.Builder()
+                    .version(IpVersion.IPV4)
+                    .tos(((IpV4Packet.IpV4Header) ipHeader).getTos())
+                    .ttl(((IpV4Packet.IpV4Header) ipHeader).getTtl())
+                    .identification(((IpV4Packet.IpV4Header) ipHeader).getIdentification())
+                    .fragmentOffset(((IpV4Packet.IpV4Header) ipHeader).getFragmentOffset())
+                    .srcAddr(((IpV4Packet.IpV4Header) ipHeader).getDstAddr())
+                    .dstAddr(((IpV4Packet.IpV4Header) ipHeader).getSrcAddr())
+                    .protocol(IpNumber.TCP)
+
+                    .paddingAtBuild(true)
+                    .correctLengthAtBuild(true)
+                    .correctChecksumAtBuild(true)
+
+                    .payloadBuilder(builder)
+                    .build();
+            ctx.writeAndFlush(ipPacket0);
             // RST
 //            throw new IllegalStateException();
         }
