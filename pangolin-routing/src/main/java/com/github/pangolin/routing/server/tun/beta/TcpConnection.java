@@ -135,7 +135,7 @@ public class TcpConnection {
     /**
      * slow start threshold.
      */
-    private int ssthresh;
+    private int ssthresh = 65535;
 
     private boolean windowScaleEnabled = true;
 
@@ -383,7 +383,7 @@ public class TcpConnection {
         rcvWndShiftCount = sndWndShiftCount;
         sndWnd = determineSndWnd(header);
         sndMss = determineSndMss(header);
-        cwnd = sndMss;
+        cwnd = 10 * sndMss;
 
         log.info("[SYN] snd.wnd = {}, snd.mss = {}", sndWnd, sndMss);
 
@@ -411,6 +411,11 @@ public class TcpConnection {
             // XXX 待完善 CLOSING 处理.
             sndUna = header.getAcknowledgmentNumber();
             sndWnd = determineSndWnd(header);
+
+            /*-
+             * 慢启动阶段(slow-start phase): cwnd = cwnd + 1 (SMSS)
+             * 拥塞避免阶段(congestion-avoidance phase): cwnd = cwnd + 1 (SMSS) / cwnd
+             */
             cwnd = cwnd < ssthresh ? cwnd + sndMss : cwnd + sndMss / cwnd;
 
             Packet payload = packet.getPayload();
@@ -627,8 +632,7 @@ public class TcpConnection {
                     .payloadBuilder(current)
                     .build();
 
-            final ChannelPromise promise = parent.newPromise();
-            parent.writeAndFlush(ipPacket, promise);
+            final ChannelFuture promise = parent.writeAndFlush(ipPacket);
 //        promise.awaitUninterruptibly();
         }
         return true;
