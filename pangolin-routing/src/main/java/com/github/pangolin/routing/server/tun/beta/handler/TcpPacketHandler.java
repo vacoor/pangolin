@@ -43,7 +43,7 @@ public class TcpPacketHandler extends IpPacketHandler {
         final TcpPort tcpSrcPort = tcpHeader.getSrcPort();
         final TcpPort tcpDstPort = tcpHeader.getDstPort();
 
-        final String sockKey = srcAddr.toString() + tcpSrcPort + dstAddr + tcpDstPort;
+        final String sockKey = srcAddr.toString() + ":" + tcpSrcPort + " => " + dstAddr + ":" + tcpDstPort;
         if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
             sessionMap.putIfAbsent(sockKey, new TcpConnection(ctx.channel(), childGroup, dnsEngine, socketChannelFactory) {
                 @Override

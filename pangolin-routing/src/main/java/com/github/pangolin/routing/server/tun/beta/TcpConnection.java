@@ -23,6 +23,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -253,7 +254,7 @@ public class TcpConnection {
             check(tcpHeader, false, true);
             if (this.state.compareAndSet(State.SYN_RCVD, State.ESTABLISHED)) {
                 connectionActive();
-                tcpDataQueue(tcpPacket, ipHeader);
+                tcpDataQueueWrap(tcpPacket, ipHeader);
             } else {
                 throw new IllegalStateException();
             }
@@ -266,7 +267,7 @@ public class TcpConnection {
              * ACK: transmission.
              */
             check(tcpHeader, false, true);
-            tcpDataQueue(tcpPacket, ipHeader);
+            tcpDataQueueWrap(tcpPacket, ipHeader);
         }
         /*-
          * 被动关闭.
@@ -303,7 +304,7 @@ public class TcpConnection {
 
                 // XXX 待完善 CLOSING 处理.
                 // XXX 没 ACK 标记不应该处理 sndUna
-                tcpDataQueue(tcpPacket, ipHeader);
+                tcpDataQueueWrap(tcpPacket, ipHeader);
             } else {
                 // 主动关闭, 第二次挥手.
                 check(tcpHeader, false, true);
@@ -313,15 +314,15 @@ public class TcpConnection {
                 // https://github.com/steveLauwh/TCP-IP/blob/master/TCP/Open%20and%20Closed%20at%20the%20same%20time.md
                 log.info("[S] FIN_WAIT_1 -> FIN_WAIT_2");
                 this.state.compareAndSet(State.FIN_WAIT_1, State.FIN_WAIT_2);
-                tcpDataQueue(tcpPacket, ipHeader);
+                tcpDataQueueWrap(tcpPacket, ipHeader);
             }
 
         } else if (State.FIN_WAIT_2.equals(state)) {
             check(tcpHeader, false, true);
-            tcpDataQueue(tcpPacket, ipHeader);
+            tcpDataQueueWrap(tcpPacket, ipHeader);
         } else if (State.CLOSING.equals(state)) {
             check(tcpHeader, false, true);
-            tcpDataQueue(tcpPacket, ipHeader);
+            tcpDataQueueWrap(tcpPacket, ipHeader);
         } else if (State.TIME_WAIT.equals(state)) {
             throw new IllegalStateException("CLOSE WAIT");
         }
@@ -390,7 +391,7 @@ public class TcpConnection {
         this.ipHeader = ipHeader;
     }
 
-    private synchronized void tcpDataQueue(final TcpPacket packet, IpHeader ipHeader) throws IOException {
+    private synchronized void tcpDataQueueWrap(final TcpPacket packet, IpHeader ipHeader) throws IOException {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         /*-
@@ -401,6 +402,22 @@ public class TcpConnection {
         final TcpPacket.TcpHeader header = packet.getHeader();
         final int sequence = header.getSequenceNumber();
         final int size = determineIncrement(packet);
+
+        final int ackNum = header.getAcknowledgmentNumber();
+        if (ackNum == lastAck) {
+            lastAckDupCnt ++;
+        } else {
+            lastAckDupCnt = 0;
+        }
+        lastAck = ackNum;
+
+        if (lastAckDupCnt >= 3) {
+            log.info("[Fast Retransmit] found: {}.", lastAck & 0xFFFFFFFFL);
+            ssthresh = cwnd / 2;
+            fastRetransmit(lastAck);
+        }
+
+        cleanBefore(lastAck);
         if (sequence == rcvNxt) {
             /*-
              * 数据段序号正是期望的序号,
@@ -483,14 +500,14 @@ public class TcpConnection {
              * 数据段超出接收窗口左沿(客户端重传), ACK 客户端未正确收到.
              * Out-Of-Window, 立即 ACK.
              */
-            log.warn("[TCP Retransmission] Seq={}, Size={}, rcv.nxt={}", sequence, size, rcvNxt);
+            log.warn("[TCP Retransmission-ACK] Seq={}, Size={}, rcv.nxt={}", sequence & 0xFFFFFFFFL, size, rcvNxt & 0xFFFFFFFFL);
             write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
         } else if (sequence >= rcvNxt + rcvWnd) {
             /*-
              * 数据段超出接收窗口右沿(Out-Of-Window), 比如零窗口探测报文段.
              * Out-Of-Window, 立即 ACK.
              */
-            log.warn("[OOW] Seq={}, Size={}, rcv.nxt={}, rcv.wnd={}", sequence, size, rcvNxt, rcvWnd);
+            log.warn("[OOW] Seq={}, Size={}, rcv.nxt={}, rcv.wnd={}", sequence & 0xFFFFFFFFL, size, rcvNxt & 0xFFFFFFFFL, rcvWnd);
             write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
         } else if (sequence < rcvNxt && sequence + size > rcvNxt) {
             /*-
@@ -506,7 +523,7 @@ public class TcpConnection {
             try {
                 final byte[] bytes = Arrays.copyOfRange(rawBytes, rcvNxt - sequence, rawBytes.length);
 
-                log.warn("[TCP Retransmission] [TCP ACKed unseen segment]");
+                log.warn("[TCP Retransmission]");
                 connectionRead(bytes);
                 write0(newPacket(header, srcAddr, dstAddr).ack(true), false);
             } catch (RuntimeException ex) {
@@ -521,6 +538,7 @@ public class TcpConnection {
             // FIXME
             log.warn("[OFO]");
             // write0(newPacket(header, srcAddr, dstAddr, 0).newPacket(true).rst(true))
+            write0(newPacket(header, srcAddr, dstAddr).ack(true), true);
         }
     }
 
@@ -562,6 +580,7 @@ public class TcpConnection {
         final int usableSndWnd = sndUna + sndWnd - sndNxt;
         final int cwndToUse = sndUna + cwnd - sndNxt;
         // FIXME
+//        final int wndToUse = Math.min(usableSndWnd, cwndToUse);
         final int wndToUse = usableSndWnd;// Math.min(usableSndWnd, cwndToUse);
         log.debug("USABLE-WND = {}, CWND-To-USE = {}, USABLE-CWND = {}", usableSndWnd, cwndToUse, wndToUse);
 
@@ -574,8 +593,9 @@ public class TcpConnection {
         while (null != (current = sndQueue.poll())) {
             byte[] payload = null != current.getPayloadBuilder() ? current.getPayloadBuilder().build().getRawData() : new byte[0];
             if (payload.length > wndToUse) {
-                log.warn("Payload.lenth({}) > wndToUse({})", payload.length, wndToUse);
+                log.warn("Payload.lenth({}) > wndToUse({}), cwnd={}, snd.una={}, snd.nxt={}", payload.length, wndToUse, cwnd, sndUna, sndNxt);
                 // FIXME
+//                break;
             } else {
                 for (; ; ) {
                     final TcpPacket.Builder next = sndQueue.peek();
@@ -615,6 +635,7 @@ public class TcpConnection {
 
             trace(ipHeader, current.build(), false);
 
+            tcpWriteQueue.add(current);
             final IpV4Packet ipPacket = new IpV4Packet.Builder()
                     .version(IpVersion.IPV4)
                     .tos(((IpV4Packet.IpV4Header) ipHeader).getTos())
@@ -636,6 +657,42 @@ public class TcpConnection {
 //        promise.awaitUninterruptibly();
         }
         return true;
+    }
+
+    private volatile int lastAck;
+    private volatile int lastAckDupCnt = 0;
+    private final CopyOnWriteArrayList<TcpPacket.Builder> tcpWriteQueue = new CopyOnWriteArrayList<>();
+
+    private void cleanBefore(final int ack) {
+        tcpWriteQueue.removeIf(p -> p.build().getHeader().getSequenceNumber() < ack);
+    }
+
+    private void fastRetransmit(final int sequence) {
+        final Optional<TcpPacket.Builder> first = tcpWriteQueue.stream().filter(p -> p.build().getHeader().getSequenceNumber() == sequence).findFirst();
+        if (first.isPresent()) {
+            final IpV4Packet ipPacket = new IpV4Packet.Builder()
+                    .version(IpVersion.IPV4)
+                    .tos(((IpV4Packet.IpV4Header) ipHeader).getTos())
+                    .ttl(((IpV4Packet.IpV4Header) ipHeader).getTtl())
+                    .identification(((IpV4Packet.IpV4Header) ipHeader).getIdentification())
+                    .fragmentOffset(((IpV4Packet.IpV4Header) ipHeader).getFragmentOffset())
+                    .srcAddr(((IpV4Packet.IpV4Header) ipHeader).getDstAddr())
+                    .dstAddr(((IpV4Packet.IpV4Header) ipHeader).getSrcAddr())
+                    .protocol(IpNumber.TCP)
+
+                    .paddingAtBuild(true)
+                    .correctLengthAtBuild(true)
+                    .correctChecksumAtBuild(true)
+
+                    .payloadBuilder(first.get().acknowledgmentNumber(rcvNxt))
+                    .build();
+            log.info("[Fast Retransmit] will transmit.");
+            trace(ipHeader, first.get().build(), false);
+            parent.writeAndFlush(ipPacket);
+        } else {
+            //
+            log.error("FastRetranst error");
+        }
     }
 
     /**
@@ -757,9 +814,9 @@ public class TcpConnection {
             buff.replace(buff.length() - 1, buff.length(), "] ").insert(len, " [");
         }
 
-        final boolean useRelative = true;
-        int sequence = tcpHeader.getSequenceNumber();
-        int acknowledgment = tcpHeader.getAcknowledgmentNumber();
+        final boolean useRelative = false;
+        long sequence = tcpHeader.getSequenceNumberAsLong();
+        long acknowledgment = tcpHeader.getAcknowledgmentNumberAsLong();
         if (useRelative) {
             final boolean syn = tcpHeader.getSyn();
             if (inbound) {
