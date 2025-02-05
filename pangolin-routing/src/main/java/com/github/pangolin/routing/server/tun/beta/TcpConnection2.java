@@ -2,37 +2,45 @@ package com.github.pangolin.routing.server.tun.beta;
 
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
-import com.github.pangolin.routing.util.SocketUtils;
 import com.google.common.collect.Lists;
+import freework.util.Bytes;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
-import io.netty.util.NetUtil;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.EventLoopGroup;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket.IpHeader;
-import org.pcap4j.packet.*;
+import org.pcap4j.packet.IpV4Packet;
+import org.pcap4j.packet.Packet;
+import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
+import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.TcpPacket.TcpOption;
-import org.pcap4j.packet.factory.PacketFactories;
+import org.pcap4j.packet.TcpWindowScaleOption;
+import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
-import org.pcap4j.packet.namednumber.TcpOptionKind;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.security.SecureRandom;
+import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-
-import static org.pcap4j.packet.namednumber.TcpOptionKind.MAXIMUM_SEGMENT_SIZE;
-import static org.pcap4j.packet.namednumber.TcpOptionKind.WINDOW_SCALE;
 
 @Slf4j
 public class TcpConnection2 {
@@ -50,26 +58,26 @@ public class TcpConnection2 {
     private static final short TCP_HEADER_SIZE = 20;
 
     /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c">tcp.c</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp_states.h">tcp_states.h</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.c">tcp.c</a>
      */
     enum State {
+
+        /**
+         * connection established.
+         */
+        TCP_ESTABLISHED,
+
         /**
          * sent a connection request, waiting for ack.
          */
         TCP_SYN_SENT,
-
-        TCP_LISTEN,
 
         /**
          * received a connection request, sent ack,
          * waiting for final ack in three-way handshake.
          */
         TCP_SYN_RECV,
-
-        /**
-         * connection established.
-         */
-        TCP_ESTABLISHED,
 
         /**
          * our side has shutdown, waiting to complete
@@ -84,12 +92,6 @@ public class TcpConnection2 {
         TCP_FIN_WAIT2,
 
         /**
-         * both sides have shutdown but we still have
-         * data we have to finish sending.
-         */
-        TCP_CLOSING,
-
-        /**
          * timeout to catch resent junk before entering
          * closed, can only be entered from FIN_WAIT2
          * or CLOSING.  Required because the other end
@@ -97,6 +99,11 @@ public class TcpConnection2 {
          * to retransmit the data packet (which we ignore).
          */
         TCP_TIME_WAIT,
+
+        /**
+         * socket is finished.
+         */
+        TCP_CLOSE,
 
         /**
          * remote side has shutdown and is waiting for
@@ -112,10 +119,21 @@ public class TcpConnection2 {
          */
         TCP_LAST_ACK,
 
+        TCP_LISTEN,
+
         /**
-         * socket is finished.
+         * both sides have shutdown but we still have
+         * data we have to finish sending.
          */
-        TCP_CLOSE;
+        TCP_CLOSING,
+
+
+        TCP_NEW_SYN_RECV,
+
+        TCP_BOUND_INACTIVE,
+
+        TCP_MAX_STATES
+
     }
 
     private final short mtu = DEFAULT_MTU;
@@ -126,12 +144,12 @@ public class TcpConnection2 {
      *  --------------------------------------------------------------------
      * | .. | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 |  15  | ...
      *  --------------------------------------------------------------------
-     * |  sent and  |                                 | can't receive until |
-     * |acknowledged|                                 |    window moves     |
-     *              ^                                 ^
-     *              |-closes->              <-shrinks-|-opens->
+     * |  sent and  | sent and not  |                 | can't receive until |
+     * |acknowledged| acknowledged  |                 |    window moves     |
+     *              ^               ^                 ^
+     *              |-closes->   rcv.nxt    <-shrinks-|-opens->
      *          left edge                        right edge
-     *          (rcv.nxt)                    (rcv.nxt + rcv.wnd)
+     *          (rcv.wup)                    (rcv.up + rcv.wnd)
      *
      */
 
@@ -191,7 +209,7 @@ public class TcpConnection2 {
 
     private byte rcvWndShiftCount;
 
-    private short sndMss;
+    private short sndMss = 1460;
 
     private int cwnd;
 
@@ -226,7 +244,7 @@ public class TcpConnection2 {
     private final DnsEngine dnsEngine;
     private final SocketChannelFactory socketChannelFactory;
 
-    volatile Channel channel;
+    volatile Channel child;
     int connTimeoutMs = 30 * 1000;
     EventLoopGroup childGroup;
 
@@ -311,7 +329,6 @@ public class TcpConnection2 {
     }
 
 
-
     private TcpPacket.Builder newPacket(final TcpHeader header, final InetAddress srcAddr, final InetAddress dstAddr) {
         final TcpPacket.Builder builder = new TcpPacket.Builder();
         builder.srcAddr(dstAddr)
@@ -332,15 +349,16 @@ public class TcpConnection2 {
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         final TcpHeader tcpHeader = tcpPacket.getHeader();
-        final String srcHostName = srcAddr.getHostName();
-        final String dstHostName = dstAddr.getHostName();
+        final String srcHostName = srcAddr.getHostAddress();
+        final String dstHostName = dstAddr.getHostAddress();
         final int srcPort = tcpHeader.getSrcPort().valueAsInt();
         final int dstPort = tcpHeader.getDstPort().valueAsInt();
 
         final StringBuilder buff = new StringBuilder()
                 .append(inbound ? srcHostName : dstHostName).append(":").append(srcPort)
                 .append(" => ")
-                .append(inbound ? dstHostName : srcHostName).append(":").append(dstPort);
+                .append(inbound ? dstHostName : srcHostName).append(":").append(dstPort)
+                ;
 
         final int len = buff.length();
         if (tcpHeader.getFin()) {
@@ -366,17 +384,19 @@ public class TcpConnection2 {
             buff.replace(buff.length() - 1, buff.length(), "] ").insert(len, " [");
         }
 
-        final boolean useRelative = false;
+        final boolean useRelative = true;
         long sequence = tcpHeader.getSequenceNumberAsLong();
         long acknowledgment = tcpHeader.getAcknowledgmentNumberAsLong();
         if (useRelative) {
+            final long rcv_isn_l = rcv_isn & 0xFFFFFFFFL;
+            final long snt_isn_l = snt_isn & 0xFFFFFFFFL;
             final boolean syn = tcpHeader.getSyn();
             if (inbound) {
-                sequence -= !syn ? rcvIsn : sequence;
-                acknowledgment -= !syn ? sndIsn : acknowledgment - 1;
+                sequence -= !syn ? rcv_isn_l : sequence;
+                acknowledgment -= !syn ? snt_isn_l : acknowledgment - 1;
             } else {
-                sequence -= !syn ? sndIsn : sequence;
-                acknowledgment -= !syn ? rcvIsn : acknowledgment - 1;
+                sequence -= !syn ? snt_isn_l : sequence;
+                acknowledgment -= !syn ? rcv_isn_l : acknowledgment - 1;
             }
         }
 
@@ -385,9 +405,15 @@ public class TcpConnection2 {
             buff.append(" Ack=").append(acknowledgment);
         }
 
-        final Packet payload = tcpPacket.getPayload();
-        final int payloadLen = null != payload ? payload.length() : 0;
+        final int payloadLen = tcpPacket.length() - tcpHeader.length();
         buff.append(" Len=").append(payloadLen);
+
+        /*
+        final Packet payload = tcpPacket.getPayload();
+        if (null != payload) {
+            buff.append(" ").append(Bytes.toString(payload.getRawData()));
+        }
+        */
 
         log.info(buff.toString());
     }
@@ -404,6 +430,9 @@ public class TcpConnection2 {
 
     }
 
+    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L243
+    /* TCP initial congestion window as per rfc6928 */
+    private static final int TCP_INIT_CWND = 10;
 
     private static final byte TCP_MAX_WSCALE = 14;
 
@@ -417,6 +446,7 @@ public class TcpConnection2 {
     private int rcv_wnd = 65535;
     private int rcv_wup;
     private int rcv_nxt;
+    private int copied_seq;
 
     private byte rcv_wscale = 6;
 
@@ -426,10 +456,15 @@ public class TcpConnection2 {
     private int snd_una;
     private int snd_wnd;
     private int snd_nxt;
+    private int snd_up;
+    private int snd_sml;
 
     private int write_seq;
+    private int pushed_seq;
 
     private int packets_out;
+
+    private int sk_shutdown;
 
     // https://www.cnblogs.com/wanpengcoder/p/11751763.html
 
@@ -458,6 +493,7 @@ public class TcpConnection2 {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6743">tcp_rcv_state_process</a>
      */
     boolean tcp_rcv_state_process(final IpHeader ipHdr, final TcpPacket skb) throws IOException {
+        trace(ipHdr, skb, true);
         final TcpHeader th = skb.getHeader();
 
         switch (state.get()) {
@@ -503,9 +539,10 @@ public class TcpConnection2 {
             return true;
         }
 
-        trace(ipHdr, skb, true);
 
-        tcp_validate_incoming(skb);
+        if (!tcp_validate_incoming(skb)) {
+            return false;
+        }
 
         /* step 5: check the ACK field */
         tcp_ack(skb.getHeader());
@@ -513,6 +550,8 @@ public class TcpConnection2 {
 
         switch (state.get()) {
             case TCP_SYN_RECV:
+
+                tcp_init_transfer(skb);
 
                 // tcp_init_transfer (mtu, 拥塞控制)
                 state.set(State.TCP_ESTABLISHED);
@@ -526,13 +565,19 @@ public class TcpConnection2 {
                  * <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
                  * <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
                  */
-                rcv_wup = rcv_nxt = rcv_isn + 1;
-                /* snd_up = */ snd_una = snd_nxt = snt_isn + 1;
+                rcv_wup = copied_seq = rcv_nxt = rcv_isn + 1;
+                /* snd_up = */
+                snd_sml = snd_una = snd_nxt = snd_up = snt_isn + 1;
 
-                snd_una = th.getAcknowledgmentNumber();
+                // tcp_init_xmit_timers
+
+                write_seq = pushed_seq = snt_isn + 1;
+
+//                snd_una = th.getAcknowledgmentNumber();
                 snd_wnd = th.getWindow() << sndWscale;
 
                 tcp_initialize_rcv_mss();
+                child.config().setAutoRead(true);
                 break;
             case TCP_FIN_WAIT1:
                 if (snd_una != write_seq) {
@@ -551,7 +596,8 @@ public class TcpConnection2 {
             case TCP_LAST_ACK:
                 if (snd_una == write_seq) {
                     // tcp_update_metrics
-                    // tcp_done;
+                    tcp_done();
+                    return true;
                 }
                 break;
         }
@@ -564,6 +610,9 @@ public class TcpConnection2 {
             case TCP_CLOSE_WAIT:
             case TCP_CLOSING:
             case TCP_LAST_ACK:
+                if (!before(th.getSequenceNumber(), rcv_nxt)) {
+                    break;
+                }
                 // fallthrough
             case TCP_FIN_WAIT1:
             case TCP_FIN_WAIT2:
@@ -586,12 +635,64 @@ public class TcpConnection2 {
         //
     }
 
+    private void tcp_init_transfer(TcpPacket skb) {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6299
+        tcp_snd_cwnd_set(tcp_init_cwnd());
+        tcp_init_congestion_control();
+    }
+
+    private int snd_cwnd;
+
+    private void tcp_snd_cwnd_set(final int cwnd) {
+        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1317
+        snd_cwnd = cwnd;
+    }
+
+    private int tcp_init_cwnd() {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L1001
+        return TCP_INIT_CWND;
+    }
+
+    private void tcp_init_congestion_control() {
+    }
+
+    private static final int EPIPE = 32;
+    private static final int ECONNRESET = 104;
+
     /**
      * @param skb
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4530">tcp_reset</a>
      */
     void tcp_reset(final TcpPacket skb) {
-        // tcp_done_with_error
+        int err;
+        switch (state.get()) {
+            case TCP_CLOSE_WAIT:
+                err = EPIPE;
+                break;
+            case TCP_CLOSE:
+                return;
+            default:
+                err = ECONNRESET;
+        }
+        tcp_done_with_error(err);
+    }
+
+    private void tcp_done_with_error(int err) {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4515
+        tcp_done();
+    }
+
+    private void tcp_done() {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L4848
+        state.set(State.TCP_CLOSE);
+        log.warn("DONE");
+        // clear timer
+        // destroy
+        onDestroy();
+    }
+
+    protected void onDestroy() {
+
     }
 
     private boolean tcp_validate_incoming(final TcpPacket skb) {
@@ -599,10 +700,11 @@ public class TcpConnection2 {
         if (hdr.getRst()) {
             if (hdr.getSequenceNumber() == rcv_nxt || tcp_reset_check(skb)) {
                 // reset
+                tcp_reset(skb);
                 return false;
             }
         }
-        return false;
+        return true;
     }
 
     private boolean tcp_reset_check(final TcpPacket skb) {
@@ -626,25 +728,51 @@ public class TcpConnection2 {
             return;
         }
         // FIXME
-        tcp_write_xmit(1460, false);
+        tcp_write_xmit(1460, 0);
     }
 
     private void tcp_check_space() {
     }
 
-    private boolean tcp_write_xmit(int mss, final boolean pushOne) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2739
-
+    /**
+     * @param mss_now
+     * @param push_one
+     * @return
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2739">tcp_write_xmit</a>
+     */
+    private boolean tcp_write_xmit(int mss_now, final int push_one) {
         TcpPacket.Builder skb;
-        while (null != (skb = sndQueue.poll())) {
+        while (null != (skb = sndQueue.peek())) {
             TcpPacket build = skb.build();
             TcpHeader th = build.getHeader();
+
+            int cwnd_quota = tcp_cwnd_test();
+            log.warn("cwnd_quota={}", cwnd_quota);
+            if (cwnd_quota == 0) {
+                if (push_one == 2) {
+                    /* Force out a loss probe pkt. */
+                    cwnd_quota = 1;
+                } else {
+                    break;
+                }
+            }
+
+            skb = sndQueue.poll();
+
+            // cwnd_quota = min(cwnd_quota, tso_max_segs);
+
+            int missing_bytes = cwnd_quota * mss_now - skb.build().length();
+            if (missing_bytes > 0) {
+
+            }
+
+            log.warn("will send seq={}, end_seq={}", th.getSequenceNumber(), determineEndSeq(build));
 
             //
             if (th.getSequenceNumber() == determineEndSeq(build)) {
                 break;
             }
-            if (!tcp_transmit_skb(build)) {
+            if (tcp_transmit_skb(build)) {
                 break;
             }
             tcp_event_new_data_sent(build);
@@ -653,6 +781,30 @@ public class TcpConnection2 {
         return false;
     }
 
+    /**
+     * @return
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2086">tcp_cwnd_test</a>
+     */
+    private int tcp_cwnd_test() {
+        int in_flight = tcp_packets_in_flight();
+        int cwnd = tcp_snd_cwnd();
+        if (in_flight >= cwnd) {
+            return 0;
+        }
+
+        int halfcwnd = Math.max(cwnd >> 1, 1);
+        return Math.min(halfcwnd, cwnd - in_flight);
+    }
+
+    private int tcp_packets_in_flight() {
+        return 0;
+    }
+
+    /**
+     * @param skb
+     * @return
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1486">tcp_transmit_skb</a>
+     */
     private boolean tcp_transmit_skb(final TcpPacket skb) {
         __tcp_transmit_skb(skb, rcv_nxt);
         return false;
@@ -670,20 +822,20 @@ public class TcpConnection2 {
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true);
-                ;
+        ;
         if (th.getSyn()) {
             /*
              * RFC1323: The window in SYN & SYN/ACK segments
              * is never scaled.
              */
             buf.window((short) Math.min(rcv_wnd, 65535));
-                final List<TcpOption> options = Lists.newArrayList();
+            final List<TcpOption> options = Lists.newArrayList();
 //            if (wscale_ok) {
-                // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L902
-                options.add(new TcpWindowScaleOption.Builder()
-                        .shiftCount(rcv_wscale)
-                        .correctLengthAtBuild(true)
-                        .build());
+            // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L902
+            options.add(new TcpWindowScaleOption.Builder()
+                    .shiftCount(rcv_wscale)
+                    .correctLengthAtBuild(true)
+                    .build());
 //            }
             buf.options(options);
         } else {
@@ -706,6 +858,8 @@ public class TcpConnection2 {
 
                 .payloadBuilder(buf)
                 .build();
+
+        trace(ipPacket.getHeader(), buf.build(), false);
 
         parent.writeAndFlush(ipPacket);
 
@@ -786,7 +940,7 @@ public class TcpConnection2 {
         int in_flight = 0;
         int mss_cache = 1460;
         int send_win = tcp_wnd_end() - hdr.getSequenceNumber();
-        int cong_win = (tcp_snd_cwnd() - in_flight) *  mss_cache;
+        int cong_win = (tcp_snd_cwnd() - in_flight) * mss_cache;
 
         int limit = Math.min(send_win, cong_win);
         if (limit >= max_segs * mss_cache) {
@@ -798,8 +952,13 @@ public class TcpConnection2 {
         return true;
     }
 
+    /**
+     * @return
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1312">tcp_snd_cwnd</a>
+     */
     private int tcp_snd_cwnd() {
-        return snd_wnd - snd_una;
+        // FIXME
+        return snd_cwnd;
     }
 
     private int tcp_wnd_end() {
@@ -807,10 +966,10 @@ public class TcpConnection2 {
     }
 
     private void tcp_ack_snd_check(final IpHeader ipHdr, final TcpPacket skb) {
-//        if (!inet_csk_ack_scheduled()) {
+        if (!inet_csk_ack_scheduled()) {
             /* We sent a data segment already. */
-//            return;
-//        }
+            return;
+        }
         __tcp_ack_snd_check();
     }
 
@@ -836,6 +995,9 @@ public class TcpConnection2 {
     private long icsk_ack_ato = TCP_DELACK_MAX;
     private int icsk_ack_pending;
     private long icsk_ack_timeout;
+
+    private static final int sysctl_tcp_pingpong_thresh = 1;
+    private int icsk_ack_pingpong;
 
     private volatile Future<?> icsk_delack_timer;
 
@@ -865,7 +1027,6 @@ public class TcpConnection2 {
             /* If delack timer is about to expire, send ACK now. */
             if (icsk_ack_timeout <= System.currentTimeMillis() + (ato >> 2)) {
                 // send now.
-                log.warn("SEND NOW");
                 tcp_send_ack();
                 return;
             }
@@ -874,31 +1035,26 @@ public class TcpConnection2 {
             }
         }
 
-        log.warn("SEND BY TIMER");
-
         // FIXME smp_store_release
         icsk_ack_pending |= ICSK_ACK_TIMER | ICSK_ACK_SCHED;
 
         icsk_ack_timeout = timeout;
         // FIXME sk_reset_timer
         if (null != icsk_delack_timer && !icsk_delack_timer.isDone() && !icsk_delack_timer.isCancelled()) {
-            log.warn("CANCEL TIMER");
             icsk_delack_timer.cancel(false);
         }
-        log.warn("SCHEDULE TIMER");
         icsk_delack_timer = scheduler.schedule(new Runnable() {
             @Override
             public void run() {
 //                tcp_send_ack();
-                log.warn("DELACK_TIMER");
                 tcp_delack_timer();
             }
         }, timeout - System.currentTimeMillis(), TimeUnit.MILLISECONDS);
     }
 
     private void tcp_delack_timer() {
-       // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L358
-       //  https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L307
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L358
+        //  https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L307
         // https://www.cnblogs.com/wanpengcoder/p/11749449.html
         if (State.TCP_CLOSE.equals(state.get())) {
             return;
@@ -917,15 +1073,33 @@ public class TcpConnection2 {
         icsk_ack_pending &= ~ICSK_ACK_TIMER;
         if (inet_csk_ack_scheduled()) {
             // ...
-            log.warn("EXECUTE SEND TIMER");
             tcp_send_ack();
             // ...
         }
     }
 
+    /*-
+
+     */
+    void inet_csk_schedule_ack() {
+        // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L177
+        // 确保在适当的时候发送 ACK，以确认接收到数据
+        icsk_ack_pending |= ICSK_ACK_SCHED;
+    }
+
     private boolean inet_csk_ack_scheduled() {
         // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h
         return 0 != (icsk_ack_pending & ICSK_ACK_SCHED);
+    }
+
+    private void inet_csk_enter_pingpong_mode() {
+        // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L329
+        icsk_ack_pingpong = sysctl_tcp_pingpong_thresh;
+    }
+
+    private void inet_csk_exit_pingpong_mode() {
+        // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L335
+        icsk_ack_pingpong = 0;
     }
 
 
@@ -934,7 +1108,6 @@ public class TcpConnection2 {
     }
 
     /**
-     *
      * @param rcv_nxt
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4237">__tcp_send_ack</a>
      */
@@ -951,15 +1124,14 @@ public class TcpConnection2 {
                 .dstAddr(ipHeader.getSrcAddr())
                 .srcAddr(ipHeader.getDstAddr())
                 .dstPort(tcpSrcPort)
-                .srcPort(tcpDstPort)
-                ;
+                .srcPort(tcpDstPort);
 
         __tcp_transmit_skb(current.build(), rcv_nxt);
     }
 
     /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L97">tcp_acceptable_seq</a>
      * @return
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L97">tcp_acceptable_seq</a>
      */
     private int tcp_acceptable_seq() {
         if (tcp_wnd_end() >= snd_nxt
@@ -989,7 +1161,8 @@ public class TcpConnection2 {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
     private boolean conn_request(final IpHeader ipHdr, final TcpPacket skb) {
-        // snt_isn = initSeq()
+        inet_reqsk_alloc(ipHdr, skb);
+
         tcp_parse_options(skb, false);
 
         tcp_openreq_init(skb);
@@ -1004,15 +1177,113 @@ public class TcpConnection2 {
 
         // init rwin
         tcp_openreq_init_rwin(skb);
-//         FIXME ???
-//        rcv_wup = rcv_isn;
-
 
         // send_synack
         tcp_v4_send_synack(ipHdr, skb);
 
         return true;
     }
+
+    private void inet_reqsk_alloc(IpHeader ipHeader, TcpPacket skb) {
+//        if (true) {
+//            return;
+//        }
+        final InetAddress dst = resolve(ipHeader.getDstAddr());
+        final InetSocketAddress resolved = new InetSocketAddress(dst, skb.getHeader().getDstPort().valueAsInt());
+        final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+                try {
+                    final ByteBuf buf = (ByteBuf) msg;
+                    final byte[] payload = ByteBufUtil.getBytes(buf);
+
+                    // tcp data len = tcp snd.mss - tcp options.len
+                    // 超过 tcp data len 不切割, 会使用TSO功能通过网卡来分段.
+                    final int dataMaxLen = sndMss;
+                    for (int i = 0; i < payload.length - 1; i += dataMaxLen) {
+                        final int maxEndIndex = i + dataMaxLen;
+                        if (maxEndIndex >= payload.length) {
+                            final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, i, payload.length - i).getBuilder();
+                            tcp_sendmsg2(new TcpPacket.Builder().ack(true).psh(true).payloadBuilder(builder), true);
+                        } else {
+                            UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, i, dataMaxLen).getBuilder();
+                            tcp_sendmsg2(new TcpPacket.Builder().ack(true).psh(true).payloadBuilder(builder), false);
+                        }
+                    }
+                    log.warn("Flush");
+                    tcp_push_pending_frames();
+//                    UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, 0, payload.length).getBuilder();
+//                    write(newPacket(header, src.getAddress(), dst.getAddress()).ack(true).psh(true).payloadBuilder(builder), true);
+                } finally {
+                    ReferenceCountUtil.release(msg);
+                }
+            }
+        });
+
+        try {
+            child = cf.sync().channel();
+            log.warn("Connected");
+            child.closeFuture().addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(final ChannelFuture future) throws Exception {
+                    if (future.isSuccess()) {
+                        shutdown(SEND_SHUTDOWN);
+                        if (State.TCP_ESTABLISHED.equals(state.get())) {
+                            // write now ??
+//                            write0(newPacket(header, src.getAddress(), dst.getAddress()).rst(true), true);
+//                            onDestroy();
+                        }
+                    }
+                }
+            });
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private InetAddress resolve(InetAddress dst) {
+        if (true) {
+            try {
+                return InetAddress.getByName("139.196.84.154");
+            } catch (UnknownHostException e) {
+                e.printStackTrace();
+            }
+        }
+        return dst;
+    }
+
+    private void tcp_sendmsg() {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L1353
+        // lock
+        tcp_sendmsg_locked();
+        // unlock
+    }
+
+    private void tcp_sendmsg_locked() {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L1052
+    }
+
+    private synchronized void tcp_sendmsg2(TcpPacket.Builder skb, boolean flush) {
+        skb.sequenceNumber(write_seq);
+        skb.dstPort(tcpSrcPort).srcPort(tcpDstPort);
+        tcp_skb_entail(skb);
+        final Packet.Builder builder = skb.getPayloadBuilder();
+        if (null != builder) {
+            write_seq += builder.build().length();
+        }
+        if (flush) {
+            tcp_push_pending_frames();
+        }
+    }
+
+    void tcp_skb_entail(TcpPacket.Builder skb) {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L676
+        skb.sequenceNumber(write_seq);
+        skb.ack(true);
+        sndQueue.offer(skb);
+    }
+
+    //
 
     private void tcp_openreq_init_rwin(TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L422
@@ -1035,13 +1306,7 @@ public class TcpConnection2 {
                 .syn(true).ack(true)
                 .sequenceNumber(snt_isn)
                 .acknowledgmentNumber(rcv_nxt)
-                .window((short)Math.min(rcv_wnd, 65535))
-                ;
-
-
-        // XXX ???
-//        rcv_nxt = rcv_wup = rcv_isn + 1;
-//        snd_nxt = snt_isn + 1;
+                .window((short) Math.min(rcv_wnd, 65535));
 
         final List<TcpOption> options = Lists.newArrayList();
         if (wscale_ok) {
@@ -1068,6 +1333,9 @@ public class TcpConnection2 {
 
                 .payloadBuilder(current)
                 .build();
+
+        trace(ipPacket.getHeader(), current.build(), false);
+
         parent.writeAndFlush(ipPacket);
     }
 
@@ -1111,25 +1379,29 @@ public class TcpConnection2 {
         /* step 7: process the segment text */
         tcp_data_queue(skb);
 
-//        tcp_data_snd_check();
-//        tcp_ack_snd_check();
+        tcp_data_snd_check();
+        // tcp_ack_snd_check();
     }
 
     private void tcp_ack(final TcpHeader tcpHdr) {
+        int prior_snd_una = snd_una;
         final int ack = tcpHdr.getAcknowledgmentNumber();
-        if (ack <= snd_una) {
+        if (ack < prior_snd_una) {
             // OLD ACK
+            return;
         }
 
         /*-
          * If the ack includes data we haven't sent yet, discard
          * this segment (RFC793 Section 3.9).
          */
-        else if (ack >= snd_nxt) {
+        else if (ack > snd_nxt) {
             //
-        } else if (ack >= snd_una) {
-            tcp_ack_update_window(tcpHdr, ack);
+            return;
+        } else if (ack > prior_snd_una) {
         }
+
+        tcp_ack_update_window(tcpHdr, ack);
 
         // See if we can take anything off of the retransmit queue.
         // tcp_clean_rtx_queue
@@ -1187,8 +1459,9 @@ public class TcpConnection2 {
         inet_csk_schedule_ack();
 
         sk_data_ready();
-
-        consume(skb);
+        if (skb.length() - hdr.length() > 0) {
+            consume(skb);
+        }
 
         tcp_queue_rcv(skb);
 
@@ -1221,35 +1494,40 @@ public class TcpConnection2 {
     }
 
     private void tcp_fin() {
-        // final State state = this.state.get();
-        // switch (state) {
-        //     case TCP_SYN_RECV:
-        //     case TCP_ESTABLISHED:
-        //         /* Move to CLOSE_WAIT */
-        //         this.state.set(State.TCP_CLOSE_WAIT);
-        //         break;
-        //     case TCP_CLOSE_WAIT:
-        //     case TCP_CLOSING:
-        //         /* Received a retransmission of the FIN, do nothing. */
-        //         break;
-        //     case TCP_LAST_ACK:
-        //         /* RFC793: Remain in the LAST-ACK state. */
-        //         break;
-        //     case TCP_FIN_WAIT1:
-        //         /*-
-        //          * This case occurs when a simultaneous close
-        //          * happens, we must ack the received FIN and
-        //          * enter the CLOSING state.
-        //          */
-        //         tcp_send_ack(sk);
-        //         this.state.set(State.TCP_CLOSING);
-        //         break;
-        //     case TCP_FIN_WAIT2:
-        //         /* Received a FIN -- send ACK and enter TIME_WAIT. */
-        //         tcp_send_ack(sk);
-        //         tcp_time_wait(sk, State.TCP_TIME_WAIT, 0);
-        //         break;
-        // }
+        inet_csk_schedule_ack();
+
+        final State state = this.state.get();
+        switch (state) {
+            case TCP_SYN_RECV:
+            case TCP_ESTABLISHED:
+                /* Move to CLOSE_WAIT */
+                this.state.set(State.TCP_CLOSE_WAIT);
+                inet_csk_enter_pingpong_mode();
+                // FIXME
+                shutdown(SEND_SHUTDOWN);
+                break;
+            case TCP_CLOSE_WAIT:
+            case TCP_CLOSING:
+                /* Received a retransmission of the FIN, do nothing. */
+                break;
+            case TCP_LAST_ACK:
+                /* RFC793: Remain in the LAST-ACK state. */
+                break;
+            case TCP_FIN_WAIT1:
+                /*-
+                 * This case occurs when a simultaneous close
+                 * happens, we must ack the received FIN and
+                 * enter the CLOSING state.
+                 */
+                tcp_send_ack();
+                this.state.set(State.TCP_CLOSING);
+                break;
+            case TCP_FIN_WAIT2:
+                /* Received a FIN -- send ACK and enter TIME_WAIT. */
+                tcp_send_ack();
+                // tcp_time_wait(sk, State.TCP_TIME_WAIT, 0);
+                break;
+        }
     }
 
     void tcp_rcv_spurious_retrans(final TcpPacket skb) {
@@ -1260,21 +1538,12 @@ public class TcpConnection2 {
 
     }
 
-    /*-
-
-     */
-    void inet_csk_schedule_ack() {
-        // 确保在适当的时候发送 ACK，以确认接收到数据
-        // net/ipv4/inet_connection_sock.c
-//        write0(newPacket().ack(true), false);
-    }
 
     void sk_data_ready() {
 
     }
 
     void consume(final TcpPacket skb) throws IOException {
-        /*
         final TcpHeader hdr = skb.getHeader();
         final int seq = hdr.getSequenceNumber();
         byte[] bytes = skb.getPayload().getRawData();
@@ -1284,9 +1553,14 @@ public class TcpConnection2 {
         if (0 != from || to != bytes.length) {
             bytes = Arrays.copyOfRange(bytes, from, to);
         }
-        */
+        connectionRead(bytes);
+    }
 
-//        connectionRead(bytes);
+    private void connectionRead(final byte[] bytes) throws IOException {
+        if (null == child || !child.isOpen()) {
+            throw new IOException("Remote already closed");
+        }
+        child.writeAndFlush(Unpooled.wrappedBuffer(bytes));
     }
 
     /**
@@ -1297,7 +1571,7 @@ public class TcpConnection2 {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/core/secure_seq.c#L136">secure_tcp_seq</a>
      */
     private int initSeq(final IpHeader ipHdr, final TcpHeader tcpHdr) {
-        new SecureRandom().nextInt();
+//        new SecureRandom().nextInt();
         return tcpHdr.getSequenceNumber();
     }
 
@@ -1325,5 +1599,75 @@ public class TcpConnection2 {
 
     private boolean after(final int seq2, final int seq1) {
         return before(seq1, seq2);
+    }
+
+    // https://github.com/torvalds/linux/blob/master/include/net/sock.h#L1472
+    private static final int RCV_SHUTDOWN = 1;
+    private static final int SEND_SHUTDOWN = 2;
+    private static final int SHUTDOWN_MASK = 2;
+
+    private static final int TCPF_ESTABLISHED = 1 << State.TCP_ESTABLISHED.ordinal();
+    private static final int TCPF_CLOSE_WAIT = 1 << State.TCP_CLOSE_WAIT.ordinal();
+
+    /**
+     *	Shutdown the sending side of a connection. Much like close except
+     *	that we don't receive shut down or sock_set_flag(sk, SOCK_DEAD).
+     */
+    private void shutdown(final int how) {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L2979
+        if (0 == (how & SEND_SHUTDOWN)) {
+            return;
+        }
+        if (0 != ((1 << state.get().ordinal()) & (TCPF_ESTABLISHED | TCPF_CLOSE_WAIT))) {
+            /* Clear out any half completed packets.  FIN if needed. */
+            if (tcp_close_state()) {
+                tcp_send_fin();
+            }
+        }
+    }
+
+    private static final int TCP_STATE_MASK = 0xF;
+    private static final int TCP_ACTION_FIN = 1 << (State.TCP_CLOSE.ordinal());
+    private static final int[] new_state = new int[16];
+    {
+//        new_state[0 /* (Invalid) */] = State.TCP_CLOSE.ordinal();
+        new_state[State.TCP_ESTABLISHED.ordinal() + 1] = State.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
+        new_state[State.TCP_SYN_SENT.ordinal() + 1] = State.TCP_CLOSE.ordinal();
+        new_state[State.TCP_SYN_RECV.ordinal() + 1] = State.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
+        new_state[State.TCP_FIN_WAIT1.ordinal() + 1] = State.TCP_FIN_WAIT1.ordinal();
+        new_state[State.TCP_FIN_WAIT2.ordinal() + 1] = State.TCP_FIN_WAIT2.ordinal();
+        new_state[State.TCP_TIME_WAIT.ordinal() + 1] = State.TCP_CLOSE.ordinal();
+        new_state[State.TCP_CLOSE.ordinal() + 1] = State.TCP_CLOSE.ordinal();
+        new_state[State.TCP_CLOSE_WAIT.ordinal() + 1] = State.TCP_LAST_ACK.ordinal() | TCP_ACTION_FIN;
+        new_state[State.TCP_LAST_ACK.ordinal() + 1] = State.TCP_LAST_ACK.ordinal();
+        new_state[State.TCP_LISTEN.ordinal() + 1] = State.TCP_CLOSE.ordinal();
+        new_state[State.TCP_CLOSING.ordinal() + 1] = State.TCP_CLOSING.ordinal();
+        new_state[State.TCP_NEW_SYN_RECV.ordinal() + 1] = State.TCP_CLOSE.ordinal(); /* should not happen ! */
+    }
+
+    private boolean tcp_close_state() {
+        int next = new_state[state.get().ordinal() + 1];
+        int ns = next & TCP_STATE_MASK;
+
+        state.set(State.values()[ns]);
+        return 0 != (next & TCP_ACTION_FIN);
+    }
+
+
+    void tcp_send_fin() {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3578
+        TcpPacket.Builder skb = new TcpPacket.Builder()
+                .sequenceNumber(write_seq)
+                .ack(true).fin(true);
+        tcp_queue_skb(skb);
+        __tcp_push_pending_frames();
+    }
+
+    private void tcp_queue_skb(TcpPacket.Builder skb) {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498
+        // only for end enq
+        skb.dstPort(tcpSrcPort).srcPort(tcpDstPort).srcAddr(ipHeader.getDstAddr()).dstAddr(ipHeader.getSrcAddr());
+        write_seq = determineEndSeq(skb.build());
+        sndQueue.offer(skb);
     }
 }

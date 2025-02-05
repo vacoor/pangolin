@@ -49,7 +49,7 @@ public class TcpPacketHandler2 extends IpPacketHandler {
         final String sockKey = srcAddr.toString() + ":" + tcpSrcPort + " => " + dstAddr + ":" + tcpDstPort;
         if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
             sessionMap.putIfAbsent(sockKey, new TcpConnection2(ctx.channel(), childGroup, dnsEngine, socketChannelFactory) {
-//                @Override
+                @Override
                 protected void onDestroy() {
                     log.info("Destroy: {}", sockKey);
                     sessionMap.remove(sockKey);
