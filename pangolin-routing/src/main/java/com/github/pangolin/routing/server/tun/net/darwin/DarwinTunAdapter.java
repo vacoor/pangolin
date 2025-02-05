@@ -102,7 +102,8 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
                 (byte) (addressFamily >> 16),
                 (byte) (addressFamily >> 8),
                 (byte) addressFamily
-        }).put(packet).flip();
+        }).put(packet);
+        buf.flip();
 
         LibC.write(fd, buf, buf.remaining());
     }

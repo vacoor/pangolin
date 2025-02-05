@@ -3,6 +3,7 @@ package com.github.pangolin.routing.server.tun.beta.handler;
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
 import com.github.pangolin.routing.server.tun.beta.TcpConnection;
+import com.github.pangolin.routing.server.tun.beta.TcpConnection2;
 import com.google.common.collect.Maps;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoopGroup;
@@ -21,14 +22,14 @@ import java.net.InetAddress;
 import java.util.Map;
 
 @Slf4j
-public class TcpPacketHandler extends IpPacketHandler {
+public class TcpPacketHandler2 extends IpPacketHandler {
     private final DnsEngine dnsEngine;
     private final SocketChannelFactory socketChannelFactory;
     private final EventLoopGroup childGroup = new NioEventLoopGroup();
 
-    private final Map<String, TcpConnection> sessionMap = Maps.newConcurrentMap();
+    private final Map<String, TcpConnection2> sessionMap = Maps.newConcurrentMap();
 
-    public TcpPacketHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
+    public TcpPacketHandler2(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
         super(IpNumber.TCP);
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = factory;
@@ -47,15 +48,15 @@ public class TcpPacketHandler extends IpPacketHandler {
 
         final String sockKey = srcAddr.toString() + ":" + tcpSrcPort + " => " + dstAddr + ":" + tcpDstPort;
         if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
-            sessionMap.putIfAbsent(sockKey, new TcpConnection(ctx.channel(), childGroup, dnsEngine, socketChannelFactory) {
-                @Override
+            sessionMap.putIfAbsent(sockKey, new TcpConnection2(ctx.channel(), childGroup, dnsEngine, socketChannelFactory) {
+//                @Override
                 protected void onDestroy() {
                     log.info("Destroy: {}", sockKey);
                     sessionMap.remove(sockKey);
                 }
             });
         }
-        TcpConnection tcpConnection = sessionMap.get(sockKey);
+        TcpConnection2 tcpConnection = sessionMap.get(sockKey);
         if (null != tcpConnection) {
             tcpConnection.receive(ipHeader, tcpPacket);
         } else {
