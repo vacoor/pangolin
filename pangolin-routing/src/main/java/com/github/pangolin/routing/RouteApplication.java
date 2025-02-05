@@ -18,6 +18,7 @@ import com.github.pangolin.routing.server.tun.beta.channel.TunAddress;
 import com.github.pangolin.routing.server.tun.beta.channel.TunChannel;
 import com.github.pangolin.routing.server.tun.beta.handler.IpPacketCodec;
 import com.github.pangolin.routing.server.tun.beta.handler.TcpPacketHandler;
+import com.github.pangolin.routing.server.tun.beta.handler.TcpPacketHandler2;
 import com.github.pangolin.routing.stats.StatsAware;
 import com.github.pangolin.routing.stats.StatsUpstreamCombiner;
 import com.github.pangolin.routing.stats.StatsUpstreamFactory;
@@ -244,7 +245,7 @@ public class RouteApplication {
                         @Override
                         protected void initChannel(final Channel ch) throws Exception {
                             ch.pipeline().addLast(new IpPacketCodec());
-                            ch.pipeline().addLast(new TcpPacketHandler(dnsEngine, factory));
+                            ch.pipeline().addLast(new TcpPacketHandler2(dnsEngine, factory));
                         }
                     });
             final Channel ch = b.bind(new TunAddress(ifname)).addListener(new ChannelFutureListener() {
