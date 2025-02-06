@@ -78,7 +78,7 @@ public class TunChannel extends AbstractChannel {
         if (PlatformDependent.isOsx()) {
             device = DarwinTunAdapter.open(ifname, mtu);
         } else if (PlatformDependent.isWindows()) {
-            device = WindowsTunAdapter.open(ifname, "P", mtu);
+            device = WindowsTunAdapter.open(ifname, "Windows Proxy-Only Ethernet Adapter", mtu);
         } else {
             device = LinuxTunAdapter.open(ifname, mtu);
         }
