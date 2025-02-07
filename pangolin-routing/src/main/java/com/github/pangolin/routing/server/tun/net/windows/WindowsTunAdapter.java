@@ -1,5 +1,22 @@
 package com.github.pangolin.routing.server.tun.net.windows;
 
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WINTUN_ADAPTER_HANDLE;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WINTUN_SESSION_HANDLE;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunAllocateSendPacket;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunCloseAdapter;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunCreateAdapter;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunEndSession;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunGetAdapterLUID;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunGetReadWaitEvent;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunOpenAdapter;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunReceivePacket;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunReleaseReceivePacket;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunSendPacket;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunStartSession;
+import static com.sun.jna.platform.win32.Guid.GUID;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
+
 import com.github.pangolin.routing.server.tun.net.AbstractTunAdapter;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Pointer;
@@ -14,11 +31,6 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.List;
-
-import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.*;
-import static com.sun.jna.platform.win32.Guid.GUID;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
 
 /**
  * Windows tun adapter based on <a href="https://www.wintun.net/">wintun</a>.
@@ -135,7 +147,7 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
     /* ********************** */
 
     public static WindowsTunAdapter open(final String name, final String type, final int mtu) throws IOException {
-        return open(name, type, GUID.newGuid(), mtu);
+        return open(name, type, (GUID) null, mtu);
     }
 
     public static WindowsTunAdapter open(final String name, final String type,
@@ -158,9 +170,13 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
         WINTUN_SESSION_HANDLE session = null;
         try {
             if (null == guid) {
-                adapter = WintunOpenAdapter(new WString(name));
-                if (null == adapter) {
-                    throw new IOException("Failed to open tun device " + name);
+                try {
+                    adapter = WintunOpenAdapter(new WString(name));
+                } catch (final LastErrorException err) {
+                    if (err.getErrorCode() != 1168) {
+                        throw err;
+                    }
+                    adapter = WintunCreateAdapter(new WString(name), new WString(type), GUID.newGuid());
                 }
             } else {
                 adapter = WintunCreateAdapter(new WString(name), new WString(type), guid);
