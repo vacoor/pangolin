@@ -202,7 +202,7 @@ public class TcpConnection2 {
      */
 
     private int rcv_isn;
-    private int rcv_wnd = 65535;
+    private int rcv_wnd = 65535 << 6;
     private int rcv_wup;
     private int rcv_nxt;
     private int copied_seq;
@@ -329,8 +329,6 @@ public class TcpConnection2 {
         SKB_DROP_REASON_TCP_ZEROWINDOW,
         SKB_DROP_REASON_TCP_OLD_DATA,
         SKB_DROP_REASON_TCP_OVERWINDOW;
-
-
     }
 
 
@@ -443,7 +441,7 @@ public class TcpConnection2 {
                 snd_sml = snd_una = snd_nxt = snd_up = snt_isn + 1;
 
 
-                // tcp_init_xmit_timers
+                tcp_init_xmit_timers();
 
                 write_seq = pushed_seq = snt_isn + 1;
 
@@ -643,7 +641,6 @@ public class TcpConnection2 {
 //            log.info("transmit MSS: {}", mss_now);
             int missing_bytes = cwnd_quota * mss_now - skb.build().length();
             if (missing_bytes > 0) {
-
             }
 
             //
@@ -770,7 +767,7 @@ public class TcpConnection2 {
 
 
     private int tcp_select_window() {
-//https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L260
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L260
         int old_win = rcv_wnd;
         int cur_win = tcp_receive_window();
         int new_win = __tcp_select_window();
@@ -1205,7 +1202,6 @@ public class TcpConnection2 {
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708
     private TcpPacket.Builder tcp_make_synack(final IpHeader ipHdr, final TcpPacket skb) {
-
         int mss = tcp_mss_clamp(dst_metric_advmss());
 
         final TcpPacket.Builder current = new TcpPacket.Builder()
@@ -1235,6 +1231,7 @@ public class TcpConnection2 {
                     .correctLengthAtBuild(true)
                     .build());
         }
+
         current.options(options);
 
         return current;
@@ -1919,6 +1916,28 @@ public class TcpConnection2 {
     /* Reordering timer */
     private static final int ICSK_TIME_REO_TIMEOUT = 6;
 
+    private Runnable icsk_retransmit_timer;
+    private Runnable icsk_delack_timer;
+    private Runnable sk_timer;
+
+    private void tcp_init_xmit_timers() {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L883
+        inet_csk_init_xmit_timers(
+                this::tcp_write_timer,
+                this::tcp_delack_timer,
+                this::tcp_keepalive_timer
+        );
+    }
+
+    private void inet_csk_init_xmit_timers(Runnable icsk_retransmit_handler,
+                                           Runnable icsk_delack_handler,
+                                           Runnable keepalive_handler) {
+        icsk_retransmit_timer = icsk_retransmit_handler;
+        icsk_delack_timer = icsk_delack_handler;
+        sk_timer = keepalive_handler;
+        icsk_pending = icsk_ack_pending = 0;
+    }
+
     private void tcp_reset_xmit_timer(final int what, long when, long max_when) {
         // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1423
         long tcp_pacing_delay = 0; // FIXME
@@ -1930,12 +1949,12 @@ public class TcpConnection2 {
         if (ICSK_TIME_RETRANS == what || ICSK_TIME_PROBE0 == what) {
             icsk_pending = 0;
             // stop icsk_retransmit_timer
-            sk_stop_timer(this::tcp_write_timer);
+            sk_stop_timer(icsk_retransmit_timer);
         }
         if (ICSK_TIME_DACK == what) {
             icsk_ack_pending = 0;
             icsk_ack_retry = 0;
-            sk_stop_timer(this::tcp_delack_timer);
+            sk_stop_timer(icsk_delack_timer);
         }
     }
 
@@ -1949,13 +1968,11 @@ public class TcpConnection2 {
             icsk_pending = what;
             icsk_timeout = jiffies() + when;
 
-            // FIXME reset icsk_retransmit_timer  timer
-            sk_reset_timer(this::tcp_write_timer, icsk_timeout);
+            sk_reset_timer(icsk_retransmit_timer, icsk_timeout);
         } else if (what == ICSK_TIME_DACK) {
             icsk_ack_pending |= ICSK_ACK_TIMER;
             icsk_ack_timeout = jiffies() + when;
-            // FIXME reset icsk_delack_timer  timer
-            sk_reset_timer(this::tcp_delack_timer, icsk_ack_timeout);
+            sk_reset_timer(icsk_delack_timer, icsk_ack_timeout);
         }
     }
 
@@ -2050,7 +2067,7 @@ public class TcpConnection2 {
 
         if (icsk_ack_timeout != timeout) {
             icsk_ack_timeout = timeout;
-            sk_reset_timer(this::tcp_delack_timer, timeout);
+            sk_reset_timer(icsk_delack_timer, timeout);
         }
     }
 
@@ -2117,6 +2134,9 @@ public class TcpConnection2 {
 
     /* *********** ]] DELAY ACK ************** */
 
+    private void tcp_keepalive_timer() {
+
+    }
 
     /* *********** WRITE TIMER [[ ************** */
 
@@ -2147,7 +2167,7 @@ public class TcpConnection2 {
             return;
         }
         if (icsk_timeout > jiffies()) {
-            sk_reset_timer(this::tcp_write_timer, icsk_timeout);
+            sk_reset_timer(icsk_retransmit_timer, icsk_timeout);
             return;
         }
 
@@ -2180,8 +2200,8 @@ public class TcpConnection2 {
 
     private int icsk_backoff;
     // FIXME
-//    private int icsk_rto = TCP_RTO_MIN;
-    private int icsk_rto = 50;
+    private int icsk_rto = TCP_RTO_MIN;
+//    private int icsk_rto = 50;
 
     private void tcp_rearm_rto() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3261
@@ -2817,6 +2837,7 @@ public class TcpConnection2 {
     private long usecs_to_jiffies(long us) {
         return msecs_to_jiffies(TimeUnit.MICROSECONDS.toMillis(us));
     }
+
     private long msecs_to_jiffies(long ms) {
         int MSEC_PER_SEC = 1000;
         if (0 == (HZ % MSEC_PER_SEC)) {
