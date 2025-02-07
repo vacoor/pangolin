@@ -7,24 +7,13 @@ import com.google.common.collect.Maps;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket.IpHeader;
-import org.pcap4j.packet.IpV4Packet;
-import org.pcap4j.packet.Packet;
-import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
-import org.pcap4j.packet.TcpNoOperationOption;
-import org.pcap4j.packet.TcpPacket;
+import org.pcap4j.packet.*;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.TcpPacket.TcpOption;
-import org.pcap4j.packet.TcpWindowScaleOption;
-import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.TcpPort;
@@ -36,14 +25,7 @@ import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -207,6 +189,7 @@ public class TcpConnection2 {
     private int rcv_nxt;
     private int copied_seq;
     private byte rcv_wscale = 6;
+    private int icsk_ack_rcv_mss;
 
 
     /*-
@@ -257,7 +240,6 @@ public class TcpConnection2 {
 
     private int packets_out;
 
-
     private ConcurrentLinkedQueue<TcpPacket.Builder> sk_write_queue = new ConcurrentLinkedQueue<>();
     private ConcurrentLinkedQueue<TcpPacket.Builder> tcp_rtx_queue = new ConcurrentLinkedQueue<>();
 
@@ -277,7 +259,7 @@ public class TcpConnection2 {
     private final SocketChannelFactory socketChannelFactory;
 
     private volatile Channel child;
-    private int connTimeoutMs = 30 * 1000;
+    private int connTimeoutMs = 5 * 1000;
 
     protected TcpConnection2(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         this.parent = parent;
@@ -354,6 +336,7 @@ public class TcpConnection2 {
     public static final int SKB_NOT_DROPPED_YET = 0;
 
     private int tcp_header_len;
+    private int icsk_ext_hdr_len;
 
     /**
      * @param skb
@@ -451,7 +434,10 @@ public class TcpConnection2 {
 
                 tcp_header_len = 20;
                 // mss_clamp =
+                icsk_ext_hdr_len = 0;
 
+                tcp_sync_mss(dst_mtu());
+                advmss = tcp_mss_clamp(dst_metric_advmss());
                 tcp_initialize_rcv_mss();
 
                 child.config().setAutoRead(true);
@@ -791,6 +777,7 @@ public class TcpConnection2 {
     }
 
     private int __tcp_select_window() {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3084
         return rcv_wnd;
     }
 
@@ -995,7 +982,6 @@ public class TcpConnection2 {
     private static final int TCP_MSS_DEFAULT = 536;
     private static final int TCP_MSS_MIN = 88;
 
-    private int icsk_ack_rcv_mss;
 
     private void tcp_initialize_rcv_mss() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L622
@@ -1160,8 +1146,7 @@ public class TcpConnection2 {
 
     private void tcp_openreq_init_rwin(TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L422
-        // tcp_mss_clamp();
-        int mss = 1460;
+        final int mss = advmss;
 
         tcp_select_initial_window();
     }
@@ -1245,6 +1230,10 @@ public class TcpConnection2 {
     int dst_metric_advmss() {
         // https://github.com/torvalds/linux/blob/master/include/net/dst.h#L182
         return 1500 - IP_HEADER_SIZE - TCP_HEADER_SIZE;
+    }
+
+    int dst_metric(int metric) {
+        return 0;
     }
 
 
@@ -2201,7 +2190,10 @@ public class TcpConnection2 {
     private int icsk_backoff;
     // FIXME
     private int icsk_rto = TCP_RTO_MIN;
-//    private int icsk_rto = 50;
+    //    private int icsk_rto = 50;
+    private int total_rto_recoveries;
+    private long rto_stamp;
+    private int total_rto;
 
     private void tcp_rearm_rto() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3261
@@ -2271,7 +2263,7 @@ public class TcpConnection2 {
             }
 
             tcp_enter_loss();
-            // tcp_update_rto_stats
+            tcp_update_rto_stats();
             if (tcp_retransmit_skb(tcp_rtx_queue_head(), 1) > 0) {
                 /* Retransmission failed because of local congestion,
                  * Let senders fight for local resources conservatively.
@@ -2306,6 +2298,17 @@ public class TcpConnection2 {
         }
     }
 
+
+    private void tcp_update_rto_stats() {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L436
+        if (0 == icsk_retransmits) {
+            total_rto_recoveries++;
+            rto_stamp = tcp_time_stamp_ms();
+        }
+        icsk_retransmits++;
+        total_rto++;
+    }
+
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L213">retransmits_timed_out</a>
      */
@@ -2320,7 +2323,7 @@ public class TcpConnection2 {
             if (0 != ((1 << state.get().ordinal()) & (TCPF_SYN_SENT | TCPF_SYN_RECV))) {
                 rto_base = tcp_timeout_init();
             }
-            timeout = tcp_model_timeout(boundary, timeout);
+            timeout = tcp_model_timeout(boundary, rto_base);
         }
 
         if (tcp_usec_ts != 0) {
@@ -2372,6 +2375,25 @@ public class TcpConnection2 {
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L241
     private int tcp_write_timeout() {
+        boolean expired = false;
+        int retry_until = sysctl_tcp_retries2;
+        if (0 != ((1 << state.get().ordinal()) & (TCPF_SYN_SENT | TCPF_SYN_RECV))) {
+            // FIXME
+        } else {
+            // ...
+            retry_until = sysctl_tcp_retries2;
+            // ...
+        }
+
+        if (!expired) {
+            expired = retransmits_timed_out(retry_until, icsk_user_timeout);
+        }
+
+        if (expired) {
+            /* Has it gone just too far? */
+            tcp_write_err();
+            return 1;
+        }
         return 0;
     }
 
