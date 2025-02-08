@@ -2080,7 +2080,7 @@ public class TcpConnection2 {
         if (tcp_may_update_window(ack, ack_seq, nwin)) {
             flag |= FLAG_WIN_UPDATE;
             if (nwin != snd_wnd) {
-                log.warn("[Window Update] {} -> {}", snd_wnd, nwin);
+//                log.warn("[Window Update] {} -> {}", snd_wnd, nwin);
                 snd_wnd = nwin;
             }
 
