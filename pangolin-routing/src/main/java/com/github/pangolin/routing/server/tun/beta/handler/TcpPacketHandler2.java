@@ -35,6 +35,11 @@ public class TcpPacketHandler2 extends IpPacketHandler {
     }
 
     @Override
+    public boolean acceptInboundMessage(final Object msg) throws Exception {
+        return super.acceptInboundMessage(msg) && IpVersion.IPV4.equals(((IpPacket) msg).getHeader().getVersion());
+    }
+
+    @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final IpPacket ipPacket) throws Exception {
         final IpHeader ipHeader = ipPacket.getHeader();
         final InetAddress srcAddr = ipHeader.getSrcAddr();
