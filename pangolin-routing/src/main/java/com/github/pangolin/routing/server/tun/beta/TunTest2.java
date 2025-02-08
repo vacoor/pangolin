@@ -4,7 +4,6 @@ import com.github.pangolin.routing.handler.internal.server.support.StandardSocke
 import com.github.pangolin.routing.server.tun.beta.channel.TunAddress;
 import com.github.pangolin.routing.server.tun.beta.channel.TunChannel;
 import com.github.pangolin.routing.server.tun.beta.handler.IpPacketCodec;
-import com.github.pangolin.routing.server.tun.beta.handler.TcpPacketHandler;
 import com.github.pangolin.routing.server.tun.beta.handler.TcpPacketHandler2;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;

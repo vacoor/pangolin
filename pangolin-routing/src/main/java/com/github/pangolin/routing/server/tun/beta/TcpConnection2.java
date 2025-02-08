@@ -1796,6 +1796,9 @@ public class TcpConnection2 {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L4848
         state.set(State.TCP_CLOSE);
         log.warn("DONE");
+        if (child.isOpen()) {
+            child.close();
+        }
         // clear timer
         // destroy
         onDestroy();
@@ -2474,7 +2477,7 @@ public class TcpConnection2 {
         }
 
         // if ....
-        if (true) {
+        if (false) {
             long us_or_ms1 = tcp_time_stamp_ts();
             long retrans_stamp0 = retrans_stamp != 0 ? retrans_stamp : tcp_skb_timestamp_ts(tcp_usec_ts, skb.build());
             long rtx_delta = us_or_ms1 - retrans_stamp0;
@@ -3013,6 +3016,9 @@ public class TcpConnection2 {
     /* *********** ]] ZERO WINDOW PROBE ************** */
 
     private void trace(final IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
+        if (true) {
+            return;
+        }
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         final TcpHeader tcpHeader = tcpPacket.getHeader();

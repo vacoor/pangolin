@@ -2,7 +2,6 @@ package com.github.pangolin.routing.server.tun.beta.handler;
 
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
-import com.github.pangolin.routing.server.tun.beta.TcpConnection;
 import com.github.pangolin.routing.server.tun.beta.TcpConnection2;
 import com.google.common.collect.Maps;
 import io.netty.channel.ChannelHandlerContext;
