@@ -611,6 +611,8 @@ public class TcpConnection2 {
 //                            write0(newPacket(header, src.getAddress(), dst.getAddress()).rst(true), true);
 //                            onDestroy();
                         }
+                    } else {
+                        log.warn("{} Connect error", resolved, future.cause());
                     }
                 }
             });
