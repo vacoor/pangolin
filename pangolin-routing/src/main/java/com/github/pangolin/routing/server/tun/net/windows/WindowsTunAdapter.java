@@ -8,6 +8,7 @@ import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.W
 import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunEndSession;
 import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunGetAdapterLUID;
 import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunGetReadWaitEvent;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunGetRunningDriverVersion;
 import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunOpenAdapter;
 import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunReceivePacket;
 import static com.github.pangolin.routing.server.tun.net.windows.jna.WintunLib.WintunReleaseReceivePacket;
@@ -142,6 +143,11 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
 
     public void flushInterfaceDns() {
         nix.flushInterfaceDns();
+    }
+
+    @Override
+    public String toString() {
+        return ifname + " WindowsTunAdapter (By Wintun " + WintunGetRunningDriverVersion() + ")";
     }
 
     /* ********************** */

@@ -11,6 +11,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.SocketAddress;
@@ -19,6 +20,7 @@ import java.nio.channels.AlreadyConnectedException;
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 public class TunChannel extends AbstractChannel {
     private static final ChannelMetadata METADATA = new ChannelMetadata(false);
     private static final String EXPECTED_TYPES =
@@ -82,6 +84,7 @@ public class TunChannel extends AbstractChannel {
         } else {
             device = LinuxTunAdapter.open(ifname, mtu);
         }
+        log.info("Open tun adapter: {}", device);
         ((AbstractTunAdapter) device).setInterfaceAddress(InterfaceAddressEx.of("198.18.0.1", 24));
     }
 
