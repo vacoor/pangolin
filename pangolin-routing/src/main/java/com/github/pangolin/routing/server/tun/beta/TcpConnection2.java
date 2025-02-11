@@ -407,6 +407,7 @@ public class TcpConnection2 {
                 return true;
         }
 
+
         tcp_mstamp_refresh();
 
         if (!th.getAck() && !th.getRst() && !th.getSyn()) {
@@ -1067,6 +1068,259 @@ public class TcpConnection2 {
 
     }
 
+    private int tcp_clean_rtx_queue(int prior_snd_una) {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3340
+        TcpPacket.Builder skb;
+        while (null != (skb = tcp_rtx_queue.peek())) {
+            TcpPacket tp = skb.build();
+            final TcpHeader th = tp.getHeader();
+            final int seq = th.getSequenceNumber();
+            final int end_seq = determineEndSeq(tp);
+            int acked_pcount = 1;
+            if (end_seq > snd_una) {
+                // FIXME
+                break;
+            }
+
+            packets_out -= acked_pcount;
+            /*
+            if (!th.getSyn()) {
+                flag |= FLAG_DATA_ACKED;
+            } else {
+                flag |= FLAG_SYN_ACKED;
+            }
+            */
+            tcp_rtx_queue.remove(skb);
+        }
+
+        if (snd_up <= prior_snd_una && prior_snd_una <= snd_una) {
+            snd_up = snd_una;
+        }
+        return 0;
+    }
+
+    /**
+     * @param skb
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5229">tcp_input.c</a>
+     */
+    private void tcp_data_queue(final TcpPacket skb) throws IOException {
+        final TcpHeader hdr = skb.getHeader();
+        final int seq = hdr.getSequenceNumber();
+        final int endSeq = determineEndSeq(skb);
+
+        if (seq == endSeq) {
+            return;
+        }
+
+        if (seq == rcv_nxt) {
+            if (tcp_receive_window() == 0) {
+                final int len = skb.length() - hdr.length();
+                if (!(0 >= len && hdr.getFin())) {
+                    out_of_window(skb, SkbDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
+                    return;
+                }
+            }
+
+            /* Ok. In sequence. In window. */
+            queue_and_out(skb);
+        } else if (!after(endSeq, rcv_nxt)) {
+            tcp_rcv_spurious_retrans(skb);
+            /* A retransmit, 2nd most common case.  Force an immediate ack. */
+            out_of_window(skb, SkbDropReason.SKB_DROP_REASON_TCP_OLD_DATA);
+        } else if (!before(seq, rcv_nxt + tcp_receive_window())) {
+            /* Out of window. F.e. zero window probe. */
+            out_of_window(skb, SkbDropReason.SKB_DROP_REASON_TCP_OVERWINDOW);
+        } else if (before(seq, rcv_nxt)) {
+            /* Partial packet, seq < rcv_next < end_seq */
+            if (tcp_receive_window() == 0) {
+                out_of_window(skb, SkbDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
+            } else {
+                // goto queue_and_out
+                queue_and_out(skb);
+            }
+        } else {
+            tcp_data_queue_ofo(skb);
+        }
+    }
+
+    private void queue_and_out(final TcpPacket skb) throws IOException {
+        final TcpHeader hdr = skb.getHeader();
+        // queue_and_out;
+
+        inet_csk_schedule_ack();
+
+        sk_data_ready();
+        if (skb.length() - hdr.length() > 0) {
+            consume(skb);
+        }
+
+        tcp_queue_rcv(skb);
+
+        if (skb.length() - hdr.length() > 0) {
+            tcp_event_data_recv(skb);
+        }
+
+        if (hdr.getFin()) {
+            tcp_fin();
+        }
+    }
+
+    private void out_of_window(final TcpPacket skb, final SkbDropReason reason) {
+        tcp_enter_quickack_mode(TCP_MAX_QUICKACKS);
+        inet_csk_schedule_ack();
+        drop(skb, reason);
+    }
+
+    private void drop(final TcpPacket skb, final SkbDropReason reason) {
+        // tcp_drop_reason(sk, skb, reason);
+    }
+
+    private void tcp_queue_rcv(final TcpPacket skb) {
+        // https://www.cnblogs.com/wanpengcoder/p/11752122.html
+        tcp_rcv_nxt_update(determineEndSeq(skb));
+    }
+
+    private void tcp_rcv_nxt_update(final int seq) {
+        final int delta = seq - rcv_nxt;
+        bytes_received += delta;
+        rcv_nxt = seq;
+    }
+
+    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L86
+    private static final int TCP_MAX_QUICKACKS = 16;
+    private int icsk_ack_quick;
+
+    /**
+     * 最后一次收到数据的时间.
+     */
+    private long lrcvtime;
+
+    private void tcp_event_data_recv(final TcpPacket skb) throws IOException {
+        inet_csk_schedule_ack();
+        tcp_measure_rcv_mss(skb);
+        tcp_rcv_rtt_measure(skb);
+
+        long now = tcp_jiffies32();
+        if (0 == icsk_ack_ato) {
+            /*
+             * The _first_ data packet received, initialize
+             * delayed ACK engine.
+             */
+            tcp_incr_quickack(TCP_MAX_QUICKACKS);
+            icsk_ack_ato = TCP_ATO_MIN;
+        } else {
+            long m = now - lrcvtime;
+            if (m <= TCP_ATO_MIN / 2) {
+                /* The fastest case is the first. */
+                icsk_ack_ato = (icsk_ack_ato >> 1) + TCP_ATO_MIN / 2;
+            } else if (m < icsk_ack_ato) {
+                icsk_ack_ato = (icsk_ack_ato >> 1) + m;
+                if (icsk_ack_ato > icsk_rto) {
+                    icsk_ack_ato = icsk_rto;
+                }
+            } else if (m > icsk_ack_ato) {
+                /* Too long gap. Apparently sender failed to
+                 * restart window, so that we send ACKs quickly.
+                 */
+                tcp_incr_quickack(TCP_MAX_QUICKACKS);
+            }
+        }
+        lrcvtime = now;
+    }
+
+    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L300
+    private void tcp_incr_quickack(int max_quickacks) {
+        int quickacks = rcv_wnd / (2 * icsk_ack_rcv_mss);
+        if (0 == quickacks) {
+            quickacks = 2;
+        }
+        quickacks = Math.min(quickacks, max_quickacks);
+        if (quickacks > icsk_ack_quick) {
+            icsk_ack_quick = quickacks;
+        }
+    }
+
+    private void tcp_enter_quickack_mode(int max_quickacks) {
+        tcp_incr_quickack(max_quickacks);
+        inet_csk_exit_pingpong_mode();
+        icsk_ack_ato = TCP_ATO_MIN;
+    }
+
+    boolean tcp_in_quickack_mode() {
+	    //const struct dst_entry *dst = __sk_dst_get(sk);
+
+        /*
+        return (dst && dst_metric(dst, RTAX_QUICKACK)) ||
+                (icsk->icsk_ack.quick && !inet_csk_in_pingpong_mode(sk));
+                */
+        return icsk_ack_quick > 0 && !inet_csk_in_pingpong_model();
+    }
+
+    // FIXME
+    private static final int TCP_RMEM_TO_WIN_SCALE‎ = 0;
+    private int icsk_ack_last_seg_size;
+
+    private void tcp_measure_rcv_mss(TcpPacket skb) {
+        final int lss = icsk_ack_last_seg_size;
+
+        icsk_ack_last_seg_size = 0;
+        final int len = skb.length() - skb.getHeader().length();
+        if (len >= icsk_ack_rcv_mss) {
+            /*
+            if (len != icsk_ack_rcv_mss) {
+                len << TCP_RMEM_TO_WIN_SCALE‎;
+            }
+            */
+
+            icsk_ack_rcv_mss = Math.min(len, advmss);
+        }
+    }
+
+    private int rcv_rtt_est_seq;
+    private long rcv_rtt_est_time;
+    private long rcv_rtt_est_rtt_us;
+
+    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L678
+    private void tcp_rcv_rtt_measure(final TcpPacket skb) {
+        if (rcv_rtt_est_time != 0) {
+            if (before(rcv_nxt, rcv_rtt_est_seq)) {
+                return;
+            }
+            long delta_us = tcp_stamp_us_delta(tcp_mstamp, rcv_rtt_est_time);
+            if (delta_us == 0) {
+                delta_us = 1;
+            }
+            tcp_rcv_rtt_update(delta_us, 1);
+        }
+
+        // ??
+        rcv_rtt_est_seq = rcv_nxt + rcv_wnd;
+        rcv_rtt_est_time = tcp_mstamp;
+    }
+
+    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L646
+    private void tcp_rcv_rtt_update(long sample, int win_dep) {
+        long new_sample = rcv_rtt_est_rtt_us;
+        long m = sample;
+
+
+        if (new_sample != 0) {
+            if (win_dep == 0) {
+                m -= (new_sample >> 3);
+                new_sample += m;
+            } else {
+                m <<= 3;
+                if (m < new_sample) {
+                    new_sample = m;
+                }
+            }
+        } else {
+            new_sample = m << 3;
+        }
+
+        rcv_rtt_est_rtt_us = new_sample;
+    }
+
 
     private boolean tcp_reset_check(final TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5939
@@ -1099,8 +1353,6 @@ public class TcpConnection2 {
 
     private void tcp_check_space() {
     }
-
-
 
 
     private boolean tcp_tso_should_defer(final TcpPacket skb, int max_segs) {
@@ -1144,6 +1396,10 @@ public class TcpConnection2 {
     }
 
     private void __tcp_ack_snd_check() {
+        if (tcp_in_quickack_mode() || 0 != (icsk_ack_pending & ICSK_ACK_NOW)) {
+            tcp_send_ack();
+        }
+
         tcp_send_delayed_ack();
     }
 
@@ -1243,7 +1499,6 @@ public class TcpConnection2 {
      */
 
 
-
     private static final int TCP_MSS_DEFAULT = 536;
     private static final int TCP_MSS_MIN = 88;
 
@@ -1322,126 +1577,6 @@ public class TcpConnection2 {
         return sk_write_queue.peek();
     }
 
-    private int tcp_clean_rtx_queue(int prior_snd_una) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3340
-        TcpPacket.Builder skb;
-        while (null != (skb = tcp_rtx_queue.peek())) {
-            TcpPacket tp = skb.build();
-            final TcpHeader th = tp.getHeader();
-            final int seq = th.getSequenceNumber();
-            final int end_seq = determineEndSeq(tp);
-            int acked_pcount = 1;
-            if (end_seq > snd_una) {
-                // FIXME
-                break;
-            }
-
-            packets_out -= acked_pcount;
-            /*
-            if (!th.getSyn()) {
-                flag |= FLAG_DATA_ACKED;
-            } else {
-                flag |= FLAG_SYN_ACKED;
-            }
-            */
-            tcp_rtx_queue.remove(skb);
-        }
-
-        if (snd_up <= prior_snd_una && prior_snd_una <= snd_una) {
-            snd_up = snd_una;
-        }
-        return 0;
-    }
-
-    /**
-     * @param skb
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5229">tcp_input.c</a>
-     */
-    private void tcp_data_queue(final TcpPacket skb) throws IOException {
-        final TcpHeader hdr = skb.getHeader();
-        final int seq = hdr.getSequenceNumber();
-        final int endSeq = determineEndSeq(skb);
-
-        if (seq == endSeq) {
-            return;
-        }
-
-        if (seq == rcv_nxt) {
-            if (tcp_receive_window() == 0) {
-                final int len = skb.length() - hdr.length();
-                if (!(0 >= len && hdr.getFin())) {
-                    out_of_window(skb, SkbDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
-                    return;
-                }
-            }
-
-            /* Ok. In sequence. In window. */
-            queue_and_out(skb);
-        } else if (!after(endSeq, rcv_nxt)) {
-            tcp_rcv_spurious_retrans(skb);
-            /* A retransmit, 2nd most common case.  Force an immediate ack. */
-            out_of_window(skb, SkbDropReason.SKB_DROP_REASON_TCP_OLD_DATA);
-        } else if (!before(seq, rcv_nxt + tcp_receive_window())) {
-            /* Out of window. F.e. zero window probe. */
-            out_of_window(skb, SkbDropReason.SKB_DROP_REASON_TCP_OVERWINDOW);
-        } else if (before(seq, rcv_nxt)) {
-            /* Partial packet, seq < rcv_next < end_seq */
-            if (tcp_receive_window() == 0) {
-                out_of_window(skb, SkbDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
-            } else {
-                // goto queue_and_out
-                queue_and_out(skb);
-            }
-        } else {
-            tcp_data_queue_ofo(skb);
-        }
-    }
-
-    private void queue_and_out(final TcpPacket skb) throws IOException {
-        final TcpHeader hdr = skb.getHeader();
-        // queue_and_out;
-
-        inet_csk_schedule_ack();
-
-        sk_data_ready();
-        if (skb.length() - hdr.length() > 0) {
-            consume(skb);
-        }
-
-        tcp_queue_rcv(skb);
-
-        if (skb.length() - hdr.length() > 0) {
-            tcp_event_data_recv(skb);
-        }
-
-        if (hdr.getFin()) {
-            tcp_fin();
-        }
-    }
-
-    private void out_of_window(final TcpPacket skb, final SkbDropReason reason) {
-//        tcp_enter_quickack_mode(sk, TCP_MAX_QUICKACKS);
-        inet_csk_schedule_ack();
-        drop(skb, reason);
-    }
-
-    private void drop(final TcpPacket skb, final SkbDropReason reason) {
-        // tcp_drop_reason(sk, skb, reason);
-    }
-
-    private void tcp_queue_rcv(final TcpPacket skb) {
-        // https://www.cnblogs.com/wanpengcoder/p/11752122.html
-        tcp_rcv_nxt_update(determineEndSeq(skb));
-    }
-
-    private void tcp_rcv_nxt_update(final int seq) {
-        final int delta = seq - rcv_nxt;
-        bytes_received += delta;
-        rcv_nxt = seq;
-    }
-
-    private void tcp_event_data_recv(final TcpPacket skb) throws IOException {
-    }
 
     private void tcp_fin() {
         inet_csk_schedule_ack();
@@ -1921,12 +2056,15 @@ public class TcpConnection2 {
     private static final int ICSK_ACK_PUSHED2 = 1 << 3;
     private static final int ICSK_ACK_NOW = 1 << 4;
     private static final int ICSK_ACK_NOMEM = 1 << 5;
+    private static final int TCP_ATO_MIN = HZ / 25;
 
     // ACK Timeout Offset.
     private long icsk_ack_ato = TCP_DELACK_MAX;
     private int icsk_ack_pending;
     private long icsk_ack_timeout;
     private int icsk_ack_retry;
+    private int icsk_rto_min = 40;
+    private int icsk_delack_max = 200;
 
     private static final int sysctl_tcp_pingpong_thresh = 1;
     private int icsk_ack_pingpong;
@@ -1973,12 +2111,18 @@ public class TcpConnection2 {
         }
     }
 
+
     private int tcp_delack_max() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4172
-        int tcp_rto_min = 100;
-        int icsk_delack_max = 500;
+        int tcp_rto_min = tcp_rto_min();
+        int icsk_delack_max = this.icsk_delack_max;
         int delack_from_rto_min = Math.max(tcp_rto_min, 2) - 1;
         return Math.min(icsk_delack_max, delack_from_rto_min);
+    }
+
+    private int tcp_rto_min() {
+        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L783
+        return icsk_rto_min;
     }
 
 
@@ -1999,6 +2143,7 @@ public class TcpConnection2 {
         }
         if (icsk_ack_timeout > jiffies()) {
             // reset ??.
+            sk_reset_timer(icsk_delack_timer, icsk_ack_timeout);
 //            log.warn("RESCHEDULE");
             return;
         }
@@ -2006,6 +2151,16 @@ public class TcpConnection2 {
         icsk_ack_pending &= ~ICSK_ACK_TIMER;
         if (inet_csk_ack_scheduled()) {
             // ...
+            if (!inet_csk_in_pingpong_model()) {
+                /* Delayed ACK missed: inflate ATO. */
+                icsk_ack_ato = Math.min(icsk_ack_ato << 1, icsk_rto);
+            } else {
+                /* Delayed ACK missed: leave pingpong mode and
+                 * deflate ATO.
+                 */
+                inet_csk_exit_pingpong_mode();
+                icsk_ack_ato = TCP_ATO_MIN;
+            }
 
             tcp_mstamp_refresh();
             tcp_send_ack();
@@ -2022,6 +2177,10 @@ public class TcpConnection2 {
     private boolean inet_csk_ack_scheduled() {
         // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h
         return 0 != (icsk_ack_pending & ICSK_ACK_SCHED);
+    }
+
+    private boolean inet_csk_in_pingpong_model() {
+        return icsk_ack_pingpong >= sysctl_tcp_pingpong_thresh;
     }
 
     private void inet_csk_enter_pingpong_mode() {
@@ -2814,8 +2973,6 @@ public class TcpConnection2 {
     }
 
 
-
-
     private void tcp_event_ack_sent(int rcv_nxt) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L182
         if (rcv_nxt != this.rcv_nxt) {
@@ -3180,4 +3337,7 @@ public class TcpConnection2 {
     }
 
 
+    long tcp_stamp_us_delta(long t1, long t0) {
+        return Math.max(t1 - t0, 0);
+    }
 }
