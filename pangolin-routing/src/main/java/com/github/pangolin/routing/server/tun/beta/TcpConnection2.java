@@ -291,7 +291,10 @@ public class TcpConnection2 {
 
     public synchronized void receive(final IpHeader ipHeader, final TcpPacket tcpPacket) {
         try {
-            tcp_rcv_state_process(ipHeader, tcpPacket);
+            boolean ok = tcp_rcv_state_process(ipHeader, tcpPacket);
+            if (!ok) {
+                this.tcp_reset(null);
+            }
         } catch (final Throwable cause) {
             cause.printStackTrace();
         }
@@ -360,6 +363,9 @@ public class TcpConnection2 {
         // tcp_ack_snd_check();
     }
 
+    private static final int NO_ERROR = 0;
+
+
     /**
      * @param skb
      * @return
@@ -371,54 +377,67 @@ public class TcpConnection2 {
         trace(ipHdr, skb, true);
         final TcpHeader th = skb.getHeader();
 
+        /*-
+         * 第一次握手处理.
+         */
         switch (state.get()) {
             case TCP_CLOSE:
-                // goto discard.
-                break;
+                // return discard(skb, SkbDropReason.TCP_CLOSE);
+                return discard(skb, null);
             case TCP_LISTEN:
+                /*-
+                 * 不允许接收 ACK 包.
+                 */
                 if (th.getAck()) {
                     return false;
                 }
 
+                /*-
+                 * RST 包应该被忽略.
+                 */
                 if (th.getRst()) {
-                    // goto discard
-                    discard(skb, SkbDropReason.SKB_DROP_REASON_TCP_RESET);
-                    return true;
+                    return discard(skb, SkbDropReason.SKB_DROP_REASON_TCP_RESET);
                 }
 
                 if (th.getSyn()) {
+                    /*-
+                     * SYN-FIN 应该被忽略.
+                     */
                     if (th.getFin()) {
-                        // goto discard.
-                        discard(skb, SkbDropReason.SKB_DROP_REASON_TCP_FLAGS);
-                        return true;
+                        return discard(skb, SkbDropReason.SKB_DROP_REASON_TCP_FLAGS);
                     }
 
+                    /*-
+                     * 创建连接请求.
+                     */
                     final boolean accept = conn_request(ipHdr, skb);
-                    // 进入连接请求
 
-                    // ???
                     state.set(State.TCP_SYN_RECV);
-                    //
                     return true;
                 }
 
-                // goto discard;
-                discard(skb, SkbDropReason.SKB_DROP_REASON_TCP_FLAGS);
-                return true;
+                /*-
+                 * 非 SYN 的请求直接忽略.
+                 */
+                return discard(skb, SkbDropReason.SKB_DROP_REASON_TCP_FLAGS);
+            case TCP_SYN_SENT:
+                /*-
+                 * 当前场景只支持服务器模式.
+                 */
+                return false;
         }
 
-
+        /*-
+         * 刷新最近发送/接收时间戳.
+         */
         tcp_mstamp_refresh();
 
         if (!th.getAck() && !th.getRst() && !th.getSyn()) {
-            // discard
-            discard(skb, SkbDropReason.SKB_DROP_REASON_TCP_FLAGS);
-            return true;
+            return discard(skb, SkbDropReason.SKB_DROP_REASON_TCP_FLAGS);
         }
 
-
         if (!tcp_validate_incoming(skb)) {
-            return false;
+            return true;
         }
 
         /* step 5: check the ACK field */
@@ -501,8 +520,8 @@ public class TcpConnection2 {
         return true;
     }
 
-    private void discard(final TcpPacket skb, final SkbDropReason reason) {
-        //
+    private boolean discard(final TcpPacket skb, final SkbDropReason reason) {
+        return true;
     }
 
     /* ************** Initialize Connection Request [[ ************ */
@@ -1252,7 +1271,7 @@ public class TcpConnection2 {
     }
 
     boolean tcp_in_quickack_mode() {
-	    //const struct dst_entry *dst = __sk_dst_get(sk);
+        //const struct dst_entry *dst = __sk_dst_get(sk);
 
         /*
         return (dst && dst_metric(dst, RTAX_QUICKACK)) ||
@@ -2064,7 +2083,12 @@ public class TcpConnection2 {
     private static final int ICSK_ACK_NOMEM = 1 << 5;
     private static final int TCP_ATO_MIN = HZ / 25;
 
-    // ACK Timeout Offset.
+    /**
+     * ACK 超时时间(offset).
+     *
+     * @see #tcp_event_data_recv(org.pcap4j.packet.TcpPacket)
+     * @see #tcp_event_data_sent()
+     */
     private long icsk_ack_ato = TCP_DELACK_MAX;
     private int icsk_ack_pending;
     private long icsk_ack_timeout;
@@ -2075,8 +2099,10 @@ public class TcpConnection2 {
     private static final int sysctl_tcp_pingpong_thresh = 1;
     private int icsk_ack_pingpong;
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4183">tcp_send_delayed_ack</a>
+     */
     private void tcp_send_delayed_ack() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4183
         long ato = icsk_ack_ato;
         if (ato > TCP_DELACK_MIN) {
             int max_ato = HZ / 2;
@@ -2187,7 +2213,7 @@ public class TcpConnection2 {
 
     private void inet_csk_inc_pingpong_cnt() {
         if (icsk_ack_pingpong < U8_MAX) {
-            icsk_ack_pingpong ++;
+            icsk_ack_pingpong++;
         }
     }
 
