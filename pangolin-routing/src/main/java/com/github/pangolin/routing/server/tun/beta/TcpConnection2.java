@@ -432,6 +432,11 @@ public class TcpConnection2 {
                 tcp_init_transfer(skb);
 
                 state.set(State.TCP_ESTABLISHED);
+
+                /* Prevent spurious tcp_cwnd_restart() on first data packet */
+                lsndtime = tcp_jiffies32();
+                tcp_initialize_rcv_mss();
+
                 break;
             case TCP_FIN_WAIT1:
                 if (snd_una != write_seq) {
@@ -1193,7 +1198,7 @@ public class TcpConnection2 {
     /**
      * 最后一次收到数据的时间.
      */
-    private long lrcvtime;
+    private long icsk_ack_lrcvtime;
 
     private void tcp_event_data_recv(final TcpPacket skb) throws IOException {
         inet_csk_schedule_ack();
@@ -1209,7 +1214,7 @@ public class TcpConnection2 {
             tcp_incr_quickack(TCP_MAX_QUICKACKS);
             icsk_ack_ato = TCP_ATO_MIN;
         } else {
-            long m = now - lrcvtime;
+            long m = now - icsk_ack_lrcvtime;
             if (m <= TCP_ATO_MIN / 2) {
                 /* The fastest case is the first. */
                 icsk_ack_ato = (icsk_ack_ato >> 1) + TCP_ATO_MIN / 2;
@@ -1225,7 +1230,7 @@ public class TcpConnection2 {
                 tcp_incr_quickack(TCP_MAX_QUICKACKS);
             }
         }
-        lrcvtime = now;
+        icsk_ack_lrcvtime = now;
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L300
@@ -1567,6 +1572,7 @@ public class TcpConnection2 {
     //
 
 
+    private static final int U8_MAX = 255;
     private static final int U16_MAX = 65535;
 
 
@@ -2177,6 +2183,12 @@ public class TcpConnection2 {
     private boolean inet_csk_ack_scheduled() {
         // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h
         return 0 != (icsk_ack_pending & ICSK_ACK_SCHED);
+    }
+
+    private void inet_csk_inc_pingpong_cnt() {
+        if (icsk_ack_pingpong < U8_MAX) {
+            icsk_ack_pingpong ++;
+        }
     }
 
     private boolean inet_csk_in_pingpong_model() {
@@ -3069,7 +3081,25 @@ public class TcpConnection2 {
         if (th.getAck()) {
             tcp_event_ack_sent(rcv_nxt);
         }
+        if (skb.length() != th.length()) {
+            tcp_event_data_sent();
+            // data_segs_out += tcp_skb_pcount(skb);
+            // bytes_sent += skb.length() - th.length();
+        }
+
         return 0;
+    }
+
+    private long lsndtime;
+
+    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L163
+    private void tcp_event_data_sent() {
+        long now = tcp_jiffies32();
+
+        lsndtime = now;
+        if (now - icsk_ack_lrcvtime < icsk_ack_ato) {
+            inet_csk_inc_pingpong_cnt();
+        }
     }
 
     private int tcp_select_window() {
