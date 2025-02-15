@@ -1348,7 +1348,8 @@ public class TcpConnection2 {
 
     private boolean tcp_reset_check(final TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5939
-        return false;
+        int seq = skb.getHeader().getSequenceNumber();
+        return seq == rcv_nxt - 1 && 0 != ((1 << state.get().ordinal()) | (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
     }
 
     /**
@@ -1422,6 +1423,7 @@ public class TcpConnection2 {
     private void __tcp_ack_snd_check() {
         if (tcp_in_quickack_mode() || 0 != (icsk_ack_pending & ICSK_ACK_NOW)) {
             tcp_send_ack();
+            return;
         }
 
         tcp_send_delayed_ack();
@@ -1792,6 +1794,8 @@ public class TcpConnection2 {
     private static final int TCPF_LISTEN = 1 << State.TCP_LISTEN.ordinal();
     private static final int TCPF_SYN_SENT = 1 << State.TCP_SYN_SENT.ordinal();
     private static final int TCPF_SYN_RECV = 1 << State.TCP_SYN_RECV.ordinal();
+    private static final int TCPF_LAST_ACK = 1 << State.TCP_LAST_ACK.ordinal();
+    private static final int TCPF_CLOSING = 1 << State.TCP_CLOSING.ordinal();
 
     /**
      * Shutdown the sending side of a connection. Much like close except
@@ -2089,11 +2093,11 @@ public class TcpConnection2 {
      * @see #tcp_event_data_recv(org.pcap4j.packet.TcpPacket)
      * @see #tcp_event_data_sent()
      */
-    private long icsk_ack_ato = TCP_DELACK_MAX;
+    private long icsk_ack_ato = 0;
     private int icsk_ack_pending;
     private long icsk_ack_timeout;
     private int icsk_ack_retry;
-    private int icsk_rto_min = 40;
+    private int icsk_rto_min = TCP_RTO_MIN;//40;
     private int icsk_delack_max = 200;
 
     private static final int sysctl_tcp_pingpong_thresh = 1;
@@ -2299,7 +2303,8 @@ public class TcpConnection2 {
 
     private int icsk_backoff;
     // FIXME
-    private int icsk_rto = TCP_RTO_MIN;
+//    private int icsk_rto = TCP_RTO_MIN;
+    private int icsk_rto = TCP_RTO_MAX;
     //    private int icsk_rto = 50;
     private int total_rto_recoveries;
     private long rto_stamp;
@@ -3252,9 +3257,9 @@ public class TcpConnection2 {
 
 
     private void trace(final IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
-        if (true) {
-            return;
-        }
+//        if (true) {
+//            return;
+//        }
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         final TcpHeader tcpHeader = tcpPacket.getHeader();
