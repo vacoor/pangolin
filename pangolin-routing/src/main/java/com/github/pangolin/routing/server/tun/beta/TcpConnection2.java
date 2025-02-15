@@ -293,11 +293,18 @@ public class TcpConnection2 {
         try {
             boolean ok = tcp_rcv_state_process(ipHeader, tcpPacket);
             if (!ok) {
-                this.tcp_reset(null);
+                tcp_v4_send_reset(tcpPacket);
             }
         } catch (final Throwable cause) {
             cause.printStackTrace();
         }
+    }
+
+    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
+    private void tcp_v4_send_reset(TcpPacket skb) {
+        // FIXME
+        // send reset.
+        tcp_done();
     }
 
     /**
@@ -411,6 +418,10 @@ public class TcpConnection2 {
                      * 创建连接请求.
                      */
                     final boolean accept = conn_request(ipHdr, skb);
+                    if (!accept) {
+                        // FIXME RESET.
+                        return false;
+                    }
 
                     state.set(State.TCP_SYN_RECV);
                     return true;
@@ -553,7 +564,9 @@ public class TcpConnection2 {
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
          */
-        inet_reqsk_alloc(ipHdr, skb);
+        if (!inet_reqsk_alloc(ipHdr, skb)) {
+            return false;
+        }
         ts_off = 0;
         tcp_usec_ts = 0;
 
@@ -586,8 +599,11 @@ public class TcpConnection2 {
         return true;
     }
 
-    private void inet_reqsk_alloc(IpHeader ipHeader, TcpPacket skb) {
+    private boolean inet_reqsk_alloc(IpHeader ipHeader, TcpPacket skb) {
         final InetSocketAddress resolved = resolve(ipHeader.getDstAddr(), skb.getHeader().getDstPort().valueAsInt());
+        if (null == resolved) {
+            return false;
+        }
         log.info("{} Connecting...", resolved);
         final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
             @Override
@@ -637,8 +653,10 @@ public class TcpConnection2 {
                     }
                 }
             });
+            return true;
         } catch (InterruptedException e) {
             log.info("{} Connection reset.", resolved, e.getMessage(), e);
+            return false;
         }
     }
 
@@ -1547,6 +1565,8 @@ public class TcpConnection2 {
             final String host = dnsEngine.resolve(dst.getAddress());
             if (null != host) {
                 return InetSocketAddress.createUnresolved(host, port);
+            } else if (dnsEngine.isFake(dst.getAddress())) {
+                return null;
             }
         }
         return new InetSocketAddress(dst, port);
