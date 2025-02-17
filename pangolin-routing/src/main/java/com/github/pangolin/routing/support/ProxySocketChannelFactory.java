@@ -43,7 +43,7 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
         b.option(ChannelOption.TCP_NODELAY, true);
         b.option(ChannelOption.SO_KEEPALIVE, true);
         b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connTimeoutMs);
-        b.option(ChannelOption.SO_RCVBUF, 32 * 1024);// 读缓冲区为32k
+//        b.option(ChannelOption.SO_RCVBUF, 32 * 1024);// 读缓冲区为32k
         b.resolver(resolverGroup)
                 .group(group)
                 .channel(NioSocketChannel.class)

@@ -43,11 +43,6 @@ public class WebSocketUpstreamFactory extends AbstractUpstreamFactory {
         }
 
         @Override
-        public String name() {
-            return name;
-        }
-
-        @Override
         public SocketAddress address() {
             return new InetSocketAddress(uri.getHost(), uri.getPort());
         }

@@ -78,6 +78,11 @@ public class StatsUpstream extends Server implements Upstream {
                 serverStats.decrementActiveRequestsCount();
                 serverStats.noteResponseTime(System.nanoTime() - requestTime / 1000D);
             }
+
+            @Override
+            public String toString() {
+                return h.toString();
+            }
         };
     }
 

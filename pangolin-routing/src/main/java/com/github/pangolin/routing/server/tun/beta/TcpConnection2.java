@@ -275,7 +275,7 @@ public class TcpConnection2 {
     private final SocketChannelFactory socketChannelFactory;
 
     private volatile Channel child;
-    private int connTimeoutMs = 5 * 1000;
+    private int connTimeoutMs = 10 * 1000;
 
     protected TcpConnection2(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         this.parent = parent;
@@ -293,7 +293,7 @@ public class TcpConnection2 {
         try {
             boolean ok = tcp_rcv_state_process(ipHeader, tcpPacket);
             if (!ok) {
-                tcp_v4_send_reset(tcpPacket);
+                tcp_v4_send_reset(ipHeader, tcpPacket);
             }
         } catch (final Throwable cause) {
             cause.printStackTrace();
@@ -301,9 +301,25 @@ public class TcpConnection2 {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
-    private void tcp_v4_send_reset(TcpPacket skb) {
+    private void tcp_v4_send_reset(IpHeader ipHeader, TcpPacket skb) {
         // FIXME
         // send reset.
+        /*
+        TcpPacket.Builder buf = new TcpPacket.Builder()
+                .dstAddr(ipHeader.getSrcAddr())
+                .srcAddr(ipHeader.getDstAddr())
+                .dstPort(skb.getHeader().getSrcPort())
+                .srcPort(skb.getHeader().getDstPort())
+                .rst(true);
+
+        if (skb.getHeader().getAck()) {
+            buf.sequenceNumber(skb.getHeader().getAcknowledgmentNumber());
+        } else {
+            buf.sequenceNumber()
+        }
+        */
+
+
         tcp_done();
     }
 
@@ -605,7 +621,7 @@ public class TcpConnection2 {
             return false;
         }
         log.info("{} Connecting...", resolved);
-        final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
+        final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, true, childGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                 try {

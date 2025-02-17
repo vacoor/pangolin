@@ -35,7 +35,7 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
     private final Map<String, Object> attributes = Maps.newLinkedHashMap();
 
     private final List<Acceptor> acceptors = Lists.newLinkedList();
-    private final Upstream self = new ContextUpstream(UUID.randomUUID().toString(), this);
+    private final Upstream self = new ContextUpstream("Ctx-" + UUID.randomUUID().toString(), this);
 
     public AbstractRouteContext(final RouteContext parent) {
         this.parent = parent;
