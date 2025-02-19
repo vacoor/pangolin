@@ -7,6 +7,7 @@ import io.netty.channel.EventLoopGroup;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.TcpPacket;
+import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 
 /**
@@ -116,5 +117,35 @@ public class Tcp4Connection extends TcpConnection {
     @Override
     protected boolean conn_request(final IpPacket.IpHeader ih, final TcpPacket skb) {
         return super.conn_request(ih, skb);
+    }
+
+    protected void send_synack(final IpPacket.IpHeader ih, final TcpPacket syn_skb) {
+        tcp_v4_send_synack(ih, syn_skb);
+    }
+
+    private void tcp_v4_send_synack(final IpPacket.IpHeader ipHdr, final TcpPacket syn_skb) {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
+        final TcpPacket.Builder skb = tcp_make_synack(ipHdr, syn_skb);
+
+        final IpV4Packet ipPacket = new IpV4Packet.Builder()
+                .version(IpVersion.IPV4)
+                .tos(((IpV4Packet.IpV4Header) ipHdr).getTos())
+                .ttl(((IpV4Packet.IpV4Header) ipHdr).getTtl())
+                .identification(((IpV4Packet.IpV4Header) ipHdr).getIdentification())
+                .fragmentOffset(((IpV4Packet.IpV4Header) ipHdr).getFragmentOffset())
+                .srcAddr(((IpV4Packet.IpV4Header) ipHdr).getDstAddr())
+                .dstAddr(((IpV4Packet.IpV4Header) ipHdr).getSrcAddr())
+                .protocol(IpNumber.TCP)
+
+                .paddingAtBuild(true)
+                .correctLengthAtBuild(true)
+                .correctChecksumAtBuild(true)
+
+                .payloadBuilder(skb)
+                .build();
+
+        trace(ipPacket.getHeader(), skb.build(), false);
+
+        parent.writeAndFlush(ipPacket);
     }
 }
