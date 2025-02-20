@@ -352,6 +352,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
+        tcp_v4_init_sock();
         this.listen();
     }
 
@@ -831,6 +832,7 @@ public abstract class TcpConnection<P extends IpPacket> {
          * 第一步调用 <code>inet_csk_clone_lock<code/> 基于原 TCP_NEW_SYN_RECV sock clone时会将状态设置为 TCP_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1247"></a>
          */
+        inet_csk_clone_lock();
 
         rcv_isn = req_rcv_isn_ref.get();
         int _seq = req_rcv_isn_ref.get() + 1;
@@ -877,6 +879,50 @@ public abstract class TcpConnection<P extends IpPacket> {
         mss_clamp = req_mss_ref.get();
         return this;
     }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1247">inet_csk_clone_lock</a>
+     */
+    private void inet_csk_clone_lock() {
+
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/core/sock.c#L2383">sk_clone_lock</a>
+     */
+    private void sk_clone_lock() {
+        sk_prot_alloc();
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/core/sock.c#L2167">sk_prot_alloc</a>
+     */
+    private void sk_prot_alloc() {
+
+    }
+
+    private void tcp_v4_init_sock() {
+        tcp_init_sock();
+    }
+
+    // FIXME TODO tcp_init_sock https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L422
+    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2492
+    private void tcp_init_sock() {
+        // ...
+        icsk_rto = TCP_TIMEOUT_INIT;
+        icsk_delack_max = TCP_DELACK_MAX;
+
+        // tcp_snd_cwnd_set
+//        snd_ssthresh =
+        mss_cache = TCP_MSS_DEFAULT;
+//        tsoffset= 0;
+
+        // icsk->icsk_sync_mss = tcp_sync_mss;
+//        WRITE_ONCE(sk->sk_sndbuf, READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_wmem[1]));
+//        WRITE_ONCE(sk->sk_rcvbuf, READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_rmem[1]));
+//        scaling_ratio = TCP_DEFAULT_SCALING_RATIO;
+    }
+
 
     private void tcp_initialize_rcv_mss() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L622
@@ -2058,8 +2104,6 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     // FIXME
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L422
-    // FIXME TODO tcp_init_sock https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L422
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2492
     private int icsk_rto = (int) TCP_TIMEOUT_INIT;
     //    private int icsk_rto = 50;
     private int total_rto_recoveries;
@@ -2375,8 +2419,8 @@ public abstract class TcpConnection<P extends IpPacket> {
     RFC6298 2.1 initial RTO value.
     https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L152
     */
-    private static final long TCP_TIMEOUT_INIT = 1 * HZ;
-    private static final long TCP_TIMEOUT_MIN = 2;
+    private static final int TCP_TIMEOUT_INIT = 1 * HZ;
+    private static final int TCP_TIMEOUT_MIN = 2;
 
     private int icsk_probes_out;
     private long icsk_probes_tstamp;
