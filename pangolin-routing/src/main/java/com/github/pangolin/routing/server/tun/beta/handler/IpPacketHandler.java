@@ -4,7 +4,7 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 
-public abstract class IpPacketHandler extends SimpleChannelInboundHandler<IpPacket> {
+public abstract class IpPacketHandler<T extends IpPacket> extends SimpleChannelInboundHandler<T> {
     private final IpNumber inboundProtocol;
 
     public IpPacketHandler(final IpNumber inboundProtocol) {

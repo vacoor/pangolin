@@ -4,6 +4,7 @@ import com.github.pangolin.routing.handler.internal.server.support.SocketChannel
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
+import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.TcpPacket;
@@ -16,7 +17,8 @@ import org.pcap4j.packet.namednumber.IpVersion;
  * @author changhe.yang
  * @since 20250219
  */
-public class Tcp4Connection extends TcpConnection {
+@Slf4j
+public class Tcp4Connection extends TcpConnection<IpV4Packet> {
 
     public Tcp4Connection(final Channel parent,
                           final EventLoopGroup childGroup,
@@ -25,8 +27,8 @@ public class Tcp4Connection extends TcpConnection {
     }
 
     @Override
-    public synchronized void handler(final IpV4Packet.IpV4Header ipHeader, final TcpPacket tcpPacket) {
-        tcp_v4_rcv(ipHeader, tcpPacket);
+    public synchronized void handler(final IpV4Packet ip, final TcpPacket tcpPacket) {
+        tcp_v4_rcv(ip.getHeader(), tcpPacket);
     }
 
     /**
@@ -57,7 +59,7 @@ public class Tcp4Connection extends TcpConnection {
         try {
             int err = tcp_rcv_state_process(ih, skb);
             if (0 != err) {
-                tcp_v4_send_reset(ih, skb);
+                tcp_v4_send_reset(ih, skb, err);
             }
         } catch (final Throwable cause) {
             cause.printStackTrace();
@@ -65,7 +67,8 @@ public class Tcp4Connection extends TcpConnection {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
-    private void tcp_v4_send_reset(IpV4Packet.IpV4Header ih, TcpPacket skb) {
+    private void tcp_v4_send_reset(IpV4Packet.IpV4Header ih, TcpPacket skb, int err) {
+        log.warn("SEND-RST: {}", err);
         // FIXME
         // send reset.
         TcpPacket.Builder buf = new TcpPacket.Builder();
@@ -86,6 +89,12 @@ public class Tcp4Connection extends TcpConnection {
             buf.sequenceNumber(1);
             buf.acknowledgmentNumber(determineEndSeq(skb));
         }
+
+        buf.dstAddr(ih.getSrcAddr())
+                .srcAddr(ih.getSrcAddr())
+                .paddingAtBuild(true)
+                .correctLengthAtBuild(true)
+                .correctChecksumAtBuild(true);
 
         IpV4Packet.Builder arg = new IpV4Packet.Builder();
         arg.tos(ih.getTos());
@@ -119,6 +128,7 @@ public class Tcp4Connection extends TcpConnection {
         return super.conn_request(ih, skb);
     }
 
+    @Override
     protected void send_synack(final IpPacket.IpHeader ih, final TcpPacket syn_skb) {
         tcp_v4_send_synack(ih, syn_skb);
     }

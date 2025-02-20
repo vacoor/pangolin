@@ -120,7 +120,8 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
     }
 
     public void flushInterfaceDns() {
-        flushInterfaceDns(interfaceLuidToGuid(interfaceLuid), AF_UNSPEC);
+        flushInterfaceDns(interfaceLuidToGuid(interfaceLuid), AF_INET);
+        flushInterfaceDns(interfaceLuidToGuid(interfaceLuid), AF_INET6);
     }
 
     // ------------------------ START Static method ------------------------

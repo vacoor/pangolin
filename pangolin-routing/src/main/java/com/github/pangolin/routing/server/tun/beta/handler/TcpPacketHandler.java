@@ -2,8 +2,12 @@ package com.github.pangolin.routing.server.tun.beta.handler;
 
 import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
+import com.github.pangolin.routing.server.tun.beta.TcpConnection;
 import com.github.pangolin.routing.server.tun.beta.TcpConnection2;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
+import freework.reflect.Types;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -17,30 +21,35 @@ import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.TcpPort;
 
+import java.lang.reflect.Type;
 import java.net.InetAddress;
 import java.util.Map;
 
 @Slf4j
-public class TcpPacketHandler2 extends IpPacketHandler<IpV4Packet> {
+public abstract class TcpPacketHandler<P extends IpPacket> extends IpPacketHandler<P> {
+    private final Class<P> ipPacketType;
     private final DnsEngine dnsEngine;
     private final SocketChannelFactory socketChannelFactory;
     private final EventLoopGroup childGroup = new NioEventLoopGroup();
 
-    private final Map<String, TcpConnection2> sessionMap = Maps.newConcurrentMap();
+    private final Map<String, TcpConnection> sessionMap = Maps.newConcurrentMap();
 
-    public TcpPacketHandler2(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
+    public TcpPacketHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
         super(IpNumber.TCP);
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = factory;
+        final Type type = Types.resolveType(TcpPacketHandler.class.getTypeParameters()[0], getClass());
+        Preconditions.checkState(type instanceof Class<?>, "Can't resolve %s IpPacket Class", TcpPacketHandler.class.getName());
+        this.ipPacketType = (Class<P>) type;
     }
 
     @Override
     public boolean acceptInboundMessage(final Object msg) throws Exception {
-        return super.acceptInboundMessage(msg) && IpVersion.IPV4.equals(((IpPacket) msg).getHeader().getVersion());
+        return super.acceptInboundMessage(msg) && ipPacketType.isInstance(msg);
     }
 
     @Override
-    protected void channelRead0(final ChannelHandlerContext ctx, final IpV4Packet ipPacket) throws Exception {
+    protected void channelRead0(final ChannelHandlerContext ctx, final P ipPacket) throws Exception {
         final IpHeader ipHeader = ipPacket.getHeader();
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
@@ -52,18 +61,16 @@ public class TcpPacketHandler2 extends IpPacketHandler<IpV4Packet> {
 
         final String sockKey = srcAddr.toString() + ":" + tcpSrcPort + " => " + dstAddr + ":" + tcpDstPort;
         if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
-            sessionMap.putIfAbsent(sockKey, new TcpConnection2(ctx.channel(), childGroup, dnsEngine, socketChannelFactory) {
-                @Override
-                protected void onDestroy() {
+            sessionMap.putIfAbsent(sockKey, create(ctx.channel(), childGroup, dnsEngine, socketChannelFactory, () -> {
                     log.info("Destroy: {}", sockKey);
                     sessionMap.remove(sockKey);
-                }
-            });
+            }));
         }
-        TcpConnection2 tcpConnection = sessionMap.get(sockKey);
+        TcpConnection<P> tcpConnection = sessionMap.get(sockKey);
         if (null != tcpConnection) {
-            tcpConnection.receive(ipHeader, tcpPacket);
+            tcpConnection.handler(ipPacket, tcpPacket);
         } else {
+            /*
             final TcpPacket.Builder builder = new TcpPacket.Builder();
             builder.srcAddr(dstAddr)
                     .dstAddr(srcAddr)
@@ -93,7 +100,11 @@ public class TcpPacketHandler2 extends IpPacketHandler<IpV4Packet> {
             ctx.writeAndFlush(ipPacket0);
             // RST
 //            throw new IllegalStateException();
+            */
         }
     }
 
+    protected abstract TcpConnection<P> create(Channel parent, EventLoopGroup childGroup,
+                                            DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory,
+                                            Runnable destroyCallback);
 }
