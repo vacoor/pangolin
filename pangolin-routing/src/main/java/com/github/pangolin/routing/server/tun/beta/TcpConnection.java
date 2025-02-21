@@ -205,6 +205,10 @@ public abstract class TcpConnection<P extends IpPacket> {
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L243
     /* TCP initial congestion window as per rfc6928 */
     private static final int TCP_INIT_CWND = 10;
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1327">TCP_INFINITE_SSTHRESH</a>
+     */
+    private static final int TCP_INFINITE_SSTHRESH = 0x7fffffff;
 
     private static final byte TCP_MAX_WSCALE = 14;
 
@@ -912,10 +916,21 @@ public abstract class TcpConnection<P extends IpPacket> {
         icsk_rto = TCP_TIMEOUT_INIT;
         icsk_delack_max = TCP_DELACK_MAX;
 
-        // tcp_snd_cwnd_set
-//        snd_ssthresh =
+        // tcp_snd_cwnd_set(tp, TCP_INIT_CWND);
+        snd_cwnd = TCP_INIT_CWND;
+
+        /*-
+         * See draft-stevens-tcpca-spec-01 for discussion of the
+         * initialization of these values.
+         */
+        // snd_ssthresh = TCP_INFINITE_SSTHRESH;
+        // snd_cwnd_clamp = ~0;
         mss_cache = TCP_MSS_DEFAULT;
+
 //        tsoffset= 0;
+
+//        sk->sk_write_space = sk_stream_write_space;
+//        sock_set_flag(sk, SOCK_USE_WRITE_QUEUE);
 
         // icsk->icsk_sync_mss = tcp_sync_mss;
 //        WRITE_ONCE(sk->sk_sndbuf, READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_wmem[1]));
@@ -1949,7 +1964,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     private long icsk_ack_timeout;
     private int icsk_ack_retry;
     private int icsk_rto_min = TCP_RTO_MIN;//40;
-    private int icsk_delack_max = 200;
+    private int icsk_delack_max;
 
     private static final int sysctl_tcp_pingpong_thresh = 1;
     private int icsk_ack_pingpong;
@@ -2104,8 +2119,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     // FIXME
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L422
-    private int icsk_rto = (int) TCP_TIMEOUT_INIT;
-    //    private int icsk_rto = 50;
+    private int icsk_rto;
     private int total_rto_recoveries;
     private long rto_stamp;
     private int total_rto;
