@@ -323,8 +323,8 @@ public abstract class TcpConnection<P extends IpPacket> {
      */
     private int packets_out;
 
-    private ConcurrentLinkedQueue<TcpPacket.Builder> sk_write_queue = new ConcurrentLinkedQueue<>();
-    private ConcurrentLinkedQueue<TcpPacket.Builder> tcp_rtx_queue = new ConcurrentLinkedQueue<>();
+    private ConcurrentLinkedQueue<TcpBuffer> sk_write_queue = new ConcurrentLinkedQueue<>();
+    private ConcurrentLinkedQueue<TcpBuffer> tcp_rtx_queue = new ConcurrentLinkedQueue<>();
 
     private ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1, new ThreadFactory() {
         @Override
@@ -719,10 +719,10 @@ public abstract class TcpConnection<P extends IpPacket> {
                         final int maxEndIndex = i + dataMaxLen;
                         if (maxEndIndex >= payload.length) {
                             final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, i, payload.length - i).getBuilder();
-                            tcp_sendmsg2(new TcpPacket.Builder().ack(true).psh(true).payloadBuilder(builder), true);
+                            tcp_sendmsg2(new TcpBuffer().ack(true).psh(true).payloadBuilder(builder), true);
                         } else {
                             UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, i, dataMaxLen).getBuilder();
-                            tcp_sendmsg2(new TcpPacket.Builder().ack(true).psh(true).payloadBuilder(builder), false);
+                            tcp_sendmsg2(new TcpBuffer().ack(true).psh(true).payloadBuilder(builder), false);
                         }
                     }
                     tcp_push_pending_frames();
@@ -1215,12 +1215,12 @@ public abstract class TcpConnection<P extends IpPacket> {
         int seq_rtt_us = 0;
         int ca_rtt_us = 0;
 
-        TcpPacket.Builder skb;
+        TcpBuffer skb;
         while (null != (skb = tcp_rtx_queue.peek())) {
-            TcpPacket tp = skb.build();
-            final TcpHeader th = tp.getHeader();
-            final int seq = th.getSequenceNumber();
-            final int end_seq = determineEndSeq(tp);
+//            TcpPacket tp = skb.asBuilder().build();
+//            final TcpHeader th = tp.getHeader();
+            final int seq = skb.sequenceNumber();
+            final int end_seq = determineEndSeq(skb);
             int acked_pcount = 1;
             int sacked = 0; // FIXME
 
@@ -1294,7 +1294,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
 
         // FIXME
-//         tcp_ack_update_rtt(flag, seq_rtt_us, 0, ca_rtt_us);
+         tcp_ack_update_rtt(flag, seq_rtt_us, 0, ca_rtt_us);
 
         return 0;
     }
@@ -1745,7 +1745,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L676
-    void tcp_skb_entail(TcpPacket.Builder skb) {
+    void tcp_skb_entail(TcpBuffer skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L676
         skb.sequenceNumber(write_seq);
         skb.ack(true);
@@ -1768,13 +1768,13 @@ public abstract class TcpConnection<P extends IpPacket> {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L1052
     }
 
-    private synchronized void tcp_sendmsg2(TcpPacket.Builder skb, boolean flush) {
+    private synchronized void tcp_sendmsg2(TcpBuffer skb, boolean flush) {
         skb.sequenceNumber(write_seq);
         skb.dstPort(tcpSrcPort).srcPort(tcpDstPort);
         tcp_skb_entail(skb);
-        final Packet.Builder builder = skb.getPayloadBuilder();
-        if (null != builder) {
-            write_seq += builder.build().length();
+        final Packet.Builder payload = skb.payloadBuilder();
+        if (null != payload) {
+            write_seq += payload.build().length();
         }
         if (flush) {
             tcp_push_pending_frames();
@@ -1891,7 +1891,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
         // 116.228.111.118 180.168.255.18
         // TODO OPEN ME
-//        tcp_set_rto();
+        tcp_set_rto();
 
         /* RFC6298: only reset backoff on valid RTT measurement. */
         icsk_backoff = 0;
@@ -2030,7 +2030,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2021">tcp_send_head</a>
      */
-    private TcpPacket.Builder tcp_send_head() {
+    private TcpBuffer tcp_send_head() {
         return sk_write_queue.peek();
     }
 
@@ -2141,6 +2141,19 @@ public abstract class TcpConnection<P extends IpPacket> {
             endSeq++;
         }
         return endSeq + skb.length() - hdr.length();
+    }
+
+    protected int determineEndSeq(final TcpBuffer skb) {
+        int endSeq = skb.sequenceNumber();
+        if (skb.syn()) {
+            endSeq++;
+        }
+        if (skb.fin()) {
+            endSeq++;
+        }
+        final Packet.Builder b = skb.payloadBuilder();
+        final int len = null != b ? b.build().length() : 0;
+        return endSeq + len;
     }
 
     private boolean before(final int seq1, final int seq2) {
@@ -2551,7 +2564,7 @@ public abstract class TcpConnection<P extends IpPacket> {
             return;
         }
 
-        TcpPacket.Builder skb = tcp_rtx_queue_head();
+        TcpBuffer skb = tcp_rtx_queue_head();
         if (null == skb) {
             return;
         }
@@ -2559,7 +2572,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         // if ....
         if (false) {
             long us_or_ms1 = tcp_time_stamp_ts();
-            long retrans_stamp0 = retrans_stamp != 0 ? retrans_stamp : tcp_skb_timestamp_ts(tcp_usec_ts, skb.build());
+            long retrans_stamp0 = retrans_stamp != 0 ? retrans_stamp : tcp_skb_timestamp_ts(tcp_usec_ts, skb);
             long rtx_delta = us_or_ms1 - retrans_stamp0;
             if (tcp_usec_ts != 0) {
                 // rtx_delta /= 1000;  // ms
@@ -2730,11 +2743,11 @@ public abstract class TcpConnection<P extends IpPacket> {
         return a - (a % b);
     }
 
-    private int tcp_skb_pcount(TcpPacket.Builder skb) {
+    private int tcp_skb_pcount(TcpBuffer skb) {
         return 1;
     }
 
-    private long tcp_skb_timestamp_ts(int usec_ts, TcpPacket skb) {
+    private long tcp_skb_timestamp_ts(int usec_ts, TcpBuffer skb) {
         // FIXME
         long skb_mstamp_ns = 0; //skb.skb_mstamp_ns;
         if (usec_ts != 0) {
@@ -2749,17 +2762,18 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L905">tcp_skb_timestamp_us</a>
      * https://github.com/torvalds/linux/blob/v6.13/include/linux/skbuff.h#L867
      */
-    private int tcp_skb_timestamp_us(final TcpPacket.Builder skb) {
+    private int tcp_skb_timestamp_us(final TcpBuffer skb) {
         // skb_mstamp_ns <==> skb->tstamp
         // return div_u64(skb->skb_mstamp_ns, NSEC_PER_USEC);
         // FIXME
-        return 0;
+        return (int) (skb.tstamp / 1000);
     }
 
     // https://github.com/torvalds/linux/blob/v6.13/include/linux/skbuff.h#L4322
-    private void skb_set_delivery_time(TcpPacket skb, long kt, String tstamp_type) {
+    private void skb_set_delivery_time(TcpBuffer skb, long kt, String tstamp_type) {
         // FIXME
 //        skb.tstamp = kt;
+        skb.tstamp = kt;
     }
 
     // TSval values in usec (使用微妙还是毫秒)
@@ -2826,7 +2840,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2003">tcp_rtx_queue_head</a>
      */
-    private TcpPacket.Builder tcp_rtx_queue_head() {
+    private TcpBuffer tcp_rtx_queue_head() {
         return tcp_rtx_queue.peek();
     }
 
@@ -2861,7 +2875,7 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L386">tcp_probe_timer</a>
      */
     private void tcp_probe_timer() {
-        final TcpPacket.Builder skb = tcp_send_head();
+        final TcpBuffer skb = tcp_send_head();
         if (packets_out > 0 || null == skb) {
             icsk_probes_out = 0;
             icsk_probes_tstamp = 0;
@@ -2904,13 +2918,13 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3546">tcp_ack_probe</a>
      */
     private void tcp_ack_probe() {
-        final TcpPacket.Builder head = tcp_send_head();
+        final TcpBuffer head = tcp_send_head();
 
         /* Was it a usable window open? */
         if (null == head) {
             return;
         }
-        if (determineEndSeq(head.build()) <= tcp_wnd_end()) {
+        if (determineEndSeq(head) <= tcp_wnd_end()) {
             icsk_backoff = 0;
             icsk_probes_tstamp = 0;
             inet_csk_clear_xmit_timer(ICSK_TIME_PROBE0);
@@ -3246,15 +3260,15 @@ public abstract class TcpConnection<P extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L67">tcp_event_new_data_sent</a>
      */
-    private void tcp_event_new_data_sent(TcpPacket skb) {
+    private void tcp_event_new_data_sent(TcpBuffer skb) {
         final int prior_packets = packets_out;
 
         snd_nxt = determineEndSeq(skb);
 
         // XXX unlink skb from sk_write_queue and append to tcp_rtx_queue.
-        tcp_rtx_queue.offer(skb.getBuilder());
+        tcp_rtx_queue.offer(skb);
 
-        packets_out += tcp_skb_pcount(skb.getBuilder());
+        packets_out += tcp_skb_pcount(skb);
 
         if (prior_packets <= 0 || icsk_pending == ICSK_TIME_LOSS_PROBE) {
             tcp_rearm_rto();
@@ -3500,19 +3514,17 @@ public abstract class TcpConnection<P extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1290">__tcp_transmit_skb</a>
      */
-    private int __tcp_transmit_skb(final TcpPacket skb, final boolean clone, int rcv_nxt) {
+    private int __tcp_transmit_skb(final TcpBuffer skb, final boolean clone, int rcv_nxt) {
         long prior_wstamp = tcp_wstamp_ns;
         tcp_wstamp_ns = Math.max(tcp_wstamp_ns, tcp_clock_cache);
         skb_set_delivery_time(skb, tcp_wstamp_ns, "SKB_CLOCK_MONOTONIC");
 
-        final TcpHeader th = skb.getHeader();
-
         List<TcpOption> options;
-        if (th.getSyn()) {
+        if (skb.syn()) {
             options = tcp_syn_options();
         } else {
             options = tcp_established_options();
-            if (tcp_skb_pcount(skb.getBuilder()) > 1) {
+            if (tcp_skb_pcount(skb) > 1) {
                 // FIXME tcb->tcp_flags |= TCPHDR_PSH;
             }
         }
@@ -3520,32 +3532,35 @@ public abstract class TcpConnection<P extends IpPacket> {
         // FIXME ....
         // skb_set_dst_pending_confirm(skb, READ_ONCE(sk->sk_dst_pending_confirm));
 
-        final TcpPacket.Builder buf = skb.getBuilder()
-                .acknowledgmentNumber(rcv_nxt);
+        skb.acknowledgmentNumber(rcv_nxt);
 
         // ...
 
 
-        if (!th.getSyn()) {
-            buf.window((short) tcp_select_window());
+        if (!skb.syn()) {
+            skb.window((short) tcp_select_window());
         } else {
             /*
              * RFC1323: The window in SYN & SYN/ACK segments
              * is never scaled.
              */
-            buf.window((short) Math.min(rcv_wnd, U16_MAX));
+            skb.window((short) Math.min(rcv_wnd, U16_MAX));
         }
 
-        buf.options(options);
+        skb.options(options);
 
-        INDIRECT_CALL_INET(buf);
+        INDIRECT_CALL_INET(skb);
 
 
-        if (th.getAck()) {
+        if (skb.ack()) {
             tcp_event_ack_sent(rcv_nxt);
         }
 
-        if (skb.length() != th.length()) {
+//        TcpPacket tp = skb.asBuilder().build();
+//        TcpHeader th = tp.getHeader();
+        Packet.Builder p = skb.payloadBuilder();
+        int len = null != p ? p.build().length() : 0;
+        if (len > 0) {
             tcp_event_data_sent();
             // FIXME
             // data_segs_out += tcp_skb_pcount(skb);
@@ -3557,11 +3572,14 @@ public abstract class TcpConnection<P extends IpPacket> {
         return 0;
     }
 
-    private void INDIRECT_CALL_INET(final TcpPacket.Builder buf) {
+    private void INDIRECT_CALL_INET(final TcpBuffer skb) {
         final IpHeader ipHdr = ipHeader;
 
-        buf.srcAddr(ipHdr.getDstAddr())
+        TcpPacket.Builder buf = skb
+                .srcAddr(ipHdr.getDstAddr())
                 .dstAddr(ipHdr.getSrcAddr())
+                //
+                .asBuilder()
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true);
@@ -3588,18 +3606,18 @@ public abstract class TcpConnection<P extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1486">tcp_transmit_skb</a>
      */
-    private int tcp_transmit_skb(final TcpPacket skb, final boolean clone) {
+    private int tcp_transmit_skb(final TcpBuffer skb, final boolean clone) {
         return __tcp_transmit_skb(skb, clone, rcv_nxt);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498">tcp_queue_skb</a>
      */
-    private void tcp_queue_skb(TcpPacket.Builder skb) {
+    private void tcp_queue_skb(TcpBuffer skb) {
         // FIXME
         // only for end enq
         skb.dstPort(tcpSrcPort).srcPort(tcpDstPort).srcAddr(ipHeader.getDstAddr()).dstAddr(ipHeader.getSrcAddr());
-        write_seq = determineEndSeq(skb.build());
+        write_seq = determineEndSeq(skb);
         sk_write_queue.offer(skb);
     }
 
@@ -3740,7 +3758,6 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2739">tcp_write_xmit</a>
      */
     private boolean tcp_write_xmit(int mss_now, final int push_one) {
-        TcpPacket.Builder skb;
 
         tcp_mstamp_refresh();
         if (push_one == 0) {
@@ -3753,9 +3770,10 @@ public abstract class TcpConnection<P extends IpPacket> {
         }
 
 
+        TcpBuffer skb;
         while (null != (skb = sk_write_queue.peek())) {
-            TcpPacket build = skb.build();
-            TcpHeader th = build.getHeader();
+//            TcpPacket build = skb.asBuilder().build();
+//            TcpHeader th = build.getHeader();
 
             int cwnd_quota = tcp_cwnd_test();
 //            log.warn("cwnd_quota={}", cwnd_quota);
@@ -3775,18 +3793,18 @@ public abstract class TcpConnection<P extends IpPacket> {
             // cwnd_quota = min(cwnd_quota, tso_max_segs);
 
 //            log.info("transmit MSS: {}", mss_now);
-            int missing_bytes = cwnd_quota * mss_now - skb.build().length();
-            if (missing_bytes > 0) {
-            }
+//            int missing_bytes = cwnd_quota * mss_now - build.length();
+//            if (missing_bytes > 0) {
+//            }
 
             //
-            if (th.getSequenceNumber() == determineEndSeq(build)) {
+            if (skb.sequenceNumber() == determineEndSeq(skb)) {
                 break;
             }
-            if (0 != tcp_transmit_skb(build, true)) {
+            if (0 != tcp_transmit_skb(skb, true)) {
                 break;
             }
-            tcp_event_new_data_sent(build);
+            tcp_event_new_data_sent(skb);
         }
 
         return packets_out <= 0 && !sk_write_queue.isEmpty();
@@ -3908,21 +3926,21 @@ public abstract class TcpConnection<P extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3321
-    private int __tcp_retransmit_skb(final TcpPacket.Builder skb, int segs) {
+    private int __tcp_retransmit_skb(final TcpBuffer skb, int segs) {
         // start
-        TcpPacket b = skb.build();
-        TcpHeader th = b.getHeader();
-        int seq = th.getSequenceNumber();
+        int seq = skb.sequenceNumber();
 
-        if (before(seq, snd_una) && th.getSyn()) {
+        if (before(seq, snd_una) && skb.syn()) {
             skb.syn(false);
             skb.sequenceNumber(++seq);
-            b = skb.build();
-            th = b.getHeader();
+//            b = skb.build();
+//            th = b.getHeader();
         }
 
-        if (before(th.getSequenceNumber(), snd_una)) {
-            int end_seq = determineEndSeq(b);
+//        TcpPacket b = skb.asBuilder().build();
+//        TcpHeader th = b.getHeader();
+        if (before(skb.sequenceNumber(), snd_una)) {
+            int end_seq = determineEndSeq(skb);
             if (before(end_seq, snd_una)) {
                 // ACKED.
                 // return -EINVAL;
@@ -3933,7 +3951,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
         // ...
         int cur_mss = tcp_current_mss();
-        int avail_wnd = tcp_wnd_end() - th.getSequenceNumber();
+        int avail_wnd = tcp_wnd_end() - skb.sequenceNumber();
 
         /* If receiver has shrunk his window, and skb is out of
          * new window, do not retransmit it. The exception is the
@@ -3941,7 +3959,7 @@ public abstract class TcpConnection<P extends IpPacket> {
          * our retransmit of one segment serves as a zero window probe.
          */
         if (avail_wnd <= 0) {
-            if (th.getSequenceNumber() != snd_una) {
+            if (skb.sequenceNumber() != snd_una) {
                 // return -EAGAIN;
                 return -1;
             }
@@ -3960,7 +3978,11 @@ public abstract class TcpConnection<P extends IpPacket> {
         // FIXME
         log.warn("TCP_RETRNSMIT_SKB");
 
-        int plen = b.length() - th.length();
+//        int plen = b.length();
+        int plen = skb.asBuilder()
+                .srcAddr(ipHeader.getDstAddr())
+                .dstAddr(ipHeader.getSrcAddr())
+                .build().length();
         if (plen > avail_wnd) {
             // FIXME
             // fragment
@@ -3977,7 +3999,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         if (false) {
 
         } else {
-            return tcp_transmit_skb(b, true);
+            return tcp_transmit_skb(skb, true);
         }
 
         /* To avoid taking spuriously low RTT samples based on a timestamp
@@ -3989,7 +4011,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3448
-    private int tcp_retransmit_skb(final TcpPacket.Builder skb, int segs) {
+    private int tcp_retransmit_skb(final TcpBuffer skb, int segs) {
         int err = __tcp_retransmit_skb(skb, segs);
         if (0 == err) {
             //skb.sacked |= TCPCB_RETRANS;
@@ -3998,7 +4020,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
         /* Save stamp of the first (attempted) retransmit. */
         if (retrans_stamp == 0) {
-            retrans_stamp = tcp_skb_timestamp_ts(tcp_usec_ts, skb.build());
+            retrans_stamp = tcp_skb_timestamp_ts(tcp_usec_ts, skb);
         }
 
         if (undo_retrans < 0) {
@@ -4010,7 +4032,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     private void tcp_send_fin() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3578
-        TcpPacket.Builder skb = new TcpPacket.Builder()
+        TcpBuffer skb = new TcpBuffer()
                 .sequenceNumber(write_seq)
                 .ack(true).fin(true);
         tcp_queue_skb(skb);
@@ -4018,11 +4040,11 @@ public abstract class TcpConnection<P extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708
-    protected TcpPacket.Builder tcp_make_synack(final IpHeader ipHdr, final TcpPacket skb) {
+    protected TcpBuffer tcp_make_synack(final IpHeader ipHdr, final TcpPacket skb) {
         int mss = tcp_mss_clamp(dst_metric_advmss());
         long now = tcp_clock_ns();
 
-        final TcpPacket.Builder current = new TcpPacket.Builder()
+        final TcpBuffer current = new TcpBuffer()
                 .srcAddr(ipHdr.getDstAddr())
                 .dstAddr(ipHdr.getSrcAddr())
                 .srcPort(skb.getHeader().getDstPort())
@@ -4031,11 +4053,9 @@ public abstract class TcpConnection<P extends IpPacket> {
                 .sequenceNumber(req_snt_isn_ref.get())
                 .acknowledgmentNumber(req_rcv_nxt_ref.get())
                 .window((short) Math.min(req_rsk_rcv_wnd_ref.get(), U16_MAX))
-                .paddingAtBuild(true)
-                .correctLengthAtBuild(true)
-                .correctChecksumAtBuild(true);
+                ;
 
-        skb_set_delivery_time(skb, now, "SKB_CLOCK_MONOTONIC");
+        skb_set_delivery_time(current, now, "SKB_CLOCK_MONOTONIC");
 
         current.options(tcp_synack_options(mss));
 
@@ -4109,7 +4129,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         }
 
         final int sndSeq = tcp_acceptable_seq();
-        TcpPacket.Builder current = new TcpPacket.Builder()
+        TcpBuffer current = new TcpBuffer()
                 .ack(true)
                 .sequenceNumber(sndSeq)
                 .dstAddr(ipHeader.getSrcAddr())
@@ -4117,7 +4137,7 @@ public abstract class TcpConnection<P extends IpPacket> {
                 .dstPort(tcpSrcPort)
                 .srcPort(tcpDstPort);
 
-        __tcp_transmit_skb(current.build(), false, rcv_nxt);
+        __tcp_transmit_skb(current, false, rcv_nxt);
     }
 
     /**
@@ -4130,14 +4150,13 @@ public abstract class TcpConnection<P extends IpPacket> {
          * send it.
          */
         final int seq = snd_una - (0 == urgent ? 1 : 0);
-        TcpPacket skb = new TcpPacket.Builder()
+        TcpBuffer skb = new TcpBuffer()
                 .sequenceNumber(seq)
                 .ack(true)
                 .srcAddr(ipHeader.getDstAddr())
                 .dstAddr(ipHeader.getSrcAddr())
                 .srcPort(tcpDstPort)
-                .dstPort(tcpSrcPort)
-                .build();
+                .dstPort(tcpSrcPort);
         return tcp_transmit_skb(skb, false);
     }
 
@@ -4151,10 +4170,10 @@ public abstract class TcpConnection<P extends IpPacket> {
             return -1;
         }
 
-        final TcpPacket.Builder buf = tcp_send_head();
-        final TcpPacket skb = null != buf ? buf.build() : null;
-        if (null != skb && skb.getHeader().getSequenceNumber() < tcp_wnd_end()) {
-            final int seq = skb.getHeader().getSequenceNumber();
+        final TcpBuffer buf = tcp_send_head();
+        final TcpBuffer skb = null != buf ? buf : null;
+        if (null != skb && skb.sequenceNumber() < tcp_wnd_end()) {
+            final int seq = skb.sequenceNumber();
             final int mss = tcp_current_mss();
             int seg_size = tcp_wnd_end() - seq;
 
@@ -4168,22 +4187,24 @@ public abstract class TcpConnection<P extends IpPacket> {
              * but the window size is != 0
              * must have been a result SWS avoidance ( sender )
              */
-            final int len = skb.length() - skb.getHeader().length();
-            if (seg_size < end_seq - seq || len > mss) {
-                seg_size = Math.min(seg_size, mss);
-                buf.psh(true);
+            // FIXME
+//            final int len = skb.asBuilder().length();
+//            final int len = skb.length() - skb.getHeader().length();
+//            if (seg_size < end_seq - seq || len > mss) {
+//                seg_size = Math.min(seg_size, mss);
+//                buf.psh(true);
 
                 // FIXME
-            }
+//            }
 
             // ...
 
             buf.psh(true);
 
-            TcpPacket build = buf.build();
-            int err = tcp_transmit_skb(build, true);
+//            TcpPacket build = buf.build();
+            int err = tcp_transmit_skb(skb, true);
             if (0 == err) {
-                tcp_event_new_data_sent(build);
+                tcp_event_new_data_sent(skb);
             }
             return err;
         } else {

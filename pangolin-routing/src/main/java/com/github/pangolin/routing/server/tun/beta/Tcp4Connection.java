@@ -135,7 +135,13 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
 
     private void tcp_v4_send_synack(final IpPacket.IpHeader ipHdr, final TcpPacket syn_skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
-        final TcpPacket.Builder skb = tcp_make_synack(ipHdr, syn_skb);
+        final TcpPacket.Builder skb = tcp_make_synack(ipHdr, syn_skb)
+                .asBuilder()
+                .srcAddr(ipHdr.getDstAddr())
+                .dstAddr(ipHdr.getSrcAddr())
+                .srcPort(syn_skb.getHeader().getDstPort())
+                .dstPort(syn_skb.getHeader().getSrcPort())
+                ;
 
         final IpV4Packet ipPacket = new IpV4Packet.Builder()
                 .version(IpVersion.IPV4)
