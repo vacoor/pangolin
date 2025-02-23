@@ -4,7 +4,7 @@ import com.github.pangolin.routing.handler.internal.server.support.StandardSocke
 import com.github.pangolin.routing.server.tun.beta.channel.TunAddress;
 import com.github.pangolin.routing.server.tun.beta.channel.TunChannel;
 import com.github.pangolin.routing.server.tun.beta.handler.IpPacketCodec;
-import com.github.pangolin.routing.server.tun.beta.handler.TcpPacketHandler2;
+import com.github.pangolin.routing.server.tun.beta.handler.SimpleTcpPacketHandler;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
@@ -29,7 +29,7 @@ public class TunTest2 {
                         @Override
                         protected void initChannel(final Channel ch) throws Exception {
                             ch.pipeline().addLast(new IpPacketCodec());
-                            ch.pipeline().addLast(new TcpPacketHandler2(null, new StandardSocketChannelFactory(null)));
+                            ch.pipeline().addLast(new SimpleTcpPacketHandler(null, new StandardSocketChannelFactory(null)));
                         }
                     });
             final Channel ch = b.bind(new TunAddress(ifname)).sync().channel();

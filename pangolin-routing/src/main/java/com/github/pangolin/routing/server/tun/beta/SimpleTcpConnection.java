@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
-public class TcpConnection2 {
+public class SimpleTcpConnection {
     private static final byte FIN = 0x0001;
     private static final byte SYN = 0x0002;
     private static final byte RST = 0x0004;
@@ -277,7 +277,7 @@ public class TcpConnection2 {
     private volatile Channel child;
     private int connTimeoutMs = 10 * 1000;
 
-    protected TcpConnection2(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+    protected SimpleTcpConnection(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         this.parent = parent;
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
@@ -844,8 +844,8 @@ public class TcpConnection2 {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpConnection2 tcp_check_req(final TcpPacket skb) {
-        TcpConnection2 nsk = tcp_v4_syn_recv_sock(skb);
+    private SimpleTcpConnection tcp_check_req(final TcpPacket skb) {
+        SimpleTcpConnection nsk = tcp_v4_syn_recv_sock(skb);
         return nsk;
     }
 
@@ -855,8 +855,8 @@ public class TcpConnection2 {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpConnection2 tcp_v4_syn_recv_sock(final TcpPacket skb) {
-        TcpConnection2 newsk = tcp_create_openreq_child(skb);
+    private SimpleTcpConnection tcp_v4_syn_recv_sock(final TcpPacket skb) {
+        SimpleTcpConnection newsk = tcp_create_openreq_child(skb);
         icsk_ext_hdr_len = 0;
         tcp_sync_mss(dst_mtu());
         advmss = tcp_mss_clamp(dst_metric_advmss());
@@ -870,7 +870,7 @@ public class TcpConnection2 {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpConnection2 tcp_create_openreq_child(final TcpPacket skb) {
+    private SimpleTcpConnection tcp_create_openreq_child(final TcpPacket skb) {
         /*-
          * 第一步调用 <code>inet_csk_clone_lock<code/> 基于原 TCP_NEW_SYN_RECV sock clone时会将状态设置为 TCP_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1247"></a>

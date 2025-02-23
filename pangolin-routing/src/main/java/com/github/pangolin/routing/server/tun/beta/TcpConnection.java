@@ -1292,6 +1292,9 @@ public abstract class TcpConnection<P extends IpPacket> {
             log.info("SEQ RTT = {}", seq_rtt_us);
         }
 
+        /*-
+         * 更新 RTT, RTO.
+         */
 
         // FIXME
          tcp_ack_update_rtt(flag, seq_rtt_us, 0, ca_rtt_us);
