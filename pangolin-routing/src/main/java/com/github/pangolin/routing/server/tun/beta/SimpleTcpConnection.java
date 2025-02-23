@@ -662,7 +662,7 @@ public class SimpleTcpConnection {
                         if (State.TCP_ESTABLISHED.equals(state.get())) {
                             // write now ??
 //                            write0(newPacket(header, src.getAddress(), dst.getAddress()).rst(true), true);
-//                            onDestroy();
+//                            destroy();
                         }
                     } else {
                         log.warn("{} Connect error", resolved, future.cause());
