@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
-public abstract class TcpConnection<P extends IpPacket> {
+public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSock {
     private static final byte FIN = 0x0001;
     private static final byte SYN = 0x0002;
     private static final byte RST = 0x0004;
@@ -247,20 +247,27 @@ public abstract class TcpConnection<P extends IpPacket> {
      *              ^               ^                 ^
      *              |-closes->   rcv.nxt    <-shrinks-|-opens->
      *          left edge                        right edge
-     *          (rcv.wup)                    (rcv.up + rcv.wnd)
+     *          (rcv.wup)                    (rcv.wup + rcv.wnd)
      *
      */
 
     private int rcv_isn;
-    private int rcv_wnd;
     private int rcv_wup;
     private int rcv_nxt;
+    private int rcv_wnd;
+
     private int copied_seq;
+
     private byte rcv_wscale = 6;
+
     private int icsk_ack_rcv_mss;
+
 
     private int bytes_acked;
     private long bytes_received;
+    private int bytes_sent;
+    private int data_segs_out;
+    private int segs_out;
 
 
     /*-
@@ -281,19 +288,25 @@ public abstract class TcpConnection<P extends IpPacket> {
      */
 
     private int snt_isn;
-
-    /*-
-     * https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L192
-     */
     private int snd_una;
-    /**
-     * The window we expect to receive.
-     */
     private int snd_wnd;
     private int snd_nxt;
+    /**
+     * Urgent pointer.
+     *
+     * @deprecated
+     */
+    @Deprecated
     private int snd_up;
     private int snd_sml;
+
     private byte snd_wscale;
+
+    /**
+     * 最大窗口.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L192">tcp_sock</a>
+     */
     private int max_window;
 
     private int snd_cwnd;
@@ -406,6 +419,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     public abstract void handler(final P ipHeader, final TcpPacket tcpPacket);
 
     /**
+     * 接收窗口可用大小.
      * Compute the actual receive window we are currently advertising.
      * Rcv_nxt can be after the window if our peer push more data
      * than the offered window.
@@ -417,6 +431,22 @@ public abstract class TcpConnection<P extends IpPacket> {
         return Math.max(rcv_wup + rcv_wnd - rcv_nxt, 0);
     }
 
+    /**
+     * 发送可用/拥塞窗口大小.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1312">tcp_snd_cwnd</a>
+     */
+    private int tcp_snd_cwnd() {
+        // FIXME
+        return snd_cwnd;
+    }
+
+    /**
+     * 发送窗口右边界.
+     */
+    private int tcp_wnd_end() {
+        return snd_una + snd_wnd;
+    }
 
     private int sk_shutdown;
 
@@ -932,20 +962,6 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     }
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/core/sock.c#L2383">sk_clone_lock</a>
-     */
-    private void sk_clone_lock() {
-        sk_prot_alloc();
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/core/sock.c#L2167">sk_prot_alloc</a>
-     */
-    private void sk_prot_alloc() {
-
-    }
-
     private void tcp_v4_init_sock() {
         tcp_init_sock();
     }
@@ -995,7 +1011,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6299">tcp_init_transfer</a>
      */
-    void tcp_init_transfer(TcpPacket skb) {
+    private void tcp_init_transfer(TcpPacket skb) {
         tcp_mtup_init();
         tcp_init_metrics();
 
@@ -1032,6 +1048,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     }
 
+    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5957
     private boolean tcp_validate_incoming(final TcpPacket skb) {
         final TcpHeader hdr = skb.getHeader();
         if (hdr.getRst()) {
@@ -1045,6 +1062,8 @@ public abstract class TcpConnection<P extends IpPacket> {
     }
 
     /**
+     * This routine deals with incoming acks, but not outgoing ones.
+     *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3904">tcp_ack</a>
      */
     private int tcp_ack(final TcpPacket skb, int flag) {
@@ -1177,6 +1196,10 @@ public abstract class TcpConnection<P extends IpPacket> {
                 || (ack_seq == snd_wl1 && (nwin > snd_wnd || nwin == 0));
     }
 
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1483">tcp_update_wl</a>
+     */
     private void tcp_update_wl(int ack_seq) {
         snd_wl1 = ack_seq;
     }
@@ -1297,7 +1320,7 @@ public abstract class TcpConnection<P extends IpPacket> {
          */
 
         // FIXME
-         tcp_ack_update_rtt(flag, seq_rtt_us, 0, ca_rtt_us);
+        tcp_ack_update_rtt(flag, seq_rtt_us, 0, ca_rtt_us);
 
         return 0;
     }
@@ -1942,19 +1965,6 @@ public abstract class TcpConnection<P extends IpPacket> {
     private void tcp_check_space() {
     }
 
-
-    /**
-     * @return
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1312">tcp_snd_cwnd</a>
-     */
-    private int tcp_snd_cwnd() {
-        // FIXME
-        return snd_cwnd;
-    }
-
-    private int tcp_wnd_end() {
-        return snd_una + snd_wnd;
-    }
 
     private void tcp_ack_snd_check(final IpHeader ipHdr, final TcpPacket skb) {
         if (!inet_csk_ack_scheduled()) {
@@ -3402,7 +3412,7 @@ public abstract class TcpConnection<P extends IpPacket> {
          * Make the window 0 if we failed to queue the data because we
          * are out of memory.
          */
-        // FIXME ...
+        // XXX NOMEM ?
 
         if (new_win < cur_win) {
             /*-
@@ -3415,13 +3425,13 @@ public abstract class TcpConnection<P extends IpPacket> {
              */
             if (!ipv4_sysctl_tcp_shrink_window || 0 != rcv_wscale) {
                 /* Never shrink the offered window */
-                // FIXME
-                // new_win = ALIGN(cur_win, 1 << rcv_wscale);
+                new_win = ALIGN(cur_win, 1 << rcv_wscale);
             }
         }
 
-        rcv_wnd = new_win;
-        rcv_wup = rcv_nxt;
+        this.rcv_wnd = new_win;
+        // XXX  放在这里一点也不合适.
+        this.rcv_wup = this.rcv_nxt;
 
         /*-
          * Make sure we do not exceed the maximum possible
@@ -3438,7 +3448,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
         /* If we advertise zero window, disable fast path. */
         if (new_win == 0) {
-            // FIXME
+            // TODO
 //            tp->pred_flags = 0;
             if (0 != old_win) {
 //                NET_INC_STATS(net, LINUX_MIB_TCPTOZEROWINDOWADV);
@@ -3458,7 +3468,7 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L817">tcp_syn_options</a>
      */
     private List<TcpOption> tcp_syn_options() {
-        // FIXME
+        // TODO
         return Collections.emptyList();
     }
 
@@ -3471,7 +3481,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
         final List<TcpOption> options = Lists.newArrayList();
 
-        // FIXME ...
+        // TODO
 
         /* We always send an MSS option. */
         options.add(new TcpMaximumSegmentSizeOption.Builder()
@@ -3487,7 +3497,7 @@ public abstract class TcpConnection<P extends IpPacket> {
                     .build());
         }
 
-        // FIXME ...
+        // TODO ...
 
         return options;
     }
@@ -3499,7 +3509,7 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L978">tcp_established_options</a>
      */
     private List<TcpOption> tcp_established_options() {
-        // FIXME
+        // TODO
         return Collections.emptyList();
     }
 
@@ -3520,6 +3530,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     private int __tcp_transmit_skb(final TcpBuffer skb, final boolean clone, int rcv_nxt) {
         long prior_wstamp = tcp_wstamp_ns;
         tcp_wstamp_ns = Math.max(tcp_wstamp_ns, tcp_clock_cache);
+
         skb_set_delivery_time(skb, tcp_wstamp_ns, "SKB_CLOCK_MONOTONIC");
 
         List<TcpOption> options;
@@ -3529,6 +3540,7 @@ public abstract class TcpConnection<P extends IpPacket> {
             options = tcp_established_options();
             if (tcp_skb_pcount(skb) > 1) {
                 // FIXME tcb->tcp_flags |= TCPHDR_PSH;
+                skb.psh(true);
             }
         }
 
@@ -3552,6 +3564,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
         skb.options(options);
 
+
         INDIRECT_CALL_INET(skb);
 
 
@@ -3559,16 +3572,16 @@ public abstract class TcpConnection<P extends IpPacket> {
             tcp_event_ack_sent(rcv_nxt);
         }
 
-//        TcpPacket tp = skb.asBuilder().build();
-//        TcpHeader th = tp.getHeader();
         Packet.Builder p = skb.payloadBuilder();
         int len = null != p ? p.build().length() : 0;
         if (len > 0) {
             tcp_event_data_sent();
-            // FIXME
-            // data_segs_out += tcp_skb_pcount(skb);
-            // bytes_sent += skb.length() - th.length();
+            // TODO
+            data_segs_out += tcp_skb_pcount(skb);
+            bytes_sent += len;
         }
+
+        segs_out += tcp_skb_pcount(skb);
 
         /* Leave earliest departure time in skb->tstamp (skb->skb_mstamp_ns) */
 
@@ -3581,6 +3594,8 @@ public abstract class TcpConnection<P extends IpPacket> {
         TcpPacket.Builder buf = skb
                 .srcAddr(ipHdr.getDstAddr())
                 .dstAddr(ipHdr.getSrcAddr())
+                .dstPort(tcpSrcPort)
+                .srcPort(tcpDstPort)
                 //
                 .asBuilder()
                 .paddingAtBuild(true)
@@ -3617,9 +3632,6 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498">tcp_queue_skb</a>
      */
     private void tcp_queue_skb(TcpBuffer skb) {
-        // FIXME
-        // only for end enq
-        skb.dstPort(tcpSrcPort).srcPort(tcpDstPort).srcAddr(ipHeader.getDstAddr()).dstAddr(ipHeader.getSrcAddr());
         write_seq = determineEndSeq(skb);
         sk_write_queue.offer(skb);
     }
@@ -3632,7 +3644,7 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1755">__tcp_mtu_to_mss</a>
      */
     private int __tcp_mtu_to_mss(final int pmtu) {
-        // FIXME icsk->icsk_af_ops->net_header_len
+        // XXX icsk->icsk_af_ops->net_header_len
         final int net_header_len = IP_HEADER_SIZE;
 
         /*-
@@ -3644,9 +3656,8 @@ public abstract class TcpConnection<P extends IpPacket> {
             mss_now = mss_clamp;
         }
 
-        /* FIXME Now subtract optional transport overhead */
+        /* XXX Now subtract optional transport overhead */
         mss_now -= icsk_ext_hdr_len;
-        ;
 
         /* Then reserve room for full set of TCP options and 8 bytes of data */
         // mss_now = max(mss_now, READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_min_snd_mss));
@@ -3670,20 +3681,24 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1802">tcp_output.c</a>
      */
     private void tcp_mtup_init() {
-        // FIXME
+        // TODO
     }
 
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1840
+    /**
+     * This function synchronize snd mss to current pmtu/exthdr set.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1840"></a>
+     */
     private int tcp_sync_mss(int pmtu) {
-        int mss_now;
+        // XXX icsk->icsk_mtup.search_high
 
-        mss_now = tcp_mtu_to_mss(pmtu);
+        int mss_now = tcp_mtu_to_mss(pmtu);
         mss_now = tcp_bound_to_half_wnd(mss_now);
 
         /* And store cached results */
         icsk_pmtu_cookie = pmtu;
 
-        // ...
+        // ... XXX icsk->icsk_mtup.enabled
 
         mss_cache = mss_now;
         return mss_now;
@@ -3713,7 +3728,9 @@ public abstract class TcpConnection<P extends IpPacket> {
     }
 
     /**
-     * @return
+     * Can at least one segment of SKB be sent right now, according to the
+     * congestion window rules?  If so, return how many segments are allowed.
+     *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2086">tcp_cwnd_test</a>
      */
     private int tcp_cwnd_test() {
@@ -3723,27 +3740,12 @@ public abstract class TcpConnection<P extends IpPacket> {
             return 0;
         }
 
+        /*-
+         * For better scheduling, ensure we have at least
+         * 2 GSO packets in flight.
+         */
         int halfcwnd = Math.max(cwnd >> 1, 1);
         return Math.min(halfcwnd, cwnd - in_flight);
-    }
-
-    private boolean tcp_tso_should_defer(final TcpPacket skb, int max_segs) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2214
-
-        TcpHeader hdr = skb.getHeader();
-        int in_flight = 0;
-        int mss_cache = 1460;
-        int send_win = tcp_wnd_end() - hdr.getSequenceNumber();
-        int cong_win = (tcp_snd_cwnd() - in_flight) * mss_cache;
-
-        int limit = Math.min(send_win, cong_win);
-        if (limit >= max_segs * mss_cache) {
-            return false;
-        }
-        if (limit >= skb.length() - hdr.length()) {
-            return false;
-        }
-        return true;
     }
 
     /**
@@ -4055,8 +4057,7 @@ public abstract class TcpConnection<P extends IpPacket> {
                 .syn(true).ack(true)
                 .sequenceNumber(req_snt_isn_ref.get())
                 .acknowledgmentNumber(req_rcv_nxt_ref.get())
-                .window((short) Math.min(req_rsk_rcv_wnd_ref.get(), U16_MAX))
-                ;
+                .window((short) Math.min(req_rsk_rcv_wnd_ref.get(), U16_MAX));
 
         skb_set_delivery_time(current, now, "SKB_CLOCK_MONOTONIC");
 
@@ -4082,9 +4083,21 @@ public abstract class TcpConnection<P extends IpPacket> {
         if (ato > TCP_DELACK_MIN) {
             int max_ato = HZ / 2;
 
-            // XXX
-            if (0 != (icsk_ack_pending & ICSK_ACK_PUSHED)) {
+            if (inet_csk_in_pingpong_model() || 0 != (icsk_ack_pending & ICSK_ACK_PUSHED)) {
                 max_ato = TCP_DELACK_MAX;
+            }
+
+            /* Slow path, intersegment interval is "high". */
+
+            /* If some rtt estimate is known, use it to bound delayed ack.
+             * Do not use inet_csk(sk)->icsk_rto here, use results of rtt measurements
+             * directly.
+             */
+            if (srtt_us != 0) {
+                int rtt = (int) Math.min(usecs_to_jiffies(srtt_us >> 3), TCP_DELACK_MIN);
+                if (rtt < max_ato) {
+                    max_ato = rtt;
+                }
             }
 
             ato = Math.min(ato, max_ato);
@@ -4099,18 +4112,19 @@ public abstract class TcpConnection<P extends IpPacket> {
         if ((icsk_ack_pending & ICSK_ACK_TIMER) != 0) {
 
             /* If delack timer is about to expire, send ACK now. */
-            if (icsk_ack_timeout <= jiffies() + (ato >> 2)) {
+            if (time_before_eq(icsk_ack_timeout, jiffies() + (ato >> 2))) {
                 // send now.
                 tcp_send_ack();
                 return;
             }
-            if (timeout >= icsk_ack_timeout) {
+
+            if (!time_before(timeout, icsk_ack_timeout)) {
                 timeout = icsk_ack_timeout;
             }
         }
 
-        // FIXME smp_store_release
-        icsk_ack_pending |= ICSK_ACK_TIMER | ICSK_ACK_SCHED;
+        // XXX smp_store_release
+        icsk_ack_pending |= ICSK_ACK_SCHED | ICSK_ACK_TIMER;
 
         if (icsk_ack_timeout != timeout) {
             icsk_ack_timeout = timeout;
@@ -4118,30 +4132,25 @@ public abstract class TcpConnection<P extends IpPacket> {
         }
     }
 
-    private void tcp_send_ack() {
-        __tcp_send_ack(rcv_nxt);
-    }
-
     /**
-     * @param rcv_nxt
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4237">__tcp_send_ack</a>
      */
     private void __tcp_send_ack(final int rcv_nxt) {
+        /* If we have been reset, we may not send again. */
         if (State.TCP_CLOSE.equals(state.get())) {
             return;
         }
 
         final int sndSeq = tcp_acceptable_seq();
-        TcpBuffer current = new TcpBuffer()
-                .ack(true)
-                .sequenceNumber(sndSeq)
-                .dstAddr(ipHeader.getSrcAddr())
-                .srcAddr(ipHeader.getDstAddr())
-                .dstPort(tcpSrcPort)
-                .srcPort(tcpDstPort);
 
+        TcpBuffer current = new TcpBuffer().ack(true).sequenceNumber(sndSeq);
         __tcp_transmit_skb(current, false, rcv_nxt);
     }
+
+    private void tcp_send_ack() {
+        __tcp_send_ack(rcv_nxt);
+    }
+
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4295">tcp_xmit_probe_skb</a>
@@ -4153,13 +4162,7 @@ public abstract class TcpConnection<P extends IpPacket> {
          * send it.
          */
         final int seq = snd_una - (0 == urgent ? 1 : 0);
-        TcpBuffer skb = new TcpBuffer()
-                .sequenceNumber(seq)
-                .ack(true)
-                .srcAddr(ipHeader.getDstAddr())
-                .dstAddr(ipHeader.getSrcAddr())
-                .srcPort(tcpDstPort)
-                .dstPort(tcpSrcPort);
+        TcpBuffer skb = new TcpBuffer().sequenceNumber(seq).ack(true);
         return tcp_transmit_skb(skb, false);
     }
 
@@ -4197,7 +4200,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 //                seg_size = Math.min(seg_size, mss);
 //                buf.psh(true);
 
-                // FIXME
+            // FIXME
 //            }
 
             // ...
@@ -4226,7 +4229,9 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4374">tcp_send_probe0</a>
      */
     private void tcp_send_probe0() {
+        // LINUX_MIB_TCPWINPROBE
         int err = tcp_write_wakeup(0);
+
         if (packets_out > 0 || tcp_write_queue_empty()) {
             /* Cancel probe timer, if it is not required. */
             icsk_backoff = 0;
@@ -4272,4 +4277,19 @@ public abstract class TcpConnection<P extends IpPacket> {
         return (((x) + ((a) - 1)) & ~((a) - 1));
     }
 
+    private boolean time_after(long a, long b) {
+        return (b - a) < 0;
+    }
+
+    private boolean time_after_eq(long a, long b) {
+        return (a - b) >= 0;
+    }
+
+    private boolean time_before(long a, long b) {
+        return time_after(b, a);
+    }
+
+    private boolean time_before_eq(long a, long b) {
+        return time_after_eq(b, a);
+    }
 }
