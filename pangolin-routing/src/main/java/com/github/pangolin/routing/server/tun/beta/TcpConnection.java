@@ -13,6 +13,7 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoopGroup;
+import io.netty.util.NetUtil;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
@@ -1356,25 +1357,24 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
     }
 
     private InetSocketAddress resolve(InetAddress dst, final int port) {
-        String addr = dst.getHostAddress();
-        if ("198.18.0.201".equalsIgnoreCase(addr) || "198.18.0.1".equalsIgnoreCase(addr)) {
-            try {
-                return new InetSocketAddress(InetAddress.getByName("139.196.84.154"), port);
-            } catch (UnknownHostException e) {
-                e.printStackTrace();
-            }
-        }
-        if (null != dnsEngine) {
-            final String host = dnsEngine.resolve(dst.getAddress());
-            if (null != host) {
-                return InetSocketAddress.createUnresolved(host, port);
-            } else if (dnsEngine.isFake(dst.getAddress())) {
-                return null;
-            }
+        String host = resolve(dst);
+        if (null != host) {
+            return InetSocketAddress.createUnresolved(host, port);
         }
         return new InetSocketAddress(dst, port);
     }
 
+    private String resolve(InetAddress dst) {
+        if (null != dnsEngine) {
+            final String host = dnsEngine.resolve(dst.getAddress());
+            if (null != host) {
+                return host;
+            } else if (dnsEngine.isFake(dst.getAddress())) {
+                return null;
+            }
+        }
+        return null;
+    }
 
     // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L597
     int tcp_mss_clamp(final int mss) {
@@ -2344,10 +2344,17 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
         final int srcPort = tcpHeader.getSrcPort().valueAsInt();
         final int dstPort = tcpHeader.getDstPort().valueAsInt();
 
+        String dstHostNameToUse = resolve(dstAddr);
+        if (null != dstHostNameToUse) {
+            dstHostNameToUse += dstHostName;
+        } else {
+            dstHostNameToUse = dstHostName;
+        }
+
         final StringBuilder buff = new StringBuilder()
-                .append(inbound ? srcHostName : dstHostName).append(":").append(srcPort)
+                .append(inbound ? srcHostName : dstHostNameToUse).append(":").append(srcPort)
                 .append(" => ")
-                .append(inbound ? dstHostName : srcHostName).append(":").append(dstPort);
+                .append(inbound ? dstHostNameToUse : srcHostName).append(":").append(dstPort);
 
         final int len = buff.length();
         if (tcpHeader.getFin()) {
