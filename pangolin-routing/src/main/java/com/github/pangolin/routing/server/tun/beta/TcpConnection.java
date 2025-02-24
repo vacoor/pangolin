@@ -7,13 +7,25 @@ import com.google.common.collect.Maps;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.EventLoopGroup;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.*;
+import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
+import org.pcap4j.packet.IpV4Packet;
+import org.pcap4j.packet.Packet;
+import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
+import org.pcap4j.packet.TcpNoOperationOption;
+import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.TcpPacket.TcpOption;
+import org.pcap4j.packet.TcpWindowScaleOption;
+import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.TcpPort;
@@ -25,7 +37,14 @@ import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -796,7 +815,6 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
     }
 
 
-
     private void tcp_init_metrics() {
     }
 
@@ -821,7 +839,12 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
     }
 
 
-
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1478">tcp_init_wl</a>
+     */
+    private void tcp_init_wl(int seq) {
+        snd_wl1 = seq;
+    }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1483">tcp_update_wl</a>
@@ -830,40 +853,6 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
         snd_wl1 = ack_seq;
     }
 
-
-
-
-    private void queue_and_out(final TcpPacket skb) throws IOException {
-        final TcpHeader hdr = skb.getHeader();
-        // queue_and_out;
-
-        inet_csk_schedule_ack();
-
-        sk_data_ready();
-        if (skb.length() - hdr.length() > 0) {
-            consume(skb);
-        }
-
-        tcp_queue_rcv(skb);
-
-        if (skb.length() - hdr.length() > 0) {
-            tcp_event_data_recv(skb);
-        }
-
-        if (hdr.getFin()) {
-            tcp_fin();
-        }
-    }
-
-    private void out_of_window(final TcpPacket skb, final int reason) {
-        tcp_enter_quickack_mode(TCP_MAX_QUICKACKS);
-        inet_csk_schedule_ack();
-        drop(skb, reason);
-    }
-
-    private void drop(final TcpPacket skb, final int reason) {
-        // tcp_drop_reason(sk, skb, reason);
-    }
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L86
     private static final int TCP_MAX_QUICKACKS = 16;
@@ -1335,16 +1324,10 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
     }
 
 
-
-
-
-
     private void tcp_push_pending_frames() {
         // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2102
         __tcp_push_pending_frames(tcp_current_mss());
     }
-
-
 
 
     private int sk_err_soft;
@@ -1409,7 +1392,6 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
     private TcpBuffer tcp_send_head() {
         return sk_write_queue.peek();
     }
-
 
 
     void tcp_data_queue_ofo(final TcpPacket skb) {
@@ -3717,7 +3699,7 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
         if (null == head) {
             return;
         }
-        if (determineEndSeq(head) <= tcp_wnd_end()) {
+        if (!after(determineEndSeq(head), tcp_wnd_end())) {
             icsk_backoff = 0;
             icsk_probes_tstamp = 0;
             inet_csk_clear_xmit_timer(ICSK_TIME_PROBE0);
@@ -3767,6 +3749,7 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
     private void tcp_rcv_nxt_update(final int seq) {
         final int delta = seq - rcv_nxt;
         bytes_received += delta;
+        // tcp_rcv_sne_update(seq)
         rcv_nxt = seq;
     }
 
@@ -4249,6 +4232,7 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
 
                 snd_una = th.getAcknowledgmentNumber();
                 snd_wnd = th.getWindowAsInt() << snd_wscale;
+                tcp_init_wl(th.getSequenceNumber());
 
                 // ...
 
@@ -4319,11 +4303,41 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
         return SKB_DROP_REASON_NOT_SPECIFIED;
     }
 
+    private void queue_and_out(final TcpPacket skb) throws IOException {
+        final TcpHeader hdr = skb.getHeader();
+        // queue_and_out;
+
+        inet_csk_schedule_ack();
+
+        sk_data_ready();
+        if (skb.length() - hdr.length() > 0) {
+            consume(skb);
+        }
+
+        tcp_queue_rcv(skb);
+
+        if (skb.length() - hdr.length() > 0) {
+            tcp_event_data_recv(skb);
+        }
+
+        if (hdr.getFin()) {
+            tcp_fin();
+        }
+    }
+
+    private void out_of_window(final TcpPacket skb, final int reason) {
+        tcp_enter_quickack_mode(TCP_MAX_QUICKACKS);
+        inet_csk_schedule_ack();
+        drop(skb, reason);
+    }
+
+    private void drop(final TcpPacket skb, final int reason) {
+        // tcp_drop_reason(sk, skb, reason);
+    }
+
     private int discard(final TcpPacket skb, final int reason) {
         return 0;
     }
-
-
 
 
     private long tcp_clock_ns() {

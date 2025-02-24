@@ -1,5 +1,32 @@
 package com.github.pangolin.routing.server.tun.net.windows;
 
+import static com.github.pangolin.routing.server.tun.net.windows.jna.DnsLib.DnsFlushResolverCache;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.AF_UNSPEC;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.DNS_INTERFACE_SETTINGS;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.DNS_INTERFACE_SETTINGS_VERSION1;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.DNS_SETTING_IPV6;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.DNS_SETTING_NAMESERVER;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.DNS_SETTING_SEARCHLIST;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.GAA_FLAG_INCLUDE_ALL_INTERFACES;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.GAA_FLAG_INCLUDE_GATEWAYS;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.GAA_FLAG_SKIP_ANYCAST;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.GAA_FLAG_SKIP_FRIENDLY_NAME;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.GAA_FLAG_SKIP_MULTICAST;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.GAA_FLAG_SKIP_UNICAST;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.INSTANCE;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.IP_ADAPTER_ADDRESSES_LH;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.IP_ADAPTER_DNS_SERVER_ADDRESS_XP;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.IP_ADAPTER_DNS_SUFFIX;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.MIB_IPINTERFACE_ROW;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.MIB_UNICASTIPADDRESS_ROW;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.MIB_UNICASTIPADDRESS_TABLE;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.NDIS_IF_MAX_STRING_SIZE;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.sockaddr_in;
+import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.sockaddr_in6;
+import static com.sun.jna.platform.win32.Guid.GUID;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
+
 import com.github.pangolin.routing.server.tun.net.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.net.NetworkInterfaceEx;
 import com.google.common.base.Preconditions;
@@ -15,17 +42,16 @@ import com.sun.jna.ptr.PointerByReference;
 import io.netty.util.NetUtil;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.*;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.LinkedList;
 import java.util.List;
-
-import static com.github.pangolin.routing.server.tun.net.windows.jna.DnsLib.DnsFlushResolverCache;
-import static com.github.pangolin.routing.server.tun.net.windows.jna.IpHelpLib.*;
-import static com.sun.jna.platform.win32.Guid.GUID;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
 
 /**
  * @see <a href="https://github.com/WireGuard/wireguard-windows/blob/master/tunnel/winipcfg/luid.go">luid</a>
@@ -364,7 +390,19 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         final int family = address instanceof Inet4Address ? AF_INET : (address instanceof Inet6Address ? AF_INET6 : AF_UNSPEC);
         flushInterfaceAddresses(interfaceLuid, family);
         addInterfaceAddress(interfaceLuid, address, prefixLength);
+        /*
+        final MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(interfaceLuid, address);
+        row.OnLinkPrefixLength = prefixLength;
+        row.ValidLifetime = 0xFFFFFFFF;
+        row.PreferredLifetime = 0xFFFFFFFF;
+
+        final int err = INSTANCE.SetUnicastIpAddressEntry(row);
+        if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {
+            throw new IllegalStateException("SetUnicastIpAddressEntry failed: " + err);
+        }
+        */
     }
+
 
     /**
      * @param family Must be [IPHlpAPI.AF_INET], [IPHlpAPI.AF_INET6] or [IPHlpAPI.AF_UNSPEC]
@@ -394,6 +432,7 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         INSTANCE.InitializeUnicastIpAddressEntry(row);
 
         row.InterfaceLuid = interfaceLuid;
+        // row.OnLinkPrefixLength = 24; // 子网掩码
 
         if (address instanceof Inet4Address) {
             final sockaddr_in sockaddrIn = new sockaddr_in();

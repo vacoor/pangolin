@@ -1,23 +1,15 @@
 package com.github.pangolin.routing.handler.internal.server;
 
 import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
 import com.google.common.collect.Maps;
-import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandler;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.DatagramPacket;
-import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.util.AbstractReferenceCounted;
 import io.netty.util.ReferenceCounted;
+
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.concurrent.ConcurrentMap;
@@ -113,39 +105,5 @@ public class Socks5ServerDatagramDemultiplexer extends ChannelInboundHandlerAdap
         protected void deallocate() {
 
         }
-    }
-
-    public static void main(String[] args) throws InterruptedException {
-        final Socks5ServerDatagramDemultiplexer d = new Socks5ServerDatagramDemultiplexer(new StandardDatagramChannelFactory());
-        d.join(new InetSocketAddress("127.0.0.1", 0));
-
-//        d.leave(new InetSocketAddress(0));
-        System.out.println();
-
-        ChannelFuture c = new Bootstrap()
-            .group(new NioEventLoopGroup())
-//            .group(parent.eventLoop())
-            .channel(NioDatagramChannel.class)
-            .option(ChannelOption.SO_BROADCAST, false)
-            .handler(new ChannelInitializer<Channel>() {
-                @Override
-                protected void initChannel(final Channel ch) throws Exception {
-                    ch.pipeline().addLast(d);
-                }
-            }).bind(1082).addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(ChannelFuture future) throws Exception {
-                  if (future.isSuccess()) {
-                      final Channel channel = future.channel();
-                      final Socks5ServerDatagramDemultiplexer demultiplexer = future.channel().pipeline()
-                          .get(Socks5ServerDatagramDemultiplexer.class);
-                      System.out.println(demultiplexer);
-                      System.out.println(future.channel().localAddress());
-                  }
-                }
-            });
-
-        c.sync();
-
     }
 }

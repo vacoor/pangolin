@@ -91,6 +91,7 @@ public class Socks5ServerDatagramHandler extends ChannelInboundHandlerAdapter {
                 recipient,
                 callbackCtx.channel().config().getConnectTimeoutMillis(),
 //                callbackCtx.channel().eventLoop(),
+                // FIXME
                 new NioEventLoopGroup(),
                 new ChannelInitializer<DatagramChannel>() {
                     @Override

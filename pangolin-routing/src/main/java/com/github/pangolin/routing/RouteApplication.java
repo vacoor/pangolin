@@ -1,38 +1,45 @@
 package com.github.pangolin.routing;
 
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
+
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.context.RouteContextFactory;
-import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
 import com.github.pangolin.routing.route.RoutePredicateFactoriesAware;
 import com.github.pangolin.routing.route.RouteRegistry;
 import com.github.pangolin.routing.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.route.predicate.RoutePredicateSetFactory;
 import com.github.pangolin.routing.server.Acceptor;
 import com.github.pangolin.routing.server.AcceptorProvider;
-import com.github.pangolin.routing.server.Forwarder;
 import com.github.pangolin.routing.server.extra.ProxyAutoConfigurationServerHandler;
 import com.github.pangolin.routing.server.extra.SwitchyRuleConfigurationServerHandler;
-import com.github.pangolin.routing.server.fakedns.DnsEngine;
-import com.github.pangolin.routing.server.tun.beta.channel.TunAddress;
-import com.github.pangolin.routing.server.tun.beta.channel.TunChannel;
-import com.github.pangolin.routing.server.tun.beta.handler.IpPacketCodec;
-import com.github.pangolin.routing.server.tun.beta.handler.Tcp4PacketHandler;
+import com.github.pangolin.routing.server.fakedns.FakeDnsAcceptorFactory;
+import com.github.pangolin.routing.server.tun.beta.TunAcceptorFactory;
 import com.github.pangolin.routing.stats.StatsAware;
 import com.github.pangolin.routing.stats.StatsUpstreamCombiner;
 import com.github.pangolin.routing.stats.StatsUpstreamFactory;
-import com.github.pangolin.routing.upstream.*;
+import com.github.pangolin.routing.upstream.DirectUpstream;
+import com.github.pangolin.routing.upstream.DropUpstream;
+import com.github.pangolin.routing.upstream.RejectUpstream;
+import com.github.pangolin.routing.upstream.Upstream;
+import com.github.pangolin.routing.upstream.UpstreamCombiner;
+import com.github.pangolin.routing.upstream.UpstreamCombinersAware;
+import com.github.pangolin.routing.upstream.UpstreamFactoriesAware;
+import com.github.pangolin.routing.upstream.UpstreamFactory;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.netflix.loadbalancer.LoadBalancerStats;
-import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
@@ -48,8 +55,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.Set;
-
-import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 @Slf4j
 public class RouteApplication {
@@ -214,6 +219,8 @@ public class RouteApplication {
         final RouteApplication app = new RouteApplication();
         final RouteContext context = app.run(conf);
 
+        app.channelGroup.add(new FakeDnsAcceptorFactory().apply(0, "FakeDNS").start(context).channel());
+
         final Set<String> bypass = Sets.newTreeSet();
         for (Upstream upstream : context.upstreams()) {
             final SocketAddress address = upstream.address();
@@ -229,49 +236,11 @@ public class RouteApplication {
 
         System.out.println("Bypass = " + bypass);
 
-        final SocketChannelFactory factory = context.newSocketChannelFactory();
-        final Forwarder forwarder = new Forwarder(factory, new NioEventLoopGroup(), new NioEventLoopGroup());
-//        forwarder.addForwarding(2222, InetSocketAddress.createUnresolved("127.0.0.1", 22));
-
         if (args.length > 0 && "tun".equalsIgnoreCase(args[0])) {
-            final DnsEngine dnsEngine = context.attr(DnsEngine.class.getName());
             final String ifname = args.length > 1 ? args[1] : "utun8";
-            EventLoopGroup group = new DefaultEventLoopGroup(1);
-            final Bootstrap b = new Bootstrap()
-                    .group(group)
-                    .channel(TunChannel.class)
-                    .handler(new ChannelInitializer<Channel>() {
-                        @Override
-                        protected void initChannel(final Channel ch) throws Exception {
-                            ch.pipeline().addLast(new IpPacketCodec());
-//                            ch.pipeline().addLast(new SimpleTcpPacketHandler(dnsEngine, factory));
-                            ch.pipeline().addLast(new Tcp4PacketHandler(dnsEngine, factory));
-                        }
-                    });
-            final Channel ch = b.bind(new TunAddress(ifname)).addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(final ChannelFuture future) throws Exception {
-                    if (future.isSuccess()) {
-                        log.info("Tun device started: {}", ifname);
-                        log.info("sudo route add -net 198.18.0.0/15 198.18.0.1");
-                        log.info("networksetup -setdnsservers \"Wi-Fi\" 127.0.0.1");
-                        log.info("sudo killall -HUP mDNSResponder;");
-                    }
-                }
-            }).sync().channel();
+            app.channelGroup.add(new TunAcceptorFactory().apply(0, ifname).start(context).channel());
         }
 
-        /*
-        for (Route<InetSocketAddress> route : context.routes()) {
-            for (RoutePredicate predicate : route.getPredicates()) {
-                if (predicate instanceof SubnetRoutePredicate) {
-                    SubnetRoutePredicate p = (SubnetRoutePredicate) predicate;
-                    String s = p.getNetworkAddress().getHostAddress() + "/" + p.getCidrPrefix();
-                    System.out.println(String.format("sudo route add -net %s 198.18.0.1", s));
-                }
-            }
-        }
-        */
         app.await();
 //        LinuxTunAdapter.main(args);
 //        DarwinTunAdapter.main(args);

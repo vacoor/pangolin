@@ -1,1 +1,1 @@
-com.github.pangolin.routing.server.fakedns.FakeDnsMixinAcceptorFactory
+com.github.pangolin.routing.server.MixinAcceptorFactory

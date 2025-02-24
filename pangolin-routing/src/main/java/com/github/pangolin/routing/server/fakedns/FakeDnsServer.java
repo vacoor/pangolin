@@ -64,7 +64,7 @@ public class FakeDnsServer {
                 .build();
 
         final Bootstrap b = new Bootstrap();
-        return b.group(new NioEventLoopGroup())
+        return b.group(loop)
                 .channel(NioDatagramChannel.class)
                 .handler(new ChannelInitializer<DatagramChannel>() {
                     @Override
@@ -79,6 +79,8 @@ public class FakeDnsServer {
                         if (!future.isSuccess()) {
                             final Throwable cause = future.cause();
                             log.warn("FakeDNS error: {}", cause.getMessage(), cause);
+                        } else {
+                            log.info("Fake DNS startup on {}", future.channel().localAddress());
                         }
                     }
                 });

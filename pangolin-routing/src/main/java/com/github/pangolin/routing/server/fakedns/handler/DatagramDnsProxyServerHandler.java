@@ -1,21 +1,20 @@
 package com.github.pangolin.routing.server.fakedns.handler;
 
-import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.DatagramChannel;
-import io.netty.channel.socket.nio.NioDatagramChannel;
-import io.netty.handler.codec.dns.*;
+import io.netty.channel.AddressedEnvelope;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.codec.dns.DatagramDnsQuery;
+import io.netty.handler.codec.dns.DatagramDnsQueryDecoder;
+import io.netty.handler.codec.dns.DatagramDnsResponse;
+import io.netty.handler.codec.dns.DatagramDnsResponseEncoder;
+import io.netty.handler.codec.dns.DnsQuestion;
+import io.netty.handler.codec.dns.DnsRecord;
+import io.netty.handler.codec.dns.DnsResponse;
+import io.netty.handler.codec.dns.DnsSection;
 import io.netty.resolver.dns.DnsNameResolver;
-import io.netty.resolver.dns.DnsNameResolverBuilder;
-import io.netty.resolver.dns.SequentialDnsServerAddressStreamProvider;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.GenericFutureListener;
 
 import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
-import java.util.Arrays;
-import java.util.List;
 
 public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<DatagramDnsQuery> {
 
@@ -70,35 +69,5 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
             DnsRecord record = r1.recordAt(section, i);
             r2.addRecord(section, record);
         }
-    }
-
-    public static void main(String[] args) throws UnknownHostException, InterruptedException {
-        final List<InetSocketAddress> addresses = Arrays.asList(
-                new InetSocketAddress("192.168.1.1", 53)
-        );
-
-        final EventLoopGroup loop = new NioEventLoopGroup();
-        final DnsNameResolver resolver = new DnsNameResolverBuilder()
-                .nameServerProvider(new SequentialDnsServerAddressStreamProvider(addresses))
-                .channelFactory(NioDatagramChannel::new)
-                .eventLoop(loop.next())
-//                .ttl()
-                .recursionDesired(true)
-                .build();
-
-        EventLoopGroup proxyGroup = new NioEventLoopGroup();
-        Bootstrap b = new Bootstrap();
-        b.group(proxyGroup).channel(NioDatagramChannel.class)
-                .handler(new ChannelInitializer<DatagramChannel>() {
-                    @Override
-                    protected void initChannel(DatagramChannel ch) {
-                        ch.pipeline().addLast(new DatagramDnsProxyServerHandler(resolver));
-                    }
-                }).option(ChannelOption.SO_BROADCAST, true).bind(53).addListener(new GenericFutureListener<Future<? super Void>>() {
-            @Override
-            public void operationComplete(final Future<? super Void> future) throws Exception {
-                System.out.println("DNS: " + future.isSuccess());
-            }
-        });
     }
 }
