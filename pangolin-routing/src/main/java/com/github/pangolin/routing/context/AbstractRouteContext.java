@@ -181,6 +181,12 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
         }
 
         @Override
+        public ChannelHandler[] newSocketProxyHandlers(final InetSocketAddress destination) {
+            final Upstream upstream = context.choose(destination);
+            return null != upstream ? upstream.newSocketProxyHandlers(destination) : new ChannelHandler[0];
+        }
+
+        @Override
         public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
             final Upstream upstream = context.choose(destination);
             return null != upstream ? upstream.newDatagramProxyHandler(destination) : null;

@@ -10,6 +10,7 @@ import io.netty.channel.ChannelInitializer;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.util.List;
 import java.util.stream.StreamSupport;
 
 public class UpstreamChainFactory implements UpstreamCombiner {
@@ -41,6 +42,13 @@ public class UpstreamChainFactory implements UpstreamCombiner {
                         .toArray(ChannelHandler[]::new);
                 return createInitializer(handlers);
             }
+
+            @Override
+            public ChannelHandler[] newSocketProxyHandlers(final InetSocketAddress destination) {
+                // FIXME
+                return super.newSocketProxyHandlers(destination);
+            }
+
 
             @Override
             public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {

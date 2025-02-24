@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -62,6 +63,16 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
                     log.info("[SELECT] [{}]: [{}] => {}", name, upstream.name(), stringify(destination));
                 }
                 return null != upstream ? upstream.newSocketProxyHandler(destination) : null;
+            }
+
+            @Override
+            public ChannelHandler[] newSocketProxyHandlers(final InetSocketAddress destination) {
+                return StreamSupport.stream(names.spliterator(), false)
+                        .map(registry::getUpstream)
+                        .filter(Objects::nonNull)
+                        .map(upstream -> upstream.newSocketProxyHandlers(destination))
+                        .flatMap(Arrays::stream)
+                        .toArray(ChannelHandler[]::new);
             }
 
             @Override

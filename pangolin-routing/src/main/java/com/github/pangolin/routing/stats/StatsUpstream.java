@@ -10,6 +10,7 @@ import io.netty.channel.ChannelHandlerContext;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.util.Arrays;
 
 public class StatsUpstream extends Server implements Upstream {
     private final Upstream delegate;
@@ -38,11 +39,27 @@ public class StatsUpstream extends Server implements Upstream {
 
     @Override
     public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
-        final ServerStats serverStats = stats.getSingleServerStat(this);
-        ChannelHandler h = delegate.newSocketProxyHandler(destination);
+        return wrap(delegate.newSocketProxyHandler(destination));
+    }
+
+    @Override
+    public ChannelHandler[] newSocketProxyHandlers(final InetSocketAddress destination) {
+        return Arrays.stream(delegate.newSocketProxyHandlers(destination))
+                .map(this::wrap)
+                .toArray(ChannelHandler[]::new);
+    }
+
+
+    @Override
+    public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
+        return delegate.newDatagramProxyHandler(destination);
+    }
+
+    private ChannelHandler wrap(final ChannelHandler h) {
         if (null == h) {
             return null;
         }
+        final ServerStats serverStats = stats.getSingleServerStat(this);
         return new ChannelDuplexHandler() {
             private volatile long requestTime;
 
@@ -84,11 +101,6 @@ public class StatsUpstream extends Server implements Upstream {
                 return h.toString();
             }
         };
-    }
-
-    @Override
-    public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
-        return delegate.newDatagramProxyHandler(destination);
     }
 
     @Override

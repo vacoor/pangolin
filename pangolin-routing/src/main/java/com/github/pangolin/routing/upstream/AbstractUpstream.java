@@ -21,6 +21,11 @@ public abstract class AbstractUpstream implements Upstream {
     @Override
     public abstract ChannelHandler newSocketProxyHandler(final InetSocketAddress destination);
 
+    public ChannelHandler[] newSocketProxyHandlers(final InetSocketAddress destination) {
+        final ChannelHandler h = newSocketProxyHandler(destination);
+        return null != h ? new ChannelHandler[]{h} : new ChannelHandler[0];
+    }
+
     /**
      * {@inheritDoc}
      */
