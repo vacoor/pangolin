@@ -20,7 +20,7 @@ public class Tcp4PacketHandler extends TcpPacketHandler<IpV4Packet> {
     protected TcpConnection<IpV4Packet> create(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory, final Runnable destroyCallback) {
         return new Tcp4Connection(parent, childGroup, dnsEngine, socketChannelFactory) {
             @Override
-            protected void destroy() {
+            protected void destroy0() {
                 destroyCallback.run();
             }
         };

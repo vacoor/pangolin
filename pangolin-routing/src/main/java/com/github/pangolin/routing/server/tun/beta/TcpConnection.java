@@ -13,7 +13,6 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoopGroup;
-import io.netty.util.NetUtil;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
@@ -34,8 +33,6 @@ import org.pcap4j.packet.namednumber.TcpPort;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -835,7 +832,14 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
     private static final int ETIMEOUT = 110;
 
 
-    protected void destroy() {
+    private void destroy() {
+        if (child.isOpen()) {
+            child.close();
+        }
+        destroy0();
+    }
+
+    protected void destroy0() {
 
     }
 
@@ -1361,7 +1365,7 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
         if (null != host) {
             return InetSocketAddress.createUnresolved(host, port);
         }
-        return new InetSocketAddress(dst, port);
+        return null;
     }
 
     private String resolve(InetAddress dst) {
@@ -1373,7 +1377,7 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
                 return null;
             }
         }
-        return null;
+        return dst.getHostAddress();
     }
 
     // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L597
@@ -1403,27 +1407,16 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
 
     }
 
-    void consume(final TcpPacket skb) throws IOException {
-        final TcpHeader hdr = skb.getHeader();
-        final int seq = hdr.getSequenceNumber();
-        byte[] bytes = skb.getPayload().getRawData();
+    private void consume(final TcpPacket skb) throws IOException {
+        if (null != child && child.isOpen()) {
+            final TcpHeader hdr = skb.getHeader();
+            final byte[] bytes = skb.getPayload().getRawData();
 
-        final int from = rcv_nxt - seq;
-        final int to = Math.min(from + tcp_receive_window(), bytes.length);
-        if (0 != from || to != bytes.length) {
-            bytes = Arrays.copyOfRange(bytes, from, to);
+            final int offset = rcv_nxt - hdr.getSequenceNumber();
+            final int length = Math.min(offset + tcp_receive_window(), bytes.length);
+            child.writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
         }
-        connectionRead(bytes);
     }
-
-    private void connectionRead(final byte[] bytes) throws IOException {
-        if (null == child || !child.isOpen()) {
-            log.warn("Remote already closed");
-            return;
-        }
-        child.writeAndFlush(Unpooled.wrappedBuffer(bytes));
-    }
-
 
     /**
      * @param skb
@@ -1470,7 +1463,6 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
         return seq3 - seq2 >= seq1 - seq2;
     }
 
-
     /**
      *
      */
@@ -1481,11 +1473,6 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
 
         sk_shutdown = SHUTDOWN_MASK;
 
-        log.warn("DONE");
-
-        if (child.isOpen()) {
-            child.close();
-        }
 
         destroy();
     }
@@ -2344,12 +2331,15 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
         final int srcPort = tcpHeader.getSrcPort().valueAsInt();
         final int dstPort = tcpHeader.getDstPort().valueAsInt();
 
+        /*
         String dstHostNameToUse = resolve(dstAddr);
         if (null != dstHostNameToUse) {
-            dstHostNameToUse += dstHostName;
+            dstHostNameToUse = dstHostName + "(" + dstHostNameToUse +  ")";
         } else {
             dstHostNameToUse = dstHostName;
         }
+        */
+        String dstHostNameToUse = dstHostName;
 
         final StringBuilder buff = new StringBuilder()
                 .append(inbound ? srcHostName : dstHostNameToUse).append(":").append(srcPort)
@@ -2401,8 +2391,15 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
             buff.append(" Ack=").append(acknowledgment);
         }
 
+        final int window = tcpHeader.getWindowAsInt() << (inbound ? rcv_wscale : snd_wscale);
+        buff.append(" Win=").append(window);
+
         final int payloadLen = tcpPacket.length() - tcpHeader.length();
         buff.append(" Len=").append(payloadLen);
+
+        if (tcpHeader.getSyn()) {
+
+        }
 
         /*
         final Packet payload = tcpPacket.getPayload();
@@ -3964,7 +3961,7 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
                 inet_csk_enter_pingpong_mode();
 
                 // FIXME
-                if (null != child || child.isOpen()) {
+                if (null != child && child.isOpen()) {
                     child.disconnect();
                 } else {
                     shutdown(SEND_SHUTDOWN);

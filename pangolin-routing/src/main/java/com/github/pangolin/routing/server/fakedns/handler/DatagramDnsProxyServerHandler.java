@@ -43,17 +43,27 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
      */
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final DatagramDnsQuery query) throws Exception {
+        final int id = query.id();
+        final InetSocketAddress sender = query.sender();
+        final InetSocketAddress recipient = query.recipient();
         final DnsQuestion question = query.recordAt(DnsSection.QUESTION);
+
         resolver.query(question).addListener(f -> {
             if (f.isSuccess()) {
                 final AddressedEnvelope<DnsResponse, InetSocketAddress> envelope = (AddressedEnvelope<DnsResponse, InetSocketAddress>) f.getNow();
-                ctx.writeAndFlush(getResponse(envelope.content(), query));
+                try {
+                    DnsResponse response = getResponse(recipient, sender, id, envelope.content());
+                    ctx.writeAndFlush(response);
+                } finally {
+                    // envelope.release();
+                }
+
             }
         });
     }
 
-    private DnsResponse getResponse(DnsResponse serverResponse, DatagramDnsQuery query) {
-        DnsResponse response = new DatagramDnsResponse(query.recipient(), query.sender(), query.id());
+    private DnsResponse getResponse(InetSocketAddress sender, InetSocketAddress recipient, int id, DnsResponse serverResponse) {
+        DnsResponse response = new DatagramDnsResponse(sender, recipient, id);
         copySections(serverResponse, response);
         return response;
     }

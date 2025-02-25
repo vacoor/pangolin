@@ -12,16 +12,10 @@ public abstract class AbstractTunAdapter<T extends NetworkInterfaceEx> implement
         this.nix = nix;
     }
 
-    public byte[] readBytes() throws IOException {
-        final ByteBuffer buf = read();
-        final byte[] bytes = new byte[buf.remaining()];
-        buf.get(bytes).clear();
-        return bytes;
-    }
-
     /**
      * {@inheritDoc}
      */
+    @Override
     public ByteBuffer read() throws IOException {
         checkOpen();
         return read0();
