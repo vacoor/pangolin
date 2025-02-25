@@ -10,6 +10,7 @@ public interface Route {
     int RTM_VERSION = 5;
 
     int RTM_ADD = 0x1;
+    int RTM_DELETE = 0x2;
 
     int RTF_UP = 0x1;            /* route usable */
 
@@ -52,8 +53,8 @@ public interface Route {
 
     class rt_msghdr extends Structure {
         public short rtm_msglen;     /* to skip over non-understood messages */
-        public char rtm_version;    /* future binary compatibility */
-        public char rtm_type;       /* message type */
+        public byte rtm_version;    /* future binary compatibility */
+        public byte rtm_type;       /* message type */
         public short rtm_index;      /* index for associated ifp */
         public int rtm_flags;      /* flags, incl. kern & message, e.g. DONE */
         public int rtm_addrs;      /* bitmask identifying sockaddrs in msg */
@@ -66,12 +67,12 @@ public interface Route {
         public rt_metrics rtm_rmx = new rt_metrics(); /* metrics themselves */
 
         public rt_msghdr() {
-            setAlignType(ALIGN_NONE);
+//            setAlignType(ALIGN_DEFAULT);
         }
 
         public rt_msghdr(final Pointer p) {
-//            super(p);
-            super(p, ALIGN_NONE);
+            super(p);
+//            super(p, ALIGN_NONE);
         }
 
         @Override

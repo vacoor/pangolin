@@ -24,6 +24,7 @@ public class RouteTest {
         hdr = new rt_msghdr(ptr);
         hdr.rtm_msglen = (short) (hdr.size() + 3 * addr_size);
         hdr.rtm_version = RTM_VERSION;
+//        hdr.rtm_type = RTM_DELETE;
         hdr.rtm_type = RTM_ADD;
         hdr.rtm_flags = RTF_UP | RTF_GATEWAY;
         hdr.rtm_addrs = RTA_DST | RTA_GATEWAY | RTA_NETMASK;
@@ -34,8 +35,8 @@ public class RouteTest {
 
 
         int offset = hdr.size();
-        offset += write0(ptr.share(offset), toBytes("10.188.72.1"));
-        offset += write0(ptr.share(offset), toBytes("192.168.1.1"));
+        offset += write0(ptr.share(offset), toBytes("198.18.0.0"));
+        offset += write0(ptr.share(offset), toBytes("198.18.0.1"));
         offset += write0(ptr.share(offset), toBytes("255.255.255.0"));
 
         System.out.println(offset);
@@ -46,8 +47,8 @@ public class RouteTest {
             System.out.println("FD: " + fd);
             return;
         }
-        int write = LibC.write(fd, buffer, offset);
-        System.out.println("WRITE: " + write);
+        int writtenBytes = LibC.write(fd, buffer, offset);
+        System.out.println("WRITE: " + writtenBytes);
         LibC.close(fd);
     }
 
