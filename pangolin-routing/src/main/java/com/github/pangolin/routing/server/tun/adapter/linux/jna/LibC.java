@@ -69,6 +69,10 @@ public final class LibC {
         return API.INSTANCE.write(fd, buf, nBytes);
     }
 
+    public static int write(final int fd, final Pointer buf, final int nBytes) throws LastErrorException {
+        return API.INSTANCE.write(fd, buf, nBytes);
+    }
+
 
     public static int socket(final int domain, final int type, final int protocol) throws LastErrorException {
         return API.INSTANCE.socket(domain, type, protocol);
@@ -110,6 +114,8 @@ public final class LibC {
         int write(final int fd, final byte[] buf, final int nBytes) throws LastErrorException;
 
         int write(final int fd, final ByteBuffer buf, final int nBytes) throws LastErrorException;
+
+        int write(final int fd, final Pointer buf, final int nBytes) throws LastErrorException;
 
         int socket(final int domain, final int type, final int protocol) throws LastErrorException;
 

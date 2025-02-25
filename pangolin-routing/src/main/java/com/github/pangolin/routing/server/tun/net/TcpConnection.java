@@ -578,9 +578,6 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
                             tcp_sendmsg2(new TcpBuffer().ack(true).psh(true).payloadBuilder(builder), false);
                         }
                     }
-                    tcp_push_pending_frames();
-//                    UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, 0, payload.length).getBuilder();
-//                    write(newPacket(header, src.getAddress(), dst.getAddress()).ack(true).psh(true).payloadBuilder(builder), true);
                 } finally {
                     ReferenceCountUtil.release(msg);
                 }
