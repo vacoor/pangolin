@@ -57,7 +57,6 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
                 } finally {
                     // envelope.release();
                 }
-
             }
         });
     }

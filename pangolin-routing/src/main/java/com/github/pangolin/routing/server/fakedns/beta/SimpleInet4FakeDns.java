@@ -5,6 +5,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.dns.*;
 import io.netty.util.NetUtil;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -12,6 +13,7 @@ import java.net.UnknownHostException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+@Slf4j
 public class SimpleInet4FakeDns extends AbstractFakeDns<Inet4Address> {
     private final int subnetMask;
     private final int networkAddress;
@@ -143,7 +145,9 @@ public class SimpleInet4FakeDns extends AbstractFakeDns<Inet4Address> {
                         final DatagramDnsResponse response = new DatagramDnsResponse(query.recipient(), query.sender(), query.id());
                         response.addRecord(DnsSection.QUESTION, dnsQuestion);
                         response.addRecord(DnsSection.ANSWER, dnsQuestionAnswer);
-                        System.out.println(String.format("%s -> %s", domain, NetUtil.bytesToIpAddress(bytes)));
+                        response.setAuthoritativeAnswer(true);
+
+                        log.info("Assign IPv4 Address {} to {}, TTL={}", NetUtil.bytesToIpAddress(bytes), domain, ttl);
                         return response;
                     }
                 }
