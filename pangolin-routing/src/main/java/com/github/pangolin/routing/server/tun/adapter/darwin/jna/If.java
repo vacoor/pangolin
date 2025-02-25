@@ -13,38 +13,6 @@ import static java.nio.charset.StandardCharsets.US_ASCII;
 public interface If {
     int IFNAMSIZ = 16;
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/in.h">in.h</a>
-     */
-    @Structure.FieldOrder({"sin_family", "sin_port", "sin_addr", "sin_zero"})
-    class sockaddr extends Structure {
-        public static class ByRef extends sockaddr implements ByReference {}
-
-        public short sin_family;
-        public short sin_port;
-        public byte[] sin_addr = new byte[4];
-        public byte[] sin_zero = new byte[8];
-
-        public sockaddr() {
-        }
-
-        public sockaddr(final Pointer p) {
-            super(p);
-            read();
-        }
-    }
-
-    @Structure.FieldOrder({"sa_len", "sa_family", "sa_data"})
-    class sockaddr2 extends Structure {
-        public static class ByRef extends sockaddr2 implements ByReference {}
-
-        public byte sa_len;
-        public byte sa_family;
-        public byte[] sa_data = new byte[14];
-//        public Pointer sa_data;
-
-    }
-
     @Structure.FieldOrder({ "ifr_name", "ifr_ifru" })
     class Ifreq extends Structure {
         public byte[] ifr_name = new byte[IFNAMSIZ];
@@ -70,9 +38,9 @@ public interface If {
         }
 
         public static class IfrIfru extends Union {
-            public sockaddr ifru_addr;
-            public sockaddr ifru_dstaddr;
-            public sockaddr ifru_broadaddr;
+            public sockaddr_in ifru_addr;
+            public sockaddr_in ifru_dstaddr;
+            public sockaddr_in ifru_broadaddr;
             public short	ifru_flags;
             public int ifru_metric;
             public int	ifru_mtu;
@@ -84,22 +52,39 @@ public interface If {
         }
     }
 
+    @Structure.FieldOrder({"sa_len", "sa_family", "sa_data"})
+    class sockaddr extends Structure {
+        public static class ByRef extends sockaddr implements ByReference {}
+
+        public byte sa_len;
+        public byte sa_family;
+        public byte[] sa_data = new byte[14];
+//        public Pointer sa_data;
+
+
+        public sockaddr() {
+             sa_len = (byte) this.size();
+        }
+    }
+
     @Structure.FieldOrder({
             "sin_len", "sin_family",
             "sin_port", "sin_addr", "sin_zero"
     })
     class sockaddr_in extends Structure {
-        public byte sin_len = 16;
+        public byte sin_len;
         public byte sin_family;
         public short sin_port;
         public byte[] sin_addr = new byte[4];
         public byte[] sin_zero = new byte[8];
 
         public sockaddr_in() {
+             sin_len = (byte) this.size();
         }
 
         public sockaddr_in(Pointer p) {
             super(p);
+            sin_len = (byte) this.size();
             read();
         }
     }
@@ -171,10 +156,12 @@ public interface If {
     class sockaddr_in6 extends Structure {
 
         public sockaddr_in6() {
+            sin6_len = (byte) this.size();
         }
 
         public sockaddr_in6(Pointer p) {
             super(p);
+            sin6_len = (byte) this.size();
             read();
         }
 
@@ -184,6 +171,8 @@ public interface If {
         public int sin6_flowinfo;
         public byte[] sin6_addr = new byte[16];
         public int sin6_scope_id;
+
+
     }
 
 
@@ -242,9 +231,9 @@ public interface If {
         public ByRef ifa_next = null;
         public String ifa_name;
         public int ifa_flags;
-        public sockaddr2.ByRef ifa_addr;
-        public sockaddr2.ByRef ifa_netmask;
-        public sockaddr2.ByRef ifa_dstaddr;
+        public sockaddr.ByRef ifa_addr;
+        public sockaddr.ByRef ifa_netmask;
+        public sockaddr.ByRef ifa_dstaddr;
         public Pointer ifa_data;
 
         public ifaddrs() {}

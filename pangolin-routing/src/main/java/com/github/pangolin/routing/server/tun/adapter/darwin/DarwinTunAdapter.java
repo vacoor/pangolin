@@ -63,7 +63,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
         // read from socket
         final int mtu = getMTU();
         final int packetSize = mtu + ADDRESS_FAMILY_SIZE;
-        final ByteBuffer buf = ByteBuffer.allocate(packetSize);
+        final ByteBuffer buf = ByteBuffer.allocateDirect(packetSize);
         final int bytesRead = LibC.read(fd, buf, packetSize);
 
         // 4-bytes address family
