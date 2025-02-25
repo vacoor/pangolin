@@ -251,10 +251,11 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
     private static byte[] getInterfaceIpAddress4(final int fd, final String ifname) {
         final Ifreq ifr = new Ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_addr");
+//        ifr.ifr_ifru.ifru_addr.sin_len = (byte) ifr.ifr_ifru.ifru_addr.size();
 
         ioctl(fd, SIOCGIFADDR, ifr);
 
-        final sockaddr addr = ifr.ifr_ifru.ifru_addr;
+        final sockaddr_in addr = ifr.ifr_ifru.ifru_addr;
         assert AF_INET == addr.sin_family;
         return addr.sin_addr;
     }
@@ -275,7 +276,7 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
 
         ioctl(fd, SIOCGIFNETMASK, ifr);
 
-        final sockaddr netmask = ifr.ifr_ifru.ifru_addr;
+        final sockaddr_in netmask = ifr.ifr_ifru.ifru_addr;
         assert AF_INET == netmask.sin_family;
         return netmask.sin_addr;
     }

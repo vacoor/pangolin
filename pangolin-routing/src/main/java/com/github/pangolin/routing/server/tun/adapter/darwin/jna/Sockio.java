@@ -8,6 +8,7 @@ import com.sun.jna.NativeLong;
  */
 public interface Sockio {
     NativeLong SIOCGIFCONF = new NativeLong(0xc00c6924L);
+
     NativeLong SIOCGIFFLAGS = new NativeLong(0xc0206911L);
     NativeLong SIOCSIFFLAGS = new NativeLong(0x80206910L);
     NativeLong SIOCGIFADDR = new NativeLong(0xc0206921L);
@@ -22,8 +23,13 @@ public interface Sockio {
 
     NativeLong SIOCGIFMETRIC = new NativeLong(0xc0206917L);
     NativeLong SIOCSIFMETRIC = new NativeLong(0x80206918L);
+
+
     NativeLong SIOCGIFMTU = new NativeLong(0xc0206933L);
     NativeLong SIOCSIFMTU = new NativeLong(0x80206934L);
+//    NativeLong SIOCGIFMTU = new NativeLong(0x80206937L);
+//    NativeLong SIOCSIFMTU = new NativeLong(0x80206938L);
+
     NativeLong SIOCADDMULTI = new NativeLong(0x80206931L);
     NativeLong SIOCDELMULTI = new NativeLong(0x80206932L);
 
