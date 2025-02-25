@@ -32,6 +32,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.netflix.loadbalancer.LoadBalancerStats;
+import com.sun.jna.Platform;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -237,8 +238,18 @@ public class RouteApplication {
         System.out.println("Bypass = " + bypass);
 
         if (args.length > 0 && "tun".equalsIgnoreCase(args[0])) {
-            final String ifname = args.length > 1 ? args[1] : "utun8";
-            app.channelGroup.add(new TunAcceptorFactory().apply(0, ifname).start(context).channel());
+            final String defName = Platform.isMac() ? "utun8" : (Platform.isLinux() ? "tun8" : "以太网 P");
+            final String ifname = args.length > 1 ? args[1] : defName;
+            app.channelGroup.add(new TunAcceptorFactory().apply(0, ifname).start(context).addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(final ChannelFuture future) throws Exception {
+                    if (future.isSuccess()) {
+                        log.info("TUN adapter started on: {}", ifname);
+                    } else {
+                        log.error("Tun adapter bound error: {}", future.cause().getMessage(), future.cause());
+                    }
+                }
+            }).channel());
         }
 
         app.await();

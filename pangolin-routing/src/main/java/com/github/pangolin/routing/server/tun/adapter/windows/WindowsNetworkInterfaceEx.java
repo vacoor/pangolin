@@ -32,6 +32,7 @@ import com.github.pangolin.routing.server.tun.adapter.NetworkInterfaceEx;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.sun.jna.Memory;
+import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Win32Exception;
@@ -244,7 +245,7 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
     private static long interfaceGuidToLuid(final GUID interfaceGuid) {
         final LongByReference luidRef = new LongByReference();
         final int err = INSTANCE.ConvertInterfaceGuidToLuid(interfaceGuid, luidRef);
-        assertNoError(err, "ConvertInterfaceGuidToLuid failed: %s", interfaceGuid);
+        assertNoError(err, "ConvertInterfaceGuidToLuid(%s) failed: %s", interfaceGuid, err);
         return luidRef.getValue();
     }
 
@@ -253,7 +254,7 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         final char[] buff = new char[NDIS_IF_MAX_STRING_SIZE + 1];
         final int err = INSTANCE.ConvertInterfaceLuidToNameW(luidRef, buff, buff.length);
         assertNoError(err, "ConvertInterfaceLuidToNameW failed: %s", interfaceLuid);
-        return stringify(buff);
+        return Native.toString(buff);
     }
 
     private static String interfaceLuidToAlias(final long interfaceLuid) {
@@ -261,7 +262,7 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         final char[] buff = new char[NDIS_IF_MAX_STRING_SIZE + 1];
         final int err = INSTANCE.ConvertInterfaceLuidToAlias(luidRef, buff, buff.length);
         assertNoError(err, "ConvertInterfaceLuidToAlias failed: %s", interfaceLuid);
-        return stringify(buff);
+        return Native.toString(buff);
     }
 
     static GUID interfaceLuidToGuid(final long interfaceLuid) {
@@ -278,15 +279,6 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         final int err = INSTANCE.ConvertInterfaceLuidToIndex(luidRef, indexRef);
         assertNoError(err, "ConvertInterfaceLuidToIndex failed: %s", interfaceLuid);
         return indexRef.getValue();
-    }
-
-    private static String stringify(final char[] buff) {
-        for (int i = 0; i < buff.length; i++) {
-            if ('\0' == buff[i]) {
-                return String.valueOf(buff, 0, i);
-            }
-        }
-        return String.valueOf(buff);
     }
 
     // ------------------------ START Interface related ------------------------
