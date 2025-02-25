@@ -5,9 +5,13 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.dns.*;
+import lombok.extern.slf4j.Slf4j;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.function.Predicate;
 
+@Slf4j
 public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<DatagramDnsQuery> {
     private final DnsEngine engine;
     private final Predicate<String> checker;
@@ -32,12 +36,20 @@ public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<Da
     protected void channelRead0(final ChannelHandlerContext ctx, final DatagramDnsQuery query) throws Exception {
         final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
         final String domain = dnsQuestion.name();
-        if (checker.test(domain)) {
+        List<String> msInetTestDomains = Arrays.asList(
+                "dns.msftncsi.com.",
+                "www.msftncsi.com.",
+                "www.msftconnecttest.com"
+        );
+        if (!msInetTestDomains.contains(domain) && checker.test(domain)) {
             DatagramDnsResponse lookup = engine.lookup(query);
             if (null != lookup) {
                 ctx.writeAndFlush(lookup);
                 return;
             }
+        }
+        if (msInetTestDomains.contains(domain)) {
+            log.info("MS test: {}", domain);
         }
 
         ctx.fireChannelRead(query.retain());

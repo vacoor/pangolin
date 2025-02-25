@@ -88,19 +88,25 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
             try {
                 // read from wintun
                 final IntByReference packetSizeRef = new IntByReference();
-                final Pointer packetPointer = WintunReceivePacket(session, packetSizeRef);
+                Pointer packetPointer = null;
                 try {
+                    packetPointer = WintunReceivePacket(session, packetSizeRef);
                     final int ipVersion = packetPointer.getByte(0) >> 4;
                     log.trace("IPv{} packet read.", ipVersion);
 
                     final int size = packetSizeRef.getValue();
                     return packetPointer.getByteBuffer(0, size);
                 } finally {
-                    WintunReleaseReceivePacket(session, packetPointer);
+                    if (null != packetPointer) {
+                        WintunReleaseReceivePacket(session, packetPointer);
+                    }
                 }
             } catch (final LastErrorException e) {
-                if (e.getErrorCode() == ERROR_NO_MORE_ITEMS) {
+                if (e.getErrorCode() == WinError.ERROR_NO_MORE_ITEMS) {
                     Kernel32.INSTANCE.WaitForSingleObject(WintunGetReadWaitEvent(session), INFINITE);
+                } else if (e.getErrorCode() == WinError.ERROR_HANDLE_EOF) {
+                    // disabled or remove.
+                    throw e;
                 } else {
                     throw e;
                 }

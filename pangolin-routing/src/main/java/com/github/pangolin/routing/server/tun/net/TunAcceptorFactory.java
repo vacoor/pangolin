@@ -7,6 +7,7 @@ import com.github.pangolin.routing.server.AcceptorFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
 import com.github.pangolin.routing.server.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.server.tun.net.channel.TunChannel;
+import com.github.pangolin.routing.server.tun.net.handler.IcmpV4PacketHandler;
 import com.github.pangolin.routing.server.tun.net.handler.IpPacketCodec;
 import com.github.pangolin.routing.server.tun.net.handler.Tcp4PacketHandler;
 import com.github.pangolin.routing.server.tun.net.handler.Udp4PacketHandler;
@@ -53,6 +54,7 @@ public class TunAcceptorFactory implements AcceptorFactory {
                     protected void initChannel(final Channel ch) throws Exception {
                         ch.pipeline().addLast(new IpPacketCodec());
 //                            ch.pipeline().addLast(new SimpleTcpPacketHandler(dnsEngine, factory));
+                        ch.pipeline().addLast(new IcmpV4PacketHandler());
                         ch.pipeline().addLast(new Udp4PacketHandler());
                         ch.pipeline().addLast(new Tcp4PacketHandler(dnsEngine, factory));
                     }
