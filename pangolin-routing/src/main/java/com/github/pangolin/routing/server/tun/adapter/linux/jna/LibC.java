@@ -99,6 +99,10 @@ public final class LibC {
         API.INSTANCE.freeifaddrs(ifa);
     }
 
+    public static int if_nametoindex(final String ifname) {
+        return API.INSTANCE.if_nametoindex(ifname);
+    }
+
     public interface API extends com.sun.jna.platform.linux.LibC {
 
         API INSTANCE = Native.load(Platform.C_LIBRARY_NAME, API.class);
@@ -129,6 +133,10 @@ public final class LibC {
         int getifaddrs(final Structure ifap);
 
         void freeifaddrs(final Structure ifa);
+
+        int if_nametoindex(String ifname);
+
+        String if_indextoname(int index);
 
     }
 

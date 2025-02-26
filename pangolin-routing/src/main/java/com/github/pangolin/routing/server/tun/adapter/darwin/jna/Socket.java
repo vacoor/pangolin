@@ -6,32 +6,45 @@ package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 public interface Socket {
 
 
-  /**
-   * stream socket.
-   */
-  int SOCK_STREAM = 1;
+    /**
+     * stream socket.
+     */
+    int SOCK_STREAM = 1;
 
-  /**
-   * datagram socket.
-   */
-  int SOCK_DGRAM = 2;
+    /**
+     * datagram socket.
+     */
+    int SOCK_DGRAM = 2;
 
-  /**
-   * .
-   */
-  int AF_UNSPEC = 0;
+    /**
+     * raw-protocol interface.
+     */
+    int SOCK_RAW = 3;
 
 
-  /**
-   * IPv4.
-   */
-  int AF_INET = 2;
+    /**
+     * unspecified.
+     */
+    int AF_UNSPEC = 0;
 
-  /**
-   * IPv6.
-   */
-  int AF_INET6 = 30;
+    /**
+     * IPv4.
+     */
+    int AF_INET = 2;
 
-  int AF_SYSTEM = 32;
+    /**
+     * Internal Routing Protocol.
+     */
+    int AF_ROUTE = 17;
+
+    /**
+     * IPv6.
+     */
+    int AF_INET6 = 30;
+
+    /**
+     * Kernel event messages.
+     */
+    int AF_SYSTEM = 32;
 
 }

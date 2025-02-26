@@ -13,13 +13,34 @@ public interface Route {
 
     int RTM_DELETE = 0x2;
 
-    int RTF_UP = 0x1;            /* route usable */
+    /**
+     * route usable.
+     */
+    int RTF_UP = 0x1;
 
-    int RTF_GATEWAY = 0x2;     /* destination is a gateway */
+    /**
+     * destination is a gateway.
+     */
+    int RTF_GATEWAY = 0x2;
 
-    int RTA_DST       =  0x1;     /* destination sockaddr present */
-    int RTA_GATEWAY   =  0x2;    /* gateway sockaddr present */
-    int RTA_NETMASK    = 0x4;    /* netmask sockaddr present */
+    /**
+     * host entry (net otherwise).
+     */
+    int RTF_HOST = 0x4;
+
+    /**
+     * generate new routes on use.
+     */
+    int RTF_CLONING = 0x100;
+    /**
+     * manually added.
+     */
+    int RTF_STATIC = 0x800;
+
+
+    int RTA_DST = 0x1;     /* destination sockaddr present */
+    int RTA_GATEWAY = 0x2;    /* gateway sockaddr present */
+    int RTA_NETMASK = 0x4;    /* netmask sockaddr present */
 
 
     class rt_metrics extends Structure {
@@ -65,7 +86,7 @@ public interface Route {
         public int rtm_use;        /* from rtentry */
         // macOs 14.x --> long
         public int rtm_inits;    /* which metrics we are initializing */
-        public final rt_metrics rtm_rmx = new rt_metrics(); /* metrics themselves */
+        public rt_metrics rtm_rmx = new rt_metrics(); /* metrics themselves */
 
         public rt_msghdr() {
 //            setAlignType(ALIGN_DEFAULT);
