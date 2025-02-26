@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.server.tun.adapter.linux;
+package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_DST;
@@ -11,14 +11,19 @@ import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RT
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.rt_msghdr;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET;
 
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If;
 import com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC;
 import com.sun.jna.Memory;
 import com.sun.jna.Pointer;
 import io.netty.util.NetUtil;
 
+import java.net.Inet4Address;
+
 public class RouteTest {
+
     public static void main(String[] args) {
+    }
+
+    public static void addRoute(final Inet4Address dst, final Inet4Address gw, final Inet4Address netmask) {
         rt_msghdr hdr = new rt_msghdr();
         int addr_size = new If.sockaddr_in().size();
         System.out.println(hdr.size() + "(" + hdr.rtm_rmx.size() + ")" + " + " + addr_size * 3);
@@ -39,15 +44,12 @@ public class RouteTest {
         hdr.rtm_pid = hdr.rtm_seq = 0;
         hdr.write();
 
-
         offset += hdr.size();
 
+        offset += writeSockAddr(ptr.share(offset), dst.getAddress());
+        offset += writeSockAddr(ptr.share(offset), gw.getAddress());
+        offset += writeSockAddr(ptr.share(offset), netmask.getAddress());
 
-        offset += writeSockAddr(ptr.share(offset), toBytes("198.18.0.0"));
-        offset += writeSockAddr(ptr.share(offset), toBytes("198.18.0.1"));
-        offset += writeSockAddr(ptr.share(offset), toBytes("255.255.255.0"));
-
-        System.out.println(offset);
         int PF_ROUTE = 0x11;
         int SOCK_RAW = 0x03;
         int fd = LibC.socket(PF_ROUTE, SOCK_RAW, 0);
@@ -56,6 +58,7 @@ public class RouteTest {
             return;
         }
         int writtenBytes = LibC.write(fd, buffer, offset);
+
         System.out.println("WRITE: " + writtenBytes);
         LibC.close(fd);
     }
