@@ -24,17 +24,17 @@ public class RouteTest {
     }
 
     public static void addRoute(final Inet4Address dst, final Inet4Address gw, final Inet4Address netmask) {
-        rt_msghdr hdr = new rt_msghdr();
-        int addr_size = new If.sockaddr_in().size();
-        System.out.println(hdr.size() + "(" + hdr.rtm_rmx.size() + ")" + " + " + addr_size * 3);
+        final int hdr_size = new rt_msghdr().size();
+        final int addr_size = new If.sockaddr_in().size();
+        System.out.println(hdr_size + addr_size * 3);
 
 
-        final Memory buffer = new Memory(hdr.size() + 3 * addr_size);
+        final Memory buffer = new Memory(hdr_size + 3 * addr_size);
 
         int offset = 0;
         Pointer ptr = buffer.share(offset);
 
-        hdr = new rt_msghdr(ptr);
+        final rt_msghdr hdr = new rt_msghdr(ptr);
         hdr.rtm_msglen = (short) (hdr.size() + 3 * addr_size);
         hdr.rtm_version = RTM_VERSION;
 //        hdr.rtm_type = RTM_DELETE;
