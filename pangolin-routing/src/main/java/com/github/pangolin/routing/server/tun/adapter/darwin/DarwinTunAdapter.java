@@ -19,9 +19,19 @@ import static java.nio.charset.StandardCharsets.US_ASCII;
 
 @Slf4j
 public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceEx> {
+    /**
+     * Kernel Control Protocol.
+     */
     private static final int SYSPROTO_CONTROL = 2;
-    private static final int UTUN_OPT_IFNAME = 2;
+    /**
+     * Name registered by the utun kernel control.
+     */
     private static final String UTUN_CONTROL_NAME = "com.apple.net.utun_control";
+    /**
+     * Socket option names to manage utun.
+     */
+    private static final int UTUN_OPT_IFNAME = 2;
+
 
     private static final int ADDRESS_FAMILY_SIZE = 4;
 
