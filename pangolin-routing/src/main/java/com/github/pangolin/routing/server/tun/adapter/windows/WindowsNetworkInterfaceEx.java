@@ -17,10 +17,12 @@ import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpL
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.IP_ADAPTER_ADDRESSES_LH;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.IP_ADAPTER_DNS_SERVER_ADDRESS_XP;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.IP_ADAPTER_DNS_SUFFIX;
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.MIB_IPFORWARD_ROW2;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.MIB_IPINTERFACE_ROW;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.MIB_UNICASTIPADDRESS_ROW;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.MIB_UNICASTIPADDRESS_TABLE;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.NDIS_IF_MAX_STRING_SIZE;
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.SOCKADDR_INET;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.sockaddr_in;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.sockaddr_in6;
 import static com.sun.jna.platform.win32.Guid.GUID;
@@ -36,6 +38,7 @@ import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Win32Exception;
+import com.sun.jna.platform.win32.WinDef;
 import com.sun.jna.platform.win32.WinError;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
@@ -673,11 +676,59 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         }
     }
 
+    private static SOCKADDR_INET toSockAddr(final InetAddress address) {
+        final SOCKADDR_INET sockAddr = new SOCKADDR_INET();
+        if (address instanceof Inet4Address) {
+            final sockaddr_in sockaddrIn = new sockaddr_in();
+            sockaddrIn.sin_family = AF_INET;
+            sockaddrIn.sin_port = 0;
+            sockaddrIn.sin_addr = address.getAddress();
+
+            sockAddr.si_family = sockaddrIn.sin_family;
+            sockAddr.setTypedValue(sockaddrIn);
+        } else if (address instanceof Inet6Address) {
+            final sockaddr_in6 sockaddrIn6 = new sockaddr_in6();
+            sockaddrIn6.sin6_family = AF_INET6;
+            sockaddrIn6.sin6_port = 0;
+            sockaddrIn6.sin6_addr = address.getAddress();
+            sockaddrIn6.sin6_scope_id = ((Inet6Address) address).getScopeId();
+
+            sockAddr.si_family = sockaddrIn6.sin6_family;
+            sockAddr.setTypedValue(sockaddrIn6);
+        }
+        return sockAddr;
+    }
+
     public static void main(String[] args) throws SocketException, UnknownHostException {
         final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias("以太网 2");
+        /*
 //        nix.addInterfaceAddress(InterfaceAddressEx.of("192.168.1.3", 24));
         for (InterfaceAddressEx interfaceAddress : nix.getInterfaceAddresses()) {
             System.out.println(interfaceAddress);
         }
+        */
+        final MIB_IPFORWARD_ROW2 row = new MIB_IPFORWARD_ROW2();
+        INSTANCE.InitializeIpForwardEntry(row);
+
+        // 目标地址
+        row.DestinationPrefix.Prefix = toSockAddr(InetAddress.getByName("192.168.1.1"));
+        row.DestinationPrefix.PrefixLength = 24;
+
+        // 下一跳
+        row.NextHop = toSockAddr(InetAddress.getByName("10.188.70.1"));
+
+        row.InterfaceLuid = nix.interfaceLuid;
+
+        // row.SitePrefixLength = 0;
+        // https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_ipforward_row2
+        int MIB_IPPROTO_NETMGMT = 3;
+        row.Protocol = MIB_IPPROTO_NETMGMT;
+        row.Metric = 1;
+        row.ValidLifetime = 0xFFFFFFFF;
+        row.PreferredLifetime = 0xFFFFFFFF;
+        row.Loopback = new WinDef.BOOL(0);
+
+        int i = INSTANCE.DeleteIpForwardEntry2(row);
+        System.out.println(i);
     }
 }

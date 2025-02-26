@@ -1,13 +1,21 @@
 package com.github.pangolin.routing.server.tun.adapter.linux;
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_DST;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_GATEWAY;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_NETMASK;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTF_GATEWAY;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTF_UP;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTM_ADD;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTM_VERSION;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.rt_msghdr;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET;
+
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If;
 import com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC;
 import com.sun.jna.Memory;
 import com.sun.jna.Pointer;
 import io.netty.util.NetUtil;
-
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET;
 
 public class RouteTest {
     public static void main(String[] args) {
@@ -18,8 +26,8 @@ public class RouteTest {
 
         final Memory buffer = new Memory(hdr.size() + 3 * addr_size);
 
-
-        Pointer ptr = buffer.share(0);
+        int offset = 0;
+        Pointer ptr = buffer.share(offset);
 
         hdr = new rt_msghdr(ptr);
         hdr.rtm_msglen = (short) (hdr.size() + 3 * addr_size);
@@ -31,19 +39,19 @@ public class RouteTest {
         hdr.rtm_pid = hdr.rtm_seq = 0;
         hdr.write();
 
-//        ptr.setPointer(0, hdr.getPointer());
+
+        offset += hdr.size();
 
 
-        int offset = hdr.size();
-        offset += write0(ptr.share(offset), toBytes("198.18.0.0"));
-        offset += write0(ptr.share(offset), toBytes("198.18.0.1"));
-        offset += write0(ptr.share(offset), toBytes("255.255.255.0"));
+        offset += writeSockAddr(ptr.share(offset), toBytes("198.18.0.0"));
+        offset += writeSockAddr(ptr.share(offset), toBytes("198.18.0.1"));
+        offset += writeSockAddr(ptr.share(offset), toBytes("255.255.255.0"));
 
         System.out.println(offset);
         int PF_ROUTE = 0x11;
         int SOCK_RAW = 0x03;
         int fd = LibC.socket(PF_ROUTE, SOCK_RAW, 0);
-        if (fd < 0 ) {
+        if (fd < 0) {
             System.out.println("FD: " + fd);
             return;
         }
@@ -56,21 +64,14 @@ public class RouteTest {
         return NetUtil.createByteArrayFromIpAddressString(ip);
     }
 
-    private static int write(Pointer ptr, byte[] addr) {
-        ptr.setByte(0, (byte) 16);
-        ptr.setByte(1, (byte) AF_INET);
-        ptr.setShort(2, (byte) 0);
-        ptr.write(4, addr, 0, 4);
-        ptr.setLong(8, 0);
-        return 16;
+    private static int writeSockAddr(final Pointer ptr, final byte[] addr) {
+        final sockaddr_in in = new sockaddr_in(ptr);
+        final int size = in.size();
+        in.sin_len = (byte) size;
+        in.sin_family = AF_INET;
+        in.sin_addr = addr;
+        in.write();
+        return size;
     }
 
-    private static int write0(Pointer ptr, byte[] addr) {
-        If.sockaddr_in sockaddr_in = new If.sockaddr_in(ptr);
-        sockaddr_in.sin_len = (byte) sockaddr_in.size();
-        sockaddr_in.sin_family = AF_INET;
-        sockaddr_in.sin_addr = addr;
-        sockaddr_in.write();
-        return sockaddr_in.size();
-    }
 }

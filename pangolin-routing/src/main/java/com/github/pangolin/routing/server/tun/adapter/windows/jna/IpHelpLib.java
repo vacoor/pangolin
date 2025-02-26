@@ -837,6 +837,23 @@ public interface IpHelpLib extends IPHlpAPI {
     }
 
 
+    @Structure.FieldOrder({
+            "InterfaceLuid",
+            "InterfaceIndex",
+            "DestinationPrefix",
+            "NextHop",
+            "SitePrefixLength",
+            "ValidLifetime",
+            "PreferredLifetime",
+            "Metric",
+            "Protocol",
+            "Loopback",
+            "AutoconfigureAddress",
+            "Publish",
+            "Immortal",
+            "Age",
+            "Origin",
+    })
     class MIB_IPFORWARD_ROW2 extends Structure {
         public long InterfaceLuid;
         public int InterfaceIndex;
@@ -856,5 +873,21 @@ public interface IpHelpLib extends IPHlpAPI {
         public int Age;
 //        NL_ROUTE_ORIGIN   Origin;
         public int Origin;
+
+
     }
+
+    int InitializeIpForwardEntry(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
+
+    /**
+     * https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setipforwardentry2
+     * @param row
+     * @return
+     * @throws LastErrorException
+     */
+    int SetIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
+
+    int CreateIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
+
+    int DeleteIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
 }

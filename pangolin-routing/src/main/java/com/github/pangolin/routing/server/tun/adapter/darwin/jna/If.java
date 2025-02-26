@@ -1,10 +1,10 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 
+import static java.nio.charset.StandardCharsets.US_ASCII;
+
 import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
 import com.sun.jna.Union;
-
-import static java.nio.charset.StandardCharsets.US_ASCII;
 
 
 /**
@@ -13,40 +13,25 @@ import static java.nio.charset.StandardCharsets.US_ASCII;
 public interface If {
     int IFNAMSIZ = 16;
 
-    @Structure.FieldOrder({ "ifr_name", "ifr_ifru" })
+    @Structure.FieldOrder({"ifr_name", "ifr_ifru"})
     class Ifreq extends Structure {
-        public byte[] ifr_name = new byte[IFNAMSIZ];
+        public byte[] ifr_name;
         public IfrIfru ifr_ifru;
 
-        public Ifreq(final String name) {
-            this.ifr_name = new byte[IFNAMSIZ];
-            if (name != null) {
-                final byte[] bytes = name.getBytes(US_ASCII);
-                System.arraycopy(bytes, 0, this.ifr_name, 0, bytes.length);
-            }
-        }
-
-
-        public Ifreq(final String ifr_name, final short flags) {
-            this.ifr_name = new byte[IFNAMSIZ];
-            if (ifr_name != null) {
-                final byte[] bytes = ifr_name.getBytes(US_ASCII);
-                System.arraycopy(bytes, 0, this.ifr_name, 0, bytes.length);
-            }
-            this.ifr_ifru.setType("ifru_flags");
-            this.ifr_ifru.ifru_flags = flags;
+        public Ifreq(final String ifname) {
+            this.ifr_name = Utils.toBytes(ifname, IFNAMSIZ);
         }
 
         public static class IfrIfru extends Union {
             public sockaddr_in ifru_addr;
             public sockaddr_in ifru_dstaddr;
             public sockaddr_in ifru_broadaddr;
-            public short	ifru_flags;
+            public short ifru_flags;
             public int ifru_metric;
-            public int	ifru_mtu;
-            public int	ifru_phys;
-            public int	ifru_media;
-            public int	ifru_intval;
+            public int ifru_mtu;
+            public int ifru_phys;
+            public int ifru_media;
+            public int ifru_intval;
 
             // ...
         }
@@ -54,16 +39,15 @@ public interface If {
 
     @Structure.FieldOrder({"sa_len", "sa_family", "sa_data"})
     class sockaddr extends Structure {
-        public static class ByRef extends sockaddr implements ByReference {}
+        public static class ByRef extends sockaddr implements ByReference {
+        }
 
         public byte sa_len;
         public byte sa_family;
         public byte[] sa_data = new byte[14];
-//        public Pointer sa_data;
-
 
         public sockaddr() {
-             sa_len = (byte) this.size();
+            sa_len = (byte) this.size();
         }
     }
 
@@ -79,7 +63,7 @@ public interface If {
         public byte[] sin_zero = new byte[8];
 
         public sockaddr_in() {
-             sin_len = (byte) this.size();
+            sin_len = (byte) this.size();
         }
 
         public sockaddr_in(Pointer p) {
@@ -107,19 +91,14 @@ public interface If {
 
 
     // ----------------------
-    @Structure.FieldOrder({ "ifr_name", "ifr_ifru" })
+    @Structure.FieldOrder({"ifr_name", "ifr_ifru"})
     class In6Ifreq extends Structure {
         public byte[] ifr_name = new byte[IFNAMSIZ];
         public IfrIfru ifr_ifru;
 
-        public In6Ifreq(final String name) {
-            this.ifr_name = new byte[IFNAMSIZ];
-            if (name != null) {
-                final byte[] bytes = name.getBytes(US_ASCII);
-                System.arraycopy(bytes, 0, this.ifr_name, 0, bytes.length);
-            }
+        public In6Ifreq(final String ifname) {
+            this.ifr_name = Utils.toBytes(ifname, IFNAMSIZ);
         }
-
 
         public In6Ifreq(final String ifr_name, final short flags) {
             this.ifr_name = new byte[IFNAMSIZ];
@@ -138,7 +117,7 @@ public interface If {
             public int ifru_flags;
             public int ifru_flags6;
             public int ifru_metric;
-            public int	ifru_intval;
+            public int ifru_intval;
             public in6_addrlifetime ifru_lifetime;
             public int[] ifru_scope_id = new int[SCOPE6_ID_MAX];
 
@@ -227,8 +206,10 @@ public interface If {
 
     @Structure.FieldOrder({"ifa_next", "ifa_name", "ifa_flags", "ifa_addr", "ifa_netmask", "ifa_dstaddr", "ifa_data"})
     class ifaddrs extends Structure {
-        public static class ByRef extends ifaddrs implements ByReference {}
-        public ByRef ifa_next = null;
+        public static class ByRef extends ifaddrs implements ByReference {
+        }
+
+        public ifaddrs.ByRef ifa_next = null;
         public String ifa_name;
         public int ifa_flags;
         public sockaddr.ByRef ifa_addr;
@@ -236,7 +217,8 @@ public interface If {
         public sockaddr.ByRef ifa_dstaddr;
         public Pointer ifa_data;
 
-        public ifaddrs() {}
+        public ifaddrs() {
+        }
 
     }
 }

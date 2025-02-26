@@ -10,6 +10,7 @@ public interface Route {
     int RTM_VERSION = 5;
 
     int RTM_ADD = 0x1;
+
     int RTM_DELETE = 0x2;
 
     int RTF_UP = 0x1;            /* route usable */
@@ -33,7 +34,7 @@ public interface Route {
         public int rmx_rttvar;     // RTT方差
         public int rmx_pksent;     // 发送数据包计数（2025新增）
         public int rmx_state;
-        public int[] rmx_filler = new int[3];  // 保留字段
+        public final int[] rmx_filler = new int[3];  // 保留字段
 
         public rt_metrics() {
 //             setAlignType(Type.ALIGN_APPLE_SILICON);
@@ -64,7 +65,7 @@ public interface Route {
         public int rtm_use;        /* from rtentry */
         // macOs 14.x --> long
         public int rtm_inits;    /* which metrics we are initializing */
-        public rt_metrics rtm_rmx = new rt_metrics(); /* metrics themselves */
+        public final rt_metrics rtm_rmx = new rt_metrics(); /* metrics themselves */
 
         public rt_msghdr() {
 //            setAlignType(ALIGN_DEFAULT);

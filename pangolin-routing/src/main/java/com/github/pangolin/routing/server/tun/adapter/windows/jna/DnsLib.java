@@ -7,6 +7,7 @@ import com.sun.jna.Native;
  * @see <a href="https://stackoverflow.com/questions/52007372/how-to-clear-flush-the-dns-cache-in-win32-apis">How to Clear/Flush the DNS Cache in Win32 API's</a>
  */
 public final class DnsLib {
+
     static {
         Native.register("DNSAPI");
     }
