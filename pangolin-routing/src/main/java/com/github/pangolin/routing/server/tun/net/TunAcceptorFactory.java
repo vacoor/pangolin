@@ -65,8 +65,7 @@ public class TunAcceptorFactory implements AcceptorFactory {
                 if (future.isSuccess()) {
                     log.info("Tun device started: {}", ifname);
                     if (Platform.isMac()) {
-                        log.info("sudo route add -net 198.18.0.0/24 198.18.0.1");
-                        log.info("networksetup -setdnsservers \"Wi-Fi\" 127.0.0.1");
+                        log.info("networksetup -setdnsservers \"Wi-Fi\" 127.0.0.1(empty)");
                         log.info("sudo killall -HUP mDNSResponder;");
                     }
                     final TunAdapter adapter = ((TunChannel) future.channel()).device();
