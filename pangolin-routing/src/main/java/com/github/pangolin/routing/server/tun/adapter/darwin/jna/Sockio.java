@@ -4,9 +4,9 @@ import com.sun.jna.NativeLong;
 
 /**
  * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/sockio.h">sockio.h</a>
- * @see <a href="https://github.com/dcuddeback/ioctl-rs/blob/master/src/os/macos.rs">macos ioctl</a>
  */
 public interface Sockio {
+
     NativeLong SIOCGIFCONF = new NativeLong(0xc00c6924L);
 
     NativeLong SIOCGIFFLAGS = new NativeLong(0xc0206911L);
@@ -35,6 +35,8 @@ public interface Sockio {
 
     NativeLong SIOCAIFADDR = new NativeLong(0x8040691aL);
     NativeLong SIOCDIFADDR = new NativeLong(0x80206919L);
+
+    // netinet6/in6_var.h
 
     NativeLong SIOCGIFADDR_IN6 = new NativeLong(0xc1206921L);
     NativeLong SIOCSIFADDR_IN6 = new NativeLong(0x08120690c);

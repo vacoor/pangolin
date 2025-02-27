@@ -1,11 +1,10 @@
 package com.github.pangolin.routing.server.tun.net.channel;
 
-import com.github.pangolin.routing.route.predicate.Subnet4RoutePredicate;
 import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.TunAdapter;
+import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinNetworkRoute;
 import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinTunAdapter;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.RouteTest;
 import com.github.pangolin.routing.server.tun.adapter.linux.LinuxTunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.windows.WindowsTunAdapter;
 import io.netty.buffer.ByteBuf;
@@ -99,15 +98,11 @@ public class TunChannel extends AbstractChannel {
             Inet4Address dst = (Inet4Address) InetAddress.getByName(NetUtil.intToIpAddress(networkAddress));
             Inet4Address netmask = (Inet4Address) InetAddress.getByName(NetUtil.intToIpAddress(subnetMask));
             Inet4Address gw = (Inet4Address) of.getAddress();
-            System.out.println("Dst: " + dst);
-            System.out.println("Netmask: " + netmask);
-            System.out.println("Gw: " + gw);
-
             /*-
              * MacOS 不会添加默认网关路由.
+             * sudo route add -net 198.18.0.0/24 198.18.0.1
              */
-//            RouteTest.deleteRoute(ifname, dst, gw, netmask);
-            RouteTest.addRoute(ifname, dst, gw, netmask);
+            DarwinNetworkRoute.add(dst, netmask, gw, ifname);
         }
     }
 

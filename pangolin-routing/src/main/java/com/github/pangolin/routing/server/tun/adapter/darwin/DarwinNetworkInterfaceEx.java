@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
 
 /**
  *
@@ -304,7 +305,7 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
                                              final Inet4Address address, final int prefixLength) {
         final byte[] ipAddress = address.getAddress();
 
-        final in_aliasreq ifr = new in_aliasreq(ifname);
+        final ifaliasreq ifr = new ifaliasreq(ifname);
         ifr.ifra_addr.sin_family = AF_INET;
         ifr.ifra_addr.sin_port = 0;
         ifr.ifra_addr.sin_addr = ipAddress;
@@ -352,8 +353,8 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
         ifr6.ifra_prefixmask.sin6_addr = cidrPrefixToNetmask(ipAddress.clone(), prefixLength);
 
         /* important!!! */
-        ifr6.ifra_lifetime.ia6t_vltime = in6_addrlifetime.ND6_INFINITE_LIFETIME;
-        ifr6.ifra_lifetime.ia6t_pltime = in6_addrlifetime.ND6_INFINITE_LIFETIME;
+        ifr6.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
+        ifr6.ifra_lifetime.ia6t_pltime = ND6_INFINITE_LIFETIME;
 
         ioctl(fd, SIOCAIFADDR_IN6, ifr6);
     }
@@ -373,8 +374,8 @@ public class DarwinNetworkInterfaceEx implements NetworkInterfaceEx {
         ifr6.ifra_prefixmask.sin6_addr = cidrPrefixToNetmask(ipAddress.clone(), prefixLength);
 
         /* important!!! */
-        ifr6.ifra_lifetime.ia6t_vltime = in6_addrlifetime.ND6_INFINITE_LIFETIME;
-        ifr6.ifra_lifetime.ia6t_pltime = in6_addrlifetime.ND6_INFINITE_LIFETIME;
+        ifr6.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
+        ifr6.ifra_lifetime.ia6t_pltime = ND6_INFINITE_LIFETIME;
 
         ioctl(fd, SIOCDIFADDR_IN6, ifr6);
     }

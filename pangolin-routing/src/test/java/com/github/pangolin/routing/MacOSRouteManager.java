@@ -67,7 +67,7 @@ public class MacOSRouteManager {
                 // 2. 构造数据缓冲区
                 Memory buffer = new Memory(256);
                 buffer.setOrder(ByteOrder.BIG_ENDIAN); // macOS 网络字节序
-                hdr.writeTo(buffer);
+                hdr.writeToBytes(buffer);
 
                 // 3. 填充地址数据
                 int offset = hdr.size();

@@ -5,7 +5,6 @@ package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
  */
 public interface Socket {
 
-
     /**
      * stream socket.
      */
@@ -36,6 +35,11 @@ public interface Socket {
      * Internal Routing Protocol.
      */
     int AF_ROUTE = 17;
+
+    /**
+     * Link layer interface.
+     */
+    int AF_LINK = 18;
 
     /**
      * IPv6.

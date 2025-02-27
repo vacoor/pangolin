@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
 import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.CtlInfo;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.SockaddrCtl;
+import com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.ctl_info;
+import com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.sockaddr_ctl;
 import com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC;
 import com.sun.jna.Native;
 import com.sun.jna.Structure;
@@ -14,24 +14,13 @@ import java.nio.ByteBuffer;
 
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.CTLIOCGINFO;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfTun.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SysDomain.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC.*;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 
 @Slf4j
 public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceEx> {
-    /**
-     * Kernel Control Protocol.
-     */
-    private static final int SYSPROTO_CONTROL = 2;
-    /**
-     * Name registered by the utun kernel control.
-     */
-    private static final String UTUN_CONTROL_NAME = "com.apple.net.utun_control";
-    /**
-     * Socket option names to manage utun.
-     */
-    private static final int UTUN_OPT_IFNAME = 2;
-
 
     private static final int ADDRESS_FAMILY_SIZE = 4;
 
@@ -138,11 +127,11 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
         }
 
         // mark socket as utun device
-        final CtlInfo ctlInfo = new CtlInfo(UTUN_CONTROL_NAME);
-        ioctl(fd, CTLIOCGINFO, ctlInfo);
+        final ctl_info ctlinfo = new ctl_info(UTUN_CONTROL_NAME);
+        ioctl(fd, CTLIOCGINFO, ctlinfo);
 
         // define address of socket
-        final SockaddrCtl address = new SockaddrCtl(AF_SYSTEM, (short) SYSPROTO_CONTROL, ctlInfo.ctl_id, utunNum);
+        final sockaddr_ctl address = new sockaddr_ctl((byte) AF_SYSTEM, (short) SYSPROTO_CONTROL, ctlinfo.ctl_id, utunNum);
         connect(fd, address, address.sc_len);
 
         // get socket name

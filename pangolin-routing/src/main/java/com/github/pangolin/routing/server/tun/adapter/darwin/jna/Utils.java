@@ -11,19 +11,27 @@ import java.util.Arrays;
  */
 public class Utils {
 
+    public static byte[] b(final int size) {
+        return new byte[size];
+    }
+
     public static byte[] toBytes(final String name, final int len) {
         final byte[] bytes = new byte[len];
-        writeTo(name, bytes, 0);
+        writeToBytes(name, bytes, 0);
         return bytes;
     }
 
-    public static int writeTo(final String value, final byte[] target, final int offset) {
+    public static int writeToBytes(final String value, final byte[] target) {
+        return writeToBytes(value, target, 0);
+    }
+
+    public static int writeToBytes(final String value, final byte[] target, final int offset) {
         if (null == value) {
             return 0;
         }
         final byte[] bytes = value.getBytes(StandardCharsets.US_ASCII);
         final int len = Math.min(target.length - offset, bytes.length);
-        System.arraycopy(bytes, 0, target, offset, len);
+        System.arraycopy(bytes, 0, target, offset, bytes.length);
         return len;
     }
 

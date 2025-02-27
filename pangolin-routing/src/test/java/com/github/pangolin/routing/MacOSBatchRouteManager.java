@@ -67,7 +67,7 @@ public class MacOSBatchRouteManager {
                 hdr.rtm_msglen = (short) (hdr.size() + 3 * 16); // 头 + 3*16字节地址数据
 
                 // 写入消息头
-                hdr.writeTo(ptr);
+                hdr.writeToBytes(ptr);
                 ptr = ptr.share(hdr.size());
 
                 // 填充地址数据

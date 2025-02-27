@@ -1410,7 +1410,7 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
             final byte[] bytes = skb.getPayload().getRawData();
 
             final int offset = rcv_nxt - hdr.getSequenceNumber();
-            final int length = Math.min(offset + tcp_receive_window(), bytes.length);
+            final int length = Math.min(tcp_receive_window(), bytes.length - offset);
             child.writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
         }
     }

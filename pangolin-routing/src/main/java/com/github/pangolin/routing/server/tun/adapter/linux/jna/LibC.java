@@ -103,6 +103,10 @@ public final class LibC {
         return API.INSTANCE.if_nametoindex(ifname);
     }
 
+    public static String strerror(int errno) {
+        return API.INSTANCE.strerror(errno);
+    }
+
     public interface API extends com.sun.jna.platform.linux.LibC {
 
         API INSTANCE = Native.load(Platform.C_LIBRARY_NAME, API.class);
@@ -137,6 +141,8 @@ public final class LibC {
         int if_nametoindex(String ifname);
 
         String if_indextoname(int index);
+
+        String strerror(int errno);
 
     }
 

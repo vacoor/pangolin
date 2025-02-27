@@ -13,6 +13,10 @@ public interface Route {
 
     int RTM_DELETE = 0x2;
 
+    int RTM_CHANGE = 0x3;
+
+    byte RTM_GET = 0x4;
+
     /**
      * route usable.
      */
@@ -41,6 +45,7 @@ public interface Route {
     int RTA_DST = 0x1;     /* destination sockaddr present */
     int RTA_GATEWAY = 0x2;    /* gateway sockaddr present */
     int RTA_NETMASK = 0x4;    /* netmask sockaddr present */
+    int RTA_IFP = 0x10; /* interface name sockaddr present */
 
 
     class rt_metrics extends Structure {
