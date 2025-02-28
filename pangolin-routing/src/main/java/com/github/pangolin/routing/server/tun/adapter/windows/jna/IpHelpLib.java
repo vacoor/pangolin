@@ -1,6 +1,13 @@
 package com.github.pangolin.routing.server.tun.adapter.windows.jna;
 
-import com.sun.jna.*;
+import static com.sun.jna.platform.win32.Guid.GUID;
+
+import com.sun.jna.LastErrorException;
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
+import com.sun.jna.Structure;
+import com.sun.jna.Union;
+import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Guid;
 import com.sun.jna.platform.win32.IPHlpAPI;
 import com.sun.jna.platform.win32.WinDef;
@@ -13,12 +20,16 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 
-import static com.sun.jna.platform.win32.Guid.GUID;
-
 public interface IpHelpLib extends IPHlpAPI {
     IpHelpLib INSTANCE = Native.load("IPHlpAPI", IpHelpLib.class, W32APIOptions.DEFAULT_OPTIONS);
 
     int NDIS_IF_MAX_STRING_SIZE = 256;
+
+    /*
+    static {
+        Native.register("IPHlpAPI");
+    }
+    */
 
     /**
      * Converts an interface alias name for a network interface to the locally unique identifier (LUID) for the interface.
@@ -29,7 +40,7 @@ public interface IpHelpLib extends IPHlpAPI {
      * and a NULL is returned in the InterfaceLuid parameter.
      * <ul><li>[com.sun.jna.platform.win32.WinError.ERROR_INVALID_PARAMETER]: Wrong parameter</li></ul>
      */
-    int ConvertInterfaceAliasToLuid(String InterfaceAlias, LongByReference InterfaceLuid) throws LastErrorException;
+    int ConvertInterfaceAliasToLuid(final String InterfaceAlias, final LongByReference InterfaceLuid) throws LastErrorException;
 
     /**
      * Converts a Unicode network interface name to the locally unique identifier (LUID) for the interface.
@@ -240,22 +251,28 @@ public interface IpHelpLib extends IPHlpAPI {
 
     @Structure.FieldOrder({"sin_family", "sin_port", "sin_addr", "sin_zero"})
     class sockaddr_in extends Structure {
-        public sockaddr_in() {
-        }
-
-        public sockaddr_in(Pointer p) {
-            super(p);
-            read();
-        }
-
         public short sin_family;
         public short sin_port;
         public byte[] sin_addr = new byte[4];
         public byte[] sin_zero = new byte[8];
+
+        public sockaddr_in() {
+        }
+
+        public sockaddr_in(final Pointer p) {
+            super(p);
+            read();
+        }
+
     }
 
     @Structure.FieldOrder({"sin6_family", "sin6_port", "sin6_flowinfo", "sin6_addr", "sin6_scope_id"})
     class sockaddr_in6 extends Structure {
+        public short sin6_family;
+        public short sin6_port;
+        public int sin6_flowinfo;
+        public byte[] sin6_addr = new byte[16];
+        public int sin6_scope_id;
 
         public sockaddr_in6() {
         }
@@ -264,12 +281,6 @@ public interface IpHelpLib extends IPHlpAPI {
             super(p);
             read();
         }
-
-        public short sin6_family;
-        public short sin6_port;
-        public int sin6_flowinfo;
-        public byte[] sin6_addr = new byte[16];
-        public int sin6_scope_id;
     }
 
     class SOCKADDR_INET extends Union {
@@ -864,30 +875,40 @@ public interface IpHelpLib extends IPHlpAPI {
         public int PreferredLifetime;
         public int Metric;
 
-//        NL_ROUTE_PROTOCOL Protocol;
+        //        NL_ROUTE_PROTOCOL Protocol;
         public int Protocol;
         public WinDef.BOOL Loopback;
         public WinDef.BOOL AutoconfigureAddress;
         public WinDef.BOOL Publish;
         public WinDef.BOOL Immortal;
         public int Age;
-//        NL_ROUTE_ORIGIN   Origin;
+        //        NL_ROUTE_ORIGIN   Origin;
         public int Origin;
-
-
     }
 
+    /**
+     * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-initializeipforwardentry">InitializeIpForwardEntry</a>
+     */
     int InitializeIpForwardEntry(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
 
     /**
-     * https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setipforwardentry2
-     * @param row
-     * @return
-     * @throws LastErrorException
+     * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setipforwardentry2">SetIpForwardEntry2</a>
      */
     int SetIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
 
+    /**
+     * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-createipforwardentry2">CreateIpForwardEntry2</a>
+     */
     int CreateIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
 
+    /**
+     * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-deleteipforwardentry2">DeleteIpForwardEntry2</a>
+     */
     int DeleteIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
+
+    /**
+     * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardentry2">GetIpForwardEntry2</a>
+     */
+    int GetIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
+
 }

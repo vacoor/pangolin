@@ -1,5 +1,9 @@
 package com.github.pangolin.routing.server.tun.adapter.windows.jna;
 
+import static com.sun.jna.platform.win32.WinDef.DWORD;
+import static com.sun.jna.platform.win32.WinNT.HANDLE;
+import static org.drasyl.channel.tun.jna.windows.loader.LibraryLoader.PREFER_SYSTEM;
+
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
@@ -11,10 +15,6 @@ import io.netty.util.internal.SystemPropertyUtil;
 import org.drasyl.channel.tun.jna.windows.loader.LibraryLoader;
 
 import java.io.IOException;
-
-import static com.sun.jna.platform.win32.WinDef.DWORD;
-import static com.sun.jna.platform.win32.WinNT.HANDLE;
-import static org.drasyl.channel.tun.jna.windows.loader.LibraryLoader.PREFER_SYSTEM;
 
 /**
  * JNA mapping for the <a href="https://www.wintun.net/">Wintun Network Adapter</a>.
@@ -221,4 +221,5 @@ public final class WintunLib {
     @SuppressWarnings("java:S101")
     public static class WINTUN_SESSION_HANDLE extends HANDLE {
     }
+
 }

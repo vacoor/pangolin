@@ -17,12 +17,10 @@ import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpL
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.IP_ADAPTER_ADDRESSES_LH;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.IP_ADAPTER_DNS_SERVER_ADDRESS_XP;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.IP_ADAPTER_DNS_SUFFIX;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.MIB_IPFORWARD_ROW2;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.MIB_IPINTERFACE_ROW;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.MIB_UNICASTIPADDRESS_ROW;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.MIB_UNICASTIPADDRESS_TABLE;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.NDIS_IF_MAX_STRING_SIZE;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.SOCKADDR_INET;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.sockaddr_in;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.sockaddr_in6;
 import static com.sun.jna.platform.win32.Guid.GUID;
@@ -38,7 +36,6 @@ import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Win32Exception;
-import com.sun.jna.platform.win32.WinDef;
 import com.sun.jna.platform.win32.WinError;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
@@ -334,29 +331,13 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
                     continue;
                 }
                 final byte prefixLength = row.OnLinkPrefixLength;
-                if (AF_INET == row.Address.si_family) {
-                    final sockaddr_in v4 = (sockaddr_in) row.Address.getTypedValue(sockaddr_in.class);
-                    addresses.add(InterfaceAddressEx.of(toInetAddress(v4.sin_addr), prefixLength));
-                } else if (AF_INET6 == row.Address.si_family) {
-                    final sockaddr_in6 v6 = (sockaddr_in6) row.Address.getTypedValue(sockaddr_in6.class);
-                    addresses.add(InterfaceAddressEx.of(toInetAddress(v6.sin6_addr), prefixLength));
-                } else {
-                    throw new IllegalStateException("Unknown si family: " + row.Address.si_family);
-                }
+                addresses.add(InterfaceAddressEx.of(WindowsUtils.toInetAddress(row.Address), prefixLength));
             }
             return addresses;
         } finally {
             // FIXED when Structure.autoRead=true if the pointer is invalid, it will cause JVM crash
             table.setAutoRead(false);
             INSTANCE.FreeMibTable(table.getPointer());
-        }
-    }
-
-    private static InetAddress toInetAddress(final byte[] sinAddr) {
-        try {
-            return InetAddress.getByAddress(sinAddr);
-        } catch (final UnknownHostException e) {
-            throw new IllegalStateException(e);
         }
     }
 
@@ -429,20 +410,8 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         row.InterfaceLuid = interfaceLuid;
         // row.OnLinkPrefixLength = 24; // 子网掩码
 
-        if (address instanceof Inet4Address) {
-            final sockaddr_in sockaddrIn = new sockaddr_in();
-            sockaddrIn.sin_family = AF_INET;
-            sockaddrIn.sin_port = 0;
-            sockaddrIn.sin_addr = address.getAddress();
-            row.Address.setTypedValue(sockaddrIn);
-        } else if (address instanceof Inet6Address) {
-            final sockaddr_in6 sockaddrIn6 = new sockaddr_in6();
-            sockaddrIn6.sin6_family = AF_INET6;
-            sockaddrIn6.sin6_port = 0;
-            sockaddrIn6.sin6_addr = address.getAddress();
-            // sockaddrIn6.sin6_scope_id = ((Inet6Address) address).getScopeId();
-            row.Address.setTypedValue(sockaddrIn6);
-        }
+        WindowsUtils.writeSockAddr(row.Address, address);
+
         return row;
     }
 
@@ -470,24 +439,7 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         row.Address.Ipv4.sin_port = 0;
         row.Address.Ipv4.sin_addr = address;
         */
-        if (address instanceof Inet4Address) {
-            final sockaddr_in sockaddrIn = new sockaddr_in();
-            sockaddrIn.sin_family = AF_INET;
-            sockaddrIn.sin_port = 0;
-            sockaddrIn.sin_addr = address.getAddress();
-
-            row.Address.si_family = AF_INET;
-            row.Address.setTypedValue(sockaddrIn);
-        } else if (address instanceof Inet6Address) {
-            final sockaddr_in6 sockaddrIn6 = new sockaddr_in6();
-            sockaddrIn6.sin6_family = AF_INET6;
-            sockaddrIn6.sin6_port = 0;
-            sockaddrIn6.sin6_addr = address.getAddress();
-            // sockaddrIn6.sin6_scope_id = ((Inet6Address) address).getScopeId();
-
-            row.Address.si_family = AF_INET6;
-            row.Address.setTypedValue(sockaddrIn6);
-        }
+        WindowsUtils.writeSockAddr(row.Address, address);
 
         final int err = INSTANCE.GetUnicastIpAddressEntry(row);
         assertNoError(err, "GetUnicastIpAddressEntry failed: luid = %s, address = %s", interfaceLuid, address);
@@ -535,7 +487,7 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         if (null == addr) {
             throw new IllegalStateException("Unknown host: " + ipAddressStr);
         }
-        return toInetAddress(addr);
+        return WindowsUtils.toInetAddress(addr);
     }
 
     private static void setInterfaceDns(final GUID interfaceGuid, final int family,
@@ -674,61 +626,5 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
 //            throw new Win32Exception(err)
             throw new IllegalStateException("[" + err + "] " + String.format(message, args));
         }
-    }
-
-    private static SOCKADDR_INET toSockAddr(final InetAddress address) {
-        final SOCKADDR_INET sockAddr = new SOCKADDR_INET();
-        if (address instanceof Inet4Address) {
-            final sockaddr_in sockaddrIn = new sockaddr_in();
-            sockaddrIn.sin_family = AF_INET;
-            sockaddrIn.sin_port = 0;
-            sockaddrIn.sin_addr = address.getAddress();
-
-            sockAddr.si_family = sockaddrIn.sin_family;
-            sockAddr.setTypedValue(sockaddrIn);
-        } else if (address instanceof Inet6Address) {
-            final sockaddr_in6 sockaddrIn6 = new sockaddr_in6();
-            sockaddrIn6.sin6_family = AF_INET6;
-            sockaddrIn6.sin6_port = 0;
-            sockaddrIn6.sin6_addr = address.getAddress();
-            sockaddrIn6.sin6_scope_id = ((Inet6Address) address).getScopeId();
-
-            sockAddr.si_family = sockaddrIn6.sin6_family;
-            sockAddr.setTypedValue(sockaddrIn6);
-        }
-        return sockAddr;
-    }
-
-    public static void main(String[] args) throws SocketException, UnknownHostException {
-        final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias("以太网 2");
-        /*
-//        nix.addInterfaceAddress(InterfaceAddressEx.of("192.168.1.3", 24));
-        for (InterfaceAddressEx interfaceAddress : nix.getInterfaceAddresses()) {
-            System.out.println(interfaceAddress);
-        }
-        */
-        final MIB_IPFORWARD_ROW2 row = new MIB_IPFORWARD_ROW2();
-        INSTANCE.InitializeIpForwardEntry(row);
-
-        // 目标地址
-        row.DestinationPrefix.Prefix = toSockAddr(InetAddress.getByName("192.168.1.1"));
-        row.DestinationPrefix.PrefixLength = 24;
-
-        // 下一跳
-        row.NextHop = toSockAddr(InetAddress.getByName("10.188.70.1"));
-
-        row.InterfaceLuid = nix.interfaceLuid;
-
-        // row.SitePrefixLength = 0;
-        // https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_ipforward_row2
-        int MIB_IPPROTO_NETMGMT = 3;
-        row.Protocol = MIB_IPPROTO_NETMGMT;
-        row.Metric = 1;
-        row.ValidLifetime = 0xFFFFFFFF;
-        row.PreferredLifetime = 0xFFFFFFFF;
-        row.Loopback = new WinDef.BOOL(0);
-
-        int i = INSTANCE.DeleteIpForwardEntry2(row);
-        System.out.println(i);
     }
 }
