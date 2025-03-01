@@ -54,13 +54,17 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
     protected ByteBuffer read0() {
         // read from socket
         final int mtu = getMTU();
-        final byte[] buf = new byte[mtu];
-        final int bytesRead = LibC.read(fd, buf, mtu);
 
-        final int ipVersion = buf[0] >> 4;
+        final ByteBuffer buf = ByteBuffer.allocateDirect(mtu);
+        final int bytesRead = LibC.read(fd, buf, mtu);
+        if (-1 == bytesRead) {
+            throw new IllegalStateException("fd closed");
+        }
+
+        final int ipVersion = buf.get(0) >> 4;
         log.trace("IPv{} packet read.", ipVersion);
 
-        return ByteBuffer.wrap(buf, 0, bytesRead);
+        return buf;
     }
 
     /**
@@ -122,7 +126,7 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
             throw new LastErrorException(Native.getLastError());
         }
 
-        close(skfd);
+//        close(skfd);
 
         return new LinuxTunAdapter(skfd, ifname, mtuToUse);
     }

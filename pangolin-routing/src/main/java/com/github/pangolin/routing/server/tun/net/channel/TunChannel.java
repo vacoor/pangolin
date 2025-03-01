@@ -90,7 +90,7 @@ public class TunChannel extends AbstractChannel {
         log.info("Open tun adapter: {}", device);
         InterfaceAddressEx of = InterfaceAddressEx.of("198.18.0.1", 24);
         ((AbstractTunAdapter) device).setInterfaceAddress(of);
-        ((DarwinTunAdapter) device).addInterfaceAddress(InterfaceAddressEx.of("2001:2::", 48));
+        ((AbstractTunAdapter) device).addInterfaceAddress(InterfaceAddressEx.of("2001:2::", 48));
 
 
         if (PlatformDependent.isOsx()) {
