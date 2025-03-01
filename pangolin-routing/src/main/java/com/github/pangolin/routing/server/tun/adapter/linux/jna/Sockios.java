@@ -25,6 +25,17 @@ public interface Sockios {
    * set PA address.
    */
   NativeLong SIOCSIFADDR = new NativeLong(0x8916);
+
+  /**
+   * get remote PA address.
+   */
+  NativeLong SIOCGIFDSTADDR = new NativeLong(0x8917);
+
+  /**
+   * Set remote PA address
+   */
+  NativeLong SIOCSIFDSTADDR = new NativeLong(0x8918);
+
   /**
    * get network PA mask.
    */

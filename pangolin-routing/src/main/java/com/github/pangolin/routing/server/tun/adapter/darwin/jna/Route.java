@@ -7,6 +7,7 @@ import java.util.Arrays;
 import java.util.List;
 
 public interface Route {
+
     int RTM_VERSION = 5;
 
     int RTM_ADD = 0x1;
@@ -62,11 +63,6 @@ public interface Route {
         public int rmx_state;
         public final int[] rmx_filler = new int[3];  // 保留字段
 
-        public rt_metrics() {
-//             setAlignType(Type.ALIGN_APPLE_SILICON);
-            setAlignType(ALIGN_NONE);
-        }
-
         @Override
         protected List<String> getFieldOrder() {
             return Arrays.asList(
@@ -79,27 +75,24 @@ public interface Route {
     }
 
     class rt_msghdr extends Structure {
-        public short rtm_msglen;     /* to skip over non-understood messages */
+        public short rtm_msglen;    /* to skip over non-understood messages */
         public byte rtm_version;    /* future binary compatibility */
         public byte rtm_type;       /* message type */
-        public short rtm_index;      /* index for associated ifp */
-        public int rtm_flags;      /* flags, incl. kern & message, e.g. DONE */
-        public int rtm_addrs;      /* bitmask identifying sockaddrs in msg */
-        public int rtm_pid;        /* identify sender */
-        public int rtm_seq;        /* for sender to identify action */
-        public int rtm_errno;      /* why failed */
-        public int rtm_use;        /* from rtentry */
-        // macOs 14.x --> long
-        public int rtm_inits;    /* which metrics we are initializing */
+        public short rtm_index;     /* index for associated ifp */
+        public int rtm_flags;       /* flags, incl. kern & message, e.g. DONE */
+        public int rtm_addrs;       /* bitmask identifying sockaddrs in msg */
+        public int rtm_pid;         /* identify sender */
+        public int rtm_seq;         /* for sender to identify action */
+        public int rtm_errno;       /* why failed */
+        public int rtm_use;         /* from rtentry */
+        public int rtm_inits;       /* which metrics we are initializing */
         public rt_metrics rtm_rmx = new rt_metrics(); /* metrics themselves */
 
         public rt_msghdr() {
-//            setAlignType(ALIGN_DEFAULT);
         }
 
         public rt_msghdr(final Pointer p) {
             super(p);
-//            super(p, ALIGN_NONE);
         }
 
         @Override

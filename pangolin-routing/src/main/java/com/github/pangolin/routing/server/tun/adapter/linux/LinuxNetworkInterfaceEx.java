@@ -3,54 +3,53 @@ package com.github.pangolin.routing.server.tun.adapter.linux;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.NetworkInterfaceEx;
 import com.github.pangolin.routing.server.tun.adapter.linux.jna.If;
-import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.Ifreq;
+import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.ifreq;
 import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.in6_ifreq;
 import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in;
 import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in6;
-import com.github.pangolin.routing.server.tun.adapter.linux.jna.Sockios;
+import com.github.pangolin.routing.server.tun.adapter.unix.UnixNetworkInterfaceEx;
 import com.google.common.collect.Lists;
+import com.sun.jna.LastErrorException;
+import com.sun.jna.Native;
+import com.sun.jna.NativeLong;
+import com.sun.jna.Structure;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.ifaddrs;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Sockios.*;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.netmaskToPrefixLength;
 
 /**
  *
  */
-public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
+public class LinuxNetworkInterfaceEx extends UnixNetworkInterfaceEx implements NetworkInterfaceEx {
     private final String ifname;
 
     public LinuxNetworkInterfaceEx(final String ifname) {
         this.ifname = ifname;
     }
 
-    public InterfaceAddressEx getInterfaceAddress4() {
+    @Override
+    public int getMTU() {
         final int fd = fd4();
         try {
-            final InetAddress ipAddress = toInetAddress(getInterfaceIpAddress4(fd, ifname));
-            final byte[] interfaceNetmask = getInterfaceNetmask4(fd, ifname);
-            final int prefix = netmaskToPrefixLength(interfaceNetmask);
-            return InterfaceAddressEx.of(ipAddress, prefix);
+            return getMTU(fd, ifname);
         } finally {
             close(fd);
         }
     }
 
-    public void setInterfaceAddress4(final Inet4Address addr, final int networkPrefixLength) {
+    public void setMTU(final int mtu) {
         final int fd = fd4();
         try {
-            setInterfaceIpAddress4(fd, ifname, addr);
-
-            final byte[] netmask = cidrPrefixToNetmask(addr.getAddress().clone(), networkPrefixLength);
-            setInterfaceNetmask4(fd, ifname, netmask);
+            setMTU(fd, ifname, mtu);
         } finally {
             close(fd);
         }
@@ -62,120 +61,81 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
     }
 
     @Override
-    public void setInterfaceAddress(final InterfaceAddressEx address) {
-        final InetAddress addr = address.getAddress();
-        final int networkPrefixLength = address.getNetworkPrefixLength();
-        if (addr instanceof Inet4Address) {
-            final int fd = fd4();
-            try {
-                setInterfaceAddress4((Inet4Address) addr, networkPrefixLength);
-                // flushInterfaceAddresses4(fd, ifname);
-                // addInterfaceAddress4(fd, ifname, (Inet4Address) addr, networkPrefixLength);
-            } finally {
-                close(fd);
-            }
-        } else if (addr instanceof Inet6Address) {
-            final int fd = fd6();
-            try {
-                flushInterfaceAddresses6(fd, ifname);
-                addInterfaceAddress6(fd, ifname, (Inet6Address) addr, networkPrefixLength);
-            } finally {
-                close(fd);
-            }
-        } else {
-            throw new UnsupportedOperationException();
-
-        }
-    }
-
-    @Override
-    public void addInterfaceAddress(final InterfaceAddressEx address) {
-        final InetAddress addr = address.getAddress();
-        final int networkPrefixLength = address.getNetworkPrefixLength();
-        if (addr instanceof Inet4Address) {
-            final int fd = fd4();
-            try {
-                addInterfaceAddress4(fd, ifname, (Inet4Address) addr, networkPrefixLength);
-            } finally {
-                close(fd);
-            }
-        } else if (addr instanceof Inet6Address) {
-            final int fd = fd6();
-            try {
-                addInterfaceAddress6(fd, ifname, (Inet6Address) addr, networkPrefixLength);
-            } finally {
-                close(fd);
-            }
-        } else {
-            throw new UnsupportedOperationException();
-        }
-    }
-
-    @Override
-    public void deleteInterfaceAddress(InterfaceAddressEx address) {
-        final InetAddress addr = address.getAddress();
-        final int networkPrefixLength = address.getNetworkPrefixLength();
-        if (addr instanceof Inet4Address) {
-            final int fd = fd4();
-            try {
-                deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) addr);
-            } finally {
-                close(fd);
-            }
-        } else if (addr instanceof Inet6Address) {
-            final int fd = fd6();
-            try {
-                deleteInterfaceAddress6(fd, ifname, (Inet6Address) addr, networkPrefixLength);
-            } finally {
-                close(fd);
-            }
-        } else {
-            throw new UnsupportedOperationException();
-        }
-    }
-
-
-    @Override
-    public void flushInterfaceAddresses() {
-        final List<InterfaceAddressEx> addresses = getInterfaceAddresses(ifname, AF_UNSPEC);
-        final List<InterfaceAddressEx> ipv4 = addresses.stream()
-                .filter(a -> a.getAddress() instanceof Inet4Address)
-                .collect(Collectors.toList());
-        final List<InterfaceAddressEx> ipv6 = addresses.stream()
-                .filter(a -> a.getAddress() instanceof Inet6Address)
-                .collect(Collectors.toList());
-        if (!ipv4.isEmpty()) {
-            final int fd = fd4();
-            try {
-                ipv4.forEach(addr -> deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) addr.getAddress()));
-            } finally {
-                close(fd);
-            }
-        }
-        if (!ipv6.isEmpty()) {
-            final int fd = fd6();
-            try {
-                ipv6.forEach(addr -> deleteInterfaceAddress6(fd, ifname, (Inet6Address) addr.getAddress(), addr.getNetworkPrefixLength()));
-            } finally {
-                close(fd);
-            }
-        }
-    }
-
-    @Override
-    public int getMTU() {
+    protected void setInterfaceAddress4(final Inet4Address address, final int prefix) {
         final int fd = fd4();
         try {
-            return getMtu(fd, ifname);
+            // XXX flushInterfaceAddress & addInterfaceAddress4
+            final Inet4Address netmask = cidrToNetmaskAddress(address, prefix);
+            setAddress4(fd, ifname, address);
+            // setDstAddress4(fd, ifname, address);
+            setNetmask4(fd, ifname, netmask);
         } finally {
             close(fd);
         }
     }
 
-    public void setMTU(final int mtu) {
+    @Override
+    protected void setInterfaceAddress6(final Inet6Address address, final int prefix) {
+        final int fd = fd6();
+        try {
+            flushInterfaceAddresses(fd, ifname, AF_INET6);
+            addInterfaceAddress6(fd, ifname, address, prefix);
+        } finally {
+            close(fd);
+        }
+    }
+
+    @Override
+    protected void addInterfaceAddress4(final Inet4Address address, final int prefix) {
+        // 多个 IP 需要通过添加子网卡实现.
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    protected void addInterfaceAddress6(final Inet6Address address, final int prefix) {
+        final int fd = fd6();
+        try {
+            addInterfaceAddress6(fd, ifname, address, prefix);
+        } finally {
+            close(fd);
+        }
+    }
+
+    @Override
+    protected void deleteInterfaceAddress4(final Inet4Address address, final int prefix) {
         final int fd = fd4();
         try {
-            setMtu(fd, ifname, mtu);
+            deleteAddress4(fd, ifname, address);
+        } finally {
+            close(fd);
+        }
+    }
+
+    @Override
+    protected void deleteInterfaceAddress6(final Inet6Address address, final int prefix) {
+        final int fd = fd6();
+        try {
+            deleteInterfaceAddress6(fd, ifname, address, prefix);
+        } finally {
+            close(fd);
+        }
+    }
+
+    @Override
+    protected void flushInterfaceAddresses4() {
+        final int fd = fd4();
+        try {
+            flushInterfaceAddresses(fd, ifname, AF_INET);
+        } finally {
+            close(fd);
+        }
+    }
+
+    @Override
+    protected void flushInterfaceAddresses6() {
+        final int fd = fd6();
+        try {
+            flushInterfaceAddresses(fd, ifname, AF_INET6);
         } finally {
             close(fd);
         }
@@ -189,54 +149,49 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         return socket(AF_INET6, SOCK_DGRAM, 0);
     }
 
+
     // ------------------------ START Interface related ------------------------
 
-    static int getMtu(final int fd, final String ifname) {
-        final Ifreq ifr = new Ifreq(ifname);
-        final int code = ioctl(fd, SIOCGIFMTU, ifr);
-        return ifr.ifr_ifru.ifru_mtu;
+    static int getMTU(final int fd, final String ifname) {
+        final ifreq ifr = new ifreq(ifname);
+        return ioctl0(fd, SIOCGIFMTU, ifr).ifr_ifru.ifru_mtu;
     }
 
-    static void setMtu(final int fd, final String ifname, final int mtu) {
-        final Ifreq ifr = new Ifreq(ifname);
+    static void setMTU(final int fd, final String ifname, final int mtu) {
+        final ifreq ifr = new ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_mtu");
         ifr.ifr_ifru.ifru_mtu = mtu;
-        ioctl(fd, SIOCSIFMTU, ifr);
+        ioctl0(fd, SIOCSIFMTU, ifr);
     }
 
     // ------------------------ END Interface related ------------------------
 
-    static List<InterfaceAddressEx> getInterfaceAddresses(final String ifname, final int family) {
-        final If.ifaddrs ifa = new If.ifaddrs();
-        getifaddrs(ifa);
+
+    private static List<InterfaceAddressEx> getInterfaceAddresses(final String ifname, final int family) {
+        final ifaddrs ifa = new ifaddrs();
+        if (0 != getifaddrs(ifa)) {
+            throw new LastErrorException(Native.getLastError());
+        }
 
         try {
             final List<InterfaceAddressEx> interfaceAddresses = Lists.newArrayList();
             for (If.ifaddrs n = ifa; null != n; n = n.ifa_next) {
-                // IFF_UP ?
-                if (null == n.ifa_addr) {
+                if (!matches(n, ifname, family)) {
                     continue;
                 }
 
-                final String ifaName = n.ifa_name;
-                final short sa_family = n.ifa_addr.sa_family;
-                if ((AF_UNSPEC != family && family != sa_family) || (null != ifname && !ifname.equals(ifaName))) {
-                    continue;
-                }
-
-                if (AF_INET == sa_family) {
+                if (AF_INET == n.ifa_addr.sa_family) {
                     final sockaddr_in sockaddr = (sockaddr_in) n.ifa_addr.getTypedValue(sockaddr_in.class);
-                    final sockaddr_in netmask = null != n.ifa_netmask ? (sockaddr_in) n.ifa_netmask.getTypedValue(sockaddr_in.class) : null;
-                    final int prefix = null != netmask ? netmaskToPrefixLength(netmask.sin_addr) : 0;
+                    final sockaddr_in netmask = (sockaddr_in) n.ifa_netmask.getTypedValue(sockaddr_in.class);
+                    final int prefix = netmaskToPrefixLength(netmask.sin_addr);
 
-                    interfaceAddresses.add(InterfaceAddressEx.of(toInetAddress(sockaddr.sin_addr), prefix));
-                } else if (AF_INET6 == sa_family) {
+                    interfaceAddresses.add(InterfaceAddressEx.of(toInet4Address(sockaddr), prefix));
+                } else if (AF_INET6 == n.ifa_addr.sa_family) {
                     final sockaddr_in6 sockaddr = (sockaddr_in6) n.ifa_addr.getTypedValue(sockaddr_in6.class);
+                    final sockaddr_in6 netmask = (sockaddr_in6) n.ifa_netmask.getTypedValue(sockaddr_in6.class);
+                    final int prefix = netmaskToPrefixLength(netmask.sin6_addr);
 
-                    final sockaddr_in6 netmask = null != n.ifa_netmask ? (sockaddr_in6) n.ifa_netmask.getTypedValue(sockaddr_in6.class) : null;
-                    final int prefix = null != netmask ? netmaskToPrefixLength(netmask.sin6_addr) : 0;
-
-                    interfaceAddresses.add(InterfaceAddressEx.of(toInetAddress(sockaddr.sin6_addr), prefix));
+                    interfaceAddresses.add(InterfaceAddressEx.of(toInet6Address(sockaddr), prefix));
                 }
             }
             return interfaceAddresses;
@@ -247,174 +202,200 @@ public class LinuxNetworkInterfaceEx implements NetworkInterfaceEx {
         }
     }
 
-    private static InetAddress toInetAddress(final byte[] sinAddr) {
+    private static void flushInterfaceAddresses(final int fd, final String ifname, final int family) {
+        final ifaddrs ifa = getifaddrs0(new ifaddrs());
         try {
-            return InetAddress.getByAddress(sinAddr);
-        } catch (final UnknownHostException e) {
-            throw new IllegalStateException(e);
+            for (ifaddrs n = ifa; null != n; n = n.ifa_next) {
+                if (!matches(n, ifname, family)) {
+                    continue;
+                }
+                if (AF_INET == n.ifa_addr.sa_family) {
+                    final sockaddr_in sockaddr = (sockaddr_in) n.ifa_addr.getTypedValue(sockaddr_in.class);
+                    deleteAddress4(fd, ifname, toInet4Address(sockaddr));
+                } else if (AF_INET6 == n.ifa_addr.sa_family) {
+                    final sockaddr_in6 sockaddr = (sockaddr_in6) n.ifa_addr.getTypedValue(sockaddr_in6.class);
+                    final sockaddr_in6 netmask = (sockaddr_in6) n.ifa_netmask.getTypedValue(sockaddr_in6.class);
+                    final int prefix = netmaskToPrefixLength(netmask.sin6_addr);
+                    deleteInterfaceAddress6(fd, ifname, toInet6Address(sockaddr), prefix);
+                } else {
+                    throw new UnsupportedOperationException("family: " + n.ifa_addr.sa_family);
+                }
+            }
+        } finally {
+            // FIXED when Structure.autoRead=true if the pointer is invalid, it will cause JVM crash
+            ifa.setAutoRead(false);
+            freeifaddrs(ifa);
         }
     }
 
-    private static void flushInterfaceAddresses4(final int fd, final String ifname) {
-        for (final InterfaceAddressEx remove : getInterfaceAddresses(ifname, AF_INET)) {
-            deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) remove.getAddress());
+    private static boolean matches(final ifaddrs ifaddr, final String ifname, final int family) {
+        // IFF_UP ?
+        if (null == ifaddr.ifa_addr || null == ifaddr.ifa_name || !ifaddr.ifa_name.equals(ifname)) {
+            return false;
         }
-    }
-
-    private static void flushInterfaceAddresses6(final int fd, final String ifname) {
-        for (final InterfaceAddressEx remove : getInterfaceAddresses(ifname, AF_INET6)) {
-            deleteInterfaceIpAddress4(fd, ifname, (Inet4Address) remove.getAddress());
-        }
+        return AF_UNSPEC == family || ifaddr.ifa_addr.sa_family == family;
     }
 
 
     // ------------------------ START IPv4 related ------------------------
 
-
-    private static byte[] getInterfaceIpAddress4(final int fd, final String ifname) {
-        final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_addr");
-
-        ioctl(fd, SIOCGIFADDR, ifr);
-
-        final sockaddr_in addr = ifr.ifr_ifru.ifru_addr;
-        assert AF_INET == addr.sin_family;
-        return addr.sin_addr;
+    /**
+     * Get ifnet address.
+     *
+     * @param fd     the file descriptor
+     * @param ifname the interface name
+     * @return the ifnet address
+     */
+    private static Inet4Address getAddress4(final int fd, final String ifname) {
+        final ifreq ifr = ioctl0(fd, SIOCGIFADDR, _ifreq(ifname, null));
+        return toInet4Address(ifr.ifr_ifru.ifru_addr);
     }
 
-    private static void setInterfaceIpAddress4(final int fd, final String ifname, final Inet4Address addr) {
-        final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_addr");
-        ifr.ifr_ifru.ifru_addr.sin_family = AF_INET;
-        ifr.ifr_ifru.ifru_addr.sin_port = 0;
-        ifr.ifr_ifru.ifru_addr.sin_addr = addr.getAddress();
-
-        ioctl(fd, SIOCSIFADDR, ifr);
+    /**
+     * Set ifnet address.
+     *
+     * @param fd      the file descriptor
+     * @param ifname  the interface name
+     * @param address the ifnet address
+     */
+    private static void setAddress4(final int fd, final String ifname, final Inet4Address address) {
+        ioctl0(fd, SIOCSIFADDR, _ifreq(ifname, address));
     }
 
-    private static byte[] getInterfaceNetmask4(final int fd, final String ifname) {
-        final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_netmask");
-
-        ioctl(fd, SIOCGIFNETMASK, ifr);
-
-        final sockaddr_in netmask = ifr.ifr_ifru.ifru_netmask;
-        assert AF_INET == netmask.sin_family;
-        return netmask.sin_addr;
+    /**
+     * Get ifnet destination address.
+     *
+     * @param fd     the file descriptor
+     * @param ifname the interface name
+     * @return the ifnet dst address
+     */
+    private static Inet4Address getDstAddress4(final int fd, final String ifname) {
+        final ifreq ifr = ioctl0(fd, SIOCGIFDSTADDR, _ifreq(ifname, null));
+        return toInet4Address(ifr.ifr_ifru.ifru_addr);
     }
 
-    private static void setInterfaceNetmask4(final int fd, final String ifname, final byte[] addr) {
-        final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_netmask");
-        ifr.ifr_ifru.ifru_netmask.sin_family = AF_INET;
-        ifr.ifr_ifru.ifru_netmask.sin_port = 0;
-        ifr.ifr_ifru.ifru_netmask.sin_addr = addr;
-
-        ioctl(fd, SIOCSIFNETMASK, ifr);
+    /**
+     * Set ifnet destination address.
+     *
+     * @param fd      the file descriptor
+     * @param ifname  the interface name
+     * @param address the ifnet dst address
+     */
+    private static void setDstAddress4(final int fd, final String ifname, final Inet4Address address) {
+        ioctl0(fd, SIOCSIFDSTADDR, _ifreq(ifname, address));
     }
 
-    private static void addInterfaceAddress4(final int fd, final String ifname,
-                                             final Inet4Address address, final int prefixLength) {
-        // FIXME
-        /*
-        final byte[] ipAddress = address.getAddress();
-
-        final in_aliasreq ifr = new in_aliasreq(ifname);
-        ifr.ifra_addr.sin_family = AF_INET;
-        ifr.ifra_addr.sin_port = 0;
-        ifr.ifra_addr.sin_addr = ipAddress;
-
-        // required.
-        ifr.ifra_broadaddr.sin_family = AF_INET;
-        ifr.ifra_broadaddr.sin_port = 0;
-        ifr.ifra_broadaddr.sin_addr = ipAddress;
-
-        ifr.ifra_mask.sin_family = AF_INET;
-        ifr.ifra_mask.sin_port = 0;
-        ifr.ifra_mask.sin_addr = cidrPrefixToNetmask(ipAddress.clone(), prefixLength);
-
-        ioctl(fd, SIOCAIFADDR, ifr);
-        */
+    /**
+     * Get net addr mask.
+     *
+     * @param fd     the file descriptor
+     * @param ifname the interface name
+     * @return the net addr mask
+     */
+    private static Inet4Address getNetmask4(final int fd, final String ifname) {
+        final ifreq ifr = ioctl0(fd, SIOCGIFNETMASK, _ifreq(ifname, null));
+        return toInet4Address(ifr.ifr_ifru.ifru_addr);
     }
 
-    private static void deleteInterfaceIpAddress4(final int fd, final String ifname, final Inet4Address addr) {
-        final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_addr");
-        ifr.ifr_ifru.ifru_addr.sin_family = AF_INET;
-        ifr.ifr_ifru.ifru_addr.sin_port = 0;
-        ifr.ifr_ifru.ifru_addr.sin_addr = addr.getAddress();
+    /**
+     * Set net addr mask.
+     *
+     * @param fd      the file descriptor
+     * @param ifname  the interface name
+     * @param netmask the net addr mask
+     */
+    private static void setNetmask4(final int fd, final String ifname, final Inet4Address netmask) {
+        ioctl0(fd, SIOCSIFNETMASK, _ifreq(ifname, netmask));
+    }
 
+    /**
+     * Delete ifnet address.
+     *
+     * @param fd      the file descriptor
+     * @param ifname  the interface name
+     * @param address the ifnet address
+     */
+    private static void deleteAddress4(final int fd, final String ifname, final Inet4Address address) {
         // FIXME [25] Inappropriate ioctl for device
-//        ioctl(fd, SIOCDIFADDR, ifr);
+        ioctl0(fd, SIOCDIFADDR, _ifreq(ifname, address));
     }
 
+    private static ifreq _ifreq(final String ifname, final Inet4Address addr) {
+        final ifreq ifr = new ifreq(ifname);
+        ifr.ifr_ifru.setType("ifru_addr");
+        if (null != addr) {
+            writeSockAddr4(ifr.ifr_ifru.ifru_addr, addr);
+            assert AF_INET == ifr.ifr_ifru.ifru_addr.sin_family;
+        }
+        return ifr;
+    }
 
     // ------------------------ END IPv4 related ------------------------
 
     // ------------------------ START IPv6 related ------------------------
 
 
-    private static void addInterfaceAddress6(final int fd, final String ifname, final Inet6Address addr, final int prefixLength) {
+    private static void addInterfaceAddress6(final int fd, final String ifname,
+                                             final Inet6Address addr, final int prefixLength) {
         // Wrong: sysctl net.ipv6.conf.all.disable_ipv6 --> 1: [13] Permission denied
         // sysctl net.ipv6.conf.all.disable_ipv6=0
-        final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_ifindex");
-        ioctl(fd, SIOGIFINDEX, ifr);
 
         final in6_ifreq ifr6 = new in6_ifreq();
-        ifr6.ifr6_ifindex = ifr.ifr_ifru.ifru_ifindex;
-        ifr6.ifr6_prefixlen = prefixLength;
-
         ifr6.ifr6_addr = addr.getAddress();
+        ifr6.ifr6_prefixlen = prefixLength;
+        ifr6.ifr6_ifindex = if_nametoindex0(fd, ifname);
+
         // SIOCSIFADDR is append for IPv6
-        ioctl(fd, Sockios.SIOCSIFADDR, ifr6);
+        ioctl0(fd, SIOCSIFADDR, ifr6);
     }
 
     private static void deleteInterfaceAddress6(final int fd, final String ifname, final Inet6Address addr, final int prefixLength) {
         // Wrong: sysctl net.ipv6.conf.all.disable_ipv6 --> 1: [13] Permission denied
         // sysctl net.ipv6.conf.all.disable_ipv6=0
-        final Ifreq ifr = new Ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_ifindex");
-        ioctl(fd, SIOGIFINDEX, ifr);
-        System.out.println("IFR index=" + ifr.ifr_ifru.ifru_ifindex);
 
         final in6_ifreq ifr6 = new in6_ifreq();
-        ifr6.ifr6_ifindex = ifr.ifr_ifru.ifru_ifindex;
-        ifr6.ifr6_prefixlen = prefixLength;
-
-//        ifr6.ifr6_addr.sin6_family = AF_INET6;
-//        ifr6.ifr6_addr.sin6_port = 0;
         ifr6.ifr6_addr = addr.getAddress();
-//        ifr6.ifr6_addr.sin6_scope_id = addr.getScopeId();
-        ioctl(fd, Sockios.SIOCDIFADDR, ifr6);
+        ifr6.ifr6_prefixlen = prefixLength;
+        ifr6.ifr6_ifindex = if_nametoindex0(fd, ifname);
+
+        ioctl0(fd, SIOCDIFADDR, ifr6);
     }
 
     // ------------------------ END IPv6 related ------------------------
 
-    private static byte[] cidrPrefixToNetmask(final byte[] bytes, int prefix) {
-        Arrays.fill(bytes, (byte) 0xFF);
-        bytes[prefix / Byte.SIZE] <<= prefix % Byte.SIZE;
-        prefix += prefix % Byte.SIZE;
-        for (int i = prefix / Byte.SIZE; i < bytes.length; i++) {
-            bytes[i] = 0;
-        }
-        return bytes;
+    private static int if_nametoindex0(final int fd, final String ifname) {
+        // return if_nametoindex(ifname);
+        final ifreq ifr = new ifreq(ifname);
+        ifr.ifr_ifru.setType("ifru_ifindex");
+        ioctl0(fd, SIOGIFINDEX, ifr);
+        return ifr.ifr_ifru.ifru_ifindex;
     }
 
-    static int netmaskToPrefixLength(final byte[] ipBytes) {
-        int prefix_length = 0;
-        for (byte b : ipBytes) {
-            if ((b & 0xFF) == 0xFF) {
-                prefix_length += Byte.SIZE;
-                continue;
-            }
-            for (int j = 0; j < Byte.SIZE; j++) {
-                if ((b >> j & 1) != 1) {
-                    return prefix_length;
-                }
-                prefix_length += 1;
-            }
+    private static ifaddrs getifaddrs0(final ifaddrs ifa) {
+        if (0 != getifaddrs(ifa)) {
+            throwUnchecked(Native.getLastError());
         }
-        return prefix_length;
+        return ifa;
     }
+
+    private static <S extends Structure> S ioctl0(final int fd, final NativeLong request, final S argp) {
+        if (0 != ioctl(fd, request, argp)) {
+            throwUnchecked(Native.getLastError());
+        }
+        return argp;
+    }
+
+    private static void throwUnchecked(final int errno) {
+        final String errmsg = String.format("[%s] %s", errno, strerror(errno));
+        throw new LinuxException(errno, errmsg);
+    }
+
+    private static class LinuxException extends LastErrorException {
+
+        LinuxException(final int errno, final String errmsg) {
+            super(errno, errmsg);
+        }
+
+    }
+
 }

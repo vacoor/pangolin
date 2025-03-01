@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
+package com.github.pangolin.routing.server.tun.adapter.unix;
 
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
@@ -10,10 +10,6 @@ import java.util.Arrays;
  *
  */
 public class Utils {
-
-    public static byte[] b(final int size) {
-        return new byte[size];
-    }
 
     public static byte[] toBytes(final String name, final int len) {
         final byte[] bytes = new byte[len];

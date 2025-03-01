@@ -2,20 +2,20 @@ package com.github.pangolin.routing.server.tun.adapter.linux;
 
 
 import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
-import com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC;
+import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
+import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import lombok.extern.slf4j.Slf4j;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.IfTun.*;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.SOCK_DGRAM;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Sockios.SIOCSIFFLAGS;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 import static com.sun.jna.platform.linux.Fcntl.O_RDWR;
 
 @Slf4j
@@ -88,36 +88,43 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
 
         // open tun device.
         final int fd = LibC.open("/dev/net/tun", O_RDWR);
-        if (fd == -1) {
-            throw new IOException("Create an endpoint for communication failed.");
+        if (-1 == fd) {
+            throw new LastErrorException(Native.getLastError());
         }
 
         // configure/create actual tun device.
-        final Ifreq ifr = new Ifreq(nameToUse);
-        ifr.ifr_ifru.setType("ifru_flags");
-        ifr.ifr_ifru.ifru_flags = IFF_TUN | IFF_NO_PI;
-        ioctl(fd, TUNSETIFF, ifr);
+        final ifreq tunReq = new ifreq(nameToUse);
+        tunReq.ifr_ifru.setType("ifru_flags");
+        tunReq.ifr_ifru.ifru_flags = IFF_TUN | IFF_NO_PI;
+        if (0 != ioctl(fd, TUNSETIFF, tunReq)) {
+            throw new LastErrorException(Native.getLastError());
+        }
 
-        final String ifname = Native.toString(ifr.ifr_name, StandardCharsets.US_ASCII);
+        final String ifname = Native.toString(tunReq.ifr_name, StandardCharsets.US_ASCII);
         final int skfd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (-1 == skfd) {
+            throw new LastErrorException(Native.getLastError());
+        }
 
         int mtuToUse = mtu;
         if (0 < mtuToUse) {
-            LinuxNetworkInterfaceEx.setMtu(skfd, ifname, mtuToUse);
+            LinuxNetworkInterfaceEx.setMTU(skfd, ifname, mtuToUse);
         } else {
-            mtuToUse = LinuxNetworkInterfaceEx.getMtu(skfd, ifname);
+            mtuToUse = LinuxNetworkInterfaceEx.getMTU(skfd, ifname);
         }
 
         // Set the tun device to active and ready to transfer packets.
         final int flags = IFF_POINTOPOINT | IFF_MULTICAST;
-        final Ifreq ifr2 = new Ifreq(nameToUse);
+        final ifreq ifr2 = new ifreq(nameToUse);
         ifr2.ifr_ifru.setType("ifru_flags");
         ifr2.ifr_ifru.ifru_flags = IFF_UP | IFF_RUNNING | flags;
-        ioctl(skfd, SIOCSIFFLAGS, ifr2);
+        if (0 != ioctl(skfd, SIOCSIFFLAGS, ifr2)) {
+            throw new LastErrorException(Native.getLastError());
+        }
 
         close(skfd);
 
-        return new LinuxTunAdapter(fd, ifname, mtuToUse);
+        return new LinuxTunAdapter(skfd, ifname, mtuToUse);
     }
 
     private static String checkName(final String name) {

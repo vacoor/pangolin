@@ -11,10 +11,13 @@ public interface Sockio {
 
     NativeLong SIOCGIFFLAGS = new NativeLong(0xc0206911L);
     NativeLong SIOCSIFFLAGS = new NativeLong(0x80206910L);
+
     NativeLong SIOCGIFADDR = new NativeLong(0xc0206921L);
     NativeLong SIOCSIFADDR = new NativeLong(0x8020690cL);
+
     NativeLong SIOCGIFDSTADDR = new NativeLong(0xc0206922L);
     NativeLong SIOCSIFDSTADDR = new NativeLong(0x8020690eL);
+
     NativeLong SIOCGIFBRDADDR = new NativeLong(0xc0206923L);
     NativeLong SIOCSIFBRDADDR = new NativeLong(0x80206913L);
 
@@ -27,6 +30,7 @@ public interface Sockio {
 
     NativeLong SIOCGIFMTU = new NativeLong(0xc0206933L);
     NativeLong SIOCSIFMTU = new NativeLong(0x80206934L);
+
 //    NativeLong SIOCGIFMTU = new NativeLong(0x80206937L);
 //    NativeLong SIOCSIFMTU = new NativeLong(0x80206938L);
 

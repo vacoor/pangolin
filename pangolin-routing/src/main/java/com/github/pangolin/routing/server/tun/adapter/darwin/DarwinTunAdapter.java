@@ -3,7 +3,8 @@ package com.github.pangolin.routing.server.tun.adapter.darwin;
 import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.ctl_info;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.sockaddr_ctl;
-import com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC;
+import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
+import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import com.sun.jna.Structure;
 import com.sun.jna.ptr.IntByReference;
@@ -12,11 +13,12 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfTun.UTUN_CONTROL_NAME;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfTun.UTUN_OPT_IFNAME;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.CTLIOCGINFO;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfTun.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SysDomain.*;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SysDomain.SYSPROTO_CONTROL;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 
 @Slf4j
@@ -94,8 +96,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
             throw new IOException("Unknown address family: " + addressFamily);
         }
 
-        final ByteBuffer buf = ByteBuffer.allocate(
-                ADDRESS_FAMILY_SIZE + packet.remaining()
+        final ByteBuffer buf = ByteBuffer.allocate(ADDRESS_FAMILY_SIZE + packet.remaining()
         ).put(new byte[]{
                 (byte) (addressFamily >> 24),
                 (byte) (addressFamily >> 16),
@@ -121,34 +122,40 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
         final int utunNum = nameToNum(name);
 
         // create socket
-        final int fd = socket(AF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
-        if (fd == -1) {
-            throw new IOException("Create an endpoint for communication failed.");
+        final int skfd = socket(AF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
+        if (-1 == skfd) {
+            throw new LastErrorException(Native.getLastError());
         }
 
         // mark socket as utun device
         final ctl_info ctlinfo = new ctl_info(UTUN_CONTROL_NAME);
-        ioctl(fd, CTLIOCGINFO, ctlinfo);
+        if (0 != ioctl(skfd, CTLIOCGINFO, ctlinfo)) {
+            throw new LastErrorException(Native.getLastError());
+        }
 
         // define address of socket
         final sockaddr_ctl address = new sockaddr_ctl((byte) AF_SYSTEM, (short) SYSPROTO_CONTROL, ctlinfo.ctl_id, utunNum);
-        connect(fd, address, address.sc_len);
+        if (0 != connect(skfd, address, address.sc_len)) {
+            throw new LastErrorException(Native.getLastError());
+        }
 
         // get socket name
         final SockName sockName = new SockName();
         final IntByReference sockNameLen = new IntByReference(SockName.LENGTH);
-        getsockopt(fd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME, sockName, sockNameLen);
+        if (0 != getsockopt(skfd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME, sockName, sockNameLen)) {
+            throw new LastErrorException(Native.getLastError());
+        }
 
         final String ifname = Native.toString(sockName.name, US_ASCII);
 
         int mtuToUse = mtu;
         if (0 < mtuToUse) {
-            DarwinNetworkInterfaceEx.setMtu(fd, ifname, mtuToUse);
+            DarwinNetworkInterfaceEx.setMTU(skfd, ifname, mtuToUse);
         } else {
-            mtuToUse = DarwinNetworkInterfaceEx.getMtu(fd, ifname);
+            mtuToUse = DarwinNetworkInterfaceEx.getMTU(skfd, ifname);
         }
 
-        return new DarwinTunAdapter(fd, ifname, mtuToUse);
+        return new DarwinTunAdapter(skfd, ifname, mtuToUse);
     }
 
 
@@ -177,5 +184,4 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
         static final int LENGTH = 16;
         public byte[] name = new byte[LENGTH];
     }
-
 }

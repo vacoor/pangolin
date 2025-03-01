@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
-import com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC;
+import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
@@ -12,7 +12,7 @@ import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.socka
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.LibC.if_nametoindex;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.if_nametoindex;
 
 public class DarwinNetworkRoute {
     private static final int RT_MSGHDR_SIZE = new rt_msghdr(new Pointer(0)).size();

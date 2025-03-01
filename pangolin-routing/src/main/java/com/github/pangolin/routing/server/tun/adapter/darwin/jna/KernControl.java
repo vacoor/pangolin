@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 
+import com.github.pangolin.routing.server.tun.adapter.unix.Utils;
 import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
 

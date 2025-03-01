@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 
+import com.github.pangolin.routing.server.tun.adapter.unix.Utils;
 import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
 import com.sun.jna.Union;
@@ -11,6 +12,7 @@ import java.util.List;
  * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if.h">if.h</a>
  */
 public interface If {
+
     int IFNAMSIZ = 16;
 
     /**
@@ -18,10 +20,15 @@ public interface If {
      */
     int SCOPE6_ID_MAX = 16;
 
+    /**
+     * netinet6/nd6.h
+     */
+    int ND6_INFINITE_LIFETIME = 0xFFFFFFFF;
+
 
     /**
      * Structure used by kernel to store most addresses.
-     *
+     * <p>
      * usr/include/sys/socket.h
      */
     @Structure.FieldOrder({"sa_len", "sa_family", "sa_data"})
@@ -30,10 +37,6 @@ public interface If {
         public byte sa_family;
         public byte[] sa_data = new byte[14];
 
-        public sockaddr() {
-            sa_len = (byte) this.size();
-        }
-
         public static class ByRef extends sockaddr implements ByReference {
         }
     }
@@ -41,10 +44,10 @@ public interface If {
 
     /**
      * Socket address, internet style.
-     *
+     * <p>
      * usr/include/netinet/in.h
      */
-    @Structure.FieldOrder({ "sin_len", "sin_family", "sin_port", "sin_addr", "sin_zero" })
+    @Structure.FieldOrder({"sin_len", "sin_family", "sin_port", "sin_addr", "sin_zero"})
     class sockaddr_in extends Structure {
         public byte sin_len;
         public byte sin_family;
@@ -53,12 +56,10 @@ public interface If {
         public byte[] sin_zero = new byte[8];
 
         public sockaddr_in() {
-            sin_len = (byte) this.size();
         }
 
         public sockaddr_in(final Pointer p) {
             super(p);
-            sin_len = (byte) this.size();
             read();
         }
     }
@@ -70,14 +71,14 @@ public interface If {
      * remainder may be interface specific.
      */
     @Structure.FieldOrder({"ifr_name", "ifr_ifru"})
-    class Ifreq extends Structure {
+    class ifreq extends Structure {
         /**
          * if name, e.g. "en0".
          */
         public byte[] ifr_name = new byte[IFNAMSIZ];
-        public Ifreq.ifr_ifru ifr_ifru;
+        public ifr_ifru ifr_ifru;
 
-        public Ifreq(final String ifname) {
+        public ifreq(final String ifname) {
             Utils.writeToBytes(ifname, ifr_name);
         }
 
@@ -92,6 +93,7 @@ public interface If {
             public int ifru_media;
             public int ifru_intval;
             // ...
+
         }
     }
 
@@ -127,12 +129,10 @@ public interface If {
         public int sin6_scope_id;               /* scope zone index. */
 
         public sockaddr_in6() {
-            sin6_len = (byte) this.size();
         }
 
         public sockaddr_in6(final Pointer ptr) {
             super(ptr);
-            sin6_len = (byte) this.size();
             read();
         }
 
@@ -141,11 +141,6 @@ public interface If {
             return super.getFieldOrder();
         }
     }
-
-    /**
-     * netinet6/nd6.h
-     */
-    public static int ND6_INFINITE_LIFETIME = 0xFFFFFFFF;
 
     /**
      * pltime/vltime are just for future reference (required to implements 2
@@ -163,22 +158,17 @@ public interface If {
         public long ia6t_preferred;  /* preferred lifetime expiration time */
         public int ia6t_vltime;      /* valid lifetime */
         public int ia6t_pltime;      /* prefix lifetime */
-
-        public in6_addrlifetime() {
-            ia6t_vltime = ND6_INFINITE_LIFETIME;
-            ia6t_pltime = ND6_INFINITE_LIFETIME;
-        }
     }
 
     /**
      * netinet6/in6_var.h
      */
     @Structure.FieldOrder({"ifr_name", "ifr_ifru"})
-    class In6Ifreq extends Structure {
+    class in6_ifreq extends Structure {
         public byte[] ifr_name = new byte[IFNAMSIZ];
         public IfrIfru ifr_ifru;
 
-        public In6Ifreq(final String ifname) {
+        public in6_ifreq(final String ifname) {
             Utils.writeToBytes(ifname, ifr_name);
         }
 
@@ -221,7 +211,7 @@ public interface If {
      */
     @Structure.FieldOrder({"ifa_next", "ifa_name", "ifa_flags", "ifa_addr", "ifa_netmask", "ifa_dstaddr", "ifa_data"})
     class ifaddrs extends Structure {
-        public ifaddrs.ByRef ifa_next;
+        public ByRef ifa_next;
         public String ifa_name;
         public int ifa_flags;
         public sockaddr.ByRef ifa_addr;
@@ -250,7 +240,8 @@ public interface If {
         public byte sdl_alen;       /* link level address length */
         public byte sdl_slen;       /* link layer selector length */
         public byte[] sdl_data = new byte[12];   /* minimum work area, can be larger;
-                                                  * contains both if name and ll address */
+         * contains both if name and ll address */
+
         public sockaddr_dl(final Pointer p) {
             super(p);
         }
