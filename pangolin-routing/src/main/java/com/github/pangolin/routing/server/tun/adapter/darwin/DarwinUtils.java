@@ -39,7 +39,7 @@ class DarwinUtils {
     }
 
     static sockaddr_in6 writeSockAddr6(final sockaddr_in6 sockAddr6, final byte[] addr, final int scopeId) {
-        assert addr.length == 128;
+        assert addr.length == 16;
         sockAddr6.sin6_len = (byte) sockAddr6.size();
         sockAddr6.sin6_family = AF_INET6;
         sockAddr6.sin6_port = 0;

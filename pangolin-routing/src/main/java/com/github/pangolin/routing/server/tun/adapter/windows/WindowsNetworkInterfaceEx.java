@@ -1,32 +1,5 @@
 package com.github.pangolin.routing.server.tun.adapter.windows;
 
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.DnsLib.DnsFlushResolverCache;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.AF_UNSPEC;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.DNS_INTERFACE_SETTINGS;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.DNS_INTERFACE_SETTINGS_VERSION1;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.DNS_SETTING_IPV6;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.DNS_SETTING_NAMESERVER;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.DNS_SETTING_SEARCHLIST;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.GAA_FLAG_INCLUDE_ALL_INTERFACES;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.GAA_FLAG_INCLUDE_GATEWAYS;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.GAA_FLAG_SKIP_ANYCAST;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.GAA_FLAG_SKIP_FRIENDLY_NAME;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.GAA_FLAG_SKIP_MULTICAST;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.GAA_FLAG_SKIP_UNICAST;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.INSTANCE;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.IP_ADAPTER_ADDRESSES_LH;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.IP_ADAPTER_DNS_SERVER_ADDRESS_XP;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.IP_ADAPTER_DNS_SUFFIX;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.MIB_IPINTERFACE_ROW;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.MIB_UNICASTIPADDRESS_ROW;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.MIB_UNICASTIPADDRESS_TABLE;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.NDIS_IF_MAX_STRING_SIZE;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.sockaddr_in;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.sockaddr_in6;
-import static com.sun.jna.platform.win32.Guid.GUID;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
-
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.NetworkInterfaceEx;
 import com.google.common.base.Preconditions;
@@ -34,25 +7,26 @@ import com.google.common.collect.Lists;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
-import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Win32Exception;
 import com.sun.jna.platform.win32.WinError;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
 import com.sun.jna.ptr.PointerByReference;
-import io.netty.util.NetUtil;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.Inet4Address;
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
-import java.net.UnknownHostException;
+import java.net.*;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.LinkedList;
 import java.util.List;
+
+import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.toInetAddress;
+import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.writeSockAddr;
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.DnsLib.DnsFlushResolverCache;
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.*;
+import static com.sun.jna.platform.win32.Guid.GUID;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
 
 /**
  * @see <a href="https://github.com/WireGuard/wireguard-windows/blob/master/tunnel/winipcfg/luid.go">luid</a>
@@ -83,6 +57,22 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
 
     public String alias() {
         return interfaceLuidToAlias(interfaceLuid);
+    }
+
+    @Override
+    public int getMTU() throws SocketException {
+        return networkInterface().getMTU();
+    }
+
+    private NetworkInterface networkInterface() {
+        try {
+            /*-
+             * java.net.NetworkInterface is SNAPSHOT and name/displayName, getInterfaceAddresses().networkPrefixLength is wrong.
+             */
+            return NetworkInterface.getByIndex(index());
+        } catch (final SocketException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Override
@@ -118,22 +108,6 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         flushInterfaceAddresses(interfaceLuid, AF_UNSPEC);
     }
 
-    @Override
-    public int getMTU() throws SocketException {
-        return networkInterface().getMTU();
-    }
-
-    private NetworkInterface networkInterface() {
-        try {
-            /*-
-             * java.net.NetworkInterface is SNAPSHOT and name/displayName, getInterfaceAddresses().networkPrefixLength is wrong.
-             */
-            return NetworkInterface.getByIndex(index());
-        } catch (final SocketException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
     public List<InetAddress> getInterfaceDns(final boolean manualSetOnly) {
         return getInterfaceDns(interfaceLuid, manualSetOnly);
     }
@@ -141,14 +115,16 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
     public void setInterfaceDns(final InetAddress[] nameServers) {
         final Inet4Address[] v4 = Arrays.stream(nameServers).filter(a -> a instanceof Inet4Address).toArray(Inet4Address[]::new);
         final Inet4Address[] v6 = Arrays.stream(nameServers).filter(a -> a instanceof Inet6Address).toArray(Inet4Address[]::new);
+
         final GUID interfaceGuid = interfaceLuidToGuid(interfaceLuid);
         setInterfaceDns(interfaceGuid, AF_INET, v4, new String[0]);
         setInterfaceDns(interfaceGuid, AF_INET6, v6, new String[0]);
     }
 
     public void flushInterfaceDns() {
-        flushInterfaceDns(interfaceLuidToGuid(interfaceLuid), AF_INET);
-        flushInterfaceDns(interfaceLuidToGuid(interfaceLuid), AF_INET6);
+        final GUID interfaceGuid = interfaceLuidToGuid(interfaceLuid);
+        flushInterfaceDns(interfaceGuid, AF_INET);
+        flushInterfaceDns(interfaceGuid, AF_INET6);
     }
 
     // ------------------------ START Static method ------------------------
@@ -283,37 +259,28 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
 
     // ------------------------ START Interface related ------------------------
 
-
     static int getMTU(final long interfaceLuid, final int family) {
         return getInterfaceRow(interfaceLuid, family).NlMtu;
     }
 
-    private static int getMetric(final long interfaceLuid, final int family) {
-        return getInterfaceRow(interfaceLuid, family).Metric;
+    static void setMTU(final long interfaceLuid, final int family, final int mtu) {
+        final MIB_IPINTERFACE_ROW row = getInterfaceRow(interfaceLuid, family);
+        row.NlMtu = mtu;
+
+        final int err2 = INSTANCE.SetIpInterfaceEntry(row);
+        assertNoError(err2, "SetIpInterfaceEntry failed: luid = %s, family=%s, MTU=%s", interfaceLuid, family, mtu);
     }
 
     private static MIB_IPINTERFACE_ROW getInterfaceRow(final long interfaceLuid, final int family) {
         final MIB_IPINTERFACE_ROW row = new MIB_IPINTERFACE_ROW();
-        row.InterfaceLuid = interfaceLuid;
+        INSTANCE.InitializeIpInterfaceEntry(row);
+
         row.Family = family;
+        row.InterfaceLuid = interfaceLuid;
 
         final int err = INSTANCE.GetIpInterfaceEntry(row);
         assertNoError(err, "GetIpInterfaceEntry failed: luid = %s, family=%s", interfaceLuid, family);
         return row;
-    }
-
-    static void setMTU(final long interfaceLuid, final int family, final int mtu) {
-        final MIB_IPINTERFACE_ROW row = new MIB_IPINTERFACE_ROW();
-        INSTANCE.InitializeIpInterfaceEntry(row);
-        row.Family = family;
-        row.InterfaceLuid = interfaceLuid;
-
-        final int err = INSTANCE.GetIpInterfaceEntry(row);
-        assertNoError(err, "GetIpInterfaceEntry failed: luid = %s, family=%s", interfaceLuid, family, mtu);
-
-        row.NlMtu = mtu;
-        final int err2 = INSTANCE.SetIpInterfaceEntry(row);
-        assertNoError(err2, "SetIpInterfaceEntry failed: luid = %s, family=%s, MTU=%s", interfaceLuid, family, mtu);
     }
 
     // ------------------------ END Interface related ------------------------
@@ -341,45 +308,6 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         }
     }
 
-    private static void addInterfaceAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
-        final MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(interfaceLuid, address);
-        row.OnLinkPrefixLength = prefixLength;
-        row.ValidLifetime = 0xffffffff;
-        row.PreferredLifetime = 0xffffffff;
-        row.DadState = 4;
-
-        final int err = INSTANCE.CreateUnicastIpAddressEntry(row);
-        if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {
-            throw new IllegalStateException("CreateUnicastIpAddressEntry failed: " + err);
-        }
-    }
-
-    private static void deleteInterfaceAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
-        final MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(interfaceLuid, address);
-        row.OnLinkPrefixLength = prefixLength;
-
-        final int err = INSTANCE.DeleteUnicastIpAddressEntry(row);
-        assertNoError(err, "DeleteUnicastIpAddressEntry failed: luid = %s", interfaceLuid);
-    }
-
-    private static void setInterfaceAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
-        final int family = address instanceof Inet4Address ? AF_INET : (address instanceof Inet6Address ? AF_INET6 : AF_UNSPEC);
-        flushInterfaceAddresses(interfaceLuid, family);
-        addInterfaceAddress(interfaceLuid, address, prefixLength);
-        /*
-        final MIB_UNICASTIPADDRESS_ROW row = createMibUnicastIpAddressRow(interfaceLuid, address);
-        row.OnLinkPrefixLength = prefixLength;
-        row.ValidLifetime = 0xFFFFFFFF;
-        row.PreferredLifetime = 0xFFFFFFFF;
-
-        final int err = INSTANCE.SetUnicastIpAddressEntry(row);
-        if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {
-            throw new IllegalStateException("SetUnicastIpAddressEntry failed: " + err);
-        }
-        */
-    }
-
-
     /**
      * @param family Must be [IPHlpAPI.AF_INET], [IPHlpAPI.AF_INET6] or [IPHlpAPI.AF_UNSPEC]
      */
@@ -399,20 +327,63 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         }
     }
 
-
-    /**
-     * Create and initialize a [MIB_UNICASTIPADDRESS_ROW], fill the luid and ip.
-     */
-    private static MIB_UNICASTIPADDRESS_ROW createMibUnicastIpAddressRow(final long interfaceLuid, InetAddress address) {
+    private static void setInterfaceAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
+        /*
         final MIB_UNICASTIPADDRESS_ROW row = new MIB_UNICASTIPADDRESS_ROW();
         INSTANCE.InitializeUnicastIpAddressEntry(row);
 
         row.InterfaceLuid = interfaceLuid;
-        // row.OnLinkPrefixLength = 24; // 子网掩码
+        row.OnLinkPrefixLength = prefixLength;
 
-        WindowsUtils.writeSockAddr(row.Address, address);
+        row.ValidLifetime = 0xFFFFFFFF;
+        row.PreferredLifetime = 0xFFFFFFFF;
 
-        return row;
+        // INSTANCE.GetUnicastIpAddressEntry(row);
+
+        final int err = INSTANCE.SetUnicastIpAddressEntry(row);
+        if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {
+            throw new IllegalStateException("SetUnicastIpAddressEntry failed: " + err);
+        }
+        */
+
+        if (address instanceof Inet4Address) {
+            flushInterfaceAddresses(interfaceLuid, AF_INET);
+        } else if (address instanceof Inet6Address) {
+            flushInterfaceAddresses(interfaceLuid, AF_INET6);
+        } else {
+            throw new UnsupportedOperationException();
+        }
+        addInterfaceAddress(interfaceLuid, address, prefixLength);
+    }
+
+    private static void addInterfaceAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
+        final MIB_UNICASTIPADDRESS_ROW row = new MIB_UNICASTIPADDRESS_ROW();
+        INSTANCE.InitializeUnicastIpAddressEntry(row);
+
+        row.InterfaceLuid = interfaceLuid;
+        row.OnLinkPrefixLength = prefixLength;
+
+        writeSockAddr(row.Address, address);
+
+        row.ValidLifetime = 0xffffffff;
+        row.PreferredLifetime = 0xffffffff;
+        row.DadState = 4;
+
+        final int err = INSTANCE.CreateUnicastIpAddressEntry(row);
+        if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {
+            throw new IllegalStateException("CreateUnicastIpAddressEntry failed: " + err);
+        }
+    }
+
+    private static void deleteInterfaceAddress(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
+        final MIB_UNICASTIPADDRESS_ROW row = new MIB_UNICASTIPADDRESS_ROW();
+        INSTANCE.InitializeUnicastIpAddressEntry(row);
+
+        row.InterfaceLuid = interfaceLuid;
+        row.OnLinkPrefixLength = prefixLength;
+
+        final int err = INSTANCE.DeleteUnicastIpAddressEntry(row);
+        assertNoError(err, "DeleteUnicastIpAddressEntry failed: luid = %s", interfaceLuid);
     }
 
     private static MIB_UNICASTIPADDRESS_TABLE GetUnicastIpAddressTable(final int family) {
@@ -434,12 +405,8 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
                                                                 final InetAddress address) {
         final MIB_UNICASTIPADDRESS_ROW row = new MIB_UNICASTIPADDRESS_ROW();
         row.InterfaceLuid = interfaceLuid;
-        /*
-        row.Address.Ipv4.sin_family = AF_INET;
-        row.Address.Ipv4.sin_port = 0;
-        row.Address.Ipv4.sin_addr = address;
-        */
-        WindowsUtils.writeSockAddr(row.Address, address);
+
+        writeSockAddr(row.Address, address);
 
         final int err = INSTANCE.GetUnicastIpAddressEntry(row);
         assertNoError(err, "GetUnicastIpAddressEntry failed: luid = %s, address = %s", interfaceLuid, address);
@@ -451,19 +418,19 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
 
     // ------------------------ START DNS related ------------------------
 
-    private static List<InetAddress> getInterfaceDns(long interfaceLuid, boolean manualSetOnly) {
+    private static List<InetAddress> getInterfaceDns(final long interfaceLuid, final boolean manualSetOnly) {
         return manualSetOnly ? getInterfaceDns0(interfaceLuidToGuid(interfaceLuid)) : getInterfaceDns1(interfaceLuid);
     }
 
-    private static List<InetAddress> getInterfaceDns(GUID interfaceGuid, boolean manualSetOnly) {
+    private static List<InetAddress> getInterfaceDns(final GUID interfaceGuid, final boolean manualSetOnly) {
         return manualSetOnly ? getInterfaceDns0(interfaceGuid) : getInterfaceDns1(interfaceGuidToLuid(interfaceGuid));
     }
 
-    private static List<InetAddress> getInterfaceDns0(GUID interfaceGuid) {
+    private static List<InetAddress> getInterfaceDns0(final GUID interfaceGuid) {
         final DNS_INTERFACE_SETTINGS dnsInterfaceSettings = new DNS_INTERFACE_SETTINGS();
         dnsInterfaceSettings.Version = DNS_INTERFACE_SETTINGS_VERSION1;
-        // dnsInterfaceSettings.QueryAdapterName = DNS_SETTINGS_QUERY_ADAPTER_NAME;
         dnsInterfaceSettings.Flags = DNS_SETTING_NAMESERVER | DNS_SETTING_SEARCHLIST;
+        // dnsInterfaceSettings.QueryAdapterName = DNS_SETTINGS_QUERY_ADAPTER_NAME;
 
         final int err = INSTANCE.GetInterfaceDnsSettings(interfaceGuid, dnsInterfaceSettings);
         assertNoError(err, "GetInterfaceDnsSettings failed: GUID = %s", interfaceGuid.toGuidString());
@@ -480,14 +447,6 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
             }
         }
         return nameServers;
-    }
-
-    private static InetAddress toInetAddress(final String ipAddressStr) {
-        final byte[] addr = NetUtil.createByteArrayFromIpAddressString(ipAddressStr);
-        if (null == addr) {
-            throw new IllegalStateException("Unknown host: " + ipAddressStr);
-        }
-        return WindowsUtils.toInetAddress(addr);
     }
 
     private static void setInterfaceDns(final GUID interfaceGuid, final int family,
@@ -529,56 +488,28 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         setInterfaceDns(interfaceGuid, family, new InetAddress[0], new String[0]);
     }
 
-
     // ------------------------ END DNS related ------------------------
 
 
     // ------------------------ START AdapterAddresses related ------------------------
 
-    private static void printInterfaces() {
-        final int flags = GAA_FLAG_SKIP_UNICAST | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST
-                | GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_ALL_INTERFACES;
-        IP_ADAPTER_ADDRESSES_LH addresses = GetAdaptersAddresses(AF_UNSPEC, flags);
-        do {
-            final int ifType = addresses.IfType;
-            final int ifIndex = addresses.IfIndex;
-            final int ifIndex6 = addresses.Ipv6IfIndex;
-            final int mtu = addresses.Mtu;
-            final String name = addresses.AdapterName.getString(0);
-            final WString alias = addresses.FriendlyName;
-            final WString desc = addresses.Description;
-            final int ipv4Metric = addresses.Ipv4Metric;
-            final int ipv6Metric = addresses.Ipv6Metric;
-            final String msg = String.format("[%s/%s] [%s] %s:%s:%s -> %s[%s/%s]", ifIndex, ifIndex6, ifType, name, alias, desc, mtu, ipv4Metric, ipv6Metric);
-
-            System.out.println(msg);
-
-            addresses = addresses.Next;
-        } while (null != addresses);
-    }
-
     private static List<InetAddress> getInterfaceDns1(final long interfaceLuid) {
-        final int flags = GAA_FLAG_SKIP_UNICAST | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST
-                | GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_ALL_INTERFACES;
+        final int flags = GAA_FLAG_SKIP_UNICAST | GAA_FLAG_SKIP_ANYCAST
+                | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_INCLUDE_GATEWAYS
+                | GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_INCLUDE_ALL_INTERFACES;
 
         IP_ADAPTER_ADDRESSES_LH addresses = GetAdaptersAddresses(AF_UNSPEC, flags);
         do {
             // only interfaces with IfOperStatusUp
-            // if (addresses.OperStatus == 1) {
-            if (addresses.Luid == interfaceLuid) {
+            if (addresses.Luid == interfaceLuid && addresses.OperStatus == 1) {
                 final List<InetAddress> nameServers = Lists.newLinkedList();
                 for (IP_ADAPTER_DNS_SERVER_ADDRESS_XP dns = addresses.FirstDnsServerAddress; null != dns; dns = dns.Next) {
-                    // IP_ADAPTER_GATEWAY_ADDRESS_LH gateway = addresses.FirstGatewayAddress;
                     try {
                         final InetAddress address = dns.Address.toAddress();
                         if (address instanceof Inet4Address || !address.isSiteLocalAddress()) {
                             nameServers.add(address);
-//                            addNameserver(new InetSocketAddress(address, SimpleResolver.DEFAULT_PORT));
                         } else {
-                            log.debug(
-                                    "Skipped site-local IPv6 server address {} on adapter index {}",
-                                    address,
-                                    addresses.IfIndex);
+                            log.debug("Skipped site-local IPv6 server address {} on adapter index {}", address, addresses.IfIndex);
                         }
                     } catch (UnknownHostException e) {
                         log.warn("Invalid nameserver address on adapter index {}", addresses.IfIndex, e);
@@ -586,7 +517,6 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
                 }
 
                 log.debug("DnsSuffix: {}", addresses.DnsSuffix);
-//                addSearchPath(result.DnsSuffix.toString());
                 for (IP_ADAPTER_DNS_SUFFIX suffix = addresses.FirstDnsSuffix; null != suffix; suffix = suffix.Next) {
                     log.debug("SearchPath: {}", suffix._String);
                 }

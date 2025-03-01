@@ -1,13 +1,6 @@
 package com.github.pangolin.routing.server.tun.adapter.windows.jna;
 
-import static com.sun.jna.platform.win32.Guid.GUID;
-
-import com.sun.jna.LastErrorException;
-import com.sun.jna.Native;
-import com.sun.jna.Pointer;
-import com.sun.jna.Structure;
-import com.sun.jna.Union;
-import com.sun.jna.WString;
+import com.sun.jna.*;
 import com.sun.jna.platform.win32.Guid;
 import com.sun.jna.platform.win32.IPHlpAPI;
 import com.sun.jna.platform.win32.WinDef;
@@ -19,6 +12,8 @@ import com.sun.jna.win32.W32APIOptions;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+
+import static com.sun.jna.platform.win32.Guid.GUID;
 
 public interface IpHelpLib extends IPHlpAPI {
     IpHelpLib INSTANCE = Native.load("IPHlpAPI", IpHelpLib.class, W32APIOptions.DEFAULT_OPTIONS);
@@ -589,7 +584,7 @@ public interface IpHelpLib extends IPHlpAPI {
                     return InetAddress.getByAddress(in4.sin_addr);
                 case AF_INET6:
                     sockaddr_in6 in6 = new sockaddr_in6(lpSockaddr);
-                    return Inet6Address.getByAddress("", in6.sin6_addr, in6.sin6_scope_id);
+                    return Inet6Address.getByAddress(null, in6.sin6_addr, in6.sin6_scope_id);
             }
             return null;
         }

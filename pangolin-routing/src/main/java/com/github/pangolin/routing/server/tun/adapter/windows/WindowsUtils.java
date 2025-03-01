@@ -1,5 +1,7 @@
 package com.github.pangolin.routing.server.tun.adapter.windows;
 
+import io.netty.util.NetUtil;
+
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.SOCKADDR_INET;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.sockaddr_in;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.sockaddr_in6;
@@ -72,4 +74,11 @@ public class WindowsUtils {
         }
     }
 
+    static InetAddress toInetAddress(final String ipAddressStr) {
+        final byte[] addr = NetUtil.createByteArrayFromIpAddressString(ipAddressStr);
+        if (null == addr) {
+            throw new IllegalStateException("Unknown host: " + ipAddressStr);
+        }
+        return toInetAddress(addr);
+    }
 }

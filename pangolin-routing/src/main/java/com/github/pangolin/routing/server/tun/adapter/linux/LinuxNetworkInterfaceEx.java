@@ -364,11 +364,11 @@ public class LinuxNetworkInterfaceEx extends UnixNetworkInterfaceEx implements N
     // ------------------------ END IPv6 related ------------------------
 
     private static int if_nametoindex0(final int fd, final String ifname) {
-        // return if_nametoindex(ifname);
         final ifreq ifr = new ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_ifindex");
         ioctl0(fd, SIOGIFINDEX, ifr);
         return ifr.ifr_ifru.ifru_ifindex;
+        // return if_nametoindex(ifname);
     }
 
     private static ifaddrs getifaddrs0(final ifaddrs ifa) {

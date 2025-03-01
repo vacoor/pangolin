@@ -6,17 +6,16 @@ import com.github.pangolin.routing.server.tun.adapter.TunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinNetworkRoute;
 import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinTunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.linux.LinuxTunAdapter;
+import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
 import com.github.pangolin.routing.server.tun.adapter.windows.WindowsTunAdapter;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
-import io.netty.util.NetUtil;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
@@ -95,39 +94,18 @@ public class TunChannel extends AbstractChannel {
 
 
         if (PlatformDependent.isOsx()) {
-            int subnetMask = prefixToSubnetMask(of.getNetworkPrefixLength());
-            int networkAddress = ipAddressToInt((Inet4Address) of.getAddress()) & subnetMask;
+            final InetAddress gw = of.getAddress();
+            final int prefix = of.getNetworkPrefixLength();
+            final InetAddress dst = NetUtils2.getNetworkAddress(gw, prefix);
 
-            Inet4Address dst = (Inet4Address) InetAddress.getByName(NetUtil.intToIpAddress(networkAddress));
-            Inet4Address netmask = (Inet4Address) InetAddress.getByName(NetUtil.intToIpAddress(subnetMask));
-            Inet4Address gw = (Inet4Address) of.getAddress();
             /*-
              * MacOS 不会添加默认网关路由.
              * sudo route add -net 198.18.0.0/24 198.18.0.1
              */
-            DarwinNetworkRoute.add(dst, netmask, gw, ifname);
+            DarwinNetworkRoute.add(dst, prefix, gw, ifname);
         }
     }
 
-    private int prefixToSubnetMask(final int cidrPrefix) {
-        /*-
-         * Perform the shift on a long and downcast it to int afterwards.
-         * This is necessary to handle a cidrPrefix of zero correctly.
-         * The left shift operator on an int only uses the five least
-         * significant bits of the right-hand operand. Thus -1 << 32 evaluates
-         * to -1 instead of 0. The left shift operator applied on a long
-         * uses the six least significant bits.
-         *
-         * Also see https://github.com/netty/netty/issues/2767
-         */
-        return (int) ((-1L << 32 - cidrPrefix) & 0xffffffff);
-    }
-
-    private static int ipAddressToInt(final Inet4Address ipAddress) {
-        final byte[] ipBytes = ipAddress.getAddress();
-        assert ipBytes.length == 4;
-        return (ipBytes[0] & 0xff) << 24 | (ipBytes[1] & 0xff) << 16 | (ipBytes[2] & 0xff) << 8 | ipBytes[3] & 0xff;
-    }
 
     @Override
     protected void doDisconnect() throws Exception {

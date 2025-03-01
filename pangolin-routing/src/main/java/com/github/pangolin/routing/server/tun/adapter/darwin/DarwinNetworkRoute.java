@@ -1,15 +1,19 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
 import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
+import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 
 import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_dl;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr4;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr6;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
 import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.if_nametoindex;
@@ -20,35 +24,37 @@ public class DarwinNetworkRoute {
     private static final int SOCKADDR_DL_SIZE = new sockaddr_dl(new Pointer(0)).size();
 
 
-    public static void add(final Inet4Address dst, final Inet4Address netmask, final Inet4Address gw, final String ifname) {
-        add(dst, netmask, gw, nameToIndex(ifname));
+    public static void add(final InetAddress dst, final int prefix, final InetAddress gw, final String ifname) {
+        final InetAddress netmask = NetUtils2.cidrToNetmaskAddress(dst, prefix);
+        add(dst, netmask, gw, if_nametoindex0(ifname));
     }
 
-    private static int nameToIndex(final String ifname) {
-        final int index = if_nametoindex(ifname);
-        if (0 == index) {
-            final int errno = Native.getLastError();
-            // final String errmsg = strerror(errno);
-            throw new LastErrorException(errno);
-        }
-        return index;
+    public static void add(final InetAddress dst, final InetAddress netmask, final InetAddress gw, final String ifname) {
+        add(dst, netmask, gw, if_nametoindex0(ifname));
     }
 
-    public static void add(final Inet4Address dst, final Inet4Address netmask, final Inet4Address gw, final int ifindex) {
+    public static void add(final InetAddress dst, final InetAddress netmask, final InetAddress gw, final int ifindex) {
         route((byte) RTM_ADD, (short) ifindex, dst, gw, netmask);
     }
 
+    public static void delete(final InetAddress dst, final int prefix, final InetAddress gw, final String ifname) {
+        final InetAddress netmask = NetUtils2.cidrToNetmaskAddress(dst, prefix);
+        delete(dst, netmask, gw, if_nametoindex0(ifname));
+    }
 
-    public static void deleteRoute(String ifname,
-                                   final Inet4Address dst, final Inet4Address gw,
-                                   final Inet4Address netmask) {
-        short rtm_index = (short) LibC.if_nametoindex(ifname);
-        route((byte) RTM_DELETE, rtm_index, dst, gw, netmask);
+    public static void delete(final InetAddress dst, final InetAddress netmask, final InetAddress gw, final String ifname) {
+        delete(dst, netmask, gw, if_nametoindex0(ifname));
+    }
+
+
+    public static void delete(final InetAddress dst, final InetAddress netmask,
+                              final InetAddress gw, final int ifindex) {
+        route((byte) RTM_DELETE, (short) ifindex, dst, gw, netmask);
     }
 
     private static void route(final byte rtm_type, final short rtm_index,
-                              final Inet4Address dst, final Inet4Address gw,
-                              final Inet4Address netmask) {
+                              final InetAddress dst, final InetAddress gw,
+                              final InetAddress netmask) {
         final int size = RT_MSGHDR_SIZE + SOCKADDR_IN_SIZE * 3 + (rtm_index == 0 ? 0 : SOCKADDR_DL_SIZE);
         final Memory buffer = new Memory(size * 1);
 
@@ -71,9 +77,9 @@ public class DarwinNetworkRoute {
             hdr.write();
 
             offset += hdr.size();
-            offset += writeSockAddrIn(buffer.share(offset), dst.getAddress());
-            offset += writeSockAddrIn(buffer.share(offset), gw.getAddress());
-            offset += writeSockAddrIn(buffer.share(offset), netmask.getAddress());
+            offset += writeSockAddrIn(buffer.share(offset), dst);
+            offset += writeSockAddrIn(buffer.share(offset), gw);
+            offset += writeSockAddrIn(buffer.share(offset), netmask);
 
             if (rtm_index != 0) {
                 // 只设置 rtm_index 不设置 RTA_IFP 和这个结构体的话不能保证绑定到网卡.
@@ -82,7 +88,7 @@ public class DarwinNetworkRoute {
         }
 
 
-        final int fd = LibC.socket(AF_ROUTE, SOCK_RAW, AF_INET);
+        final int fd = LibC.socket(AF_ROUTE, SOCK_RAW, AF_UNSPEC);
         if (fd <= 0) {
             throw new LastErrorException(fd);
         }
@@ -94,23 +100,38 @@ public class DarwinNetworkRoute {
         LibC.close(fd);
     }
 
-    private static int writeSockAddrIn(final Pointer ptr, final byte[] addr) {
-        final sockaddr_in in = new sockaddr_in(ptr);
-        final int size = in.size();
-        in.sin_len = (byte) size;
-        in.sin_family = AF_INET;
-        in.sin_addr = addr;
-        in.write();
-        return size;
+    private static int writeSockAddrIn(final Pointer ptr, final InetAddress address) {
+        if (address instanceof Inet4Address) {
+            final sockaddr_in in = new sockaddr_in(ptr);
+            writeSockAddr4(in, (Inet4Address) address);
+            in.write();
+            return in.size();
+        } else if (address instanceof Inet6Address) {
+            final sockaddr_in6 in = new sockaddr_in6(ptr);
+            writeSockAddr6(in, (Inet6Address) address);
+            in.write();
+            return in.size();
+        }
+        throw new UnsupportedOperationException();
     }
 
-    private static int writeSockAddrDl(final Pointer ptr, final int ifindwx) {
+    private static int writeSockAddrDl(final Pointer ptr, final int ifindex) {
         final sockaddr_dl dl = new sockaddr_dl(ptr);
         dl.sdl_len = (byte) dl.size();
         dl.sdl_family = AF_LINK;
-        dl.sdl_index = (short) ifindwx;
+        dl.sdl_index = (short) ifindex;
         dl.write();
         return dl.size();
+    }
+
+    private static int if_nametoindex0(final String ifname) {
+        final int index = if_nametoindex(ifname);
+        if (0 == index) {
+            final int errno = Native.getLastError();
+            // final String errmsg = strerror(errno);
+            throw new LastErrorException(errno);
+        }
+        return index;
     }
 
 }

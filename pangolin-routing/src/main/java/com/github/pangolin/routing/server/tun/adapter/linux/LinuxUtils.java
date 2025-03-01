@@ -38,7 +38,7 @@ class LinuxUtils {
     }
 
     static sockaddr_in6 writeSockAddr6(final sockaddr_in6 sockAddr6, final byte[] addr, final int scopeId) {
-        assert addr.length == 128;
+        assert addr.length == 16;
         sockAddr6.sin6_family = AF_INET6;
         sockAddr6.sin6_port = 0;
         sockAddr6.sin6_addr = addr;
