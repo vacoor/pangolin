@@ -5,6 +5,8 @@ import com.github.pangolin.routing.handler.internal.server.support.SocketChannel
 import com.github.pangolin.routing.server.Acceptor;
 import com.github.pangolin.routing.server.AcceptorFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
+import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinTunAdapter;
+import com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfigurationTest;
 import com.github.pangolin.routing.server.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.server.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.server.tun.net.handler.IcmpV4PacketHandler;
@@ -74,6 +76,8 @@ public class TunAcceptorFactory implements AcceptorFactory {
                                 InetAddress.getByName("127.0.0.1")
                         });
                         WindowsNetworkInterfaceEx.flushDnsCache();
+                    } else if (adapter instanceof DarwinTunAdapter) {
+                        SystemConfigurationTest.addDnsServerAndCleanupOnShutdown("127.0.0.1");
                     }
                 }
             }

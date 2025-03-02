@@ -12,8 +12,11 @@ import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
 
+import java.lang.reflect.Method;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
+import java.net.NetworkInterface;
+import java.util.Enumeration;
 import java.util.List;
 
 import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.*;
@@ -411,5 +414,20 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
             super(errno, errmsg);
         }
 
+    }
+
+    public static void main(String[] args) throws Exception {
+        final Method getDefault = NetworkInterface.class.getDeclaredMethod("getDefault");
+        getDefault.setAccessible(true);
+        NetworkInterface defaultInterface = (NetworkInterface) getDefault.invoke(null);
+
+        Enumeration<NetworkInterface> nie = NetworkInterface.getNetworkInterfaces();
+
+        while (nie.hasMoreElements()) {
+            NetworkInterface ni = nie.nextElement();
+            if (!ni.isLoopback() && !ni.isVirtual() && ni.isUp()) {
+                System.out.println(ni.getIndex() + ": " + ni.getName() + "/" + ni.getDisplayName() + " " + ni.getInterfaceAddresses());
+            }
+        }
     }
 }
