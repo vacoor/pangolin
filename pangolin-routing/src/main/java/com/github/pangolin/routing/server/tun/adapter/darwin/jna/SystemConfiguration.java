@@ -3,6 +3,7 @@ package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 import com.sun.jna.*;
 
 import static com.sun.jna.platform.mac.CoreFoundation.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation2.*;
 
 public interface SystemConfiguration extends Library {
 
@@ -10,7 +11,7 @@ public interface SystemConfiguration extends Library {
 
     interface SCDynamicStoreCallBack extends Callback {
 
-        void invoke(Pointer store, Pointer changedKeys, Pointer info);
+        void callback(SCDynamicStoreRef store, CFArrayRef changedKeys, Pointer info);
 
     }
 
@@ -29,5 +30,9 @@ public interface SystemConfiguration extends Library {
     boolean SCDynamicStoreSetValue(SCDynamicStoreRef store, CFStringRef key, PointerType value);
 
     boolean SCDynamicStoreNotifyValue(SCDynamicStoreRef store, CFStringRef key);
+
+    boolean SCDynamicStoreSetNotificationKeys(SCDynamicStoreRef store, final CFArrayRef keysToWatch, final CFArrayRef keysToIgnore);
+
+    CFRunLoopSourceRef SCDynamicStoreCreateRunLoopSource(CFAllocatorRef allocator, SCDynamicStoreRef store, CFIndex order);
 
 }

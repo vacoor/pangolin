@@ -1,20 +1,26 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation2.CFRunLoopRef;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation2.CFRunLoopSourceRef;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreCallBack;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFArrayRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFDictionaryRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFIndex;
+import static com.sun.jna.platform.mac.CoreFoundation.CFMutableDictionaryRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFStringRef;
+
 import com.google.common.collect.Lists;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
-import com.sun.jna.platform.mac.CoreFoundation;
 
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreRef;
-import static com.sun.jna.platform.mac.CoreFoundation.*;
-
 public class SystemConfigurationTest {
-    private static final CoreFoundation CF = CoreFoundation.INSTANCE;
+    private static final CoreFoundation2 CF = CoreFoundation2.INSTANCE;
     private static final SystemConfiguration SC = SystemConfiguration.INSTANCE;
 
 
@@ -230,9 +236,53 @@ public class SystemConfigurationTest {
         }
     }
 
+    private static void watchInNewThread() {
+        final SCDynamicStoreCallBack callback = new SCDynamicStoreCallBack() {
 
-    public static void main(String[] args) {
-        addDnsServerAndCleanupOnShutdown("127.0.0.1");
+            @Override
+            public void callback(final SCDynamicStoreRef store, final CFArrayRef changedKeys, final Pointer info) {
+                final CFIndex count = CF.CFArrayGetCount(changedKeys);
+                for (int i = 0; i < count.intValue(); i++) {
+                    CFStringRef key = new CFStringRef(CF.CFArrayGetValueAtIndex(changedKeys, new CFIndex(i)));
+                    final String cKey = key.stringValue();
+                    System.out.printf("Detected network change: %s\n", cKey);
+                }
+            }
+
+        };
+
+        final Memory memory = new Memory(Native.POINTER_SIZE);
+        memory.setPointer(0, CFSTR("State:/Network/Global/DNS").getPointer());
+        final CFArrayRef watchedKeys = CF.CFArrayCreate(null, memory, new CFIndex(1), null);
+
+        // 设置监听的键
+        final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR("NetworkMonitor"), callback, null);
+        SC.SCDynamicStoreSetNotificationKeys(store, watchedKeys, null);
+        CF.CFRelease(watchedKeys);
+
+        // 绑定到 RunLoop
+        // final CFRunLoopSourceRef runLoopSource = SC.SCDynamicStoreCreateRunLoopSource(null, store, 0);
+        // CF.CFRunLoopAddSource(CF.CFRunLoopGetMain(), runLoopSource, kCFRunLoopCommonModes);
+        // CF.CFRelease(runLoopSource);
+
+        // final CFRunLoopRef currentRunLoop = CF.CFRunLoopGetMain();
+        final CFRunLoopRef currentRunLoop = CF.CFRunLoopGetCurrent();
+        final CFRunLoopSourceRef runLoopSource = SC.SCDynamicStoreCreateRunLoopSource(null, store, new CFIndex(0));
+        CF.CFRunLoopAddSource(currentRunLoop, runLoopSource, CFSTR("kCFRunLoopCommonModes"));
+
+        // 启动事件循环.
+        CF.CFRunLoopRun();
+
+        CF.CFRelease(runLoopSource);
+        CF.CFRelease(store);
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        // addDnsServerAndCleanupOnShutdown("127.0.0.1");
+        Thread t = new Thread(SystemConfigurationTest::watchInNewThread);
+        t.setDaemon(false);
+        t.start();
+        t.join();
     }
 
     private static CFStringRef CFSTR(final String str) {
