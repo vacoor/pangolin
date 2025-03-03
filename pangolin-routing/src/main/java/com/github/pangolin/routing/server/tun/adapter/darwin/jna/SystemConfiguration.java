@@ -11,7 +11,7 @@ public interface SystemConfiguration extends Library {
 
     interface SCDynamicStoreCallBack extends Callback {
 
-        void callback(SCDynamicStoreRef store, CFArrayRef changedKeys, Pointer info);
+        void invoke(SCDynamicStoreRef store, CFArrayRef changedKeys, Pointer info);
 
     }
 
@@ -31,7 +31,7 @@ public interface SystemConfiguration extends Library {
 
     boolean SCDynamicStoreNotifyValue(SCDynamicStoreRef store, CFStringRef key);
 
-    boolean SCDynamicStoreSetNotificationKeys(SCDynamicStoreRef store, final CFArrayRef keysToWatch, final CFArrayRef keysToIgnore);
+    boolean SCDynamicStoreSetNotificationKeys(SCDynamicStoreRef store, final CFArrayRef keys, final CFArrayRef patterns);
 
     CFRunLoopSourceRef SCDynamicStoreCreateRunLoopSource(CFAllocatorRef allocator, SCDynamicStoreRef store, CFIndex order);
 
