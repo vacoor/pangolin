@@ -119,7 +119,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
     /* ********************** */
 
     public static DarwinTunAdapter open(String name, int mtu) throws IOException {
-        final int utunNum = nameToNum(name);
+        final int scUnit = nameToNum(name);
 
         // create socket
         final int skfd = socket(AF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
@@ -134,7 +134,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
         }
 
         // define address of socket
-        final sockaddr_ctl address = new sockaddr_ctl((byte) AF_SYSTEM, (short) SYSPROTO_CONTROL, ctlinfo.ctl_id, utunNum);
+        final sockaddr_ctl address = new sockaddr_ctl((byte) AF_SYSTEM, (short) SYSPROTO_CONTROL, ctlinfo.ctl_id, scUnit);
         if (0 != connect(skfd, address, address.sc_len)) {
             throw new LastErrorException(Native.getLastError());
         }

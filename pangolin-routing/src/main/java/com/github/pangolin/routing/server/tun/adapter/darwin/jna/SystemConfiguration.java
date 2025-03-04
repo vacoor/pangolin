@@ -9,6 +9,8 @@ public interface SystemConfiguration extends Library {
 
     SystemConfiguration INSTANCE = Native.load("SystemConfiguration", SystemConfiguration.class);
 
+
+
     interface SCDynamicStoreCallBack extends Callback {
 
         void invoke(SCDynamicStoreRef store, CFArrayRef changedKeys, Pointer info);
@@ -17,6 +19,17 @@ public interface SystemConfiguration extends Library {
 
     class SCDynamicStoreRef extends CFTypeRef {
     }
+
+    class SCNetworkInterfaceRef extends CFTypeRef {
+        public SCNetworkInterfaceRef() {
+            super();
+        }
+
+        public SCNetworkInterfaceRef(final Pointer p) {
+            super(p);
+        }
+    }
+
 
     // 获取动态存储引用
     SCDynamicStoreRef SCDynamicStoreCreate(CFAllocatorRef allocator, CFStringRef name, SCDynamicStoreCallBack callback, Pointer context);
@@ -35,4 +48,12 @@ public interface SystemConfiguration extends Library {
 
     CFRunLoopSourceRef SCDynamicStoreCreateRunLoopSource(CFAllocatorRef allocator, SCDynamicStoreRef store, CFIndex order);
 
+
+
+
+    CFArrayRef SCNetworkInterfaceGetAll();
+
+    CFStringRef SCNetworkInterfaceGetBSDName(SCNetworkInterfaceRef scInterface);
+
+    CFStringRef SCNetworkInterfaceGetServiceID(SCNetworkInterfaceRef scInterface);
 }

@@ -3,6 +3,7 @@ package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation2.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreCallBack;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreRef;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.*;
 import static com.sun.jna.platform.mac.CoreFoundation.CFArrayRef;
 import static com.sun.jna.platform.mac.CoreFoundation.CFDictionaryRef;
 import static com.sun.jna.platform.mac.CoreFoundation.CFIndex;
@@ -198,7 +199,6 @@ public class SystemConfigurationTest {
         // 获取当前活动网络接口服务 ID
         final String serviceId = getPrimaryServiceID(store);
 
-
         final List<String> dnsServers = getDnsServers(store, serviceId);
 
         final List<String> newDnsServers = Lists.newArrayListWithExpectedSize(1 + dnsServers.size());
@@ -288,12 +288,43 @@ public class SystemConfigurationTest {
         // 启动事件循环.
         CF.CFRunLoopRun();
 
-//        CF.CFRelease(rlSource);
-//        CF.CFRelease(store);
+        CF.CFRelease(rlSource);
+        CF.CFRelease(store);
+    }
+
+
+    static void printUTUNServiceIDs() {
+        final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR("UTUNScanner"), null, null);
+        if (null == store) {
+            System.err.printf("Failed to create SCDynamicStore\n");
+            return;
+        }
+
+        CFArrayRef interfaces = SC.SCNetworkInterfaceGetAll();
+        if (null == interfaces) {
+            System.err.printf("No network interfaces found\n");
+            CF.CFRelease(store);
+            return;
+        }
+
+        for (int i = 0; i < CF.CFArrayGetCount(interfaces).intValue(); i++) {
+            final SCNetworkInterfaceRef scInterface = new SCNetworkInterfaceRef(CF.CFArrayGetValueAtIndex(interfaces, new CFIndex(i)));
+            final CFStringRef bsdName = SC.SCNetworkInterfaceGetBSDName(scInterface);
+            if (null != bsdName && CF.CFStringHasPrefix(bsdName, CFSTR("utun"))) {
+                CFStringRef serviceID = SC.SCNetworkInterfaceGetServiceID(scInterface);
+//                printf("Found UTUN: %s (Service ID: %s)\n",
+//                        CFStringGetCStringPtr(bsdName, kCFStringEncodingUTF8),
+//                        CFStringGetCStringPtr(serviceID, kCFStringEncodingUTF8));
+                System.out.printf("Found UTUN: %s (Service ID: %s)\n", bsdName.stringValue(), serviceID.stringValue());
+            }
+        }
+        CF.CFRelease(interfaces);
+        CF.CFRelease(store);
     }
 
     public static void main(String[] args) throws InterruptedException {
         // addDnsServerAndCleanupOnShutdown("127.0.0.1");
+        /*
         Thread t = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -306,7 +337,10 @@ public class SystemConfigurationTest {
 //        watchInNewThread();
         System.out.println("Over");
         LockSupport.park();
+        */
+        printUTUNServiceIDs();
     }
+
 
     private static CFStringRef CFSTR(final String str) {
         return CFStringRef.createCFString(str);

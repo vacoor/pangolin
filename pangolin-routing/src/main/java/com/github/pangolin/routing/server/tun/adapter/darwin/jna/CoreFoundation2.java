@@ -16,6 +16,7 @@ public interface CoreFoundation2 extends CoreFoundation {
     Pointer kCFRunLoopCommonModes = ((Handler) Proxy.getInvocationHandler(INSTANCE)).getNativeLibrary().getGlobalVariableAddress("kCFRunLoopCommonModes");
     Pointer kCFRunLoopDefaultMode = ((Handler) Proxy.getInvocationHandler(INSTANCE)).getNativeLibrary().getGlobalVariableAddress("kCFRunLoopCommonModes");
 
+
     class CFRunLoopRef extends CFTypeRef {
     }
     class CFRunLoopSourceRef extends CFTypeRef {
@@ -36,4 +37,5 @@ public interface CoreFoundation2 extends CoreFoundation {
     // Pointer CFStringCreateWithCString(Pointer allocator, String str, int encoding);
     Pointer CFRunLoopCopyCurrentMode(CFRunLoopRef rl);
 
+    boolean CFStringHasPrefix(CFStringRef bsdName, CFStringRef utun);
 }
