@@ -3,6 +3,7 @@ package com.github.pangolin.routing.server.fakedns;
 import com.github.pangolin.routing.server.fakedns.beta.SimpleInet4FakeDns;
 import com.github.pangolin.routing.server.fakedns.handler.DatagramDnsProxyServerHandler;
 import com.github.pangolin.routing.server.fakedns.handler.DatagramFakeDnsServerHandler;
+import com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfigurationTest;
 import com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterfaceEx;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
@@ -12,6 +13,7 @@ import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.resolver.dns.DnsNameResolver;
 import io.netty.resolver.dns.DnsNameResolverBuilder;
 import io.netty.resolver.dns.SequentialDnsServerAddressStreamProvider;
+import io.netty.util.internal.PlatformDependent;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
@@ -42,6 +44,9 @@ public class FakeDnsServer {
                     .filter(a -> !a.isLoopbackAddress())
                     .map(a -> new InetSocketAddress(a, 53))
                     .collect(Collectors.toList());
+        }
+        if (PlatformDependent.isOsx()) {
+            // SystemConfigurationTest.getPrimaryDnsServers();
         }
         return Collections.singletonList(new InetSocketAddress("192.168.1.1", 53));
     }

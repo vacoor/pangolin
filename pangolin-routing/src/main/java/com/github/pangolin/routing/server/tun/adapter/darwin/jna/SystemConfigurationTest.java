@@ -23,6 +23,16 @@ public class SystemConfigurationTest {
     private static final CoreFoundation2 CF = CoreFoundation2.INSTANCE;
     private static final SystemConfiguration SC = SystemConfiguration.INSTANCE;
 
+    public static List<String> getPrimaryDnsServers() {
+        final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR("DNS_READER"), null, null);
+        try {
+            // 获取当前活动网络接口服务 ID
+            final String serviceId = getPrimaryServiceID(store);
+            return getDnsServers(store, serviceId);
+        } finally {
+            CF.CFRelease(store);
+        }
+    }
 
     private static String getPrimaryServiceID(final SCDynamicStoreRef store) {
         final CFDictionaryRef globalIPv4 = SC.SCDynamicStoreCopyValue(store, CFSTR("State:/Network/Global/IPv4"));
