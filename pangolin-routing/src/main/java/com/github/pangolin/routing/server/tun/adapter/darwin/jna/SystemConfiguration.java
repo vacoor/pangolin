@@ -53,6 +53,8 @@ public interface SystemConfiguration extends Library {
 
     CFArrayRef SCNetworkInterfaceGetAll();
 
+    CFArrayRef SCNetworkInterfaceCopyAll();
+
     CFStringRef SCNetworkInterfaceGetBSDName(SCNetworkInterfaceRef scInterface);
 
     CFStringRef SCNetworkInterfaceGetServiceID(SCNetworkInterfaceRef scInterface);

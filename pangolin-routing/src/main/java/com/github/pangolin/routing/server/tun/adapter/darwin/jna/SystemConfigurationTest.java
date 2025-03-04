@@ -197,7 +197,8 @@ public class SystemConfigurationTest {
 
     private static boolean addDns0(final SCDynamicStoreRef store, final String dnsServer) {
         // 获取当前活动网络接口服务 ID
-        final String serviceId = getPrimaryServiceID(store);
+         final String serviceId = getPrimaryServiceID(store);
+//        final String serviceId = GetServiceIDByInterface(store, "utun8");
 
         final List<String> dnsServers = getDnsServers(store, serviceId);
 
@@ -215,6 +216,7 @@ public class SystemConfigurationTest {
         try {
             // 获取当前活动网络接口服务 ID
             final String serviceId = getPrimaryServiceID(store);
+//            final String serviceId = GetServiceIDByInterface(store, "utun8");
 
             final List<String> dnsServers = getDnsServers(store, serviceId);
 
@@ -300,7 +302,8 @@ public class SystemConfigurationTest {
             return;
         }
 
-        CFArrayRef interfaces = SC.SCNetworkInterfaceGetAll();
+//        CFArrayRef interfaces = SC.SCNetworkInterfaceGetAll();
+        CFArrayRef interfaces = SC.SCNetworkInterfaceCopyAll();
         if (null == interfaces) {
             System.err.printf("No network interfaces found\n");
             CF.CFRelease(store);
@@ -310,6 +313,7 @@ public class SystemConfigurationTest {
         for (int i = 0; i < CF.CFArrayGetCount(interfaces).intValue(); i++) {
             final SCNetworkInterfaceRef scInterface = new SCNetworkInterfaceRef(CF.CFArrayGetValueAtIndex(interfaces, new CFIndex(i)));
             final CFStringRef bsdName = SC.SCNetworkInterfaceGetBSDName(scInterface);
+            System.out.println(bsdName.stringValue());
             if (null != bsdName && CF.CFStringHasPrefix(bsdName, CFSTR("utun"))) {
                 CFStringRef serviceID = SC.SCNetworkInterfaceGetServiceID(scInterface);
 //                printf("Found UTUN: %s (Service ID: %s)\n",
