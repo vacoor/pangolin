@@ -20,8 +20,8 @@ import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.if_na
 
 public class DarwinNetworkRoute {
     private static final int RT_MSGHDR_SIZE = new rt_msghdr(new Pointer(0)).size();
-    private static final int SOCKADDR_IN_SIZE = 16;
     private static final int SOCKADDR_DL_SIZE = new sockaddr_dl(new Pointer(0)).size();
+    private static final int SOCKADDR_IN_SIZE = 16;
 
 
     public static void add(final InetAddress dst, final int prefix, final InetAddress gw, final String ifname) {
@@ -61,12 +61,13 @@ public class DarwinNetworkRoute {
         int offset = 0;
         final rt_msghdr hdr = new rt_msghdr(buffer.share(offset));
         for (int i = 0; i < 1; i++) {
-            hdr.rtm_msglen = (short) size;
+            hdr.rtm_msglen = (short) buffer.size();
 
             hdr.rtm_type = rtm_type;
             hdr.rtm_flags = RTF_UP | RTF_GATEWAY | RTF_STATIC;
             hdr.rtm_version = RTM_VERSION;
             hdr.rtm_addrs = RTA_DST | RTA_GATEWAY | RTA_NETMASK;
+
             if (rtm_index != 0) {
                 hdr.rtm_index = rtm_index;
                 hdr.rtm_addrs |= RTA_IFP;
