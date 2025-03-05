@@ -8,26 +8,33 @@ import io.netty.channel.socket.DatagramPacket;
 import io.netty.handler.codec.MessageToMessageCodec;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpV4Packet;
+import org.pcap4j.packet.IpV4Rfc1349Tos;
 import org.pcap4j.packet.UdpPacket;
 import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
+import org.pcap4j.packet.namednumber.IpV4TosPrecedence;
 import org.pcap4j.packet.namednumber.IpV4TosTos;
 import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.UdpPort;
 
 import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.List;
 
 /**
+ *
  */
 public class DatagramPacketCodec extends MessageToMessageCodec<IpPacket, DatagramPacket> {
 
     @Override
     protected void encode(final ChannelHandlerContext ctx, final DatagramPacket msg, final List<Object> out) throws Exception {
-        final InetSocketAddress sender = msg.sender();
+        InetSocketAddress sender = msg.sender();
+        if (null == sender) {
+            sender = msg.recipient();
+        }
         final InetSocketAddress recipient = msg.recipient();
         final int srcPort = sender.getPort();
         final int dstPort = recipient.getPort();
@@ -45,8 +52,26 @@ public class DatagramPacketCodec extends MessageToMessageCodec<IpPacket, Datagra
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true)
                 .build();
-        if (srcAddr instanceof Inet4Address) {
-
+        if (dstAddr instanceof Inet4Address) {
+            IpV4Rfc1349Tos tos = new IpV4Rfc1349Tos.Builder()
+                    .precedence(IpV4TosPrecedence.PRIORITY)
+                    .tos(IpV4TosTos.MINIMIZE_DELAY)
+                    .build();
+            IpV4Packet build = new IpV4Packet.Builder()
+                    .version(IpVersion.IPV4)
+                    .protocol(IpNumber.UDP)
+                    .srcAddr((Inet4Address) srcAddr)
+                    .dstAddr((Inet4Address) dstAddr)
+                    .ttl((byte) 10)
+                    .tos(tos)
+                    .payloadBuilder(payload.getBuilder())
+                    .paddingAtBuild(true)
+                    .correctLengthAtBuild(true)
+                    .correctChecksumAtBuild(true)
+                    .build();
+            out.add(build);
+        } else if (srcAddr instanceof Inet6Address) {
+            throw new UnsupportedOperationException();
         }
     }
 
@@ -57,7 +82,11 @@ public class DatagramPacketCodec extends MessageToMessageCodec<IpPacket, Datagra
         }
         IpPacket ipPacket = (IpPacket) msg;
         IpPacket.IpHeader ih = ipPacket.getHeader();
-        return IpNumber.UDP.equals(ih.getProtocol());
+        if (!IpNumber.UDP.equals(ih.getProtocol())) {
+            return false;
+        }
+        UdpPacket udpPacket = (UdpPacket) ((IpPacket) msg).getPayload();
+        return udpPacket.getHeader().getDstPort().valueAsInt() == 53;
     }
 
     @Override
@@ -68,22 +97,28 @@ public class DatagramPacketCodec extends MessageToMessageCodec<IpPacket, Datagra
         final UdpPort srcPort = payload.getHeader().getSrcPort();
         final UdpPort dstPort = payload.getHeader().getDstPort();
 
-            final InetSocketAddress sender = new InetSocketAddress(srcAddr, srcPort.valueAsInt());
-            final InetSocketAddress recipient = new InetSocketAddress(dstAddr, dstPort.valueAsInt());
-            final byte[] rawData = payload.getPayload().getRawData();
-            final ByteBuf data = Unpooled.wrappedBuffer(rawData);
+        final InetSocketAddress sender = new InetSocketAddress(srcAddr, srcPort.valueAsInt());
+        final InetSocketAddress recipient = new InetSocketAddress(dstAddr, dstPort.valueAsInt());
+        final byte[] rawData = payload.getPayload().getRawData();
+        final ByteBuf data = Unpooled.wrappedBuffer(rawData);
 
+        out.add(new DatagramPacket(data, recipient, sender));
     }
 
     public static void main(String[] args) throws UnknownHostException {
         InetAddress srcAddr = InetAddress.getByName("192.168.1.1");
         InetAddress dstAddr = InetAddress.getByName("192.168.1.2");
+        IpV4Rfc1349Tos tos = new IpV4Rfc1349Tos.Builder()
+                .precedence(IpV4TosPrecedence.PRIORITY)
+                .tos(IpV4TosTos.MINIMIZE_DELAY)
+                .build();
         IpV4Packet build = new IpV4Packet.Builder()
                 .version(IpVersion.IPV4)
                 .protocol(IpNumber.UDP)
                 .srcAddr((Inet4Address) srcAddr)
                 .dstAddr((Inet4Address) dstAddr)
                 .ttl((byte) 10)
+                .tos(tos)
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true)

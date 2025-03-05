@@ -28,6 +28,7 @@ public class Udp4PacketHandler extends IpPacketHandler<IpV4Packet> {
         final Inet4Address dstAddr = msg.getHeader().getDstAddr();
         final UdpPort srcPort = payload.getHeader().getSrcPort();
         final UdpPort dstPort = payload.getHeader().getDstPort();
+
         if (UdpPort.DOMAIN.equals(dstPort) && "198.18.0.254".equals(dstAddr.getHostAddress())) {
             final InetSocketAddress sender = new InetSocketAddress(srcAddr, srcPort.valueAsInt());
             final InetSocketAddress recipient = new InetSocketAddress(dstAddr, dstPort.valueAsInt());

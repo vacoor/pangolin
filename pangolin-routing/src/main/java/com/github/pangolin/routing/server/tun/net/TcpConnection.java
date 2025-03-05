@@ -555,6 +555,7 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
     private boolean inet_reqsk_alloc(IpHeader ipHeader, TcpPacket skb) {
         final InetSocketAddress resolved = resolve(ipHeader.getDstAddr(), skb.getHeader().getDstPort().valueAsInt());
         if (null == resolved) {
+            // no socket.
             return false;
         }
         log.info("{} Connecting...", resolved);
@@ -1362,6 +1363,7 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
         if (null != host) {
             return InetSocketAddress.createUnresolved(host, port);
         }
+        // no socket.
         return null;
     }
 
