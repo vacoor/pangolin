@@ -17,10 +17,10 @@ public class DatagramDnsResponseEncoder2 extends DatagramDnsResponseEncoder {
         final List<Object> temp = Lists.newArrayList();
         super.encode(ctx, in, temp);
         for (int i = 0; i < temp.size(); i++) {
-            Object o = out.get(i);
+            Object o = temp.get(i);
             if (o instanceof DatagramPacket) {
                 DatagramPacket o1 = (DatagramPacket) o;
-                out.add(new DatagramPacket(o1.content(), o1.recipient(), in.sender()));
+                out.add(new DatagramPacket(o1.content().copy(), o1.recipient(), in.sender()));
                 ReferenceCountUtil.release(o);
             } else {
                 out.add(o);
