@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.server.fakedns.handler;
 
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
+import com.github.pangolin.routing.server.tun.net.handler.DatagramDnsResponseEncoder2;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -28,7 +29,7 @@ public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<Da
             cp.addBefore(ctx.name(), null, new DatagramDnsQueryDecoder());
         }
         if (null == cp.get(DatagramDnsResponseEncoder.class)) {
-            cp.addBefore(ctx.name(), null, new DatagramDnsResponseEncoder());
+            cp.addBefore(ctx.name(), null, new DatagramDnsResponseEncoder2());
         }
     }
 
