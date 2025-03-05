@@ -112,6 +112,32 @@ public class SystemConfigurationTest {
         return serviceID;
     }
 
+    private static List<String> getGlobalDnsServers(final SCDynamicStoreRef store) {
+        final List<String> servers = Lists.newArrayList();
+        final CFStringRef dnsKey = CFStringRef.createCFString("State:/Network/Global/DNS");
+        final CFDictionaryRef dnsDictionary = SC.SCDynamicStoreCopyValue(store, dnsKey);
+        if (null != dnsDictionary) {
+            if (CF.CFDictionaryGetTypeID().equals(CF.CFGetTypeID(dnsDictionary))) {
+                final Pointer ptr = CF.CFDictionaryGetValue(dnsDictionary, CFSTR("ServerAddresses"));
+                if (null != ptr && CF.CFArrayGetTypeID().equals(CF.CFGetTypeID(ptr))) {
+                    final CFArrayRef serverAddresses = new CFArrayRef(ptr);
+                    System.out.printf("DNS 服务器地址（服务键：%s）:\n", dnsKey.stringValue());
+
+                    int count = CF.CFArrayGetCount(serverAddresses).intValue();
+                    for (int j = 0; j < count; j++) {
+                        final Pointer p = CF.CFArrayGetValueAtIndex(serverAddresses, new CFIndex(j));
+                        CFStringRef dnsEntry = new CFStringRef(p);
+                        System.out.printf("• %s\n", dnsEntry.stringValue());
+                        servers.add(dnsEntry.stringValue());
+                    }
+                }
+            }
+            CF.CFRelease(dnsDictionary);
+        }
+        CF.CFRelease(dnsKey);
+        return servers;
+    }
+
     private static List<String> getDnsServers(final SCDynamicStoreRef store, final String serviceID) {
         final List<String> servers = Lists.newArrayList();
         final CFStringRef dnsKey = CFStringRef.createCFString(String.format(SERVICE_ID_DNS_KEY, serviceID));
@@ -188,8 +214,28 @@ public class SystemConfigurationTest {
         return SC.SCDynamicStoreSetValue(store, dnsKey, dnsDict);
     }
 
+    public static boolean setGlobalDns(final SCDynamicStoreRef store, final List<String> dnsServer) {
+        // 构建 DNS 配置键路径
+        final CFStringRef dnsKey = CFSTR("State:/Network/Global/DNS");
 
-    private boolean flushDnsCache(final SCDynamicStoreRef store) {
+        // 定义 DNS 服务器地址
+        final Memory memory = new Memory(Native.POINTER_SIZE * dnsServer.size());
+        for (int i = 0; i < dnsServer.size(); i++) {
+            final String server = dnsServer.get(i);
+            memory.setPointer(i * Native.POINTER_SIZE, CFStringRef.createCFString(server).getPointer());
+        }
+        final CFArrayRef serverArray = CF.CFArrayCreate(null, memory, new CFIndex(dnsServer.size()), null);
+
+        // 构建 DNS 配置字典
+        final CFMutableDictionaryRef dnsDict = CF.CFDictionaryCreateMutable(null, new CFIndex(0), null, null);
+        CF.CFDictionarySetValue(dnsDict, CFSTR("ServerAddresses"), serverArray);
+
+        // 应用配置(仅内存有效).
+        return SC.SCDynamicStoreSetValue(store, dnsKey, dnsDict);
+    }
+
+
+        private boolean flushDnsCache(final SCDynamicStoreRef store) {
         // 通知系统网络配置更新，间接触发缓存刷新.(默认修改了DNS就会触发, 不需要调用)
         return SC.SCDynamicStoreNotifyValue(store, CFSTR("State:/Network/Global/DNS"));
     }
@@ -205,6 +251,17 @@ public class SystemConfigurationTest {
         }
     }
 
+    public static boolean addGlobalDns0(final String dnsServer) {
+        // 创建动态存储会话
+        final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR("DNS_READER"), null, null);
+
+        try {
+            return addGlobalDns0(store, dnsServer);
+        } finally {
+            CF.CFRelease(store);
+        }
+    }
+
     private static boolean addDns0(final SCDynamicStoreRef store, final String dnsServer) {
         // 获取当前活动网络接口服务 ID
          final String serviceId = getPrimaryServiceID(store);
@@ -213,10 +270,25 @@ public class SystemConfigurationTest {
         final List<String> dnsServers = getDnsServers(store, serviceId);
 
         final List<String> newDnsServers = Lists.newArrayListWithExpectedSize(1 + dnsServers.size());
-        newDnsServers.add(dnsServer);
+        if (!dnsServers.contains(dnsServer)) {
+            newDnsServers.add(dnsServer);
+        }
         newDnsServers.addAll(dnsServers);
 
         return setDns(store, serviceId, newDnsServers);
+    }
+
+    private static boolean addGlobalDns0(final SCDynamicStoreRef store, final String dnsServer) {
+        // 获取当前活动网络接口服务 ID
+        final List<String> dnsServers = getGlobalDnsServers(store);
+
+        final List<String> newDnsServers = Lists.newArrayListWithExpectedSize(1 + dnsServers.size());
+        if (!dnsServers.contains(dnsServer)) {
+            newDnsServers.add(dnsServer);
+        }
+        newDnsServers.addAll(dnsServers);
+
+        return setGlobalDns(store, newDnsServers);
     }
 
     private static boolean removeDns0(final String dnsServer) {
@@ -237,12 +309,41 @@ public class SystemConfigurationTest {
         }
     }
 
+    private static boolean removeGlobalDns0(final String dnsServer) {
+        // 创建动态存储会话
+        final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR("DNS_READER"), null, null);
+
+        try {
+            // 获取当前活动网络接口服务 ID
+            final List<String> dnsServers = getGlobalDnsServers(store);
+
+            final List<String> newDnsServers = Lists.newArrayList(dnsServers);
+            return newDnsServers.remove(dnsServer) && setGlobalDns(store, newDnsServers);
+        } finally {
+            CF.CFRelease(store);
+        }
+    }
+
     public static void addDnsServerAndCleanupOnShutdown(final String dnsServer) {
         if (addDns0(dnsServer)) {
             Runtime.getRuntime().addShutdownHook(new Thread() {
                 @Override
                 public void run() {
                     boolean b = removeDns0(dnsServer);
+                    System.out.println("Cleanup DNS " + dnsServer + ": " + b);
+                }
+            });
+        } else {
+            System.err.println("Add DNS fail, Please run root");
+        }
+    }
+
+    public static void addGlobalDnsServerAndCleanupOnShutdown(final String dnsServer) {
+        if (addGlobalDns0(dnsServer)) {
+            Runtime.getRuntime().addShutdownHook(new Thread() {
+                @Override
+                public void run() {
+                    boolean b = removeGlobalDns0(dnsServer);
                     System.out.println("Cleanup DNS " + dnsServer + ": " + b);
                 }
             });

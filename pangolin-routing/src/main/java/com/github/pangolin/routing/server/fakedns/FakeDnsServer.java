@@ -15,6 +15,7 @@ import io.netty.resolver.dns.DnsNameResolverBuilder;
 import io.netty.resolver.dns.SequentialDnsServerAddressStreamProvider;
 import io.netty.util.internal.PlatformDependent;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.util.CollectionUtils;
 
 import java.net.InetSocketAddress;
 import java.net.SocketException;
@@ -32,6 +33,7 @@ public class FakeDnsServer {
                                              final Predicate<String> domainFakePredicate) throws SocketException {
         log.info("FakeDNS Starting...");
         final List<InetSocketAddress> dnsServers = determineDnsServers();
+//        final List<InetSocketAddress> dnsServers = Collections.emptyList();
         log.info("FakeDNS detect DNS: {}", dnsServers);
         return startFakeDns(fakeDns, domainFakePredicate, dnsServers);
     }
@@ -61,12 +63,16 @@ public class FakeDnsServer {
 //        final DnsEngine fakeDns = SimpleInet6FakeDns.create("2001:2::/48", 60).asDnsEngine();
 
         final EventLoopGroup loop = new NioEventLoopGroup();
-        final DnsNameResolver resolver = new DnsNameResolverBuilder()
-                .eventLoop(loop.next())
-                .recursionDesired(true)
-                .channelFactory(NioDatagramChannel::new)
-                .nameServerProvider(new SequentialDnsServerAddressStreamProvider(upstreamDnsServers))
-                .build();
+        DnsNameResolver resolver = null;
+        if (!CollectionUtils.isEmpty(upstreamDnsServers)) {
+            resolver = new DnsNameResolverBuilder()
+                    .eventLoop(loop.next())
+                    .recursionDesired(true)
+                    .channelFactory(NioDatagramChannel::new)
+                    .nameServerProvider(new SequentialDnsServerAddressStreamProvider(upstreamDnsServers))
+                    .build();
+        }
+        final DnsNameResolver resolverToUse = resolver;
 
         final Bootstrap b = new Bootstrap();
         return b.group(loop)
@@ -75,7 +81,9 @@ public class FakeDnsServer {
                     @Override
                     protected void initChannel(DatagramChannel ch) {
                         ch.pipeline().addLast(new DatagramFakeDnsServerHandler(fakeDns, domainFakePredicate));
-                        ch.pipeline().addLast(new DatagramDnsProxyServerHandler(resolver));
+                        if (null != resolverToUse) {
+                            ch.pipeline().addLast(new DatagramDnsProxyServerHandler(resolverToUse));
+                        }
                     }
                 }).option(ChannelOption.SO_BROADCAST, true)
                 .bind(53).addListener(new ChannelFutureListener() {
