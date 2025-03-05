@@ -1,6 +1,13 @@
 package com.github.pangolin.routing.server.tun.adapter.windows.jna;
 
-import com.sun.jna.*;
+import static com.sun.jna.platform.win32.Guid.GUID;
+
+import com.sun.jna.LastErrorException;
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
+import com.sun.jna.Structure;
+import com.sun.jna.Union;
+import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Guid;
 import com.sun.jna.platform.win32.IPHlpAPI;
 import com.sun.jna.platform.win32.WinDef;
@@ -12,8 +19,6 @@ import com.sun.jna.win32.W32APIOptions;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-
-import static com.sun.jna.platform.win32.Guid.GUID;
 
 public interface IpHelpLib extends IPHlpAPI {
     IpHelpLib INSTANCE = Native.load("IPHlpAPI", IpHelpLib.class, W32APIOptions.DEFAULT_OPTIONS);
@@ -887,11 +892,6 @@ public interface IpHelpLib extends IPHlpAPI {
     int InitializeIpForwardEntry(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
 
     /**
-     * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setipforwardentry2">SetIpForwardEntry2</a>
-     */
-    int SetIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
-
-    /**
      * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-createipforwardentry2">CreateIpForwardEntry2</a>
      */
     int CreateIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
@@ -905,5 +905,10 @@ public interface IpHelpLib extends IPHlpAPI {
      * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardentry2">GetIpForwardEntry2</a>
      */
     int GetIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
+
+    /**
+     * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setipforwardentry2">SetIpForwardEntry2</a>
+     */
+    int SetIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
 
 }

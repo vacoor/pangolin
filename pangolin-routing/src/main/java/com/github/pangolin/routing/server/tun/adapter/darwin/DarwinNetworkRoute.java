@@ -47,8 +47,7 @@ public class DarwinNetworkRoute {
     }
 
 
-    public static void delete(final InetAddress dst, final InetAddress netmask,
-                              final InetAddress gw, final int ifindex) {
+    public static void delete(final InetAddress dst, final InetAddress netmask, final InetAddress gw, final int ifindex) {
         route((byte) RTM_DELETE, (short) ifindex, dst, gw, netmask);
     }
 
