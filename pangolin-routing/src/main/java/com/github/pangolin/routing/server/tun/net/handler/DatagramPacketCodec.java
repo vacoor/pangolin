@@ -54,9 +54,10 @@ public class DatagramPacketCodec extends MessageToMessageCodec<IpPacket, Datagra
                 .build();
         if (dstAddr instanceof Inet4Address) {
             IpV4Rfc1349Tos tos = new IpV4Rfc1349Tos.Builder()
-                    .precedence(IpV4TosPrecedence.PRIORITY)
-                    .tos(IpV4TosTos.MINIMIZE_DELAY)
+                    .precedence(IpV4TosPrecedence.ROUTINE)
+                    .tos(IpV4TosTos.DEFAULT)
                     .build();
+            short identification = 0x4e11;
             IpV4Packet build = new IpV4Packet.Builder()
                     .version(IpVersion.IPV4)
                     .protocol(IpNumber.UDP)
@@ -64,6 +65,8 @@ public class DatagramPacketCodec extends MessageToMessageCodec<IpPacket, Datagra
                     .dstAddr((Inet4Address) dstAddr)
                     .ttl((byte) 10)
                     .tos(tos)
+                    .fragmentOffset((short) 0)
+                    .identification(identification)
                     .payloadBuilder(payload.getBuilder())
                     .paddingAtBuild(true)
                     .correctLengthAtBuild(true)

@@ -1,7 +1,6 @@
 package com.github.pangolin.routing.server.fakedns.handler;
 
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
-import com.github.pangolin.routing.server.tun.net.handler.DatagramDnsResponseEncoder2;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -37,14 +36,32 @@ public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<Da
     protected void channelRead0(final ChannelHandlerContext ctx, final DatagramDnsQuery query) throws Exception {
         final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
         final String domain = dnsQuestion.name();
+
+        /*
+        if (DnsRecordType.PTR.equals(dnsQuestion.type()) && "2.0.18.198.in-addr.arpa.".equals(domain)) {
+//            ByteBuf buf = Unpooled.wrappedBuffer("lan".getBytes(StandardCharsets.UTF_8));
+//            final DefaultDnsRawRecord dnsQuestionAnswer = new DefaultDnsRawRecord(dnsQuestion.name(), DnsRecordType.PTR, 10, buf);
+            DefaultDnsPtrRecord dnsQuestionAnswer = new DefaultDnsPtrRecord(dnsQuestion.name(), dnsQuestion.dnsClass(), 10, "local.lan.com");
+
+            final DatagramDnsResponse response = new DatagramDnsResponse(query.recipient(), query.sender(), query.id());
+            response.addRecord(DnsSection.QUESTION, dnsQuestion);
+            response.addRecord(DnsSection.ANSWER, dnsQuestionAnswer);
+//            response.setAuthoritativeAnswer(true);
+            ctx.writeAndFlush(response);
+            return;
+        }
+        */
+
         List<String> msInetTestDomains = Arrays.asList(
                 "dns.msftncsi.com.",
                 "www.msftncsi.com.",
                 "www.msftconnecttest.com"
         );
         if (!msInetTestDomains.contains(domain) && checker.test(domain)) {
+            System.out.println("Lookup: " + domain);
             DatagramDnsResponse lookup = engine.lookup(query);
             if (null != lookup) {
+                System.out.println("Write: " + domain);
                 ctx.writeAndFlush(lookup);
                 return;
             }
