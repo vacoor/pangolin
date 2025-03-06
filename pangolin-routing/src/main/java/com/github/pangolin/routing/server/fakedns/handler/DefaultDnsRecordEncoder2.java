@@ -59,14 +59,15 @@ public class DefaultDnsRecordEncoder2 implements DnsRecordEncoder {
 
     private void encodePtrRecord(DnsPtrRecord record, ByteBuf out) throws Exception {
         encodeRecord0(record, out);
+        int writerIndex = out.writerIndex();
+        // Skip 2 bytes as these will be used to encode the rdataLen after we know how many bytes were written.
+        // See https://www.rfc-editor.org/rfc/rfc1035.html#section-3.2.1
+        out.writerIndex(writerIndex + 2);
 
-        // FIXED missing length BUG
-        // https://github.com/netty/netty/issues/14627
-        final ByteBuf nameBuffer = Unpooled.buffer();
-        encodeName(record.hostname(), nameBuffer);
+        encodeName(record.hostname(), out);
 
-        out.writeShort(nameBuffer.readableBytes());
-        out.writeBytes(nameBuffer);
+        int rdLength = out.writerIndex() - (writerIndex + 2);
+        out.setShort(writerIndex, rdLength);
     }
 
     private void encodeOptPseudoRecord(DnsOptPseudoRecord record, ByteBuf out) throws Exception {
