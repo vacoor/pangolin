@@ -2,9 +2,8 @@ package com.github.pangolin.routing.server.fakedns;
 
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.route.Route;
-import com.github.pangolin.routing.server.Acceptor;
-import com.github.pangolin.routing.server.AcceptorFactory;
-import com.github.pangolin.routing.server.fakedns.beta.SimpleInet4FakeDns;
+import com.github.pangolin.routing.server.acceptor.Acceptor;
+import com.github.pangolin.routing.server.acceptor.AcceptorFactory;
 import io.netty.channel.ChannelFuture;
 
 import java.net.InetSocketAddress;
@@ -22,11 +21,11 @@ public class FakeDnsAcceptorFactory implements AcceptorFactory {
         return new Acceptor() {
             @Override
             public ChannelFuture start(final RouteContext context) throws Exception {
-                final String fakeSubnet = "198.18.0.1/24";
-
+                final String fake4Subnet = "198.18.0.1/24";
+                final String fake6Subnet = "2001:2::/48";
                 DnsEngine fakeDns = null;
                 if (null == context.attr(DnsEngine.class.getName())) {
-                    fakeDns = SimpleInet4FakeDns.create(fakeSubnet, 60).asDnsEngine();
+                    fakeDns = FakeNameService.create(fake4Subnet, fake6Subnet, 60);
                     context.attr(DnsEngine.class.getName(), fakeDns);
                 }
 

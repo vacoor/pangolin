@@ -2,8 +2,8 @@ package com.github.pangolin.routing.server;
 
 import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
 import com.github.pangolin.routing.handler.internal.server.Socks5ServerDatagramDemultiplexer;
-import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
+import com.github.pangolin.routing.support.DatagramChannelFactory;
+import com.github.pangolin.routing.support.StandardDatagramChannelFactory;
 import com.github.pangolin.server.NettyServer;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;

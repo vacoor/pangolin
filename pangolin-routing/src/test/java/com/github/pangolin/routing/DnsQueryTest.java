@@ -1,9 +1,8 @@
 package com.github.pangolin.routing;
 
-import com.github.pangolin.routing.handler.codec.socks5.Socks5ClientDatagramPacketCodec;
+import com.github.pangolin.routing.support.DatagramChannelFactory;
+import com.github.pangolin.routing.support.StandardDatagramChannelFactory;
 import com.github.pangolin.routing.handler.internal.client.Socks5DatagramProxyHandler;
-import com.github.pangolin.routing.handler.internal.server.support.DatagramChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardDatagramChannelFactory;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;

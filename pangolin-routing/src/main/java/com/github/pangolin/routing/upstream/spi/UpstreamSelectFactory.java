@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.upstream.spi;
 
-import com.github.pangolin.routing.stats.StatsAware;
-import com.github.pangolin.routing.stats.StatsUpstream;
+import com.github.pangolin.routing.upstream.stats.StatsAware;
+import com.github.pangolin.routing.upstream.stats.StatsUpstream;
 import com.github.pangolin.routing.upstream.AbstractUpstream;
 import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.upstream.UpstreamCombiner;

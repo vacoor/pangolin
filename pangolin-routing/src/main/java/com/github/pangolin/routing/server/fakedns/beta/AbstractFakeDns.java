@@ -52,7 +52,7 @@ public abstract class AbstractFakeDns<T> {
         return address;
     }
 
-    protected T doResolve(final String hostname) {
+    public T doResolve(final String hostname) {
         try {
             return leases.get(hostname, () -> doAcquire(hostname));
         } catch (final ExecutionException e) {
@@ -60,7 +60,7 @@ public abstract class AbstractFakeDns<T> {
         }
     }
 
-    protected String doResolve(final T address) {
+    public String doResolve(final T address) {
         final String hostname = hostnames.get(address);
         if (null != hostname) {
             leases.getIfPresent(hostname);

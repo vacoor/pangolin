@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.handler.internal.client;
 
 import com.github.pangolin.routing.handler.codec.socks5.Socks5ClientDatagramPacketCodec;
-import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
+import com.github.pangolin.routing.support.SocketChannelFactory;
+import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;

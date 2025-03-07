@@ -6,7 +6,7 @@ import com.github.pangolin.routing.handler.codec.ss.SsSocketStreamCryptCodec;
 import com.github.pangolin.routing.handler.codec.ss.crypto.AeadCipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm;
-import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
+import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -19,6 +19,7 @@ import java.net.InetSocketAddress;
 import java.security.SecureRandom;
 
 @Slf4j
+@SuppressWarnings("deprecation")
 public class SsProxyServerHandler extends ChannelDuplexHandler {
     private final String password;
     private final CipherAlgorithm algorithm;

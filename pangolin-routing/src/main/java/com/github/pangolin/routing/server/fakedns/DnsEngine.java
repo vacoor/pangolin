@@ -9,11 +9,10 @@ import io.netty.handler.codec.dns.DatagramDnsResponse;
  */
 public interface DnsEngine {
 
-    byte[] resolve(final String name);
+    boolean isFakeAddress(final byte[] address);
 
-    String resolve(final byte[] address);
-
-    boolean isFake(final byte[] address);
+    String getHostByAddress(final byte[] address);
 
     DatagramDnsResponse lookup(DatagramDnsQuery query);
+
 }

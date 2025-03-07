@@ -99,7 +99,7 @@ public class FakeDnsServer {
     }
 
     public static void main(String[] args) throws Exception {
-        final DnsEngine fakeDns = SimpleInet4FakeDns.create("198.18.0.0/24", 60).asDnsEngine();
+        final DnsEngine fakeDns = FakeNameService.create("198.18.0.0/24", "2001:2::/48", 60);
 
         startFakeDns(fakeDns, domain -> true).addListener(new ChannelFutureListener() {
             @Override

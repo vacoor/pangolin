@@ -67,7 +67,7 @@ public class SimpleInet6FakeDns extends AbstractFakeDns<Inet6Address> {
         return new BigInteger(ipBytes);
     }
 
-    private static int checkPrefix(final int cidrPrefix) {
+    public static int checkPrefix(final int cidrPrefix) {
         if (0 > cidrPrefix || cidrPrefix > 128) {
             throw new IllegalArgumentException(String.format("IPv6 requires the subnet prefix to be in range of [0,128]. The prefix was: %d", cidrPrefix));
         }
@@ -115,7 +115,7 @@ public class SimpleInet6FakeDns extends AbstractFakeDns<Inet6Address> {
         return new SimpleInet6FakeDns(ipAddress, cidrPrefix, leaseTime);
     }
 
-    private static Inet6Address checkIpAddress(final String ipAddress) {
+    public static Inet6Address checkIpAddress(final String ipAddress) {
         if (!NetUtil.isValidIpV6Address(ipAddress)) {
             throw new IllegalArgumentException("Only IPv6 addresses are supported. The ip address was: " + ipAddress);
         }
@@ -135,48 +135,6 @@ public class SimpleInet6FakeDns extends AbstractFakeDns<Inet6Address> {
         return this::create;
     }
 
-    public DnsEngine asDnsEngine() {
-        return new DnsEngine() {
-            @Override
-            public byte[] resolve(final String name) {
-                return doResolve(name).getAddress();
-            }
-
-            @Override
-            public String resolve(final byte[] address) {
-                try {
-                    return doResolve((Inet6Address) InetAddress.getByAddress(address));
-                } catch (UnknownHostException e) {
-                    throw new IllegalStateException(e);
-                }
-            }
-
-            @Override
-            public boolean isFake(final byte[] address) {
-                return isFakeAddress(address);
-            }
-
-            @Override
-            public DatagramDnsResponse lookup(DatagramDnsQuery query) {
-                final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
-                if (DnsRecordType.AAAA.equals(dnsQuestion.type())) {
-                    final int ttl = leaseTime;
-                    final String domain = dnsQuestion.name();
-                    byte[] bytes = this.resolve(domain);
-                    if (null != bytes) {
-                        final ByteBuf buf = Unpooled.wrappedBuffer(bytes);
-                        final DefaultDnsRawRecord dnsQuestionAnswer = new DefaultDnsRawRecord(dnsQuestion.name(), DnsRecordType.AAAA, ttl, buf);
-
-                        final DatagramDnsResponse response = new DatagramDnsResponse(query.recipient(), query.sender(), query.id());
-                        response.addRecord(DnsSection.QUESTION, dnsQuestion);
-                        response.addRecord(DnsSection.ANSWER, dnsQuestionAnswer);
-                        return response;
-                    }
-                }
-                return null;
-            }
-        };
-    }
 
     public static void main(String[] args) throws InterruptedException, UnknownHostException {
 //        final int min = ipAddressToInt(NetUtil.createByteArrayFromIpAddressString("198.18.0.1"));

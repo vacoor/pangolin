@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.handler.internal.client;
 
-import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
-import com.github.pangolin.routing.handler.internal.server.support.StandardSocketChannelFactory;
+import com.github.pangolin.routing.support.SocketChannelFactory;
+import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;

@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.server.tun.net.handler;
 
-import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
+import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
 import com.github.pangolin.routing.server.tun.net.Tcp4Connection;
 import com.github.pangolin.routing.server.tun.net.TcpConnection;

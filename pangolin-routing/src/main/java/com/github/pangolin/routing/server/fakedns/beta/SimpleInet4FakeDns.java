@@ -1,9 +1,5 @@
 package com.github.pangolin.routing.server.fakedns.beta;
 
-import com.github.pangolin.routing.server.fakedns.DnsEngine;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import io.netty.handler.codec.dns.*;
 import io.netty.util.NetUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -65,7 +61,7 @@ public class SimpleInet4FakeDns extends AbstractFakeDns<Inet4Address> {
         return (ipBytes[0] & 0xff) << 24 | (ipBytes[1] & 0xff) << 16 | (ipBytes[2] & 0xff) << 8 | ipBytes[3] & 0xff;
     }
 
-    private static int checkPrefix(final int cidrPrefix) {
+    public static int checkPrefix(final int cidrPrefix) {
         if (0 > cidrPrefix || cidrPrefix > 32) {
             throw new IllegalArgumentException(String.format("IPv4 requires the subnet prefix to be in range of [0,32]. The prefix was: %d", cidrPrefix));
         }
@@ -110,52 +106,6 @@ public class SimpleInet4FakeDns extends AbstractFakeDns<Inet4Address> {
         }
     }
 
-    public DnsEngine asDnsEngine() {
-        return new DnsEngine() {
-            @Override
-            public byte[] resolve(final String name) {
-                return doResolve(name).getAddress();
-            }
-
-            @Override
-            public String resolve(final byte[] address) {
-                try {
-                    return doResolve((Inet4Address) Inet4Address.getByAddress(address));
-                } catch (UnknownHostException e) {
-                    throw new IllegalStateException(e);
-                }
-            }
-
-            @Override
-            public boolean isFake(final byte[] address) {
-                return isFakeAddress(address);
-            }
-
-            @Override
-            public DatagramDnsResponse lookup(DatagramDnsQuery query) {
-                final DnsQuestion dnsQuestion = query.recordAt(DnsSection.QUESTION);
-                if (DnsRecordType.A.equals(dnsQuestion.type())) {
-                    final int ttl = leaseTime;
-                    final String domain = dnsQuestion.name();
-                    byte[] bytes = this.resolve(domain);
-                    if (null != bytes) {
-                        final ByteBuf buf = Unpooled.wrappedBuffer(bytes);
-                        final DefaultDnsRawRecord dnsQuestionAnswer = new DefaultDnsRawRecord(dnsQuestion.name(), DnsRecordType.A, ttl, buf);
-
-                        final DatagramDnsResponse response = new DatagramDnsResponse(query.recipient(), query.sender(), query.id());
-                        response.addRecord(DnsSection.QUESTION, dnsQuestion);
-                        response.addRecord(DnsSection.ANSWER, dnsQuestionAnswer);
-                        response.setAuthoritativeAnswer(true);
-
-                        log.info("Assign IPv4 Address {} to {}, TTL={}", NetUtil.bytesToIpAddress(bytes), domain, ttl);
-                        return response;
-                    }
-                }
-                return null;
-            }
-        };
-    }
-
     public static SimpleInet4FakeDns create(final String definition, final int leaseTime) {
         final int index = definition.indexOf("/");
         final String address = 0 < index ? definition.substring(0, index) : definition;
@@ -170,7 +120,7 @@ public class SimpleInet4FakeDns extends AbstractFakeDns<Inet4Address> {
         return new SimpleInet4FakeDns(ipAddress, cidrPrefix, leaseTime);
     }
 
-    private static Inet4Address checkIpAddress(final String ipAddress) {
+    public static Inet4Address checkIpAddress(final String ipAddress) {
         if (!NetUtil.isValidIpV4Address(ipAddress)) {
             throw new IllegalArgumentException("Only IPv4 addresses are supported. The ip address was: " + ipAddress);
         }

@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.server.tun.net;
 
-import com.github.pangolin.routing.handler.internal.server.support.SocketChannelFactory;
+import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -1369,10 +1369,10 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
 
     private String resolve(InetAddress dst) {
         if (null != dnsEngine) {
-            final String host = dnsEngine.resolve(dst.getAddress());
+            final String host = dnsEngine.getHostByAddress(dst.getAddress());
             if (null != host) {
                 return host;
-            } else if (dnsEngine.isFake(dst.getAddress())) {
+            } else if (dnsEngine.isFakeAddress(dst.getAddress())) {
                 return null;
             }
         }
