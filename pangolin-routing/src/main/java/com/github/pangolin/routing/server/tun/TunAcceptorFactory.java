@@ -72,7 +72,7 @@ public class TunAcceptorFactory implements AcceptorFactory {
                         });
                         WindowsNetworkInterfaceEx.flushDnsCache();
                     } else if (adapter instanceof DarwinTunAdapter) {
-                        DarwinDnsUtils.addDnsServerAndCleanupOnShutdown("127.0.0.1");
+                        DarwinDnsUtils.addDnsServerAndCleanupOnShutdown(new String[]{"::1", "127.0.0.1"});
                     }
                 }
             }

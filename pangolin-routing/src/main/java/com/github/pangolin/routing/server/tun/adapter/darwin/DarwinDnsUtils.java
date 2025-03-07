@@ -8,6 +8,7 @@ import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -139,25 +140,29 @@ public class DarwinDnsUtils {
     }
 
 
-    private static boolean addDns0(final SCDynamicStoreRef store, final String serviceId, final String dnsServer) {
+    private static boolean addDns0(final SCDynamicStoreRef store, final String serviceId, final String[] dnsServers) {
         final List<String> dns = getDns0(store, serviceId);
         final List<String> dnsToUse = Lists.newArrayListWithExpectedSize(1 + dns.size());
 
-        if (!dns.contains(dnsServer)) {
-            dnsToUse.add(dnsServer);
+        for (String dnsServer : dnsServers) {
+            if (!dns.contains(dnsServer)) {
+                dnsToUse.add(dnsServer);
+            }
         }
 
         dnsToUse.addAll(dns);
         return setDns0(store, serviceId, dnsToUse);
     }
 
-    private static boolean removeDns0(final SCDynamicStoreRef store, final String serviceId, final String dnsServer) {
+    private static boolean removeDns0(final SCDynamicStoreRef store, final String serviceId, final String[] dnsServers) {
         final List<String> dns = getDns0(store, serviceId);
         final List<String> dnsToUse = Lists.newArrayList(dns);
 
         boolean found = false;
-        while (dnsToUse.remove(dnsServer)) {
-            found = true;
+        for (String dnsServer : dnsServers) {
+            while (dnsToUse.remove(dnsServer)) {
+                found = true;
+            }
         }
         return found && setDns0(store, serviceId, dnsToUse);
     }
@@ -253,20 +258,21 @@ public class DarwinDnsUtils {
         CF.CFRelease(store);
     }
 
-    private static Thread cleaner(final AtomicReference<String> serviceId, final String dnsServer) {
+    private static Thread cleaner(final AtomicReference<String> serviceId, final String[] dnsServers) {
+        final String dnsServersStr = Arrays.toString(dnsServers);
         return new Thread() {
             @Override
             public void run() {
                 final String serviceIdToUse = serviceId.get();
                 if (null == serviceIdToUse || serviceIdToUse.isEmpty()) {
-                    log.info("• Cleanup DNS {}: SKIP, no ServiceID hold", dnsServer);
+                    log.info("• Cleanup DNS {}: SKIP, no ServiceID hold", dnsServersStr);
                     return;
                 }
 
-                final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR("DNS-CLEANER@" + dnsServer), null, null);
+                final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR("DNS-CLEANER@" + dnsServersStr), null, null);
                 try {
-                    final boolean cleanup = removeDns0(store, serviceIdToUse, dnsServer);
-                    log.info("• Cleanup DNS {}: {}", dnsServer, cleanup);
+                    final boolean cleanup = removeDns0(store, serviceIdToUse, dnsServers);
+                    log.info("• Cleanup DNS {}: {}", dnsServersStr, cleanup);
                 } finally {
                     CF.CFRelease(store);
                 }
@@ -274,7 +280,8 @@ public class DarwinDnsUtils {
         };
     }
 
-    public static void addDnsServerAndCleanupOnShutdown(final String dns) {
+    public static void addDnsServerAndCleanupOnShutdown(final String[] dns) {
+        final String dnsStr = Arrays.toString(dns);
         final AtomicReference<String> holder = new AtomicReference<>();
         final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR("DNS"), null, null);
         try {
@@ -283,7 +290,7 @@ public class DarwinDnsUtils {
             if (addDns0(store, sid, dns)) {
                 holder.set(sid);
             } else {
-                log.warn("• ADD DNS {} to SERVICE({}): FAILED", sid, dns);
+                log.warn("• ADD DNS {} to SERVICE({}): FAILED", sid, dnsStr);
             }
 
             watchInBackground(new String[]{GLOBAL_IPV4_KEY}, new SCDynamicStoreCallBack() {
@@ -297,10 +304,10 @@ public class DarwinDnsUtils {
                     } else {
                         if (addDns0(store, primary, dns)) {
                             holder.set(primary);
-                            log.info("• Add DNS {} to SERVICE({}): OK", dns, primary);
+                            log.info("• Add DNS {} to SERVICE({}): OK", dnsStr, primary);
                         } else {
                             holder.set(null);
-                            log.info("• Add DNS {} to SERVICE({}): FAILED", dns, primary);
+                            log.info("• Add DNS {} to SERVICE({}): FAILED", dnsStr, primary);
                         }
                     }
                 }
