@@ -79,13 +79,16 @@ public class TunChannel extends AbstractChannel {
     @Override
     protected void doBind(final SocketAddress localAddress) throws Exception {
         final int mtu = config.getMtu();
-        final String ifname = ((TunAddress) localAddress).ifName();
+        TunAddress ta = (TunAddress) localAddress;
+        final String ifname = ta.ifName();
+        final InterfaceAddressEx[] bindings = ta.getInterfaceAddresses();
+
         if (PlatformDependent.isOsx()) {
-            device = DarwinTunAdapter.open(ifname, mtu);
+            device = DarwinTunAdapter.open(ifname, mtu, bindings);
         } else if (PlatformDependent.isWindows()) {
-            device = WindowsTunAdapter.open(ifname, "Proxies Host-Only", "{2B54EB73-2CF2-4C1A-B900-E193C9E16966}", mtu);
+            device = WindowsTunAdapter.open(ifname, "Proxies Host-Only", "{2B54EB73-2CF2-4C1A-B900-E193C9E16966}", mtu, bindings);
         } else {
-            device = LinuxTunAdapter.open(ifname, mtu);
+            device = LinuxTunAdapter.open(ifname, mtu, bindings);
         }
         log.info("TUN adapter initialized: {}", ifname);
 

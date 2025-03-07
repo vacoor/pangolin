@@ -2,22 +2,18 @@ package com.github.pangolin.routing.server.tun.net.channel;
 
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 
+import java.net.InetAddress;
 import java.net.SocketAddress;
 import java.util.Arrays;
 import java.util.List;
 
-public class TunAddress extends SocketAddress {
-    private static final long serialVersionUID = -584786182484350484L; // NOSONAR
-    private final String ifName;
+public class TunAdapterAddress extends SocketAddress {
+    private final String name;
     private final InterfaceAddressEx[] bindings;
 
-    public TunAddress(final String ifName, final InterfaceAddressEx... bindings) {
-        this.ifName = ifName;
+    public TunAdapterAddress(final String name, final InterfaceAddressEx... bindings) {
+        this.name = name;
         this.bindings = bindings;
-    }
-
-    public TunAddress() {
-        this(null);
     }
 
     /**
@@ -25,17 +21,17 @@ public class TunAddress extends SocketAddress {
      *
      * @return the name of the tun device
      */
-    public String ifName() {
-        return ifName;
+    public String name() {
+        return name;
     }
 
-    public InterfaceAddressEx[] getInterfaceAddresses() {
-        return bindings;
+    public List<InterfaceAddressEx> getInterfaceAddresses() {
+        return Arrays.asList(bindings);
     }
 
     @Override
     public String toString() {
         // return Objects.requireNonNullElse(name, "");
-        return ifName;
+        return name;
     }
 }

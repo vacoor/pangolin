@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.server.tun.adapter.unix.jna;
 
+import com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink;
 import com.sun.jna.*;
 import com.sun.jna.platform.unix.LibCAPI;
 import com.sun.jna.ptr.IntByReference;
@@ -7,6 +8,7 @@ import com.sun.jna.ptr.IntByReference;
 import java.nio.ByteBuffer;
 
 public final class LibC {
+    public static final API API_INSTANTCE = Native.load("c", API.class);
 
     /*-
     static {
@@ -20,68 +22,67 @@ public final class LibC {
     }
 
     public static int open(final String path, final int oflag) {
-        return API.INSTANCE.open(path, oflag);
+        return API_INSTANTCE.open(path, oflag);
     }
 
     public static int close(final int fd) {
-        return API.INSTANCE.close(fd);
+        return API_INSTANTCE.close(fd);
     }
 
     public static int read(final int fd, final byte[] buf, final long nBytes) {
-        return API.INSTANCE.read(fd, buf, nBytes);
+        return API_INSTANTCE.read(fd, buf, nBytes);
     }
 
     public static int read(final int fd, final ByteBuffer buf, final long nBytes) {
-        return API.INSTANCE.read(fd, buf, nBytes);
+        return API_INSTANTCE.read(fd, buf, nBytes);
     }
 
     public static int write(final int fd, final byte[] buf, final int nBytes) {
-        return API.INSTANCE.write(fd, buf, nBytes);
+        return API_INSTANTCE.write(fd, buf, nBytes);
     }
 
     public static int write(final int fd, final ByteBuffer buf, final int nBytes) {
-        return API.INSTANCE.write(fd, buf, nBytes);
+        return API_INSTANTCE.write(fd, buf, nBytes);
     }
 
     public static int write(final int fd, final Pointer buf, final int nBytes) {
-        return API.INSTANCE.write(fd, buf, nBytes);
+        return API_INSTANTCE.write(fd, buf, nBytes);
     }
 
     public static int socket(final int domain, final int type, final int protocol) {
-        return API.INSTANCE.socket(domain, type, protocol);
+        return API_INSTANTCE.socket(domain, type, protocol);
     }
 
     public static int connect(final int socket, final Structure address, final int addressLen) {
-        return API.INSTANCE.connect(socket, address, addressLen);
+        return API_INSTANTCE.connect(socket, address, addressLen);
     }
 
     @SuppressWarnings("java:S117")
     public static int getsockopt(final int socket, final int level, final int optionName, final Structure optionValue, final IntByReference optionLen) {
-        return API.INSTANCE.getsockopt(socket, level, optionName, optionValue, optionLen);
+        return API_INSTANTCE.getsockopt(socket, level, optionName, optionValue, optionLen);
     }
 
     public static int ioctl(final int fd, final NativeLong request, final Structure argp) {
-        return API.INSTANCE.ioctl(fd, request, argp);
+        return API_INSTANTCE.ioctl(fd, request, argp);
     }
 
     public static int getifaddrs(final Structure ifap) {
-        return API.INSTANCE.getifaddrs(ifap);
+        return API_INSTANTCE.getifaddrs(ifap);
     }
 
     public static void freeifaddrs(final Structure ifa) {
-        API.INSTANCE.freeifaddrs(ifa);
+        API_INSTANTCE.freeifaddrs(ifa);
     }
 
     public static int if_nametoindex(final String ifname) {
-        return API.INSTANCE.if_nametoindex(ifname);
+        return API_INSTANTCE.if_nametoindex(ifname);
     }
 
     public static String strerror(int errno) {
-        return API.INSTANCE.strerror(errno);
+        return API_INSTANTCE.strerror(errno);
     }
 
     public interface API extends LibCAPI, Library {
-        API INSTANCE = Native.load("c", API.class);
 
         /**
          * Look up the error message string corresponding to an error number.
@@ -275,6 +276,16 @@ public final class LibC {
         int getifaddrs(final Structure ifap);
 
         void freeifaddrs(final Structure ifp);
+
+        int bind(int sockfd, Netlink.sockaddr_nl addr, int addrlen);
+
+        int send(int sockfd, Pointer buf, int len, int flags);
+
+        int sendmsg(int sockfd, Netlink.MsgHdr buf, int flags);
+
+        int recv(int sockfd, byte[] buf, int size, int flag);
+
+        int getpid();
 
     }
 

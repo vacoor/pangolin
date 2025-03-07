@@ -15,6 +15,8 @@ public interface Socket {
    */
   int SOCK_DGRAM = 2;
 
+  int SOCK_RAW = 3;
+
   /**
    * .
    */
@@ -29,5 +31,7 @@ public interface Socket {
    * IPv6.
    */
   int AF_INET6 = 10;
+
+  int AF_NETLINK = 16;
 
 }

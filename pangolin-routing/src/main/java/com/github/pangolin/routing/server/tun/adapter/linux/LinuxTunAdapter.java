@@ -2,6 +2,7 @@ package com.github.pangolin.routing.server.tun.adapter.linux;
 
 
 import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
+import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
@@ -87,7 +88,7 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
 
     /* ********************** */
 
-    public static LinuxTunAdapter open(final String tunName, final int mtu) throws Exception {
+    public static LinuxTunAdapter open(final String tunName, final int mtu, final InterfaceAddressEx... bindings) throws Exception {
         final String nameToUse = checkName(tunName);
 
         // open tun device.
@@ -110,14 +111,8 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
             throw new LastErrorException(Native.getLastError());
         }
 
-        int mtuToUse = mtu;
-        if (0 < mtuToUse) {
-            LinuxNetworkInterfaceEx.setMTU(skfd, ifname, mtuToUse);
-        } else {
-            mtuToUse = LinuxNetworkInterfaceEx.getMTU(skfd, ifname);
-        }
-
         // Set the tun device to active and ready to transfer packets.
+        // final int flags = IFF_POINTOPOINT | IFF_MULTICAST | IFF_BROADCAST;
         final int flags = IFF_POINTOPOINT | IFF_MULTICAST;
         final ifreq ifr2 = new ifreq(nameToUse);
         ifr2.ifr_ifru.setType("ifru_flags");
@@ -126,9 +121,20 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
             throw new LastErrorException(Native.getLastError());
         }
 
-//        close(skfd);
+        int mtuToUse = mtu;
+        if (0 < mtuToUse) {
+            LinuxNetworkInterfaceEx.setMTU(skfd, ifname, mtuToUse);
+        } else {
+            mtuToUse = LinuxNetworkInterfaceEx.getMTU(skfd, ifname);
+        }
 
-        return new LinuxTunAdapter(skfd, ifname, mtuToUse);
+        close(skfd);
+
+        LinuxTunAdapter ap = new LinuxTunAdapter(fd, ifname, mtuToUse);
+        for (InterfaceAddressEx binding : bindings) {
+            ap.addInterfaceAddress(binding);
+        }
+        return ap;
     }
 
     private static String checkName(final String name) {

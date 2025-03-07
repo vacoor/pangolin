@@ -21,6 +21,7 @@ import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
 import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
 
 import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
+import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
@@ -162,13 +163,13 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
 
     /* ********************** */
 
-    public static WindowsTunAdapter open(final String name, final String type, final int mtu) throws IOException {
-        return open(name, type, (GUID) null, mtu);
+    public static WindowsTunAdapter open(final String name, final String type, final int mtu, final InterfaceAddressEx... bindings) throws IOException {
+        return open(name, type, (GUID) null, mtu, bindings);
     }
 
     public static WindowsTunAdapter open(final String name, final String type,
-                                         final String guid, final int mtu) throws IOException {
-        return open(name, type, GUID.fromString(guid), mtu);
+                                         final String guid, final int mtu, final InterfaceAddressEx... bindings) throws IOException {
+        return open(name, type, GUID.fromString(guid), mtu, bindings);
     }
 
     /**
@@ -181,7 +182,8 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
      */
     public static WindowsTunAdapter open(final String name,
                                          final String type,
-                                         final GUID guid, final int mtu) throws IOException {
+                                         final GUID guid, final int mtu,
+                                         final InterfaceAddressEx... bindings) throws IOException {
         WINTUN_ADAPTER_HANDLE adapter = null;
         WINTUN_SESSION_HANDLE session = null;
         int i = 0;
@@ -203,7 +205,11 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
                     mtuToUse = WindowsNetworkInterfaceEx.getMTU(luid, AF_INET);
                 }
 
-                return new WindowsTunAdapter(luid, name, mtuToUse, adapter, session);
+                final WindowsTunAdapter adapter0 = new WindowsTunAdapter(luid, name, mtuToUse, adapter, session);
+                for (InterfaceAddressEx binding : bindings) {
+                    adapter0.addInterfaceAddress(binding);
+                }
+                return adapter0;
             } catch (final LastErrorException e) {
                 if (null != session) {
                     WintunEndSession(session);

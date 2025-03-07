@@ -2,12 +2,12 @@ package com.github.pangolin.routing.server.tun.adapter.darwin;
 
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation2;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration;
-import com.google.common.collect.Lists;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -40,7 +40,7 @@ public class DarwinDnsUtils {
     }
 
     private static List<String> getDnsServiceIds(final SCDynamicStoreRef store) {
-        final List<String> serviceKeys = Lists.newArrayList();
+        final List<String> serviceKeys = newArrayList();
         final CFArrayRef dnsKeys = SC.SCDynamicStoreCopyKeyList(store, CFSTR("State:/Network/Service/.*/DNS"));
         if (null != dnsKeys) {
             for (int i = 0; i < CF.CFArrayGetCount(dnsKeys).intValue(); i++) {
@@ -102,7 +102,7 @@ public class DarwinDnsUtils {
     }
 
     private static List<String> getGlobalDnsServers(final SCDynamicStoreRef store) {
-        final List<String> servers = Lists.newArrayList();
+        final List<String> servers = newArrayList();
         final CFStringRef dnsKey = CFStringRef.createCFString("State:/Network/Global/DNS");
         final CFDictionaryRef dnsDictionary = SC.SCDynamicStoreCopyValue(store, dnsKey);
         if (null != dnsDictionary) {
@@ -142,7 +142,7 @@ public class DarwinDnsUtils {
 
     private static boolean addDns0(final SCDynamicStoreRef store, final String serviceId, final String[] dnsServers) {
         final List<String> dns = getDns0(store, serviceId);
-        final List<String> dnsToUse = Lists.newArrayListWithExpectedSize(1 + dns.size());
+        final List<String> dnsToUse = newArrayList();
 
         for (String dnsServer : dnsServers) {
             if (!dns.contains(dnsServer)) {
@@ -156,7 +156,7 @@ public class DarwinDnsUtils {
 
     private static boolean removeDns0(final SCDynamicStoreRef store, final String serviceId, final String[] dnsServers) {
         final List<String> dns = getDns0(store, serviceId);
-        final List<String> dnsToUse = Lists.newArrayList(dns);
+        final List<String> dnsToUse = newArrayList(dns);
 
         boolean found = false;
         for (String dnsServer : dnsServers) {
@@ -168,7 +168,7 @@ public class DarwinDnsUtils {
     }
 
     private static List<String> getDns0(final SCDynamicStoreRef store, final String serviceID) {
-        final List<String> dnsToUse = Lists.newArrayList();
+        final List<String> dnsToUse = newArrayList();
         final CFStringRef dnsKey = CFStringRef.createCFString(String.format(SERVICE_ID_DNS_KEY, serviceID));
         final CFDictionaryRef dnsDictionary = SC.SCDynamicStoreCopyValue(store, dnsKey);
         if (null != dnsDictionary) {
@@ -363,4 +363,15 @@ public class DarwinDnsUtils {
         throw new UnsupportedOperationException();
     }
 
+    private static <T> ArrayList<T> newArrayList() {
+        return new ArrayList<>();
+    }
+
+    private static <T> ArrayList<T> newArrayList(Iterable<T> elements) {
+        final ArrayList<T> ret = newArrayList();
+        for (final T element : elements) {
+            ret.add(element);
+        }
+        return ret;
+    }
 }

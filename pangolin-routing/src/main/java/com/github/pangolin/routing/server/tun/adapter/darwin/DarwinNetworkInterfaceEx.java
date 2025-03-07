@@ -338,8 +338,8 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
     }
 
 
-    private static void addInterfaceAddress4(final int fd, final String ifname,
-                                             final Inet4Address address, final Inet4Address netmask) {
+    static void addInterfaceAddress4(final int fd, final String ifname,
+                                     final Inet4Address address, final Inet4Address netmask) {
         final ifaliasreq ifr = new ifaliasreq(ifname);
         writeSockAddr4(ifr.ifra_addr, address);
 
@@ -358,8 +358,8 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
     // ------------------------ START IPv6 related ------------------------
 
 
-    private static void addInterfaceAddress6(final int fd, final String ifname,
-                                             final Inet6Address address, final Inet6Address netmask) {
+    static void addInterfaceAddress6(final int fd, final String ifname,
+                                     final Inet6Address address, final Inet6Address netmask) {
         final in6_aliasreq ifr6 = new in6_aliasreq(ifname);
         writeSockAddr6(ifr6.ifra_addr, address);
         // writeSockAddr6(ifr6.ifra_dstaddr, address);

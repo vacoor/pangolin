@@ -9,10 +9,7 @@ import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in;
 import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in6;
 import com.github.pangolin.routing.server.tun.adapter.unix.UnixNetworkInterfaceEx;
 import com.google.common.collect.Lists;
-import com.sun.jna.LastErrorException;
-import com.sun.jna.Native;
-import com.sun.jna.NativeLong;
-import com.sun.jna.Structure;
+import com.sun.jna.*;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -20,6 +17,7 @@ import java.util.List;
 
 import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.ifaddrs;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Sockios.*;
 import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
@@ -87,9 +85,114 @@ public class LinuxNetworkInterfaceEx extends UnixNetworkInterfaceEx implements N
 
     @Override
     protected void addInterfaceAddress4(final Inet4Address address, final int prefix) {
-        // 多个 IP 需要通过添加子网卡实现.
-        throw new UnsupportedOperationException();
+        /*
+        int RTM_NEWADDR = 20;
+
+        int sockfd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+        try {
+            // 绑定地址
+            final sockaddr_nl local_addr = new sockaddr_nl();
+            local_addr.nl_family = AF_NETLINK;
+             local_addr.nl_pid = API_INSTANTCE.getpid();
+//            local_addr.nl_pid = 0;
+
+            if (API_INSTANTCE.bind(sockfd, local_addr, local_addr.size()) != 0) {
+                throw new RuntimeException("Netlink send failed: " + strerror(Native.getLastError()));
+            }
+
+            final int ifindex = if_nametoindex0(ifname); // 通过ioctl获取网卡索引
+            System.out.println("ifindex=" + ifindex);
+
+            // 计算消息总长度
+            int msgSize = 32; // nlmsghdr(16) + ifaddrmsg(8) + rtattr(8)
+
+            // 初始化消息内存
+            Memory buffer = new Memory(msgSize);
+            int offset = 0;
+
+            final nlmsghdr hl = new nlmsghdr(buffer.share(offset));
+            hl.nlmsg_len = msgSize;
+            hl.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE;
+            hl.nlmsg_type = (short) RTM_NEWADDR;
+            hl.write();
+
+            offset += hl.size();
+            System.out.println(offset);
+
+            // 填充ifaddrmsg
+            final ifaddrmsg ifa = new ifaddrmsg(buffer.share(offset));
+            ifa.ifa_family = AF_INET;
+            ifa.ifa_prefixlen = (byte) prefix;
+            ifa.ifa_index = ifindex;
+            ifa.ifa_flags = (byte) 0x80;
+            ifa.ifa_scope = 0;
+            ifa.write();
+
+            offset += ifa.size();
+            System.out.println(offset + " -> " + ifa.ifa_index);
+
+            // 填充rtattr（IP地址）
+            rtattr rta = new rtattr(buffer.share(offset));
+            rta.rta_type = 2;          // IFA_LOCAL
+            rta.rta_len = 4 + 4;
+            rta.write();
+
+            offset += rta.size();
+
+            // rta.rta_data = address.getAddress(); // IP地址
+            buffer.write(offset, address.getAddress(), 0, 4);
+
+            offset += address.getAddress().length;
+            System.out.println(offset);
+
+            final sockaddr_nl.ByRef dest_addr = new sockaddr_nl.ByRef();
+            dest_addr.nl_family = AF_NETLINK;       // AF_NETLINK
+            dest_addr.nl_pid = 0;
+            dest_addr.nl_groups = 0;
+//            dest_addr.write();
+            System.out.println("dest=" + dest_addr.size());
+
+            IOVec.ByRef ioVec = new IOVec.ByRef();
+            ioVec.iov_base = buffer.getPointer(0);
+            ioVec.iov_len = offset;
+//            ioVec.write();
+            System.out.println("iv=" + ioVec.size());
+
+            MsgHdr msg = new MsgHdr();
+            msg.msg_name = dest_addr;
+            msg.msg_namelen = new NativeLong(dest_addr.size());
+            msg.msg_iov = ioVec;
+            msg.msg_iovlen = new NativeLong(1);
+            msg.msg_control = null;
+            msg.msg_controllen = new NativeLong(0);
+            msg.msg_flags = 0;
+//            msg.write();
+
+            System.out.println("msg=" + msg.size());
+
+            int ret = API_INSTANTCE.sendmsg(sockfd, msg, 0);
+            if (ret != 0) {
+                throw new RuntimeException("Netlink send failed: " + strerror(Native.getLastError()));
+            }
+        } finally {
+            close(sockfd);
+        }
+        */
+        final int fd = fd4();
+        try {
+            ioctl0(fd, SIOCSIFADDR, _ifreq(ifname, address));
+            // 多个 IP 需要通过添加子网卡实现.
+            // throw new UnsupportedOperationException();
+        } finally {
+            close(fd);
+        }
     }
+
+    public static int nlmsgAlign(int len) {
+        final int ALIGN = 4;  // NLMSG_ALIGN 通常为 4 字节对齐 ‌:ml-citation{ref="3,4" data="citationList"}
+        return (len + ALIGN - 1) & ~(ALIGN - 1);
+    }
+
 
     @Override
     protected void addInterfaceAddress6(final Inet6Address address, final int prefix) {
@@ -376,6 +479,16 @@ public class LinuxNetworkInterfaceEx extends UnixNetworkInterfaceEx implements N
             throwUnchecked(Native.getLastError());
         }
         return ifa;
+    }
+
+    private static int if_nametoindex0(final String ifname) {
+        final int index = if_nametoindex(ifname);
+        if (0 == index) {
+            final int errno = Native.getLastError();
+            // final String errmsg = strerror(errno);
+            throw new LastErrorException(errno);
+        }
+        return index;
     }
 
     private static <S extends Structure> S ioctl0(final int fd, final NativeLong request, final S argp) {

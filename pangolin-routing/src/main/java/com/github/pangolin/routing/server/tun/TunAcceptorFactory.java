@@ -4,13 +4,10 @@ import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.server.acceptor.Acceptor;
 import com.github.pangolin.routing.server.acceptor.AcceptorFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
-import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.TunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinDnsUtils;
-import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinNetworkRoute;
 import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinTunAdapter;
-import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
 import com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterfaceEx;
 import com.github.pangolin.routing.server.tun.adapter.windows.WindowsTunAdapter;
 import com.github.pangolin.routing.server.tun.net.channel.TunAddress;
@@ -42,7 +39,7 @@ public class TunAcceptorFactory implements AcceptorFactory {
         };
     }
 
-    public static ChannelFuture startTun(final String ifname, final DnsEngine dnsEngine, final SocketChannelFactory factory) {
+    public static ChannelFuture startTun(final String ifname, final DnsEngine dnsEngine, final SocketChannelFactory factory) throws Exception {
         final EventLoopGroup group = new DefaultEventLoopGroup(1);
         final Bootstrap b = new Bootstrap()
                 .group(group)
@@ -59,30 +56,22 @@ public class TunAcceptorFactory implements AcceptorFactory {
                         ch.pipeline().addLast(new Tcp4PacketHandler(dnsEngine, factory));
                     }
                 });
-        return b.bind(new TunAddress(ifname)).addListener(new ChannelFutureListener() {
+        final InterfaceAddressEx[] bindings = {
+                InterfaceAddressEx.of("198.18.0.1", 24),
+//                InterfaceAddressEx.of("198.18.0.254", 24),
+//                InterfaceAddressEx.of("2001:2::", 48)
+        };
+        return b.bind(new TunAddress(ifname, bindings)).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
-                    final TunAdapter device = ((TunChannel) future.channel()).device();
-
-                    InterfaceAddressEx of = InterfaceAddressEx.of("198.18.0.1", 24);
-                    ((AbstractTunAdapter) device).setInterfaceAddress(of);
-                    ((AbstractTunAdapter) device).addInterfaceAddress(InterfaceAddressEx.of("2001:2::", 48));
-
                     final TunAdapter adapter = ((TunChannel) future.channel()).device();
+
                     if (adapter instanceof WindowsTunAdapter) {
+                        // log.info("ipconfig /flushdns");
                         ((WindowsTunAdapter) adapter).setInterfaceDns(new InetAddress[]{InetAddress.getByName("127.0.0.1")});
                         WindowsNetworkInterfaceEx.flushDnsCache();
                     } else if (adapter instanceof DarwinTunAdapter) {
-                        /*-
-                         * MacOS 不会添加默认网关路由.
-                         * sudo route add -net 198.18.0.0/24 198.18.0.1
-                         */
-                        final InetAddress gw = of.getAddress();
-                        final int prefix = of.getNetworkPrefixLength();
-                        final InetAddress dst = NetUtils2.getNetworkAddress(gw, prefix);
-                        DarwinNetworkRoute.add(dst, prefix, gw, ifname);
-
                         // log.info("networksetup -setdnsservers \"Wi-Fi\" 127.0.0.1(empty)");
                         // log.info("sudo killall -HUP mDNSResponder;");
                         DarwinDnsUtils.addDnsServerAndCleanupOnShutdown(new String[]{"::1", "127.0.0.1"});

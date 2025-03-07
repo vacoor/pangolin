@@ -1,9 +1,12 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
 import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
+import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.ctl_info;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.sockaddr_ctl;
 import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
+import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
+import com.google.common.collect.Sets;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import com.sun.jna.Structure;
@@ -11,7 +14,10 @@ import com.sun.jna.ptr.IntByReference;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.nio.ByteBuffer;
+import java.util.Set;
 
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfTun.UTUN_CONTROL_NAME;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfTun.UTUN_OPT_IFNAME;
@@ -118,7 +124,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
 
     /* ********************** */
 
-    public static DarwinTunAdapter open(String name, int mtu) throws IOException {
+    public static DarwinTunAdapter open(String name, int mtu, InterfaceAddressEx... bindings) throws IOException {
         final int scUnit = nameToNum(name);
 
         // create socket
@@ -155,9 +161,24 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
             mtuToUse = DarwinNetworkInterfaceEx.getMTU(skfd, ifname);
         }
 
-        return new DarwinTunAdapter(skfd, ifname, mtuToUse);
-    }
+        final DarwinTunAdapter adapter = new DarwinTunAdapter(skfd, ifname, mtuToUse);
+        final Set<InetAddress> netDst = Sets.newHashSet();
+        for (InterfaceAddressEx binding : bindings) {
+            adapter.addInterfaceAddress(binding);
 
+            /*-
+             * MacOS 不会添加默认网关路由.
+             * sudo route add -net 198.18.0.0/24 198.18.0.1
+             */
+            final InetAddress gw = binding.getAddress();
+            final int prefix = binding.getNetworkPrefixLength();
+            final InetAddress dst = NetUtils2.getNetworkAddress(gw, prefix);
+            if (netDst.add(dst) && dst instanceof Inet4Address) {
+                DarwinNetworkRoute.add(dst, prefix, gw, ifname);
+            }
+        }
+        return adapter;
+    }
 
     private static int nameToNum(final String name) {
         final int index;

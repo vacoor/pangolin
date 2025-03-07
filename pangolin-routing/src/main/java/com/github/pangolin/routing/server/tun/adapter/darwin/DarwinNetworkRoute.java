@@ -22,6 +22,7 @@ public class DarwinNetworkRoute {
     private static final int RT_MSGHDR_SIZE = new rt_msghdr(new Pointer(0)).size();
     private static final int SOCKADDR_DL_SIZE = new sockaddr_dl(new Pointer(0)).size();
     private static final int SOCKADDR_IN_SIZE = 16;
+    private static final int SOCKADDR_IN6_SIZE = new sockaddr_in6().size();
 
 
     public static void add(final InetAddress dst, final int prefix, final InetAddress gw, final String ifname) {
@@ -54,7 +55,9 @@ public class DarwinNetworkRoute {
     private static void route(final byte rtm_type, final short rtm_index,
                               final InetAddress dst, final InetAddress gw,
                               final InetAddress netmask) {
-        final int size = RT_MSGHDR_SIZE + SOCKADDR_IN_SIZE * 3 + (rtm_index == 0 ? 0 : SOCKADDR_DL_SIZE);
+        final int sockAddrSize = dst instanceof Inet6Address ? SOCKADDR_IN6_SIZE : SOCKADDR_IN_SIZE;
+        System.out.println("SockAddrSize=" + sockAddrSize);
+        final int size = RT_MSGHDR_SIZE + sockAddrSize * 3 + (rtm_index == 0 ? 0 : SOCKADDR_DL_SIZE);
         final Memory buffer = new Memory(size * 1);
 
         int offset = 0;
@@ -95,7 +98,7 @@ public class DarwinNetworkRoute {
 
         final int writtenBytes = LibC.write(fd, buffer, offset);
         if (writtenBytes != offset) {
-            throw new IllegalStateException("部分成功");
+            throw new IllegalStateException("部分成功: " + offset + " != " + writtenBytes);
         }
         LibC.close(fd);
     }
