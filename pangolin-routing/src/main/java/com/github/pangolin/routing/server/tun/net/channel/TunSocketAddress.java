@@ -5,12 +5,12 @@ import java.net.SocketAddress;
 
 public class TunSocketAddress extends SocketAddress {
     private static final long serialVersionUID = -584786182484350484L; // NOSONAR
-    private final String ifName;
+    private final String ifname;
     private final InetAddress address;
     private final int prefix;
 
-    public TunSocketAddress(final String ifName, final InetAddress address, final int prefix) {
-        this.ifName = ifName;
+    public TunSocketAddress(final String ifname, final InetAddress address, final int prefix) {
+        this.ifname = ifname;
         this.address = address;
         this.prefix = prefix;
     }
@@ -21,7 +21,7 @@ public class TunSocketAddress extends SocketAddress {
      * @return the name of the tun device
      */
     public String ifName() {
-        return ifName;
+        return ifname;
     }
 
     public InetAddress getAddress() {
@@ -35,6 +35,6 @@ public class TunSocketAddress extends SocketAddress {
     @Override
     public String toString() {
         // return Objects.requireNonNullElse(ifName, "");
-        return ifName;
+        return ifname;
     }
 }

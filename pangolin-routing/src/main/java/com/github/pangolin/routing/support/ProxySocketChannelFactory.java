@@ -79,7 +79,6 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
         if (handlers.length < 1) {
             return null;
         }
-        System.out.println("Handlers -> " + handlers.length);
         int i = 0;
         for (ChannelHandler transport : handlers) {
             if (i > 5) {

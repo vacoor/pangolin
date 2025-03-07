@@ -113,7 +113,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
      */
     @Override
     protected void destroy0() {
-        LibC.close(fd);
+        close(fd);
     }
 
     /* ********************** */

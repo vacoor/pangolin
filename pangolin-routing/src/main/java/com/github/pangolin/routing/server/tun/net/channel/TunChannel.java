@@ -87,23 +87,8 @@ public class TunChannel extends AbstractChannel {
         } else {
             device = LinuxTunAdapter.open(ifname, mtu);
         }
-        log.info("Open tun adapter: {}", device);
-        InterfaceAddressEx of = InterfaceAddressEx.of("198.18.0.1", 24);
-        ((AbstractTunAdapter) device).setInterfaceAddress(of);
-        ((AbstractTunAdapter) device).addInterfaceAddress(InterfaceAddressEx.of("2001:2::", 48));
+        log.info("TUN adapter initialized: {}", ifname);
 
-
-        if (PlatformDependent.isOsx()) {
-            final InetAddress gw = of.getAddress();
-            final int prefix = of.getNetworkPrefixLength();
-            final InetAddress dst = NetUtils2.getNetworkAddress(gw, prefix);
-
-            /*-
-             * MacOS 不会添加默认网关路由.
-             * sudo route add -net 198.18.0.0/24 198.18.0.1
-             */
-            DarwinNetworkRoute.add(dst, prefix, gw, ifname);
-        }
     }
 
 

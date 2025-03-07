@@ -1,7 +1,5 @@
 package com.github.pangolin.routing;
 
-import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
-
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.context.RouteContextFactory;
@@ -15,30 +13,17 @@ import com.github.pangolin.routing.server.extra.ProxyAutoConfigurationServerHand
 import com.github.pangolin.routing.server.extra.SwitchyRuleConfigurationServerHandler;
 import com.github.pangolin.routing.server.fakedns.FakeDnsAcceptorFactory;
 import com.github.pangolin.routing.server.tun.TunAcceptorFactory;
+import com.github.pangolin.routing.upstream.*;
 import com.github.pangolin.routing.upstream.stats.StatsAware;
 import com.github.pangolin.routing.upstream.stats.StatsUpstreamCombiner;
 import com.github.pangolin.routing.upstream.stats.StatsUpstreamFactory;
-import com.github.pangolin.routing.upstream.DirectUpstream;
-import com.github.pangolin.routing.upstream.DropUpstream;
-import com.github.pangolin.routing.upstream.RejectUpstream;
-import com.github.pangolin.routing.upstream.Upstream;
-import com.github.pangolin.routing.upstream.UpstreamCombiner;
-import com.github.pangolin.routing.upstream.UpstreamCombinersAware;
-import com.github.pangolin.routing.upstream.UpstreamFactoriesAware;
-import com.github.pangolin.routing.upstream.UpstreamFactory;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import com.netflix.loadbalancer.LoadBalancerStats;
 import com.sun.jna.Platform;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
+import io.netty.channel.*;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.socket.SocketChannel;
@@ -55,7 +40,8 @@ import java.net.URL;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
-import java.util.Set;
+
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 @Slf4j
 public class RouteApplication {
@@ -222,38 +208,13 @@ public class RouteApplication {
 
         app.channelGroup.add(new FakeDnsAcceptorFactory().apply(0, "FakeDNS").start(context).channel());
 
-        final Set<String> bypass = Sets.newTreeSet();
-        for (Upstream upstream : context.upstreams()) {
-            final SocketAddress address = upstream.address();
-            if (!upstream.isVirtual() && address instanceof InetSocketAddress) {
-                final InetSocketAddress addr = (InetSocketAddress) address;
-                if (!addr.isUnresolved()) {
-                    final String hostAddress = addr.getAddress().getHostAddress();
-//                    System.out.println(upstream.name() + " -> " + addr);
-                    bypass.add(hostAddress);
-                }
-            }
-        }
-
-        System.out.println("Bypass = " + bypass);
-
         if (args.length > 0 && "tun".equalsIgnoreCase(args[0])) {
             final String defName = Platform.isMac() ? "utun8" : (Platform.isLinux() ? "tun8" : "以太网 P");
             final String ifname = args.length > 1 ? args[1] : defName;
-            app.channelGroup.add(new TunAcceptorFactory().apply(0, ifname).start(context).addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(final ChannelFuture future) throws Exception {
-                    if (future.isSuccess()) {
-                        log.info("TUN adapter started on: {}", ifname);
-                    } else {
-                        log.error("Tun adapter bound error: {}", future.cause().getMessage(), future.cause());
-                    }
-                }
-            }).channel());
+            app.channelGroup.add(new TunAcceptorFactory().apply(0, ifname).start(context).channel());
         }
 
         app.await();
-//        LinuxTunAdapter.main(args);
-//        DarwinTunAdapter.main(args);
     }
+
 }

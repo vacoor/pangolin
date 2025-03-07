@@ -4,9 +4,13 @@ import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.server.acceptor.Acceptor;
 import com.github.pangolin.routing.server.acceptor.AcceptorFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
+import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
+import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.TunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinDnsUtils;
+import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinNetworkRoute;
 import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinTunAdapter;
+import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
 import com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterfaceEx;
 import com.github.pangolin.routing.server.tun.adapter.windows.WindowsTunAdapter;
 import com.github.pangolin.routing.server.tun.net.channel.TunAddress;
@@ -14,7 +18,6 @@ import com.github.pangolin.routing.server.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.server.tun.net.handler.IpPacketCodec;
 import com.github.pangolin.routing.server.tun.net.handler.Tcp4PacketHandler;
 import com.github.pangolin.routing.support.SocketChannelFactory;
-import com.sun.jna.Platform;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import lombok.extern.slf4j.Slf4j;
@@ -60,20 +63,36 @@ public class TunAcceptorFactory implements AcceptorFactory {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
-                    log.info("Tun device started: {}", ifname);
-                    if (Platform.isMac()) {
-                        // log.info("networksetup -setdnsservers \"Wi-Fi\" 127.0.0.1(empty)");
-                        // log.info("sudo killall -HUP mDNSResponder;");
-                    }
+                    final TunAdapter device = ((TunChannel) future.channel()).device();
+
+                    InterfaceAddressEx of = InterfaceAddressEx.of("198.18.0.1", 24);
+                    ((AbstractTunAdapter) device).setInterfaceAddress(of);
+                    ((AbstractTunAdapter) device).addInterfaceAddress(InterfaceAddressEx.of("2001:2::", 48));
+
                     final TunAdapter adapter = ((TunChannel) future.channel()).device();
                     if (adapter instanceof WindowsTunAdapter) {
-                        ((WindowsTunAdapter) adapter).setInterfaceDns(new InetAddress[]{
-                                InetAddress.getByName("127.0.0.1")
-                        });
+                        ((WindowsTunAdapter) adapter).setInterfaceDns(new InetAddress[]{InetAddress.getByName("127.0.0.1")});
                         WindowsNetworkInterfaceEx.flushDnsCache();
                     } else if (adapter instanceof DarwinTunAdapter) {
+                        /*-
+                         * MacOS 不会添加默认网关路由.
+                         * sudo route add -net 198.18.0.0/24 198.18.0.1
+                         */
+                        final InetAddress gw = of.getAddress();
+                        final int prefix = of.getNetworkPrefixLength();
+                        final InetAddress dst = NetUtils2.getNetworkAddress(gw, prefix);
+                        DarwinNetworkRoute.add(dst, prefix, gw, ifname);
+
+                        // log.info("networksetup -setdnsservers \"Wi-Fi\" 127.0.0.1(empty)");
+                        // log.info("sudo killall -HUP mDNSResponder;");
                         DarwinDnsUtils.addDnsServerAndCleanupOnShutdown(new String[]{"::1", "127.0.0.1"});
                     }
+                }
+
+                if (future.isSuccess()) {
+                    log.info("TUN adapter started on: {}", ifname);
+                } else {
+                    log.error("Tun adapter bound error: {}", future.cause().getMessage(), future.cause());
                 }
             }
         });

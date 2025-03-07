@@ -58,10 +58,8 @@ public class DatagramFakeDnsServerHandler extends SimpleChannelInboundHandler<Da
                 "www.msftconnecttest.com"
         );
         if (!msInetTestDomains.contains(domain) && checker.test(domain)) {
-            System.out.println("Lookup: " + domain);
             DatagramDnsResponse lookup = engine.lookup(query);
             if (null != lookup) {
-                System.out.println("Write: " + domain);
                 ctx.writeAndFlush(lookup);
                 return;
             }
