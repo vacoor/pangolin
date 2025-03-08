@@ -2,7 +2,6 @@ package com.github.pangolin.routing.server.tun.adapter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.List;
 
 public abstract class AbstractTunAdapter<T extends NetworkInterfaceEx> implements TunAdapter {
     protected final T nix;
@@ -30,30 +29,11 @@ public abstract class AbstractTunAdapter<T extends NetworkInterfaceEx> implement
         write0(packet);
     }
 
-    public List<InterfaceAddressEx> getInterfaceAddresses() {
-        checkOpen();
-        return nix.getInterfaceAddresses();
-    }
-
-    public void setInterfaceAddress(final InterfaceAddressEx address) {
-        checkOpen();
-        nix.setInterfaceAddress(address);
-    }
-
     public void addInterfaceAddress(final InterfaceAddressEx address) {
         checkOpen();
         nix.addInterfaceAddress(address);
     }
 
-    public void deleteInterfaceAddress(final InterfaceAddressEx address) {
-        checkOpen();
-        nix.deleteInterfaceAddress(address);
-    }
-
-    public void flushInterfaceAddresses() {
-        checkOpen();
-        nix.flushInterfaceAddresses();
-    }
 
     protected void checkOpen() {
         if (closed) {

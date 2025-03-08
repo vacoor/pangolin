@@ -391,30 +391,18 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
 
     private static ifaddrs getifaddrs0(final ifaddrs ifa) {
         if (0 != getifaddrs(ifa)) {
-            throwUnchecked(Native.getLastError());
+            throwLastErrorException(Native.getLastError());
         }
         return ifa;
     }
 
     private static <S extends Structure> S ioctl0(final int fd, final NativeLong request, final S argp) {
         if (0 != ioctl(fd, request, argp)) {
-            throwUnchecked(Native.getLastError());
+            throwLastErrorException(Native.getLastError());
         }
         return argp;
     }
 
-    private static void throwUnchecked(final int errno) {
-        final String errmsg = String.format("[%s] %s", errno, strerror(errno));
-        throw new DarwinException(errno, errmsg);
-    }
-
-    private static class DarwinException extends LastErrorException {
-
-        DarwinException(final int errno, final String errmsg) {
-            super(errno, errmsg);
-        }
-
-    }
 
     public static void main(String[] args) throws Exception {
         final Method getDefault = NetworkInterface.class.getDeclaredMethod("getDefault");

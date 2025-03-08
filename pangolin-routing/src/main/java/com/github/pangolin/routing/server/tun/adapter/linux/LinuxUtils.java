@@ -1,5 +1,7 @@
 package com.github.pangolin.routing.server.tun.adapter.linux;
 
+import com.sun.jna.LastErrorException;
+
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -9,6 +11,7 @@ import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockad
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in6;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET6;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 
 class LinuxUtils {
 
@@ -53,5 +56,18 @@ class LinuxUtils {
         } catch (final UnknownHostException e) {
             throw new IllegalArgumentException(e);
         }
+    }
+
+    public static void throwLastErrorException(final int errno) {
+        final String errmsg = String.format("[%s] %s", errno, strerror(errno));
+        throw new LinuxLastErrorException(errno, errmsg);
+    }
+
+    private static class LinuxLastErrorException extends LastErrorException {
+
+        LinuxLastErrorException(final int errno, final String errmsg) {
+            super(errno, errmsg);
+        }
+
     }
 }

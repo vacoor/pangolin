@@ -210,8 +210,13 @@ public class DarwinDnsUtils {
         CF.CFDictionarySetValue(dnsDict, CFSTR("ServerAddresses"), dnsAddresses);
 
         // 应用配置(仅内存有效).
-        return SC.SCDynamicStoreSetValue(store, dnsKey, dnsDict);
+        try {
+            return SC.SCDynamicStoreSetValue(store, dnsKey, dnsDict);
+        } finally {
+            CF.CFRelease(dnsDict);
+        }
     }
+
 
     private boolean flushDnsCache0(final SCDynamicStoreRef store) {
         // 通知系统网络配置更新，间接触发缓存刷新.(默认修改了DNS就会触发, 不需要调用)

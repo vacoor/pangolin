@@ -1,5 +1,7 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
+import com.sun.jna.LastErrorException;
+
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -9,6 +11,7 @@ import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.socka
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in6;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET6;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 
 class DarwinUtils {
 
@@ -57,4 +60,16 @@ class DarwinUtils {
         }
     }
 
+    public static void throwLastErrorException(final int errno) {
+        final String errmsg = String.format("[%s] %s", errno, strerror(errno));
+        throw new DarwinLastErrorException(errno, errmsg);
+    }
+
+    private static class DarwinLastErrorException extends LastErrorException {
+
+        DarwinLastErrorException(final int errno, final String errmsg) {
+            super(errno, errmsg);
+        }
+
+    }
 }

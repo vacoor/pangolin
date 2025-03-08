@@ -3,7 +3,7 @@ package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 /**
  * <code>net/if_utun.h</code>
  */
-public interface IfTun {
+public interface IfUtun {
 
     /**
      * Name registered by the utun kernel control

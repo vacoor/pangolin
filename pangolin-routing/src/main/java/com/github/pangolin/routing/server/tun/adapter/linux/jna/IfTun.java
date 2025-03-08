@@ -9,6 +9,8 @@ public interface IfTun {
 
     NativeLong TUNSETIFF = new NativeLong(0x400454caL);
 
+    NativeLong TUNGETIFF = new NativeLong(0x800454d2L);
+
     /* TUNSETIFF ifr flags. */
 
     /**

@@ -335,7 +335,7 @@ public class LinuxNetworkInterfaceEx extends UnixNetworkInterfaceEx implements N
             localAddr.nl_pid = API_INSTANTCE.getpid();
 
             if (API_INSTANTCE.bind(sockfd, localAddr, localAddr.size()) < 0) {
-                throwUnchecked(Native.getLastError());
+                throwLastErrorException(Native.getLastError());
             }
 
             int msgSize = 32; // nlmsghdr(16) + ifaddrmsg(8) + rtattr(4) + address(4)
@@ -393,7 +393,7 @@ public class LinuxNetworkInterfaceEx extends UnixNetworkInterfaceEx implements N
             // final int written = API_INSTANTCE.sendmsg(sockfd, msg, 0);
             final int written = API_INSTANTCE.send(sockfd, hl.getPointer(), offset, 0);
             if (written < 0) {
-                throwUnchecked(Native.getLastError());
+                throwLastErrorException(Native.getLastError());
             }
         } finally {
             close(sockfd);
@@ -449,6 +449,13 @@ public class LinuxNetworkInterfaceEx extends UnixNetworkInterfaceEx implements N
 
     // ------------------------ END IPv6 related ------------------------
 
+    static ifaddrs getifaddrs0(final ifaddrs ifa) {
+        if (getifaddrs(ifa) < 0) {
+            throwLastErrorException(Native.getLastError());
+        }
+        return ifa;
+    }
+
     private static int if_nametoindex0(final int fd, final String ifname) {
         final ifreq ifr = new ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_ifindex");
@@ -457,41 +464,19 @@ public class LinuxNetworkInterfaceEx extends UnixNetworkInterfaceEx implements N
         // return if_nametoindex(ifname);
     }
 
-    private static ifaddrs getifaddrs0(final ifaddrs ifa) {
-        if (0 != getifaddrs(ifa)) {
-            throwUnchecked(Native.getLastError());
-        }
-        return ifa;
-    }
-
     private static int if_nametoindex0(final String ifname) {
         final int index = if_nametoindex(ifname);
         if (0 == index) {
-            final int errno = Native.getLastError();
-            // final String errmsg = strerror(errno);
-            throw new LastErrorException(errno);
+            throwLastErrorException(Native.getLastError());
         }
         return index;
     }
 
     private static <S extends Structure> S ioctl0(final int fd, final NativeLong request, final S argp) {
-        if (0 != ioctl(fd, request, argp)) {
-            throwUnchecked(Native.getLastError());
+        if (ioctl(fd, request, argp) < 0) {
+            throwLastErrorException(Native.getLastError());
         }
         return argp;
-    }
-
-    private static void throwUnchecked(final int errno) {
-        final String errmsg = String.format("[%s] %s", errno, strerror(errno));
-        throw new LinuxException(errno, errmsg);
-    }
-
-    private static class LinuxException extends LastErrorException {
-
-        LinuxException(final int errno, final String errmsg) {
-            super(errno, errmsg);
-        }
-
     }
 
 }

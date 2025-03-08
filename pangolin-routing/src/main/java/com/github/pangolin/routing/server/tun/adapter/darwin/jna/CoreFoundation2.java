@@ -9,7 +9,7 @@ import java.lang.reflect.Proxy;
 /**
  *
  */
-public interface CoreFoundation2 extends CoreFoundation {
+public interface CoreFoundation2 extends com.sun.jna.platform.mac.CoreFoundation {
 
     CoreFoundation2 INSTANCE = Native.load("CoreFoundation", CoreFoundation2.class);
 

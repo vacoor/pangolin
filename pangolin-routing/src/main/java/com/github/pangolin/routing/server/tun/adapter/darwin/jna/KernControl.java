@@ -41,7 +41,7 @@ public interface KernControl {
      * controller to identify several instances of the controller.
      */
     @SuppressWarnings({"java:S109", "java:S116", "java:S1104", "java:S2160"})
-    @Structure.FieldOrder({"sc_len", "sc_family", "ss_sysaddr", /*"sc_id", "sc_unit",*/ "sc_reserved"})
+    @Structure.FieldOrder({"sc_len", "sc_family", "ss_sysaddr", "sc_id", "sc_unit", "sc_reserved"})
     class sockaddr_ctl extends Structure {
         /**
          * The length of the structure.
@@ -61,22 +61,24 @@ public interface KernControl {
         /**
          * Controller unique identifier.
          */
-//        public int sc_id;
+        public int sc_id;
 
         /**
          * Kernel controller private unit number.
          */
-//        public int sc_unit;
+        public int sc_unit;
 
         /**
          * Reserved, must be set to zero.
          */
-        public int[] sc_reserved = new int[7];
+        public int[] sc_reserved = new int[5];
 
-        public sockaddr_ctl(final byte scFamily, final short sysaddr, final int... reserved) {
+        public sockaddr_ctl(final byte scFamily, final short sysaddr, final int scId, final int scUnit, final int... reserved) {
 //            sc_len = (byte) size();
             sc_family = scFamily;
             ss_sysaddr = sysaddr;
+            sc_id = scId;
+            sc_unit = scUnit;
             System.arraycopy(reserved, 0, sc_reserved, 0, reserved.length);
         }
     }
