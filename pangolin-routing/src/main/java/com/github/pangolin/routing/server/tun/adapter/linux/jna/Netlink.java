@@ -24,6 +24,21 @@ public interface Netlink {
     int NLM_F_APPEND = 0x800;    /* Add to end of list		*/
 
     /**
+     * https://github.com/torvalds/linux/blob/master/include/uapi/linux/netlink.h#L37
+     */
+    // 定义Netlink地址结构体
+    @Structure.FieldOrder({"nl_family", "nl_pad", "nl_pid", "nl_groups"})
+    class sockaddr_nl extends Structure {
+        public short nl_family;  // AF_NETLINK=16
+        public short nl_pad;     // 填充字段
+        public int nl_pid;       // 进程PID（用户态设为0）
+        public int nl_groups;    // 多播组掩码
+
+        public static class ByRef extends sockaddr_nl implements ByReference {
+        }
+    }
+
+    /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/netlink.h#L52">nlmsghdr</a>
      */
     @Structure.FieldOrder({"nlmsg_len", "nlmsg_type", "nlmsg_flags", "nlmsg_seq", "nlmsg_pid"})
@@ -43,16 +58,6 @@ public interface Netlink {
         }
     }
 
-    // 定义Netlink地址结构体
-    @Structure.FieldOrder({"nl_family", "nl_pad", "nl_pid", "nl_groups"})
-    class sockaddr_nl extends Structure {
-        public short nl_family;  // AF_NETLINK=16
-        public short nl_pad;     // 填充字段
-        public int nl_pid;       // 进程PID（用户态设为0）
-        public int nl_groups;    // 多播组掩码
-
-        public static class ByRef extends sockaddr_nl implements ByReference {}
-    }
 
 
     // 地址信息结构
@@ -65,28 +70,13 @@ public interface Netlink {
         public int ifa_index;      // 网卡索引（通过if_nametoindex获取）
 
         public ifaddrmsg() {
-            super(ALIGN_NONE);
         }
 
         public ifaddrmsg(final Pointer p) {
-            super(p, ALIGN_NONE);
-        }
-    }
-
-    // 属性结构（用于携带IP地址）
-    @Structure.FieldOrder({"rta_type", "rta_len"})
-    class rtattr extends Structure {
-        public short rta_type;   // IFA_LOCAL=1（本地地址）
-        public short rta_len;    // 属性长度
-//        public byte[] rta_data;  // IP地址（4字节）
-
-        public rtattr() {
-        }
-
-        public rtattr(final Pointer p) {
             super(p);
         }
     }
+
 
     // 映射 struct msghdr
     public class MsgHdr extends Structure {
@@ -107,7 +97,8 @@ public interface Netlink {
                     "msg_control", "msg_controllen", "msg_flags");
         }
 
-        public static class ByRef extends MsgHdr implements ByReference {}
+        public static class ByRef extends MsgHdr implements ByReference {
+        }
     }
 
     // 映射 struct iovec
@@ -123,7 +114,10 @@ public interface Netlink {
             return Arrays.asList("iov_base", "iov_len");
         }
 
-        public static class ByRef extends IOVec implements ByReference {}
+        public static class ByRef extends IOVec implements ByReference {
+        }
     }
+
+
 
 }

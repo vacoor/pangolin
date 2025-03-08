@@ -18,6 +18,7 @@ import java.util.List;
 import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.ifaddrs;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Sockios.*;
 import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
@@ -85,112 +86,7 @@ public class LinuxNetworkInterfaceEx extends UnixNetworkInterfaceEx implements N
 
     @Override
     protected void addInterfaceAddress4(final Inet4Address address, final int prefix) {
-        /*
-        int RTM_NEWADDR = 20;
-
-        int sockfd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
-        try {
-            // 绑定地址
-            final sockaddr_nl local_addr = new sockaddr_nl();
-            local_addr.nl_family = AF_NETLINK;
-             local_addr.nl_pid = API_INSTANTCE.getpid();
-//            local_addr.nl_pid = 0;
-
-            if (API_INSTANTCE.bind(sockfd, local_addr, local_addr.size()) != 0) {
-                throw new RuntimeException("Netlink send failed: " + strerror(Native.getLastError()));
-            }
-
-            final int ifindex = if_nametoindex0(ifname); // 通过ioctl获取网卡索引
-            System.out.println("ifindex=" + ifindex);
-
-            // 计算消息总长度
-            int msgSize = 32; // nlmsghdr(16) + ifaddrmsg(8) + rtattr(8)
-
-            // 初始化消息内存
-            Memory buffer = new Memory(msgSize);
-            int offset = 0;
-
-            final nlmsghdr hl = new nlmsghdr(buffer.share(offset));
-            hl.nlmsg_len = msgSize;
-            hl.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE;
-            hl.nlmsg_type = (short) RTM_NEWADDR;
-            hl.write();
-
-            offset += hl.size();
-            System.out.println(offset);
-
-            // 填充ifaddrmsg
-            final ifaddrmsg ifa = new ifaddrmsg(buffer.share(offset));
-            ifa.ifa_family = AF_INET;
-            ifa.ifa_prefixlen = (byte) prefix;
-            ifa.ifa_index = ifindex;
-            ifa.ifa_flags = (byte) 0x80;
-            ifa.ifa_scope = 0;
-            ifa.write();
-
-            offset += ifa.size();
-            System.out.println(offset + " -> " + ifa.ifa_index);
-
-            // 填充rtattr（IP地址）
-            rtattr rta = new rtattr(buffer.share(offset));
-            rta.rta_type = 2;          // IFA_LOCAL
-            rta.rta_len = 4 + 4;
-            rta.write();
-
-            offset += rta.size();
-
-            // rta.rta_data = address.getAddress(); // IP地址
-            buffer.write(offset, address.getAddress(), 0, 4);
-
-            offset += address.getAddress().length;
-            System.out.println(offset);
-
-            final sockaddr_nl.ByRef dest_addr = new sockaddr_nl.ByRef();
-            dest_addr.nl_family = AF_NETLINK;       // AF_NETLINK
-            dest_addr.nl_pid = 0;
-            dest_addr.nl_groups = 0;
-//            dest_addr.write();
-            System.out.println("dest=" + dest_addr.size());
-
-            IOVec.ByRef ioVec = new IOVec.ByRef();
-            ioVec.iov_base = buffer.getPointer(0);
-            ioVec.iov_len = offset;
-//            ioVec.write();
-            System.out.println("iv=" + ioVec.size());
-
-            MsgHdr msg = new MsgHdr();
-            msg.msg_name = dest_addr;
-            msg.msg_namelen = new NativeLong(dest_addr.size());
-            msg.msg_iov = ioVec;
-            msg.msg_iovlen = new NativeLong(1);
-            msg.msg_control = null;
-            msg.msg_controllen = new NativeLong(0);
-            msg.msg_flags = 0;
-//            msg.write();
-
-            System.out.println("msg=" + msg.size());
-
-            int ret = API_INSTANTCE.sendmsg(sockfd, msg, 0);
-            if (ret != 0) {
-                throw new RuntimeException("Netlink send failed: " + strerror(Native.getLastError()));
-            }
-        } finally {
-            close(sockfd);
-        }
-        */
-        final int fd = fd4();
-        try {
-            ioctl0(fd, SIOCSIFADDR, _ifreq(ifname, address));
-            // 多个 IP 需要通过添加子网卡实现.
-            // throw new UnsupportedOperationException();
-        } finally {
-            close(fd);
-        }
-    }
-
-    public static int nlmsgAlign(int len) {
-        final int ALIGN = 4;  // NLMSG_ALIGN 通常为 4 字节对齐 ‌:ml-citation{ref="3,4" data="citationList"}
-        return (len + ALIGN - 1) & ~(ALIGN - 1);
+        addInterfaceAddress4(ifname, address, prefix);
     }
 
 
@@ -422,6 +318,93 @@ public class LinuxNetworkInterfaceEx extends UnixNetworkInterfaceEx implements N
         // FIXME [25] Inappropriate ioctl for device
         ioctl0(fd, SIOCDIFADDR, _ifreq(ifname, address));
     }
+
+    private static void addInterfaceAddress4(final String ifname, final Inet4Address addr, final int prefix) {
+        _netlinkAddresses4(ifname, addr, prefix, false);
+    }
+
+    private static void _netlinkAddresses4(final String ifname, final Inet4Address addr, final int prefix, final boolean delete) {
+        int IFA_F_PERMANENT = 0x80;
+        int IFA_LOCAL = 0x02;
+
+        final byte[] address = addr.getAddress();
+        final int sockfd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+        try {
+            final sockaddr_nl localAddr = new sockaddr_nl();
+            localAddr.nl_family = AF_NETLINK;
+            localAddr.nl_pid = API_INSTANTCE.getpid();
+
+            if (API_INSTANTCE.bind(sockfd, localAddr, localAddr.size()) < 0) {
+                throwUnchecked(Native.getLastError());
+            }
+
+            int msgSize = 32; // nlmsghdr(16) + ifaddrmsg(8) + rtattr(4) + address(4)
+
+            // 初始化消息内存
+            final Memory buffer = new Memory(msgSize);
+            int offset = 0;
+
+            final nlmsghdr hl = new nlmsghdr(buffer.share(offset));
+            hl.nlmsg_len = msgSize;
+            hl.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE;
+            hl.nlmsg_type = (short) (!delete ? RTM_NEWADDR : RTM_DELADDR);
+            hl.write();
+            offset += hl.size();
+
+            final ifaddrmsg ifa = new ifaddrmsg(buffer.share(offset));
+            ifa.ifa_family = AF_INET;
+            ifa.ifa_prefixlen = (byte) prefix;
+            ifa.ifa_index = if_nametoindex0(ifname);
+            if (!delete) {
+                ifa.ifa_flags = (byte) IFA_F_PERMANENT;
+                ifa.ifa_scope = 0;
+            }
+            ifa.write();
+            offset += ifa.size();
+
+            // 填充rtattr（IP地址）
+            rtattr rta = new rtattr(buffer.share(offset));
+            rta.rta_len = (byte) (rta.size() + address.length);
+            rta.rta_type = (short) IFA_LOCAL;
+            rta.write();
+            offset += rta.size();
+
+            buffer.write(offset, address, 0, address.length);
+            offset += address.length;
+
+            final sockaddr_nl.ByRef dest_addr = new sockaddr_nl.ByRef();
+            dest_addr.nl_family = AF_NETLINK;
+            dest_addr.nl_pid = 0;
+            dest_addr.nl_groups = 0;
+
+            final IOVec.ByRef ioVec = new IOVec.ByRef();
+            ioVec.iov_base = buffer;
+            ioVec.iov_len = offset;
+
+            final MsgHdr msg = new MsgHdr();
+            msg.msg_name = dest_addr;
+            msg.msg_namelen = new NativeLong(dest_addr.size());
+            msg.msg_iov = ioVec;
+            msg.msg_iovlen = new NativeLong(1);
+            msg.msg_control = null;
+            msg.msg_controllen = new NativeLong(0);
+            msg.msg_flags = 0;
+
+            // final int written = API_INSTANTCE.sendmsg(sockfd, msg, 0);
+            final int written = API_INSTANTCE.send(sockfd, hl.getPointer(), offset, 0);
+            if (written < 0) {
+                throwUnchecked(Native.getLastError());
+            }
+        } finally {
+            close(sockfd);
+        }
+    }
+
+    private static int nlmsgAlign(final int len) {
+        final int ALIGN = 4;  // NLMSG_ALIGN 通常为 4 字节对齐 ‌:ml-citation{ref="3,4" data="citationList"}
+        return (len + ALIGN - 1) & ~(ALIGN - 1);
+    }
+
 
     private static ifreq _ifreq(final String ifname, final Inet4Address addr) {
         final ifreq ifr = new ifreq(ifname);

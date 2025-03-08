@@ -277,13 +277,11 @@ public final class LibC {
 
         void freeifaddrs(final Structure ifp);
 
-        int bind(int sockfd, Netlink.sockaddr_nl addr, int addrlen);
+        int bind(int sockfd, Structure addr, int addrlen);
 
         int send(int sockfd, Pointer buf, int len, int flags);
 
-        int sendmsg(int sockfd, Netlink.MsgHdr buf, int flags);
-
-        int recv(int sockfd, byte[] buf, int size, int flag);
+        int sendmsg(int sockfd, Netlink.MsgHdr msg, int flags);
 
         int getpid();
 
