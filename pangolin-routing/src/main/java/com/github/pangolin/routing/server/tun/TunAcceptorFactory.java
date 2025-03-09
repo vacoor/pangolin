@@ -69,6 +69,7 @@ public class TunAcceptorFactory implements AcceptorFactory {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     final TunAdapter adapter = ((TunChannel) future.channel()).device();
+                    log.info("TUN adapter started on: {}", adapter.name());
 
                     if (adapter instanceof WindowsTunAdapter) {
                         // log.info("ipconfig /flushdns");
@@ -86,10 +87,6 @@ public class TunAcceptorFactory implements AcceptorFactory {
 //                        LinuxNetworkRoute.add("tun8", addr, 24, gw, false);
 
                     }
-                }
-
-                if (future.isSuccess()) {
-                    log.info("TUN adapter started on: {}", ifname);
                 } else {
                     log.error("Tun adapter bound error: {}", future.cause().getMessage(), future.cause());
                 }

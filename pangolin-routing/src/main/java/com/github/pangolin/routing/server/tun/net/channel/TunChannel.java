@@ -90,7 +90,7 @@ public class TunChannel extends AbstractChannel {
         } else {
             device = LinuxTunAdapter.open(ifname, mtu, bindings);
         }
-        log.info("TUN adapter initialized: {}", ifname);
+        log.info("TUN adapter initialized: {}", device.name());
 
     }
 
