@@ -16,6 +16,7 @@ import com.github.pangolin.routing.server.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.server.tun.net.handler.IpPacketCodec;
 import com.github.pangolin.routing.server.tun.net.handler.Tcp4PacketHandler;
 import com.github.pangolin.routing.support.SocketChannelFactory;
+import com.sun.jna.Platform;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import lombok.extern.slf4j.Slf4j;
@@ -30,7 +31,8 @@ public class TunAcceptorFactory implements AcceptorFactory {
 
     @Override
     public Acceptor apply(final int listenPort, final String... args) {
-        String ifname = args.length > 0 ? args[0] : "utun8";
+        final String defName = Platform.isWindows() ? "以太网 P" : null;
+        final String ifname = args.length > 0 ? args[0] : defName;
         return new Acceptor() {
             @Override
             public ChannelFuture start(final RouteContext context) throws Exception {

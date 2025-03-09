@@ -36,6 +36,7 @@ import org.springframework.boot.system.ApplicationHome;
 
 import java.io.File;
 import java.net.*;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
@@ -208,9 +209,8 @@ public class RouteApplication {
         app.channelGroup.add(new FakeDnsAcceptorFactory().apply(0, "FakeDNS").start(context).channel());
 
         if (args.length > 0 && "tun".equalsIgnoreCase(args[0])) {
-            final String defName = Platform.isMac() ? "utun8" : (Platform.isLinux() ? "tun8" : "以太网 P");
-            final String ifname = args.length > 1 ? args[1] : defName;
-            app.channelGroup.add(new TunAcceptorFactory().apply(0, ifname).start(context).channel());
+            final String[] args2 = Arrays.copyOfRange(args, 1, args.length);
+            app.channelGroup.add(new TunAcceptorFactory().apply(0, args2).start(context).channel());
         }
 
 
