@@ -108,13 +108,15 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
             throw new IOException("Unknown address family: " + addressFamily);
         }
 
-        final ByteBuffer buf = ByteBuffer.allocate(AF_BYTES + packet.remaining()
+        final ByteBuffer buf = ByteBuffer.allocate(
+                AF_BYTES + packet.remaining()
         ).put(new byte[]{
                 (byte) (addressFamily >> 24),
                 (byte) (addressFamily >> 16),
                 (byte) (addressFamily >> 8),
                 (byte) addressFamily
         }).put(packet);
+
         buf.flip();
 
         LibC.write(fd, buf, buf.remaining());
