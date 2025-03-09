@@ -111,13 +111,13 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
             final HttpMethod method = httpRequest.method();
             final SocketAddress clientAddress = ctx.channel().remoteAddress();
 
-            if (!this.authenticate(httpRequest)) {
-                log.warn("[HTTP] Respond not permitted to {}", clientAddress);
-                ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.UNAUTHORIZED)).addListener(ChannelFutureListener.CLOSE);
-                return;
-            }
-
             if (HttpMethod.CONNECT.equals(method)) {
+                if (!this.authenticate(httpRequest)) {
+                    log.warn("[HTTP] Respond not permitted to {}", clientAddress);
+                    ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.UNAUTHORIZED)).addListener(ChannelFutureListener.CLOSE);
+                    return;
+                }
+
                 /*-
                  * CONNECT uses a special form of request target, unique to this method,
                  * consisting of only the host and port number of the tunnel destination,
@@ -171,7 +171,12 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                     log.info("[HTTP] bad CONNECT request => {}", httpRequest.uri());
                     ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.BAD_REQUEST)).addListener(ChannelFutureListener.CLOSE);
                 }
-            } else {
+            } else if (httpRequest.headers().contains("Proxy-Connection")) {
+                if (!this.authenticate(httpRequest)) {
+                    log.warn("[HTTP] Respond not permitted to {}", clientAddress);
+                    ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.UNAUTHORIZED)).addListener(ChannelFutureListener.CLOSE);
+                    return;
+                }
                 /*- HTTP routing */
                 // GET http://www.baidu.com/ HTTP/1.1
                 // Host: www.baidu.com
@@ -210,6 +215,8 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                         log.info("[HTTP] Connection closed => {}:{}", address, port);
                     }
                 });
+            } else {
+                ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
             }
         } finally {
             ReferenceCountUtil.release(msg);
