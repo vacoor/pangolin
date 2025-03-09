@@ -161,7 +161,7 @@ public interface If {
     }
 
     /**
-     * netinet6/in6_var.h
+     * usr/include/netinet6/in6_var.h
      */
     @Structure.FieldOrder({"ifr_name", "ifr_ifru"})
     class in6_ifreq extends Structure {
@@ -240,7 +240,7 @@ public interface If {
         public byte sdl_alen;       /* link level address length */
         public byte sdl_slen;       /* link layer selector length */
         public byte[] sdl_data = new byte[12];   /* minimum work area, can be larger;
-         * contains both if name and ll address */
+                                                  * contains both if name and ll address */
 
         public sockaddr_dl(final Pointer p) {
             super(p);

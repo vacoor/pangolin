@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.upstream.spi;
 
-import com.github.pangolin.routing.handler.internal.client.WebSocketProxyHandler;
+import com.github.pangolin.routing.handler.client.WebSocketProxyHandler;
 import com.github.pangolin.routing.upstream.AbstractUpstream;
 import com.github.pangolin.routing.upstream.Upstream;
 import io.netty.channel.ChannelHandler;

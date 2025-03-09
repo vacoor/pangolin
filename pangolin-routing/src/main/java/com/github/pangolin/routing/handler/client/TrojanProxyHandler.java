@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.internal.client;
+package com.github.pangolin.routing.handler.client;
 
 import freework.codec.Hex;
 import io.netty.buffer.ByteBuf;
@@ -28,7 +28,7 @@ import java.security.NoSuchAlgorithmException;
  * @see <a href="https://trojan-gfw.github.io/trojan/protocol">The Trojan Protocol</a>
  */
 @Slf4j
-public class TrojanProxyHandshakeHandler extends ChannelDuplexHandler {
+public class TrojanProxyHandler extends ChannelDuplexHandler {
     private static final byte[] CRLF = {0x0D, 0x0A};
 
     private final SocketAddress proxyAddress;
@@ -36,7 +36,7 @@ public class TrojanProxyHandshakeHandler extends ChannelDuplexHandler {
 
     private volatile SocketAddress destinationAddress;
 
-    public TrojanProxyHandshakeHandler(final SocketAddress proxyAddress, final String password) {
+    public TrojanProxyHandler(final SocketAddress proxyAddress, final String password) {
         this.proxyAddress = ObjectUtil.checkNotNull(proxyAddress, "proxyAddress");
         this.password = password;
     }
@@ -98,13 +98,12 @@ public class TrojanProxyHandshakeHandler extends ChannelDuplexHandler {
          */
         buffer.writeBytes(getSecretKey(password));
         buffer.writeBytes(CRLF);
-        /*
         buffer.writeByte(Socks5CommandType.CONNECT.byteValue());
         if (sa.isUnresolved()) {
             buffer.writeByte(Socks5AddressType.DOMAIN.byteValue());
             Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.DOMAIN, sa.getHostString(), buffer);
         } else {
-            final String host = sa.address().getHostAddress();
+            final String host = sa.getAddress().getHostAddress();
             if (NetUtil.isValidIpV4Address(host)) {
                 buffer.writeByte(Socks5AddressType.IPv4.byteValue());
                 Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.IPv4, host, buffer);
@@ -112,15 +111,16 @@ public class TrojanProxyHandshakeHandler extends ChannelDuplexHandler {
                 buffer.writeByte(Socks5AddressType.IPv6.byteValue());
                 Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.IPv6, host, buffer);
             } else {
-                throw new ConnectException("unknown address type: " + sa.getClass().name());
+                throw new ConnectException("unknown address type: " + sa.getClass().getName());
             }
         }
         buffer.writeShort(sa.getPort());
-        */
+        /*
         buffer.writeByte(Socks5CommandType.UDP_ASSOCIATE.byteValue());
         buffer.writeByte(Socks5AddressType.IPv4.byteValue());
         Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.IPv4, "0.0.0.0", buffer);
         buffer.writeShort(0);
+        */
 
         buffer.writeBytes(CRLF);
         ctx.writeAndFlush(buffer);
@@ -132,10 +132,5 @@ public class TrojanProxyHandshakeHandler extends ChannelDuplexHandler {
         final byte[] bytes = null != password ? password.getBytes(StandardCharsets.UTF_8) : new byte[0];
         final byte[] hash = MessageDigest.getInstance("SHA-224").digest(bytes);
         return Hex.encode(hash).getBytes(StandardCharsets.UTF_8);
-    }
-
-    @Override
-    public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-        super.channelRead(ctx, msg);
     }
 }

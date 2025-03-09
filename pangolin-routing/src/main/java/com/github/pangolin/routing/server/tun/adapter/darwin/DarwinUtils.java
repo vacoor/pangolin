@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
 import com.sun.jna.LastErrorException;
+import com.sun.jna.Pointer;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;

@@ -3,13 +3,8 @@ package com.github.pangolin.routing.server.tun.adapter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-public abstract class AbstractTunAdapter<T extends NetworkInterfaceEx> implements TunAdapter {
-    protected final T nix;
+public abstract class AbstractTunAdapter implements TunAdapter {
     protected volatile boolean closed;
-
-    protected AbstractTunAdapter(final T nix) {
-        this.nix = nix;
-    }
 
     /**
      * {@inheritDoc}
@@ -28,12 +23,6 @@ public abstract class AbstractTunAdapter<T extends NetworkInterfaceEx> implement
         checkOpen();
         write0(packet);
     }
-
-    public void addInterfaceAddress(final InterfaceAddressEx address) {
-        checkOpen();
-        nix.addInterfaceAddress(address);
-    }
-
 
     protected void checkOpen() {
         if (closed) {

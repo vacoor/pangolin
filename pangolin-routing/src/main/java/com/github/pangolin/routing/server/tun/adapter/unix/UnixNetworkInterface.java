@@ -11,7 +11,7 @@ import java.net.InetAddress;
 /**
  *
  */
-public abstract class UnixNetworkInterfaceEx implements NetworkInterfaceEx {
+public abstract class UnixNetworkInterface implements NetworkInterfaceEx {
 
     @Override
     public void setInterfaceAddress(final InterfaceAddressEx address) {

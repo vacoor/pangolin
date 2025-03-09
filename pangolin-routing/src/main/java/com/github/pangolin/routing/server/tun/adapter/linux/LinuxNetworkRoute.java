@@ -1,12 +1,10 @@
 package com.github.pangolin.routing.server.tun.adapter.linux;
 
-import com.sun.jna.LastErrorException;
-import com.sun.jna.Memory;
-import com.sun.jna.Native;
-import com.sun.jna.NativeLong;
+import com.sun.jna.*;
 
 import java.net.Inet4Address;
 
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.throwLastErrorException;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.*;
@@ -15,6 +13,11 @@ import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 public class LinuxNetworkRoute {
 
     public static void add(final String ifname, final Inet4Address addr, final int prefix, final Inet4Address gwAddr, final boolean delete) {
+        int ifindex = if_nametoindex(ifname);
+        add(ifindex, addr, prefix, gwAddr, delete);
+    }
+
+    public static void add(final int ifindex, final Inet4Address addr, final int prefix, final Inet4Address gwAddr, final boolean delete) {
         final byte[] dst = addr.getAddress();
         final byte[] gw = gwAddr.getAddress();
         final int sockfd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
@@ -24,7 +27,7 @@ public class LinuxNetworkRoute {
             localAddr.nl_pid = API_INSTANTCE.getpid();
 
             if (API_INSTANTCE.bind(sockfd, localAddr, localAddr.size()) < 0) {
-                throwUnchecked(Native.getLastError());
+                throwLastErrorException(Native.getLastError());
             }
 
             int msgSize = 44 + 8; // nlmsghdr(16) + rtmsg(12) + dst rtattr(4) + dst addr(4) + gw rtattr(4) + gw addr(4) + oif rtattr(4) + ifindex(4)
@@ -49,9 +52,9 @@ public class LinuxNetworkRoute {
             rt.rtm_type = RTN_UNICAST;
             rt.write();
             offset += rt.size();
-            System.out.println("OFFSET=" + offset);
 
-            // 填充rtattr（IP地址）
+            // 填充rtattr（DST 地址）
+            /*
             rtattr rta = new rtattr(buffer.share(offset));
             rta.rta_len = (byte) (rta.size() + dst.length);
             rta.rta_type = (short) RTA_DST;
@@ -60,9 +63,12 @@ public class LinuxNetworkRoute {
 
             buffer.write(offset, dst, 0, dst.length);
             offset += dst.length;
+            */
+            offset += writeSockAddrIn(buffer.share(offset), (short) RTA_DST, dst);
 
 
-            // 填充rtattr（IP地址）
+            // 填充rtattr（GATEWAY 地址）
+            /*
             rta = new rtattr(buffer.share(offset));
             rta.rta_len = (byte) (rta.size() + gw.length);
             rta.rta_type = (short) RTA_GATEWAY;
@@ -71,8 +77,11 @@ public class LinuxNetworkRoute {
 
             buffer.write(offset, gw, 0, gw.length);
             offset += gw.length;
+            */
+            offset += writeSockAddrIn(buffer.share(offset), (short) RTA_GATEWAY, gw);
 
-            // 填充rtattr（IP地址）
+            // 填充rtattr（Interface）
+            /*
             rta = new rtattr(buffer.share(offset));
             rta.rta_len = (byte) (rta.size() + 4);
             rta.rta_type = (short) RTA_OIF;
@@ -81,7 +90,10 @@ public class LinuxNetworkRoute {
 
             buffer.setInt(offset, if_nametoindex(ifname));
             offset += 4;
+            */
+            offset += writeIfindex(buffer.share(offset), ifindex);
 
+            /*
             final sockaddr_nl.ByRef dest_addr = new sockaddr_nl.ByRef();
             dest_addr.nl_family = AF_NETLINK;
             dest_addr.nl_pid = 0;
@@ -99,27 +111,38 @@ public class LinuxNetworkRoute {
             msg.msg_control = null;
             msg.msg_controllen = new NativeLong(0);
             msg.msg_flags = 0;
+            */
 
             // final int written = API_INSTANTCE.sendmsg(sockfd, msg, 0);
             final int written = API_INSTANTCE.send(sockfd, hl.getPointer(), offset, 0);
             if (written < 0) {
-                throwUnchecked(Native.getLastError());
+                throwLastErrorException(Native.getLastError());
             }
         } finally {
             close(sockfd);
         }
     }
 
-    private static void throwUnchecked(final int errno) {
-        final String errmsg = String.format("[%s] %s", errno, strerror(errno));
-        throw new LinuxException(errno, errmsg);
+    private static int writeSockAddrIn(final Pointer ptr, final short rtaType, final byte[] addr) {
+        rtattr rta = new rtattr(ptr);
+        rta.rta_len = (byte) (rta.size() + addr.length);
+        rta.rta_type = rtaType;
+        rta.write();
+
+        ptr.write(rta.size(), addr, 0, addr.length);
+        return rta.rta_len;
     }
 
-    private static class LinuxException extends LastErrorException {
+    private static int writeIfindex(final Pointer ptr, final int ifindex) {
+        rtattr rta = new rtattr(ptr);
+        rta.rta_len = (byte) (rta.size() + 4);
+        rta.rta_type = (short) RTA_OIF;
+        rta.write();
+//        offset += rta.size();
 
-        LinuxException(final int errno, final String errmsg) {
-            super(errno, errmsg);
-        }
-
+        ptr.setInt(rta.size(), ifindex);
+//        offset += 4;
+        return rta.size() + 4;
     }
+
 }

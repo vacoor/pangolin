@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.internal.server;
+package com.github.pangolin.routing.handler.server;
 
 import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;

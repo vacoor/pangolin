@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.internal.server;
+package com.github.pangolin.routing.handler.server;
 
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 

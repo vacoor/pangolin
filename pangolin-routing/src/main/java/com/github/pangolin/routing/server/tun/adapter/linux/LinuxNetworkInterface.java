@@ -1,28 +1,26 @@
-package com.github.pangolin.routing.server.tun.adapter.darwin;
-
+package com.github.pangolin.routing.server.tun.adapter.linux;
 
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.NetworkInterfaceEx;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
-import com.github.pangolin.routing.server.tun.adapter.unix.UnixNetworkInterfaceEx;
+import com.github.pangolin.routing.server.tun.adapter.linux.jna.If;
+import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.ifreq;
+import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.in6_ifreq;
+import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in;
+import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in6;
+import com.github.pangolin.routing.server.tun.adapter.unix.UnixNetworkInterface;
 import com.google.common.collect.Lists;
-import com.sun.jna.LastErrorException;
-import com.sun.jna.Native;
-import com.sun.jna.NativeLong;
-import com.sun.jna.Structure;
+import com.sun.jna.*;
 
-import java.lang.reflect.Method;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
-import java.net.NetworkInterface;
-import java.util.Enumeration;
 import java.util.List;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.ifaddrs;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Sockios.*;
 import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
 import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.netmaskToPrefixLength;
@@ -30,10 +28,10 @@ import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.netm
 /**
  *
  */
-public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements NetworkInterfaceEx {
+public class LinuxNetworkInterface extends UnixNetworkInterface implements NetworkInterfaceEx {
     private final String ifname;
 
-    public DarwinNetworkInterfaceEx(final String ifname) {
+    public LinuxNetworkInterface(final String ifname) {
         this.ifname = ifname;
     }
 
@@ -79,9 +77,8 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
     protected void setInterfaceAddress6(final Inet6Address address, final int prefix) {
         final int fd = fd6();
         try {
-            final Inet6Address netmask = cidrToNetmaskAddress(address, prefix);
             flushInterfaceAddresses(fd, ifname, AF_INET6);
-            addInterfaceAddress6(fd, ifname, address, netmask);
+            addInterfaceAddress6(fd, ifname, address, prefix);
         } finally {
             close(fd);
         }
@@ -89,21 +86,15 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
 
     @Override
     protected void addInterfaceAddress4(final Inet4Address address, final int prefix) {
-        final int fd = fd4();
-        try {
-            final Inet4Address netmask = cidrToNetmaskAddress(address, prefix);
-            addInterfaceAddress4(fd, ifname, address, netmask);
-        } finally {
-            close(fd);
-        }
+        addInterfaceAddress4(ifname, address, prefix);
     }
+
 
     @Override
     protected void addInterfaceAddress6(final Inet6Address address, final int prefix) {
         final int fd = fd6();
         try {
-            final Inet6Address netmask = cidrToNetmaskAddress(address, prefix);
-            addInterfaceAddress6(fd, ifname, address, netmask);
+            addInterfaceAddress6(fd, ifname, address, prefix);
         } finally {
             close(fd);
         }
@@ -121,10 +112,9 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
 
     @Override
     protected void deleteInterfaceAddress6(final Inet6Address address, final int prefix) {
-        final int fd = fd4();
+        final int fd = fd6();
         try {
-            final Inet6Address netmask = cidrToNetmaskAddress(address, prefix);
-            deleteInterfaceAddress6(fd, ifname, address, netmask);
+            deleteInterfaceAddress6(fd, ifname, address, prefix);
         } finally {
             close(fd);
         }
@@ -177,11 +167,7 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
 
 
     private static List<InterfaceAddressEx> getInterfaceAddresses(final String ifname, final int family) {
-        final ifaddrs ifa = new ifaddrs();
-        if (0 != getifaddrs(ifa)) {
-            throw new LastErrorException(Native.getLastError());
-        }
-
+        final ifaddrs ifa = getifaddrs0(new ifaddrs());
         try {
             final List<InterfaceAddressEx> interfaceAddresses = Lists.newArrayList();
             for (If.ifaddrs n = ifa; null != n; n = n.ifa_next) {
@@ -190,14 +176,14 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
                 }
 
                 if (AF_INET == n.ifa_addr.sa_family) {
-                    final sockaddr_in sockaddr = new sockaddr_in(n.ifa_addr.getPointer());
-                    final sockaddr_in netmask = new sockaddr_in(n.ifa_netmask.getPointer());
+                    final sockaddr_in sockaddr = (sockaddr_in) n.ifa_addr.getTypedValue(sockaddr_in.class);
+                    final sockaddr_in netmask = (sockaddr_in) n.ifa_netmask.getTypedValue(sockaddr_in.class);
                     final int prefix = netmaskToPrefixLength(netmask.sin_addr);
 
                     interfaceAddresses.add(InterfaceAddressEx.of(toInet4Address(sockaddr), prefix));
                 } else if (AF_INET6 == n.ifa_addr.sa_family) {
-                    final sockaddr_in6 sockaddr = new sockaddr_in6(n.ifa_addr.getPointer());
-                    final sockaddr_in6 netmask = new sockaddr_in6(n.ifa_netmask.getPointer());
+                    final sockaddr_in6 sockaddr = (sockaddr_in6) n.ifa_addr.getTypedValue(sockaddr_in6.class);
+                    final sockaddr_in6 netmask = (sockaddr_in6) n.ifa_netmask.getTypedValue(sockaddr_in6.class);
                     final int prefix = netmaskToPrefixLength(netmask.sin6_addr);
 
                     interfaceAddresses.add(InterfaceAddressEx.of(toInet6Address(sockaddr), prefix));
@@ -219,12 +205,13 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
                     continue;
                 }
                 if (AF_INET == n.ifa_addr.sa_family) {
-                    final sockaddr_in sockaddr = new sockaddr_in(n.ifa_addr.getPointer());
+                    final sockaddr_in sockaddr = (sockaddr_in) n.ifa_addr.getTypedValue(sockaddr_in.class);
                     deleteAddress4(fd, ifname, toInet4Address(sockaddr));
                 } else if (AF_INET6 == n.ifa_addr.sa_family) {
-                    final sockaddr_in6 sockaddr = new sockaddr_in6(n.ifa_addr.getPointer());
-                    final sockaddr_in6 netmask = new sockaddr_in6(n.ifa_netmask.getPointer());
-                    deleteInterfaceAddress6(fd, ifname, toInet6Address(sockaddr), toInet6Address(netmask));
+                    final sockaddr_in6 sockaddr = (sockaddr_in6) n.ifa_addr.getTypedValue(sockaddr_in6.class);
+                    final sockaddr_in6 netmask = (sockaddr_in6) n.ifa_netmask.getTypedValue(sockaddr_in6.class);
+                    final int prefix = netmaskToPrefixLength(netmask.sin6_addr);
+                    deleteInterfaceAddress6(fd, ifname, toInet6Address(sockaddr), prefix);
                 } else {
                     throw new UnsupportedOperationException("family: " + n.ifa_addr.sa_family);
                 }
@@ -324,8 +311,96 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
      * @param address the ifnet address
      */
     private static void deleteAddress4(final int fd, final String ifname, final Inet4Address address) {
+        // FIXME [25] Inappropriate ioctl for device
         ioctl0(fd, SIOCDIFADDR, _ifreq(ifname, address));
     }
+
+    private static void addInterfaceAddress4(final String ifname, final Inet4Address addr, final int prefix) {
+        _netlinkAddresses4(ifname, addr, prefix, false);
+    }
+
+    private static void _netlinkAddresses4(final String ifname, final Inet4Address addr, final int prefix, final boolean delete) {
+        int IFA_F_PERMANENT = 0x80;
+        int IFA_LOCAL = 0x02;
+
+        final byte[] address = addr.getAddress();
+        final int sockfd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+        try {
+            final sockaddr_nl localAddr = new sockaddr_nl();
+            localAddr.nl_family = AF_NETLINK;
+            localAddr.nl_pid = API_INSTANTCE.getpid();
+
+            if (API_INSTANTCE.bind(sockfd, localAddr, localAddr.size()) < 0) {
+                throwLastErrorException(Native.getLastError());
+            }
+
+            int msgSize = 32; // nlmsghdr(16) + ifaddrmsg(8) + rtattr(4) + address(4)
+
+            // 初始化消息内存
+            final Memory buffer = new Memory(msgSize);
+            int offset = 0;
+
+            final nlmsghdr hl = new nlmsghdr(buffer.share(offset));
+            hl.nlmsg_len = msgSize;
+            hl.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE;
+            hl.nlmsg_type = (short) (!delete ? RTM_NEWADDR : RTM_DELADDR);
+            hl.write();
+            offset += hl.size();
+
+            final ifaddrmsg ifa = new ifaddrmsg(buffer.share(offset));
+            ifa.ifa_family = AF_INET;
+            ifa.ifa_prefixlen = (byte) prefix;
+            ifa.ifa_index = if_nametoindex0(ifname);
+            if (!delete) {
+                ifa.ifa_flags = (byte) IFA_F_PERMANENT;
+                ifa.ifa_scope = 0;
+            }
+            ifa.write();
+            offset += ifa.size();
+
+            // 填充rtattr（IP地址）
+            rtattr rta = new rtattr(buffer.share(offset));
+            rta.rta_len = (byte) (rta.size() + address.length);
+            rta.rta_type = (short) IFA_LOCAL;
+            rta.write();
+            offset += rta.size();
+
+            buffer.write(offset, address, 0, address.length);
+            offset += address.length;
+
+            final sockaddr_nl.ByRef dest_addr = new sockaddr_nl.ByRef();
+            dest_addr.nl_family = AF_NETLINK;
+            dest_addr.nl_pid = 0;
+            dest_addr.nl_groups = 0;
+
+            final IOVec.ByRef ioVec = new IOVec.ByRef();
+            ioVec.iov_base = buffer;
+            ioVec.iov_len = offset;
+
+            final MsgHdr msg = new MsgHdr();
+            msg.msg_name = dest_addr;
+            msg.msg_namelen = new NativeLong(dest_addr.size());
+            msg.msg_iov = ioVec;
+            msg.msg_iovlen = new NativeLong(1);
+            msg.msg_control = null;
+            msg.msg_controllen = new NativeLong(0);
+            msg.msg_flags = 0;
+
+            // final int written = API_INSTANTCE.sendmsg(sockfd, msg, 0);
+            final int written = API_INSTANTCE.send(sockfd, hl.getPointer(), offset, 0);
+            if (written < 0) {
+                throwLastErrorException(Native.getLastError());
+            }
+        } finally {
+            close(sockfd);
+        }
+    }
+
+    private static int nlmsgAlign(final int len) {
+        final int ALIGN = 4;  // NLMSG_ALIGN 通常为 4 字节对齐 ‌:ml-citation{ref="3,4" data="citationList"}
+        return (len + ALIGN - 1) & ~(ALIGN - 1);
+    }
+
 
     private static ifreq _ifreq(final String ifname, final Inet4Address addr) {
         final ifreq ifr = new ifreq(ifname);
@@ -337,85 +412,67 @@ public class DarwinNetworkInterfaceEx extends UnixNetworkInterfaceEx implements 
         return ifr;
     }
 
-
-    static void addInterfaceAddress4(final int fd, final String ifname,
-                                     final Inet4Address address, final Inet4Address netmask) {
-        final ifaliasreq ifr = new ifaliasreq(ifname);
-        writeSockAddr4(ifr.ifra_addr, address);
-
-        // required.
-        writeSockAddr4(ifr.ifra_broadaddr, address);
-
-        // netmask
-        writeSockAddr4(ifr.ifra_mask, netmask);
-
-        ioctl0(fd, SIOCAIFADDR, ifr);
-    }
-
-
     // ------------------------ END IPv4 related ------------------------
 
     // ------------------------ START IPv6 related ------------------------
 
 
-    static void addInterfaceAddress6(final int fd, final String ifname,
-                                     final Inet6Address address, final Inet6Address netmask) {
-        final in6_aliasreq ifr6 = new in6_aliasreq(ifname);
-        writeSockAddr6(ifr6.ifra_addr, address);
-        // writeSockAddr6(ifr6.ifra_dstaddr, address);
-        writeSockAddr6(ifr6.ifra_prefixmask, netmask);
+    private static void addInterfaceAddress6(final int fd, final String ifname,
+                                             final Inet6Address addr, final int prefixLength) {
+        // Wrong: sysctl net.ipv6.conf.all.disable_ipv6 --> 1: [13] Permission denied
+        // sysctl net.ipv6.conf.all.disable_ipv6=0
 
-        /* important!!! */
-        ifr6.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
-        ifr6.ifra_lifetime.ia6t_pltime = ND6_INFINITE_LIFETIME;
+        final in6_ifreq ifr6 = new in6_ifreq();
+        ifr6.ifr6_addr = addr.getAddress();
+        ifr6.ifr6_prefixlen = prefixLength;
+        ifr6.ifr6_ifindex = if_nametoindex0(fd, ifname);
 
-        ioctl0(fd, SIOCAIFADDR_IN6, ifr6);
+        // SIOCSIFADDR is append for IPv6
+        ioctl0(fd, SIOCSIFADDR, ifr6);
     }
 
-    private static void deleteInterfaceAddress6(final int fd, final String ifname,
-                                                final Inet6Address addr, final Inet6Address netmask) {
-        final in6_aliasreq ifr6 = new in6_aliasreq(ifname);
+    private static void deleteInterfaceAddress6(final int fd, final String ifname, final Inet6Address addr, final int prefixLength) {
+        // Wrong: sysctl net.ipv6.conf.all.disable_ipv6 --> 1: [13] Permission denied
+        // sysctl net.ipv6.conf.all.disable_ipv6=0
 
-        writeSockAddr6(ifr6.ifra_addr, addr);
-        // writeSockAddr6(ifr6.ifra_dstaddr, addr);
-        writeSockAddr6(ifr6.ifra_prefixmask, netmask);
+        final in6_ifreq ifr6 = new in6_ifreq();
+        ifr6.ifr6_addr = addr.getAddress();
+        ifr6.ifr6_prefixlen = prefixLength;
+        ifr6.ifr6_ifindex = if_nametoindex0(fd, ifname);
 
-        /* important!!! */
-        ifr6.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
-        ifr6.ifra_lifetime.ia6t_pltime = ND6_INFINITE_LIFETIME;
-
-        ioctl0(fd, SIOCDIFADDR_IN6, ifr6);
+        ioctl0(fd, SIOCDIFADDR, ifr6);
     }
 
     // ------------------------ END IPv6 related ------------------------
 
-    private static ifaddrs getifaddrs0(final ifaddrs ifa) {
-        if (0 != getifaddrs(ifa)) {
+    static ifaddrs getifaddrs0(final ifaddrs ifa) {
+        if (getifaddrs(ifa) < 0) {
             throwLastErrorException(Native.getLastError());
         }
         return ifa;
     }
 
+    private static int if_nametoindex0(final int fd, final String ifname) {
+        final ifreq ifr = new ifreq(ifname);
+        ifr.ifr_ifru.setType("ifru_ifindex");
+        ioctl0(fd, SIOGIFINDEX, ifr);
+        return ifr.ifr_ifru.ifru_ifindex;
+        // return if_nametoindex(ifname);
+    }
+
+    private static int if_nametoindex0(final String ifname) {
+        final int index = if_nametoindex(ifname);
+        if (0 == index) {
+            throwLastErrorException(Native.getLastError());
+        }
+        return index;
+    }
+
     private static <S extends Structure> S ioctl0(final int fd, final NativeLong request, final S argp) {
-        if (0 != ioctl(fd, request, argp)) {
+        if (ioctl(fd, request, argp) < 0) {
             throwLastErrorException(Native.getLastError());
         }
         return argp;
     }
 
-
-    public static void main(String[] args) throws Exception {
-        final Method getDefault = NetworkInterface.class.getDeclaredMethod("getDefault");
-        getDefault.setAccessible(true);
-        NetworkInterface defaultInterface = (NetworkInterface) getDefault.invoke(null);
-
-        Enumeration<NetworkInterface> nie = NetworkInterface.getNetworkInterfaces();
-
-        while (nie.hasMoreElements()) {
-            NetworkInterface ni = nie.nextElement();
-            if (!ni.isLoopback() && !ni.isVirtual() && ni.isUp()) {
-                System.out.println(ni.getIndex() + ": " + ni.getName() + "/" + ni.getDisplayName() + " " + ni.getInterfaceAddresses());
-            }
-        }
-    }
 }

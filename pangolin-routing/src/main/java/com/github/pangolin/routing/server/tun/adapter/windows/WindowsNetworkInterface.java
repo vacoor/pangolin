@@ -32,10 +32,10 @@ import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
  * @see <a href="https://github.com/WireGuard/wireguard-windows/blob/master/tunnel/winipcfg/luid.go">luid</a>
  */
 @Slf4j
-public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
+public class WindowsNetworkInterface implements NetworkInterfaceEx {
     private final long interfaceLuid;
 
-    public WindowsNetworkInterfaceEx(final long interfaceLuid) {
+    public WindowsNetworkInterface(final long interfaceLuid) {
         this.interfaceLuid = interfaceLuid;
     }
 
@@ -129,15 +129,15 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
 
     // ------------------------ START Static method ------------------------
 
-    public static WindowsNetworkInterfaceEx getByIndex(final int index) throws SocketException {
+    public static WindowsNetworkInterface getByIndex(final int index) throws SocketException {
         return of(NetworkInterface.getByIndex(index));
     }
 
-    public static WindowsNetworkInterfaceEx getByInetAddress(final InetAddress addr) throws SocketException {
+    public static WindowsNetworkInterface getByInetAddress(final InetAddress addr) throws SocketException {
         return of(NetworkInterface.getByInetAddress(addr));
     }
 
-    public static WindowsNetworkInterfaceEx getByAlias(final String interfaceAlias) throws SocketException {
+    public static WindowsNetworkInterface getByAlias(final String interfaceAlias) throws SocketException {
         /*-
          * java.net.NetworkInterface
          * - name: eth0 (windows平台也是)
@@ -152,13 +152,13 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
         return getByLuid(interfaceAliasToLuid(interfaceAlias));
     }
 
-    public static WindowsNetworkInterfaceEx getByLuid(final long interfaceLuid) throws SocketException {
-        return new WindowsNetworkInterfaceEx(interfaceLuid);
+    public static WindowsNetworkInterface getByLuid(final long interfaceLuid) throws SocketException {
+        return new WindowsNetworkInterface(interfaceLuid);
     }
 
-    public static WindowsNetworkInterfaceEx of(final NetworkInterface ni) {
+    public static WindowsNetworkInterface of(final NetworkInterface ni) {
         final long interfaceLuid = interfaceIndexToLuid(ni.getIndex());
-        return new WindowsNetworkInterfaceEx(interfaceLuid);
+        return new WindowsNetworkInterface(interfaceLuid);
     }
 
     public static List<InetAddress> allDns() throws SocketException {
@@ -171,7 +171,7 @@ public class WindowsNetworkInterfaceEx implements NetworkInterfaceEx {
             }
 
             final int index = ni.getIndex();
-            final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByIndex(index);
+            final WindowsNetworkInterface nix = WindowsNetworkInterface.getByIndex(index);
             final List<InetAddress> interfaceDns = nix.getInterfaceDns(false);
 
             /*

@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.internal.client;
+package com.github.pangolin.routing.handler.client;
 
 import com.github.pangolin.routing.handler.codec.ss.SsSocketAeadCryptCodec;
 import com.github.pangolin.routing.handler.codec.ss.SsSocketStreamCryptCodec;

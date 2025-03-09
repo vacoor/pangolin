@@ -1,9 +1,8 @@
 package com.github.pangolin.routing.server.fakedns;
 
-import com.github.pangolin.routing.server.fakedns.beta.SimpleInet4FakeDns;
 import com.github.pangolin.routing.server.fakedns.handler.DatagramDnsProxyServerHandler;
 import com.github.pangolin.routing.server.fakedns.handler.DatagramFakeDnsServerHandler;
-import com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterfaceEx;
+import com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -39,7 +38,7 @@ public class FakeDnsServer {
 
     private static List<InetSocketAddress> determineDnsServers() throws SocketException {
         if (IS_WINDOWS) {
-            return WindowsNetworkInterfaceEx.allDns()
+            return WindowsNetworkInterface.allDns()
                     .stream()
                     .filter(a -> !a.isAnyLocalAddress())
                     .filter(a -> !a.isLoopbackAddress())
@@ -47,7 +46,7 @@ public class FakeDnsServer {
                     .collect(Collectors.toList());
         }
         if (PlatformDependent.isOsx()) {
-            // DarwinDnsUtils.getPrimaryDnsServers();
+            // DarwinDns.getPrimaryDnsServers();
         }
         return Collections.singletonList(new InetSocketAddress("192.168.1.1", 53));
     }

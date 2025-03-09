@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.internal.server;
+package com.github.pangolin.routing.handler.server;
 
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;

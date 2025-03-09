@@ -24,13 +24,12 @@ import static com.sun.jna.platform.linux.Fcntl.O_RDWR;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 
 @Slf4j
-public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx> {
+public class LinuxTunAdapter extends AbstractTunAdapter {
     private final int fd;
     private final String ifname;
     private final int mtu;
 
     private LinuxTunAdapter(final int fd, final String ifname, final int mtu) {
-        super(new LinuxNetworkInterfaceEx(ifname));
         this.fd = fd;
         this.ifname = ifname;
         this.mtu = mtu;
@@ -127,22 +126,34 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
 
         int mtuToUse = mtu;
         if (0 < mtuToUse) {
-            LinuxNetworkInterfaceEx.setMTU(skfd, ifnameToUse, mtuToUse);
+            LinuxNetworkInterface.setMTU(skfd, ifnameToUse, mtuToUse);
         } else {
-            mtuToUse = LinuxNetworkInterfaceEx.getMTU(skfd, ifnameToUse);
+            mtuToUse = LinuxNetworkInterface.getMTU(skfd, ifnameToUse);
         }
 
         close(skfd);
 
         LinuxTunAdapter ap = new LinuxTunAdapter(fd, ifnameToUse, mtuToUse);
+        LinuxNetworkInterface nix = new LinuxNetworkInterface(ifnameToUse);
         for (InterfaceAddressEx binding : bindings) {
-            ap.addInterfaceAddress(binding);
+            nix.addInterfaceAddress(binding);
         }
 
         return ap;
     }
 
     private static String checkName(final String name) {
+        if (null == name) {
+            final Set<String> ifnames = getIfnames();
+            for (int i = 0; i < 255; i++) {
+                final String nameToUse = String.format("tun%s", i);
+                if (!ifnames.contains(nameToUse)) {
+                    return nameToUse;
+                }
+            }
+            throw new IllegalStateException("Can't generate device name");
+        }
+
         if (name.length() > IFNAMSIZ || !US_ASCII.newEncoder().canEncode(name)) {
             throw new IllegalArgumentException(String.format("Device name must be an ASCII string shorter than %s characters or null.", IFNAMSIZ));
         }
@@ -150,7 +161,7 @@ public class LinuxTunAdapter extends AbstractTunAdapter<LinuxNetworkInterfaceEx>
     }
 
     private static Set<String> getIfnames() {
-        final ifaddrs ifa = LinuxNetworkInterfaceEx.getifaddrs0(new ifaddrs());
+        final ifaddrs ifa = LinuxNetworkInterface.getifaddrs0(new ifaddrs());
         try {
             final Set<String> ifnames = new HashSet<>();
             for (ifaddrs n = ifa; null != n; n = n.ifa_next) {

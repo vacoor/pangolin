@@ -84,7 +84,7 @@ public class WindowsNetworkRoute {
 //            NetworkInterface ni = nix.nextElement();
 //            System.out.println(ni.getIndex() + " -> " + ni.getName() + " -> " + ni.getDisplayName() + " -> " + ni.getParent());
 //        }
-        final WindowsNetworkInterfaceEx nix = WindowsNetworkInterfaceEx.getByAlias("以太网 2");
+        final WindowsNetworkInterface nix = WindowsNetworkInterface.getByAlias("以太网 2");
         long luid = nix.luid();
         InetAddress dst = InetAddress.getByName("198.18.0.0");
         int prefix = (byte) 24;

@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.upstream.spi;
 
-import com.github.pangolin.routing.handler.internal.client.TrojanDatagramProxyHandler;
-import com.github.pangolin.routing.handler.internal.client.TrojanProxyHandler;
+import com.github.pangolin.routing.handler.client.TrojanDatagramProxyHandler;
+import com.github.pangolin.routing.handler.client.TrojanProxyHandler;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.upstream.Upstream;

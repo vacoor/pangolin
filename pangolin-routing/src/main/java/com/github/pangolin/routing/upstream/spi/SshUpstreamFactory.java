@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.upstream.spi;
 
-import com.github.pangolin.routing.handler.internal.client.SshProxyHandler;
+import com.github.pangolin.routing.handler.client.SshProxyHandler;
 import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.upstream.AbstractUpstream;
 import io.netty.channel.ChannelHandler;

@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.internal.client;
+package com.github.pangolin.routing.handler.client;
 
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;

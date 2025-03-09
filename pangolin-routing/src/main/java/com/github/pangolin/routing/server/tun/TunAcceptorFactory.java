@@ -6,11 +6,10 @@ import com.github.pangolin.routing.server.acceptor.AcceptorFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.TunAdapter;
-import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinDnsUtils;
+import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinDns;
 import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinTunAdapter;
-import com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkRoute;
 import com.github.pangolin.routing.server.tun.adapter.linux.LinuxTunAdapter;
-import com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterfaceEx;
+import com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface;
 import com.github.pangolin.routing.server.tun.adapter.windows.WindowsTunAdapter;
 import com.github.pangolin.routing.server.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.server.tun.net.channel.TunChannel;
@@ -21,7 +20,6 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.Inet4Address;
 import java.net.InetAddress;
 
 /**
@@ -72,12 +70,13 @@ public class TunAcceptorFactory implements AcceptorFactory {
 
                     if (adapter instanceof WindowsTunAdapter) {
                         // log.info("ipconfig /flushdns");
-                        ((WindowsTunAdapter) adapter).setInterfaceDns(new InetAddress[]{InetAddress.getByName("127.0.0.1")});
-                        WindowsNetworkInterfaceEx.flushDnsCache();
+                        final WindowsNetworkInterface nix = WindowsNetworkInterface.getByLuid(((WindowsTunAdapter) adapter).luid());
+                        nix.setInterfaceDns(new InetAddress[]{InetAddress.getByName("127.0.0.1")});
+                        WindowsNetworkInterface.flushDnsCache();
                     } else if (adapter instanceof DarwinTunAdapter) {
                         // log.info("networksetup -setdnsservers \"Wi-Fi\" 127.0.0.1(empty)");
                         // log.info("sudo killall -HUP mDNSResponder;");
-                        DarwinDnsUtils.addDnsServerAndCleanupOnShutdown(new String[]{"::1", "127.0.0.1"});
+                        DarwinDns.addDns(new String[]{"::1", "127.0.0.1"});
                     } else if (adapter instanceof LinuxTunAdapter) {
                         // ip route add 192.168.2.0/24 via 192.168.1.1 dev eth0
 //                        Inet4Address addr = (Inet4Address) InetAddress.getByName("198.18.2.0");

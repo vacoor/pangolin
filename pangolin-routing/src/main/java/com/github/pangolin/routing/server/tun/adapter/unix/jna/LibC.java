@@ -256,13 +256,6 @@ public final class LibC {
          */
         int if_nametoindex(final String ifname);
 
-        /**
-         * Maps the interface index specified in ifindex to it corresponding name.
-         *
-         * @param ifindex the interface index
-         * @return returns ifname. If the interface is not found, a NULL pointer is returned
-         */
-        String if_indextoname(final int ifindex);
 
         /**
          * Get interface addresses.

@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.server.acceptor;
 
 import com.github.pangolin.routing.context.RouteContext;
-import com.github.pangolin.routing.handler.internal.server.Socks5ProxyServerHandler;
-import com.github.pangolin.routing.handler.internal.server.Socks5ServerDatagramDemultiplexer;
+import com.github.pangolin.routing.handler.server.Socks5ProxyServerHandler;
+import com.github.pangolin.routing.handler.server.Socks5ServerDatagramDemultiplexer;
 import com.github.pangolin.routing.support.DatagramChannelFactory;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.acceptor.mixin.MixinAcceptorHandshakerFactory;

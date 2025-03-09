@@ -1,25 +1,5 @@
 package com.github.pangolin.routing.server.tun.adapter.windows;
 
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.INSTANCE;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.NDIS_IF_MAX_STRING_SIZE;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WINTUN_ADAPTER_HANDLE;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WINTUN_SESSION_HANDLE;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunAllocateSendPacket;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunCloseAdapter;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunCreateAdapter;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunEndSession;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunGetAdapterLUID;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunGetReadWaitEvent;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunGetRunningDriverVersion;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunOpenAdapter;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunReceivePacket;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunReleaseReceivePacket;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunSendPacket;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.WintunStartSession;
-import static com.sun.jna.platform.win32.Guid.GUID;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
-
 import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.sun.jna.LastErrorException;
@@ -34,17 +14,21 @@ import com.sun.jna.ptr.LongByReference;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.nio.ByteBuffer;
-import java.util.List;
+
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.INSTANCE;
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.NDIS_IF_MAX_STRING_SIZE;
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunLib.*;
+import static com.sun.jna.platform.win32.Guid.GUID;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
 
 /**
  * Windows tun adapter based on <a href="https://www.wintun.net/">wintun</a>.
  */
 @Slf4j
-public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfaceEx> {
+public class WindowsTunAdapter extends AbstractTunAdapter {
     private static final int INFINITE = 0xFFFFFFFF;
-    private static final int ERROR_NO_MORE_ITEMS = 259;
 
     private final long luid;
     private final String ifname;
@@ -56,7 +40,6 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
                               final String ifname, final int mtu,
                               final WINTUN_ADAPTER_HANDLE adapter,
                               final WINTUN_SESSION_HANDLE session) {
-        super(new WindowsNetworkInterfaceEx(luid));
         this.luid = luid;
         this.ifname = ifname;
         this.mtu = mtu;
@@ -144,18 +127,6 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
         }
     }
 
-    public List<InetAddress> getInterfaceDns(final boolean manualSetOnly) {
-        return nix.getInterfaceDns(manualSetOnly);
-    }
-
-    public void setInterfaceDns(final InetAddress[] nameServers) {
-        nix.setInterfaceDns(nameServers);
-    }
-
-    public void flushInterfaceDns() {
-        nix.flushInterfaceDns();
-    }
-
     @Override
     public String toString() {
         return ifname + " WindowsTunAdapter (By Wintun " + WintunGetRunningDriverVersion() + ")";
@@ -199,15 +170,16 @@ public class WindowsTunAdapter extends AbstractTunAdapter<WindowsNetworkInterfac
 
                 int mtuToUse = mtu;
                 if (0 < mtuToUse) {
-                    WindowsNetworkInterfaceEx.setMTU(luid, AF_INET, mtuToUse);
-                    WindowsNetworkInterfaceEx.setMTU(luid, AF_INET6, mtuToUse);
+                    WindowsNetworkInterface.setMTU(luid, AF_INET, mtuToUse);
+                    WindowsNetworkInterface.setMTU(luid, AF_INET6, mtuToUse);
                 } else {
-                    mtuToUse = WindowsNetworkInterfaceEx.getMTU(luid, AF_INET);
+                    mtuToUse = WindowsNetworkInterface.getMTU(luid, AF_INET);
                 }
 
                 final WindowsTunAdapter adapter0 = new WindowsTunAdapter(luid, name, mtuToUse, adapter, session);
+                WindowsNetworkInterface nix = WindowsNetworkInterface.getByLuid(luid);
                 for (InterfaceAddressEx binding : bindings) {
-                    adapter0.addInterfaceAddress(binding);
+                    nix.addInterfaceAddress(binding);
                 }
                 return adapter0;
             } catch (final LastErrorException e) {

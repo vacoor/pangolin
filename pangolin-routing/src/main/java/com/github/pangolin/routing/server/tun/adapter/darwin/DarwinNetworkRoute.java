@@ -1,22 +1,18 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
-import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
-import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
-import com.sun.jna.LastErrorException;
-import com.sun.jna.Memory;
-import com.sun.jna.Native;
-import com.sun.jna.Pointer;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.*;
+
+import com.sun.jna.*;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr4;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr6;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.if_nametoindex;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 
 public class DarwinNetworkRoute {
     private static final int RT_MSGHDR_SIZE = new rt_msghdr(new Pointer(0)).size();
@@ -26,7 +22,7 @@ public class DarwinNetworkRoute {
 
 
     public static void add(final InetAddress dst, final int prefix, final InetAddress gw, final String ifname) {
-        final InetAddress netmask = NetUtils2.cidrToNetmaskAddress(dst, prefix);
+        final InetAddress netmask = cidrToNetmaskAddress(dst, prefix);
         add(dst, netmask, gw, if_nametoindex0(ifname));
     }
 
@@ -39,7 +35,7 @@ public class DarwinNetworkRoute {
     }
 
     public static void delete(final InetAddress dst, final int prefix, final InetAddress gw, final String ifname) {
-        final InetAddress netmask = NetUtils2.cidrToNetmaskAddress(dst, prefix);
+        final InetAddress netmask = cidrToNetmaskAddress(dst, prefix);
         delete(dst, netmask, gw, if_nametoindex0(ifname));
     }
 
@@ -56,10 +52,8 @@ public class DarwinNetworkRoute {
                               final InetAddress dst, final InetAddress gw,
                               final InetAddress netmask) {
         final int sockAddrSize = dst instanceof Inet6Address ? SOCKADDR_IN6_SIZE : SOCKADDR_IN_SIZE;
-        System.out.println("SockAddrSize=" + sockAddrSize);
         final int size = RT_MSGHDR_SIZE + sockAddrSize * 3 + (rtm_index == 0 ? 0 : SOCKADDR_DL_SIZE);
         final Memory buffer = new Memory(size * 1);
-
         int offset = 0;
         final rt_msghdr hdr = new rt_msghdr(buffer.share(offset));
         for (int i = 0; i < 1; i++) {
@@ -91,16 +85,19 @@ public class DarwinNetworkRoute {
         }
 
 
-        final int fd = LibC.socket(AF_ROUTE, SOCK_RAW, AF_UNSPEC);
-        if (fd <= 0) {
-            throw new LastErrorException(fd);
+        final int fd = socket(AF_ROUTE, SOCK_RAW, AF_UNSPEC);
+        if (fd < 0) {
+            throwLastErrorException(Native.getLastError());
         }
 
-        final int writtenBytes = LibC.write(fd, buffer, offset);
-        if (writtenBytes != offset) {
-            throw new IllegalStateException("部分成功: " + offset + " != " + writtenBytes);
+        try {
+            final int writtenBytes = write(fd, buffer, offset);
+            if (writtenBytes != offset) {
+                throwLastErrorException(Native.getLastError());
+            }
+        } finally {
+            close(fd);
         }
-        LibC.close(fd);
     }
 
     private static int writeSockAddrIn(final Pointer ptr, final InetAddress address) {
@@ -130,9 +127,7 @@ public class DarwinNetworkRoute {
     private static int if_nametoindex0(final String ifname) {
         final int index = if_nametoindex(ifname);
         if (0 == index) {
-            final int errno = Native.getLastError();
-            // final String errmsg = strerror(errno);
-            throw new LastErrorException(errno);
+            throwLastErrorException(Native.getLastError());
         }
         return index;
     }

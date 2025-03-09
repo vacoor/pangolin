@@ -18,7 +18,7 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.Set;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinNetworkInterfaceEx.setMTU;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinNetworkInterface.setMTU;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.throwLastErrorException;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfUtun.UTUN_CONTROL_NAME;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfUtun.UTUN_OPT_IFNAME;
@@ -29,7 +29,7 @@ import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 
 @Slf4j
-public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceEx> {
+public class DarwinTunAdapter extends AbstractTunAdapter {
     /**
      * Address family bytes.
      */
@@ -46,10 +46,13 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
     private final int mtu;
 
     private DarwinTunAdapter(final int fd, final String ifname, final int mtu) {
-        super(new DarwinNetworkInterfaceEx(ifname));
         this.fd = fd;
         this.ifname = ifname;
         this.mtu = mtu;
+    }
+
+    public int fd() {
+        return fd;
     }
 
     /**
@@ -58,10 +61,6 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
     @Override
     public String name() {
         return ifname;
-    }
-
-    public int fd() {
-        return fd;
     }
 
     public int getMTU() {
@@ -168,13 +167,14 @@ public class DarwinTunAdapter extends AbstractTunAdapter<DarwinNetworkInterfaceE
         if (0 < mtuToUse) {
             setMTU(fd, ifnameToUse, mtuToUse);
         } else {
-            mtuToUse = DarwinNetworkInterfaceEx.getMTU(fd, ifnameToUse);
+            mtuToUse = DarwinNetworkInterface.getMTU(fd, ifnameToUse);
         }
 
         final DarwinTunAdapter adapter = new DarwinTunAdapter(fd, ifnameToUse, mtuToUse);
         final Set<InetAddress> netDst = Sets.newHashSet();
+        final DarwinNetworkInterface nix = new DarwinNetworkInterface(ifnameToUse);
         for (final InterfaceAddressEx binding : bindings) {
-            adapter.addInterfaceAddress(binding);
+            nix.addInterfaceAddress(binding);
 
             /*-
              * MacOS 不会添加默认网关路由.
