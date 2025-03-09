@@ -58,7 +58,7 @@ public class MixinAcceptorFactory implements AcceptorFactory {
 
     @Override
     public Acceptor apply(final int listenPort, final String... args) {
-        final String proxyName = args.length > 0 ? args[0] : null;
+        final String upstream = args.length > 0 ? args[0] : null;
         final List<MixinAcceptorHandshakerFactory> factories = args.length > 1 ? Arrays.asList(args).subList(1, args.length).stream().map(name -> {
             final MixinAcceptorHandshakerFactory factory = handshakers.get(name);
             if (null == factory) {
@@ -70,8 +70,8 @@ public class MixinAcceptorFactory implements AcceptorFactory {
         return new Acceptor() {
             @Override
             public ChannelFuture start(final RouteContext context) throws Exception {
-                final SocketChannelFactory socketChannelFactory = createSocketChannelFactory(context, proxyName);
-                final DatagramChannelFactory datagramChannelFactory = createDatagramChannelFactory(context, proxyName);
+                final SocketChannelFactory socketChannelFactory = getSocketChannelFactory(context, upstream);
+                final DatagramChannelFactory datagramChannelFactory = getDatagramChannelFactory(context, upstream);
 
                 final NettyServer server = new NettyServer(listenPort);
                 return server.start(true, new Socks5ServerInitializer(datagramChannelFactory), new ChannelInitializer<SocketChannel>() {
@@ -89,7 +89,7 @@ public class MixinAcceptorFactory implements AcceptorFactory {
                         if (future.isSuccess()) {
                             final Channel ch = future.channel();
                             final InetSocketAddress localAddress = (InetSocketAddress) ch.localAddress();
-                            log.info("Mixed upstream {} started on port {}, bound to {}", proxyName, localAddress.getPort(), localAddress);
+                            log.info("Mixed upstream {} started on port {}, bound to {}", upstream, localAddress.getPort(), localAddress);
                         } else {
                             future.cause().printStackTrace();
                         }
@@ -147,11 +147,11 @@ public class MixinAcceptorFactory implements AcceptorFactory {
     }
 
 
-    protected SocketChannelFactory createSocketChannelFactory(final RouteContext context, final String upstream) {
-        return "DEFAULT".equals(upstream) ? context.newSocketChannelFactory() : context.newSocketChannelFactory(upstream);
+    private SocketChannelFactory getSocketChannelFactory(final RouteContext context, final String upstream) {
+        return null == upstream || "DEFAULT".equals(upstream) ? context.newSocketChannelFactory() : context.newSocketChannelFactory(upstream);
     }
 
-    protected DatagramChannelFactory createDatagramChannelFactory(final RouteContext context, final String upstream) {
-        return "DEFAULT".equals(upstream) ? context.newDatagramChannelFactory() : context.newDatagramChannelFactory(upstream);
+    private DatagramChannelFactory getDatagramChannelFactory(final RouteContext context, final String upstream) {
+        return null == upstream || "DEFAULT".equals(upstream) ? context.newDatagramChannelFactory() : context.newDatagramChannelFactory(upstream);
     }
 }

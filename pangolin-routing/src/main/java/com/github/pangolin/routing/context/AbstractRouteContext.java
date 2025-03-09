@@ -144,11 +144,11 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
         return newDatagramChannelFactory(getUpstream(upstream));
     }
 
-    protected SocketChannelFactory newSocketChannelFactory(final Upstream upstream) {
+    private SocketChannelFactory newSocketChannelFactory(final Upstream upstream) {
         return null != upstream ? new ProxySocketChannelFactory(upstream, bypass(), null) : new StandardSocketChannelFactory(null);
     }
 
-    protected DatagramChannelFactory newDatagramChannelFactory(final Upstream upstream) {
+    private DatagramChannelFactory newDatagramChannelFactory(final Upstream upstream) {
         return null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass()) : new StandardDatagramChannelFactory();
     }
 
