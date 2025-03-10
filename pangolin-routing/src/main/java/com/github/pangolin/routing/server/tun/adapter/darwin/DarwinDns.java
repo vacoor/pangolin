@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -52,25 +53,29 @@ public final class DarwinDns {
      */
     public static boolean addDns(final String[] dns, final boolean cleanupOnShutdown) {
         final String name = DarwinDns.class.getSimpleName();
-        final AtomicReference<String> holder = new AtomicReference<>();
+        final AtomicBoolean shutdownHolder = new AtomicBoolean();
+        final AtomicReference<String> serviceHolder = new AtomicReference<>();
         final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR(name), null, null);
         try {
             final String serviceId = getPrimaryInterfaceServiceId(store);
             final boolean success = addDns(store, serviceId, dns);
             if (success) {
-                holder.set(serviceId);
+                serviceHolder.set(serviceId);
             }
 
             watchInBackground(name, new String[]{GLOBAL_IPV4_KEY}, new SCDynamicStoreCallBack() {
                 @Override
                 public void invoke(final SCDynamicStoreRef store, final CFArrayRef changedKeys, final Pointer info) {
-                    final String prevServiceId = holder.get();
+                    if (Thread.currentThread().isInterrupted() || shutdownHolder.get()) {
+                        return;
+                    }
+                    final String prevServiceId = serviceHolder.get();
                     final String nextServiceId = getPrimaryInterfaceServiceId(store);
                     if (null == nextServiceId) {
-                        holder.set(null);
+                        serviceHolder.set(null);
                         log.warn("• Network Service {} DOWN", prevServiceId);
                     } else {
-                        holder.set(addDns(store, nextServiceId, dns) ? nextServiceId : null);
+                        serviceHolder.set(addDns(store, nextServiceId, dns) ? nextServiceId : null);
                         if (!nextServiceId.equals(prevServiceId)) {
                             log.warn("• Network Service CHANGED: {} -> {}", prevServiceId, nextServiceId);
                         }
@@ -79,7 +84,7 @@ public final class DarwinDns {
             }).start();
 
             if (cleanupOnShutdown) {
-                Runtime.getRuntime().addShutdownHook(cleaner(name, holder, dns));
+                Runtime.getRuntime().addShutdownHook(cleaner(name, serviceHolder, shutdownHolder, dns));
             }
             return success;
         } finally {
@@ -105,11 +110,14 @@ public final class DarwinDns {
         return worker;
     }
 
-    private static Thread cleaner(final String name, final AtomicReference<String> serviceIdHolder, final String[] dns) {
+    private static Thread cleaner(final String name,
+                                  final AtomicReference<String> serviceIdHolder,
+                                  final AtomicBoolean shutdownHolder, final String[] dns) {
         final String dnsAddresses = Arrays.toString(dns);
         return new Thread() {
             @Override
             public void run() {
+                shutdownHolder.set(true);
                 final String serviceId = serviceIdHolder.get();
                 if (null == serviceId || serviceId.isEmpty()) {
                     log.info("• Cleanup DNS {}: SKIP, no Network Service hold", dnsAddresses);
