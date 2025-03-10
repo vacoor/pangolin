@@ -831,7 +831,7 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
 
 
     protected void destroy() {
-        if (child.isOpen()) {
+        if (null != child && child.isOpen()) {
             child.close();
         }
         destroy0();
