@@ -6,17 +6,10 @@ import com.sun.jna.Structure;
 import java.util.Arrays;
 import java.util.List;
 
+/**
+ * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/route.h">net/route.h</a>
+ */
 public interface Route {
-
-    int RTM_VERSION = 5;
-
-    int RTM_ADD = 0x1;
-
-    int RTM_DELETE = 0x2;
-
-    int RTM_CHANGE = 0x3;
-
-    byte RTM_GET = 0x4;
 
     /**
      * route usable.
@@ -37,18 +30,67 @@ public interface Route {
      * generate new routes on use.
      */
     int RTF_CLONING = 0x100;
+
     /**
      * manually added.
      */
     int RTF_STATIC = 0x800;
 
+    /**
+     * Up the ante and ignore older versions.
+     */
+    int RTM_VERSION = 5;
 
-    int RTA_DST = 0x1;     /* destination sockaddr present */
-    int RTA_GATEWAY = 0x2;    /* gateway sockaddr present */
-    int RTA_NETMASK = 0x4;    /* netmask sockaddr present */
-    int RTA_IFP = 0x10; /* interface name sockaddr present */
+    /*-
+     * Message types.
+     */
+
+    /**
+     * Add Route.
+     */
+    int RTM_ADD = 0x1;
+
+    /**
+     * Delete Route.
+     */
+    int RTM_DELETE = 0x2;
+
+    /**
+     * Change Metrics or flags.
+     */
+    int RTM_CHANGE = 0x3;
+
+    /**
+     * Report Metrics.
+     */
+    byte RTM_GET = 0x4;
 
 
+    /*-
+     * Bitmask values for rtm_addrs.
+     */
+
+    /**
+     * destination sockaddr present.
+     */
+    int RTA_DST = 0x1;
+    /**
+     * gateway sockaddr present.
+     */
+    int RTA_GATEWAY = 0x2;
+    /**
+     * netmask sockaddr present.
+     */
+    int RTA_NETMASK = 0x4;
+    /**
+     * interface name sockaddr present.
+     */
+    int RTA_IFP = 0x10;
+
+    /**
+     * These numbers are used by reliable protocols for determining
+     * retransmission behavior and are included in the routing structure.
+     */
     class rt_metrics extends Structure {
         public int rmx_locks;      // 路由锁状态 (bitmask)
         public int rmx_mtu;        // 路径MTU（字节）

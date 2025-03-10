@@ -171,7 +171,7 @@ public class RouteApplication {
         return (new Acceptor() {
             @Override
             public ChannelFuture start(final RouteContext context) throws Exception {
-                return new NettyServer(9080).start(true, new ChannelInitializer<SocketChannel>() {
+                return new NettyServer(9090).start(true, new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(final SocketChannel ch) throws Exception {
                         ch.pipeline().addLast(

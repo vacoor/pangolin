@@ -27,22 +27,6 @@ public interface If {
 
 
     /**
-     * Structure used by kernel to store most addresses.
-     * <p>
-     * usr/include/sys/socket.h
-     */
-    @Structure.FieldOrder({"sa_len", "sa_family", "sa_data"})
-    class sockaddr extends Structure {
-        public byte sa_len;
-        public byte sa_family;
-        public byte[] sa_data = new byte[14];
-
-        public static class ByRef extends sockaddr implements ByReference {
-        }
-    }
-
-
-    /**
      * Socket address, internet style.
      * <p>
      * usr/include/netinet/in.h
@@ -214,9 +198,9 @@ public interface If {
         public ByRef ifa_next;
         public String ifa_name;
         public int ifa_flags;
-        public sockaddr.ByRef ifa_addr;
-        public sockaddr.ByRef ifa_netmask;
-        public sockaddr.ByRef ifa_dstaddr;
+        public Socket.sockaddr.ByRef ifa_addr;
+        public Socket.sockaddr.ByRef ifa_netmask;
+        public Socket.sockaddr.ByRef ifa_dstaddr;
         public Pointer ifa_data;
 
         public static class ByRef extends ifaddrs implements ByReference {

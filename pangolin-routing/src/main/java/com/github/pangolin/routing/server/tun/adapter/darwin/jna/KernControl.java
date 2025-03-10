@@ -5,7 +5,10 @@ import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
 
 /**
- * sys/kern_control.h
+ * This header defines an API to communicate between a kernel
+ * extension and a process outside of the kernel.
+ *
+ * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/kern_control.h">sys/kern_control.h</a>
  */
 public interface KernControl {
 
@@ -19,10 +22,21 @@ public interface KernControl {
      */
     int MAX_KCTL_NAME = 96;
 
+    /**
+     * This structure is used with the CTLIOCGINFO ioctl to
+     * translate from a kernel control name to a control id.
+     */
     @SuppressWarnings({"java:S116", "java:S1104", "java:S2160"})
     @Structure.FieldOrder({"ctl_id", "ctl_name"})
     class ctl_info extends Structure {
+        /**
+         * The kernel control id, filled out upon return.
+         */
         public int ctl_id;
+
+        /**
+         * The kernel control name to find.
+         */
         public byte[] ctl_name = new byte[MAX_KCTL_NAME];
 
         public ctl_info(final String name) {
@@ -73,8 +87,9 @@ public interface KernControl {
          */
         public int[] sc_reserved = new int[5];
 
-        public sockaddr_ctl(final byte scFamily, final short sysaddr, final int scId, final int scUnit, final int... reserved) {
-//            sc_len = (byte) size();
+        public sockaddr_ctl(final byte scFamily, final short sysaddr,
+                            final int scId, final int scUnit, final int... reserved) {
+            // sc_len = (byte) size();
             sc_family = scFamily;
             ss_sysaddr = sysaddr;
             sc_id = scId;

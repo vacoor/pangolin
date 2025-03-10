@@ -3,7 +3,7 @@ package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 import com.sun.jna.NativeLong;
 
 /**
- * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/sockio.h">sockio.h</a>
+ * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/sockio.h">sys/sockio.h</a>
  */
 public interface Sockio {
 

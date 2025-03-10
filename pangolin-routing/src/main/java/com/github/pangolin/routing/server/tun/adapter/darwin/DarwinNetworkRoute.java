@@ -70,10 +70,9 @@ public class DarwinNetworkRoute {
             }
             hdr.rtm_pid = 0;
             hdr.rtm_seq = i + 1;
-
             hdr.write();
-
             offset += hdr.size();
+
             offset += writeSockAddrIn(buffer.share(offset), dst);
             offset += writeSockAddrIn(buffer.share(offset), gw);
             offset += writeSockAddrIn(buffer.share(offset), netmask);

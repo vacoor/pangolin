@@ -1,9 +1,17 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 
+import com.sun.jna.Structure;
+
 /**
- * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/socket.h">socket.h</a>
+ * Definitions related to sockets: types, address families, options.
+ *
+ * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/socket.h">sys/socket.h</a>
  */
 public interface Socket {
+
+    /*-
+     * Types.
+     */
 
     /**
      * stream socket.
@@ -20,6 +28,10 @@ public interface Socket {
      */
     int SOCK_RAW = 3;
 
+
+    /*-
+     * Address families.
+     */
 
     /**
      * unspecified.
@@ -51,4 +63,19 @@ public interface Socket {
      */
     int AF_SYSTEM = 32;
 
+    int AF_UTUN = 38;
+
+
+    /**
+     * Structure used by kernel to store most addresses.
+     */
+    @Structure.FieldOrder({"sa_len", "sa_family", "sa_data"})
+    class sockaddr extends Structure {
+        public byte sa_len;         /* total length */
+        public byte sa_family;      /* [XSI] address family */
+        public byte[] sa_data = new byte[14];   /* [XSI] addr value */
+
+        public static class ByRef extends sockaddr implements ByReference {
+        }
+    }
 }
