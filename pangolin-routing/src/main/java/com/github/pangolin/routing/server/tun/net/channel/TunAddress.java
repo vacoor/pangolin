@@ -3,16 +3,14 @@ package com.github.pangolin.routing.server.tun.net.channel;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 
 import java.net.SocketAddress;
-import java.util.Arrays;
-import java.util.List;
 
 public class TunAddress extends SocketAddress {
     private static final long serialVersionUID = -584786182484350484L; // NOSONAR
-    private final String ifName;
+    private final String ifname;
     private final InterfaceAddressEx[] bindings;
 
-    public TunAddress(final String ifName, final InterfaceAddressEx... bindings) {
-        this.ifName = ifName;
+    public TunAddress(final String ifname, final InterfaceAddressEx... bindings) {
+        this.ifname = ifname;
         this.bindings = bindings;
     }
 
@@ -25,8 +23,8 @@ public class TunAddress extends SocketAddress {
      *
      * @return the name of the tun device
      */
-    public String ifName() {
-        return ifName;
+    public String ifname() {
+        return ifname;
     }
 
     public InterfaceAddressEx[] getInterfaceAddresses() {
@@ -36,6 +34,6 @@ public class TunAddress extends SocketAddress {
     @Override
     public String toString() {
         // return Objects.requireNonNullElse(name, "");
-        return ifName;
+        return ifname;
     }
 }

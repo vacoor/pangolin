@@ -1,12 +1,9 @@
 package com.github.pangolin.routing.server.tun.net.channel;
 
-import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.TunAdapter;
-import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinNetworkRoute;
 import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinTunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.linux.LinuxTunAdapter;
-import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
 import com.github.pangolin.routing.server.tun.adapter.windows.WindowsTunAdapter;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -16,7 +13,6 @@ import io.netty.util.internal.StringUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.AlreadyConnectedException;
@@ -79,8 +75,8 @@ public class TunChannel extends AbstractChannel {
     @Override
     protected void doBind(final SocketAddress localAddress) throws Exception {
         final int mtu = config.getMtu();
-        TunAddress ta = (TunAddress) localAddress;
-        final String ifname = ta.ifName();
+        final TunAddress ta = (TunAddress) localAddress;
+        final String ifname = ta.ifname();
         final InterfaceAddressEx[] bindings = ta.getInterfaceAddresses();
 
         if (PlatformDependent.isOsx()) {
@@ -91,7 +87,6 @@ public class TunChannel extends AbstractChannel {
             device = LinuxTunAdapter.open(ifname, mtu, bindings);
         }
         log.info("TUN adapter initialized: {}", device.name());
-
     }
 
 

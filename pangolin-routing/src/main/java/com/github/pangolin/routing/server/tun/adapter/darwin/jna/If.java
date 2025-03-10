@@ -5,31 +5,31 @@ import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
 import com.sun.jna.Union;
 
-import java.util.List;
-
 
 /**
- * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if.h">if.h</a>
+ * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if.h">net/if.h</a>
  */
 public interface If {
 
     int IFNAMSIZ = 16;
 
     /**
-     * netinet6/scope6_var.h
+     * 16 is correspondent to 4bit multicast scope field.
+     * i.e. from node-local to global with some reserved/unassigned types.
+     *
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/scope6_var.h">netinet6/scope6_var.h</a>
      */
     int SCOPE6_ID_MAX = 16;
 
     /**
-     * netinet6/nd6.h
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/nd6.h">netinet6/nd6.h</a>
      */
     int ND6_INFINITE_LIFETIME = 0xFFFFFFFF;
 
-
     /**
      * Socket address, internet style.
-     * <p>
-     * usr/include/netinet/in.h
+     *
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet/in.h">netinet/in.h</a>
      */
     @Structure.FieldOrder({"sin_len", "sin_family", "sin_port", "sin_addr", "sin_zero"})
     class sockaddr_in extends Structure {
@@ -53,6 +53,8 @@ public interface If {
      * ioctl's.  All interface ioctl's must have parameter
      * definitions which begin with ifr_name.  The
      * remainder may be interface specific.
+     *
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if.h">net/if.h</a>
      */
     @Structure.FieldOrder({"ifr_name", "ifr_ifru"})
     class ifreq extends Structure {
@@ -81,6 +83,9 @@ public interface If {
         }
     }
 
+    /**
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if.h">net/if.h</a>
+     */
     @Structure.FieldOrder({"ifra_name", "ifra_addr", "ifra_broadaddr", "ifra_mask"})
     class ifaliasreq extends Structure {
         /**
@@ -101,16 +106,35 @@ public interface If {
 
     /**
      * Socket address for IPv6.
-     * netinet6/in6.h
+     *
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/in6.h">netinet6/in6.h</a>
      */
     @Structure.FieldOrder({"sin6_len", "sin6_family", "sin6_port", "sin6_flowinfo", "sin6_addr", "sin6_scope_id"})
     class sockaddr_in6 extends Structure {
-        public byte sin6_len;                   /* length of this struct(sa_family_t). */
-        public byte sin6_family;                /* AF_INET6 (sa_family_t). */
-        public short sin6_port;                 /* Transport layer port # (in_port_t). */
-        public int sin6_flowinfo;               /* IP6 flow information. */
-        public byte[] sin6_addr = new byte[16]; /* IP6 address. */
-        public int sin6_scope_id;               /* scope zone index. */
+        /**
+         * length of this struct(sa_family_t).
+         */
+        public byte sin6_len;
+        /**
+         * AF_INET6 (sa_family_t).
+         */
+        public byte sin6_family;
+        /**
+         * Transport layer port # (in_port_t).
+         */
+        public short sin6_port;
+        /**
+         * IP6 flow information.
+         */
+        public int sin6_flowinfo;
+        /**
+         * IP6 address.
+         */
+        public byte[] sin6_addr = new byte[16];
+        /**
+         * scope zone index.
+         */
+        public int sin6_scope_id;
 
         public sockaddr_in6() {
         }
@@ -120,10 +144,6 @@ public interface If {
             read();
         }
 
-        @Override
-        protected List<String> getFieldOrder() {
-            return super.getFieldOrder();
-        }
     }
 
     /**
@@ -133,19 +153,31 @@ public interface If {
      * userland -> kernel: accept pltime/vltime
      * kernel -> userland: throw up everything
      * in kernel: modify preferred/expire only
-     * <p>
-     * netinet6/in6_var.h
+     *
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/in6_var.h">netinet6/in6_var.h</a>
      */
     @Structure.FieldOrder({"ia6t_expire", "ia6t_preferred", "ia6t_vltime", "ia6t_pltime"})
     class in6_addrlifetime extends Structure {
-        public long ia6t_expire;     /* valid lifetime expiration time */
-        public long ia6t_preferred;  /* preferred lifetime expiration time */
-        public int ia6t_vltime;      /* valid lifetime */
-        public int ia6t_pltime;      /* prefix lifetime */
+        /**
+         * valid lifetime expiration time.
+         */
+        public long ia6t_expire;
+        /**
+         * preferred lifetime expiration time.
+         */
+        public long ia6t_preferred;
+        /**
+         * valid lifetime.
+         */
+        public int ia6t_vltime;
+        /**
+         * prefix lifetime.
+         */
+        public int ia6t_pltime;
     }
 
     /**
-     * usr/include/netinet6/in6_var.h
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/in6_var.h">netinet6/in6_var.h</a>
      */
     @Structure.FieldOrder({"ifr_name", "ifr_ifru"})
     class in6_ifreq extends Structure {
@@ -172,8 +204,7 @@ public interface If {
 
 
     /**
-     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/in6_var.h">in6_var.h</a>
-     * netinet6/in6_var.h
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/in6_var.h">netinet6/in6_var.h</a>
      */
     @Structure.FieldOrder({"ifra_name", "ifra_addr", "ifra_dstaddr", "ifra_prefixmask", "ifra_flags", "ifra_lifetime"})
     class in6_aliasreq extends Structure {
@@ -191,7 +222,7 @@ public interface If {
 
 
     /**
-     * usr/include/ifaddrs.h
+     * ifaddrs.h
      */
     @Structure.FieldOrder({"ifa_next", "ifa_name", "ifa_flags", "ifa_addr", "ifa_netmask", "ifa_dstaddr", "ifa_data"})
     class ifaddrs extends Structure {
@@ -207,24 +238,48 @@ public interface If {
         }
     }
 
-    /*
-     * Structure of a Link-Level sockaddr:
+    /**
+     * Structure of a Link-Level sockaddr.
      *
-     * usr/include/net/if_dl.h
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if_dl.h">net/if_dl.h</a>
      */
-    @Structure.FieldOrder({"sdl_len", "sdl_family", "sdl_index", "sdl_type", "sdl_nlen"
+    @Structure.FieldOrder({
+            "sdl_len", "sdl_family", "sdl_index", "sdl_type", "sdl_nlen"
             , "sdl_alen", "sdl_slen", "sdl_data"
     })
     class sockaddr_dl extends Structure {
-        public byte sdl_len;        /* Total length of sockaddr */
-        public byte sdl_family;     /* AF_LINK */
-        public short sdl_index;      /* if != 0, system given index for interface */
-        public byte sdl_type;       /* interface type */
-        public byte sdl_nlen;       /* interface name length, no trailing 0 reqd. */
-        public byte sdl_alen;       /* link level address length */
-        public byte sdl_slen;       /* link layer selector length */
-        public byte[] sdl_data = new byte[12];   /* minimum work area, can be larger;
-                                                  * contains both if name and ll address */
+        /**
+         * Total length of sockaddr.
+         */
+        public byte sdl_len;
+        /**
+         * AF_LINK.
+         */
+        public byte sdl_family;
+        /**
+         * if != 0, system given index for interface.
+         */
+        public short sdl_index;
+        /**
+         * interface type.
+         */
+        public byte sdl_type;
+        /**
+         * interface name length, no trailing 0 reqd.
+         */
+        public byte sdl_nlen;
+        /**
+         * link level address length.
+         */
+        public byte sdl_alen;
+        /**
+         * link layer selector length.
+         */
+        public byte sdl_slen;
+        /**
+         * minimum work area, can be larger; contains both if name and ll address.
+         */
+        public byte[] sdl_data = new byte[12];
 
         public sockaddr_dl(final Pointer p) {
             super(p);

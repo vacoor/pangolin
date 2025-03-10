@@ -27,12 +27,8 @@ public interface Sockio {
     NativeLong SIOCGIFMETRIC = new NativeLong(0xc0206917L);
     NativeLong SIOCSIFMETRIC = new NativeLong(0x80206918L);
 
-
     NativeLong SIOCGIFMTU = new NativeLong(0xc0206933L);
     NativeLong SIOCSIFMTU = new NativeLong(0x80206934L);
-
-//    NativeLong SIOCGIFMTU = new NativeLong(0x80206937L);
-//    NativeLong SIOCSIFMTU = new NativeLong(0x80206938L);
 
     NativeLong SIOCADDMULTI = new NativeLong(0x80206931L);
     NativeLong SIOCDELMULTI = new NativeLong(0x80206932L);

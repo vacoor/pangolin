@@ -68,6 +68,8 @@ public interface Socket {
 
     /**
      * Structure used by kernel to store most addresses.
+     *
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/socket.h">sys/socket.h</a>
      */
     @Structure.FieldOrder({"sa_len", "sa_family", "sa_data"})
     class sockaddr extends Structure {

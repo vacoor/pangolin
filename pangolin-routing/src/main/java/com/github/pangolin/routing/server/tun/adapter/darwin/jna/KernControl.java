@@ -25,6 +25,8 @@ public interface KernControl {
     /**
      * This structure is used with the CTLIOCGINFO ioctl to
      * translate from a kernel control name to a control id.
+     *
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/kern_control.h">sys/kern_control.h</a>
      */
     @SuppressWarnings({"java:S116", "java:S1104", "java:S2160"})
     @Structure.FieldOrder({"ctl_id", "ctl_name"})
@@ -53,6 +55,8 @@ public interface KernControl {
      * creator code obtained from Apple Computer. sc_unit is a unit
      * number for this sc_id, and is privately used by the kernel
      * controller to identify several instances of the controller.
+     *
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/kern_control.h">sys/kern_control.h</a>
      */
     @SuppressWarnings({"java:S109", "java:S116", "java:S1104", "java:S2160"})
     @Structure.FieldOrder({"sc_len", "sc_family", "ss_sysaddr", "sc_id", "sc_unit", "sc_reserved"})

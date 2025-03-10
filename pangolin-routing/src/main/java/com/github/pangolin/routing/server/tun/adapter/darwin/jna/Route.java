@@ -90,6 +90,8 @@ public interface Route {
     /**
      * These numbers are used by reliable protocols for determining
      * retransmission behavior and are included in the routing structure.
+     *
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/route.h">net/route.h</a>
      */
     class rt_metrics extends Structure {
         public int rmx_locks;      // 路由锁状态 (bitmask)
@@ -116,19 +118,60 @@ public interface Route {
         }
     }
 
+    /**
+     * Structures for routing messages.
+     *
+     * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/route.h">net/route.h</a>
+     */
     class rt_msghdr extends Structure {
-        public short rtm_msglen;    /* to skip over non-understood messages */
-        public byte rtm_version;    /* future binary compatibility */
-        public byte rtm_type;       /* message type */
-        public short rtm_index;     /* index for associated ifp */
-        public int rtm_flags;       /* flags, incl. kern & message, e.g. DONE */
-        public int rtm_addrs;       /* bitmask identifying sockaddrs in msg */
-        public int rtm_pid;         /* identify sender */
-        public int rtm_seq;         /* for sender to identify action */
-        public int rtm_errno;       /* why failed */
-        public int rtm_use;         /* from rtentry */
-        public int rtm_inits;       /* which metrics we are initializing */
-        public rt_metrics rtm_rmx = new rt_metrics(); /* metrics themselves */
+        /**
+         * to skip over non-understood messages.
+         */
+        public short rtm_msglen;
+        /**
+         * future binary compatibility.
+         */
+        public byte rtm_version;
+        /**
+         * message type.
+         */
+        public byte rtm_type;
+        /**
+         * index for associated ifp.
+         */
+        public short rtm_index;
+        /**
+         * flags, incl. kern & message, e.g. DONE.
+         */
+        public int rtm_flags;
+        /**
+         * bitmask identifying sockaddrs in msg.
+         */
+        public int rtm_addrs;
+        /**
+         * identify sender.
+         */
+        public int rtm_pid;
+        /**
+         * for sender to identify action.
+         */
+        public int rtm_seq;
+        /**
+         * why failed.
+         */
+        public int rtm_errno;
+        /**
+         * from rtentry.
+         */
+        public int rtm_use;
+        /**
+         * which metrics we are initializing.
+         */
+        public int rtm_inits;
+        /**
+         * metrics themselves.
+         */
+        public rt_metrics rtm_rmx = new rt_metrics();
 
         public rt_msghdr() {
         }

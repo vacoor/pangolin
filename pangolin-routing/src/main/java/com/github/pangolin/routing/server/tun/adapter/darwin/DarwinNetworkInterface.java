@@ -150,11 +150,11 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
     }
 
     private static int fd4() {
-        return socket(AF_INET, SOCK_DGRAM, 0);
+        return socket(AF_INET, SOCK_DGRAM, AF_UNSPEC);
     }
 
     private static int fd6() {
-        return socket(AF_INET6, SOCK_DGRAM, 0);
+        return socket(AF_INET6, SOCK_DGRAM, AF_UNSPEC);
     }
 
 
@@ -239,7 +239,6 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         return AF_UNSPEC == family || ifaddr.ifa_addr.sa_family == family;
     }
 
-
     // ------------------------ START IPv4 related ------------------------
 
     /**
@@ -322,7 +321,8 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         ioctl0(fd, SIOCDIFADDR, _ifreq(ifname, address));
     }
 
-    private static ifreq _ifreq(final String ifname, final Inet4Address addr) {
+    private static ifreq _ifreq(final String ifname,
+                                final Inet4Address addr) {
         final ifreq ifr = new ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_addr");
         if (null != addr) {
@@ -333,8 +333,10 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
     }
 
 
-    static void addInterfaceAddress4(final int fd, final String ifname,
-                                     final Inet4Address address, final Inet4Address netmask) {
+    private static void addInterfaceAddress4(final int fd,
+                                             final String ifname,
+                                             final Inet4Address address,
+                                             final Inet4Address netmask) {
         final ifaliasreq ifr = new ifaliasreq(ifname);
         writeSockAddr4(ifr.ifra_addr, address);
 
@@ -347,18 +349,15 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         ioctl0(fd, SIOCAIFADDR, ifr);
     }
 
-
     // ------------------------ END IPv4 related ------------------------
 
     // ------------------------ START IPv6 related ------------------------
 
-
-    static void addInterfaceAddress6(final int fd, final String ifname,
-                                     final Inet6Address address, final Inet6Address netmask) {
-        final in6_aliasreq ifr6 = new in6_aliasreq(ifname);
-        writeSockAddr6(ifr6.ifra_addr, address);
-        // writeSockAddr6(ifr6.ifra_dstaddr, address);
-        writeSockAddr6(ifr6.ifra_prefixmask, netmask);
+    private static void addInterfaceAddress6(final int fd,
+                                             final String ifname,
+                                             final Inet6Address address,
+                                             final Inet6Address netmask) {
+        final in6_aliasreq ifr6 = _in6AliasReq(ifname, address, netmask);
 
         /* important!!! */
         ifr6.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
@@ -367,19 +366,23 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         ioctl0(fd, SIOCAIFADDR_IN6, ifr6);
     }
 
-    private static void deleteInterfaceAddress6(final int fd, final String ifname,
-                                                final Inet6Address addr, final Inet6Address netmask) {
-        final in6_aliasreq ifr6 = new in6_aliasreq(ifname);
-
-        writeSockAddr6(ifr6.ifra_addr, addr);
-        // writeSockAddr6(ifr6.ifra_dstaddr, addr);
-        writeSockAddr6(ifr6.ifra_prefixmask, netmask);
-
-        /* important!!! */
-        ifr6.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
-        ifr6.ifra_lifetime.ia6t_pltime = ND6_INFINITE_LIFETIME;
+    private static void deleteInterfaceAddress6(final int fd,
+                                                final String ifname,
+                                                final Inet6Address addr,
+                                                final Inet6Address netmask) {
+        final in6_aliasreq ifr6 = _in6AliasReq(ifname, addr, netmask);
 
         ioctl0(fd, SIOCDIFADDR_IN6, ifr6);
+    }
+
+    private static in6_aliasreq _in6AliasReq(final String ifname,
+                                             final Inet6Address address,
+                                             final Inet6Address netmask) {
+        final in6_aliasreq ifr6 = new in6_aliasreq(ifname);
+        writeSockAddr6(ifr6.ifra_addr, address);
+        // writeSockAddr6(ifr6.ifra_dstaddr, address);
+        writeSockAddr6(ifr6.ifra_prefixmask, netmask);
+        return ifr6;
     }
 
     // ------------------------ END IPv6 related ------------------------
