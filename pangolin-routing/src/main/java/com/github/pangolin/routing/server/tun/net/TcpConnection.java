@@ -830,7 +830,7 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
     private static final int ETIMEOUT = 110;
 
 
-    private void destroy() {
+    protected void destroy() {
         if (child.isOpen()) {
             child.close();
         }
@@ -1359,24 +1359,14 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
     }
 
     private InetSocketAddress resolve(InetAddress dst, final int port) {
-        String host = resolve(dst);
-        if (null != host) {
-            return InetSocketAddress.createUnresolved(host, port);
+        /*-
+         * FakeIP is only resolved through FakeDNS.
+         */
+        if (null != dnsEngine && dnsEngine.isFakeAddress(dst.getAddress())) {
+            final String hostname = dnsEngine.getHostByAddress(dst.getAddress());
+            return null != hostname ? InetSocketAddress.createUnresolved(hostname, port) : null;
         }
-        // no socket.
-        return null;
-    }
-
-    private String resolve(InetAddress dst) {
-        if (null != dnsEngine) {
-            final String host = dnsEngine.getHostByAddress(dst.getAddress());
-            if (null != host) {
-                return host;
-            } else if (dnsEngine.isFakeAddress(dst.getAddress())) {
-                return null;
-            }
-        }
-        return dst.getHostAddress();
+        return new InetSocketAddress(dst, port);
     }
 
     // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L597
