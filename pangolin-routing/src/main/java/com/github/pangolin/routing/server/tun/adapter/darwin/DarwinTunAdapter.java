@@ -234,7 +234,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter {
             // utun unit = index + 1
             return index + 1;
         } else {
-            // AUTO alloc
+            // automatically assigned
             return 0;
         }
     }
