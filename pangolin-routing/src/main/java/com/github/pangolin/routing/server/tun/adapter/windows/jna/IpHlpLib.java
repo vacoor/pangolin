@@ -20,8 +20,13 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 
-public interface IpHelpLib extends IPHlpAPI {
-    IpHelpLib INSTANCE = Native.load("IPHlpAPI", IpHelpLib.class, W32APIOptions.DEFAULT_OPTIONS);
+/**
+ * Windows IP Helper API.
+ *
+ * @see <a href="https://msdn.microsoft.com/en-us/library/windows/desktop/aa373083(v=vs.85).aspx">IP Helper Reference</a>
+ */
+public interface IpHlpLib extends IPHlpAPI {
+    IpHlpLib INSTANCE = Native.load("IPHlpAPI", IpHlpLib.class, W32APIOptions.DEFAULT_OPTIONS);
 
     int NDIS_IF_MAX_STRING_SIZE = 256;
 
@@ -337,10 +342,6 @@ public interface IpHelpLib extends IPHlpAPI {
         public int NumEntries;
         //        public MIB_UNICASTIPADDRESS_ROW[] Table = new MIB_UNICASTIPADDRESS_ROW[1];
         public MIB_UNICASTIPADDRESS_ROW[] Table = new MIB_UNICASTIPADDRESS_ROW[0];
-
-        public MIB_UNICASTIPADDRESS_TABLE() {
-            super();
-        }
 
         public MIB_UNICASTIPADDRESS_TABLE(Pointer p) {
             super(p);
@@ -840,6 +841,17 @@ public interface IpHelpLib extends IPHlpAPI {
 
     // ------------------------ END AdapterAddresses related ------------------------
 
+    /**
+     * A static route. This value is used to identify route information
+     * for IP routing set through network management such as the Dynamic
+     * Host Configuration Protocol (DCHP), the Simple Network Management
+     * Protocol (SNMP), or by calls to the CreateIpForwardEntry2,
+     * DeleteIpForwardEntry2, or SetIpForwardEntry2 functions.
+     *
+     * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/ns-netioapi-mib_ipforward_row2">MIB_IPFORWARD_ROW2</a>
+     */
+    int MIB_IPPROTO_NETMGMT = 3;
+
 
     @Structure.FieldOrder({"Prefix", "PrefixLength"})
     class IP_ADDRESS_PREFIX extends Structure {
@@ -884,6 +896,14 @@ public interface IpHelpLib extends IPHlpAPI {
         public int Age;
         //        NL_ROUTE_ORIGIN   Origin;
         public int Origin;
+
+        public MIB_IPFORWARD_ROW2() {
+            super();
+        }
+
+        public MIB_IPFORWARD_ROW2(final Pointer p) {
+            super(p);
+        }
     }
 
     /**
@@ -910,5 +930,32 @@ public interface IpHelpLib extends IPHlpAPI {
      * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setipforwardentry2">SetIpForwardEntry2</a>
      */
     int SetIpForwardEntry2(MIB_IPFORWARD_ROW2 row) throws LastErrorException;
+
+
+    @Structure.FieldOrder({"NumEntries", "Table"})
+    class MIB_IPFORWARD_TABLE2 extends Structure {
+        /**
+         * A value that specifies the number of IP route entries in the array.
+         */
+        public int NumEntries;
+        /**
+         * An array of MIB_IPFORWARD_ROW2 structures containing IP route entries.
+         */
+        public MIB_IPFORWARD_ROW2[] Table = new MIB_IPFORWARD_ROW2[0];
+
+        public MIB_IPFORWARD_TABLE2(final Pointer p) {
+            super(p);
+            Table = new MIB_IPFORWARD_ROW2[p.getInt(0)];
+            read();;
+        }
+    }
+
+    /**
+     * @param family    The address family to retrieve.
+     * @param pTableRef A pointer to a MIB_IPFORWARD_TABLE2 structure that contains a table of IP route entries on the local computer.
+     * @return If the function succeeds, the return value is NO_ERROR.
+     * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-getipforwardtable2">GetIpForwardTable2</a>
+     */
+    int GetIpForwardTable2(final int family, final PointerByReference pTableRef);
 
 }

@@ -28,7 +28,6 @@ import java.util.regex.Pattern;
 /**
  * Darwin system dns utilities.
  *
- * @author vacoor
  * @since 1.0.0
  */
 @Slf4j

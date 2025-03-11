@@ -36,6 +36,11 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
     }
 
     @Override
+    public String name() {
+        return ifname;
+    }
+
+    @Override
     public int getMTU() {
         final int fd = fd4();
         try {
@@ -60,10 +65,10 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
     }
 
     @Override
-    protected void setInterfaceAddress4(final Inet4Address address, final int prefix) {
+    protected void setInet4InterfaceAddress(final Inet4Address address, final int prefix) {
         final int fd = fd4();
         try {
-            // XXX flushInterfaceAddress & addInterfaceAddress4
+            // XXX flushInterfaceAddress & addInet4InterfaceAddress
             final Inet4Address netmask = cidrToNetmaskAddress(address, prefix);
             setAddress4(fd, ifname, address);
             // setDstAddress4(fd, ifname, address);
@@ -74,7 +79,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
     }
 
     @Override
-    protected void setInterfaceAddress6(final Inet6Address address, final int prefix) {
+    protected void setInet6InterfaceAddress(final Inet6Address address, final int prefix) {
         final int fd = fd6();
         try {
             flushInterfaceAddresses(fd, ifname, AF_INET6);
@@ -85,13 +90,13 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
     }
 
     @Override
-    protected void addInterfaceAddress4(final Inet4Address address, final int prefix) {
+    protected void addInet4InterfaceAddress(final Inet4Address address, final int prefix) {
         addInterfaceAddress4(ifname, address, prefix);
     }
 
 
     @Override
-    protected void addInterfaceAddress6(final Inet6Address address, final int prefix) {
+    protected void addInet6InterfaceAddress(final Inet6Address address, final int prefix) {
         final int fd = fd6();
         try {
             addInterfaceAddress6(fd, ifname, address, prefix);
@@ -101,7 +106,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
     }
 
     @Override
-    protected void deleteInterfaceAddress4(final Inet4Address address, final int prefix) {
+    protected void deleteInet4InterfaceAddress(final Inet4Address address, final int prefix) {
         final int fd = fd4();
         try {
             deleteAddress4(fd, ifname, address);
@@ -111,7 +116,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
     }
 
     @Override
-    protected void deleteInterfaceAddress6(final Inet6Address address, final int prefix) {
+    protected void deleteInet6InterfaceAddress(final Inet6Address address, final int prefix) {
         final int fd = fd6();
         try {
             deleteInterfaceAddress6(fd, ifname, address, prefix);
@@ -121,7 +126,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
     }
 
     @Override
-    protected void flushInterfaceAddresses4() {
+    protected void flushInet4InterfaceAddresses() {
         final int fd = fd4();
         try {
             flushInterfaceAddresses(fd, ifname, AF_INET);
@@ -131,7 +136,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
     }
 
     @Override
-    protected void flushInterfaceAddresses6() {
+    protected void flushInet6InterfaceAddresses() {
         final int fd = fd6();
         try {
             flushInterfaceAddresses(fd, ifname, AF_INET6);

@@ -32,7 +32,10 @@ public interface If {
      *
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet/in.h">netinet/in.h</a>
      */
-    @Structure.FieldOrder({"sin_len", "sin_family", "sin_port", "sin_addr", "sin_zero"})
+    @Structure.FieldOrder({
+            "sin_len", "sin_family",
+            "sin_port", "sin_addr", "sin_zero"
+    })
     class sockaddr_in extends Structure {
         public byte sin_len;
         public byte sin_family;
@@ -101,9 +104,6 @@ public interface If {
             Utils.writeToBytes(ifname, ifra_name);
         }
     }
-
-
-    // netinet6/in6.h ----------------------
 
     /**
      * Socket address for IPv6.
@@ -225,7 +225,10 @@ public interface If {
     /**
      * ifaddrs.h
      */
-    @Structure.FieldOrder({"ifa_next", "ifa_name", "ifa_flags", "ifa_addr", "ifa_netmask", "ifa_dstaddr", "ifa_data"})
+    @Structure.FieldOrder({
+            "ifa_next", "ifa_name", "ifa_flags",
+            "ifa_addr", "ifa_netmask", "ifa_dstaddr", "ifa_data"
+    })
     class ifaddrs extends Structure {
         public ByRef ifa_next;
         public String ifa_name;
@@ -245,8 +248,8 @@ public interface If {
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if_dl.h">net/if_dl.h</a>
      */
     @Structure.FieldOrder({
-            "sdl_len", "sdl_family", "sdl_index", "sdl_type", "sdl_nlen"
-            , "sdl_alen", "sdl_slen", "sdl_data"
+            "sdl_len", "sdl_family", "sdl_index", "sdl_type",
+            "sdl_nlen", "sdl_alen", "sdl_slen", "sdl_data"
     })
     class sockaddr_dl extends Structure {
         /**

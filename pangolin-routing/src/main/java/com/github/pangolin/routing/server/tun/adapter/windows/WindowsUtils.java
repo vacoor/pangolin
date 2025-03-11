@@ -2,9 +2,9 @@ package com.github.pangolin.routing.server.tun.adapter.windows;
 
 import io.netty.util.NetUtil;
 
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.SOCKADDR_INET;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.sockaddr_in;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHelpLib.sockaddr_in6;
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.SOCKADDR_INET;
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.sockaddr_in;
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.sockaddr_in6;
 import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
 import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
 
@@ -17,10 +17,6 @@ import java.net.UnknownHostException;
  *
  */
 public class WindowsUtils {
-
-    static SOCKADDR_INET toSockAddr(final InetAddress address) {
-        return writeSockAddr(new SOCKADDR_INET(), address);
-    }
 
     static SOCKADDR_INET writeSockAddr(final SOCKADDR_INET sockAddr, final InetAddress address) {
         if (address instanceof Inet4Address) {
@@ -54,7 +50,9 @@ public class WindowsUtils {
             final sockaddr_in6 v6 = (sockaddr_in6) sockAddr.getTypedValue(sockaddr_in6.class);
             return toInet6Address(v6.sin6_addr, v6.sin6_scope_id);
         } else {
-            throw new IllegalStateException("Unknown si family: " + sockAddr.si_family);
+            // FIXME
+//            throw new IllegalStateException("Unknown si family: " + sockAddr.si_family);
+            return null;
         }
     }
 

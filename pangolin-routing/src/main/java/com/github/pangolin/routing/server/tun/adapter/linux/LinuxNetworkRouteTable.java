@@ -1,16 +1,46 @@
 package com.github.pangolin.routing.server.tun.adapter.linux;
 
-import com.sun.jna.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.throwLastErrorException;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NETLINK_ROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_CREATE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_REQUEST;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.nlmsghdr;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.sockaddr_nl;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_DST;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_GATEWAY;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_OIF;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_DELROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_NEWROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTN_UNICAST;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTPROT_STATIC;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RT_SCOPE_UNIVERSE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RT_TABLE_MAIN;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.rtattr;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.rtmsg;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_NETLINK;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.SOCK_RAW;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.API_INSTANTCE;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.close;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.if_nametoindex;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.socket;
+
+import com.github.pangolin.routing.server.tun.adapter.NetworkRouteTable;
+import com.sun.jna.Memory;
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
 
 import java.net.Inet4Address;
 
-import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.throwLastErrorException;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.*;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.*;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.*;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
+public class LinuxNetworkRouteTable extends NetworkRouteTable {
+    private static final LinuxNetworkRouteTable INSTANCE = new LinuxNetworkRouteTable();
 
-public class LinuxNetworkRoute {
+    private LinuxNetworkRouteTable() {
+    }
+
+    public static LinuxNetworkRouteTable get() {
+        return INSTANCE;
+    }
 
     public static void add(final String ifname, final Inet4Address addr, final int prefix, final Inet4Address gwAddr, final boolean delete) {
         int ifindex = if_nametoindex(ifname);

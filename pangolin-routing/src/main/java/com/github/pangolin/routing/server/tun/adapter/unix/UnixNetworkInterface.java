@@ -7,73 +7,123 @@ import com.github.pangolin.routing.server.tun.adapter.NetworkInterfaceEx;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.nio.channels.UnsupportedAddressTypeException;
 
 /**
- *
+ * This class represents a Network Interface on Unix-like OS.
  */
 public abstract class UnixNetworkInterface implements NetworkInterfaceEx {
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void setInterfaceAddress(final InterfaceAddressEx address) {
         final InetAddress addr = address.getAddress();
         final int networkPrefixLength = address.getNetworkPrefixLength();
-
         if (addr instanceof Inet4Address) {
-            setInterfaceAddress4((Inet4Address) addr, networkPrefixLength);
+            setInet4InterfaceAddress((Inet4Address) addr, networkPrefixLength);
         } else if (addr instanceof Inet6Address) {
-            setInterfaceAddress6((Inet6Address) addr, networkPrefixLength);
+            setInet6InterfaceAddress((Inet6Address) addr, networkPrefixLength);
         } else {
-            throw new UnsupportedOperationException();
+            throwUnsupportedAddressFamilyException(addr);
         }
     }
 
-    protected abstract void setInterfaceAddress4(final Inet4Address address, final int prefix);
-
-    protected abstract void setInterfaceAddress6(final Inet6Address address, final int prefix);
-
+    /**
+     * {@inheritDoc}
+     */
     @Override
-    public void addInterfaceAddress(InterfaceAddressEx addressEx) {
-        final InetAddress addr = addressEx.getAddress();
-        final int prefix = addressEx.getNetworkPrefixLength();
-
+    public void addInterfaceAddress(final InterfaceAddressEx address) {
+        final InetAddress addr = address.getAddress();
+        final int prefix = address.getNetworkPrefixLength();
         if (addr instanceof Inet4Address) {
-            addInterfaceAddress4((Inet4Address) addr, prefix);
+            addInet4InterfaceAddress((Inet4Address) addr, prefix);
         } else if (addr instanceof Inet6Address) {
-            addInterfaceAddress6((Inet6Address) addr, prefix);
+            addInet6InterfaceAddress((Inet6Address) addr, prefix);
         } else {
-            throw new UnsupportedOperationException();
+            throwUnsupportedAddressFamilyException(addr);
         }
     }
 
-    protected abstract void addInterfaceAddress4(final Inet4Address address, final int prefix);
-
-    protected abstract void addInterfaceAddress6(final Inet6Address address, final int prefix);
-
+    /**
+     * {@inheritDoc}
+     */
     @Override
-    public void deleteInterfaceAddress(InterfaceAddressEx address) {
+    public void deleteInterfaceAddress(final InterfaceAddressEx address) {
         final InetAddress addr = address.getAddress();
         final int networkPrefixLength = address.getNetworkPrefixLength();
         if (addr instanceof Inet4Address) {
-            deleteInterfaceAddress4((Inet4Address) addr, networkPrefixLength);
+            deleteInet4InterfaceAddress((Inet4Address) addr, networkPrefixLength);
         } else if (addr instanceof Inet6Address) {
-            deleteInterfaceAddress6((Inet6Address) addr, networkPrefixLength);
+            deleteInet6InterfaceAddress((Inet6Address) addr, networkPrefixLength);
         } else {
-            throw new UnsupportedOperationException();
+            throwUnsupportedAddressFamilyException(addr);
         }
     }
 
-    protected abstract void deleteInterfaceAddress4(final Inet4Address address, final int prefix);
-
-    protected abstract void deleteInterfaceAddress6(final Inet6Address address, final int prefix);
-
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void flushInterfaceAddresses() {
-        flushInterfaceAddresses4();
-        flushInterfaceAddresses6();
+        flushInet4InterfaceAddresses();
+        flushInet6InterfaceAddresses();
     }
 
-    protected abstract void flushInterfaceAddresses4();
+    /**
+     * Set the IPv4 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param address a IPv4 InterfaceAddresses bound to this network interface
+     */
+    protected abstract void setInet4InterfaceAddress(final Inet4Address address, final int prefix);
 
-    protected abstract void flushInterfaceAddresses6();
+    /**
+     * Set the IPv6 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param address a IPv6 InterfaceAddresses bound to this network interface
+     */
+    protected abstract void setInet6InterfaceAddress(final Inet6Address address, final int prefix);
 
+    /**
+     * Add the IPv4 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param address a IPv4 InterfaceAddresses bound to this network interface
+     */
+    protected abstract void addInet4InterfaceAddress(final Inet4Address address, final int prefix);
+
+    /**
+     * Add the IPv6 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param address a IPv6 InterfaceAddresses bound to this network interface
+     */
+    protected abstract void addInet6InterfaceAddress(final Inet6Address address, final int prefix);
+
+    /**
+     * Delete the IPv4 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param address a IPv4 InterfaceAddresses bound to this network interface
+     */
+    protected abstract void deleteInet4InterfaceAddress(final Inet4Address address, final int prefix);
+
+    /**
+     * Delete the IPv6 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param address a IPv6 InterfaceAddresses bound to this network interface
+     */
+    protected abstract void deleteInet6InterfaceAddress(final Inet6Address address, final int prefix);
+
+    /**
+     * Flush the IPv4 {@code InterfaceAddresses} of this network interface.
+     */
+    protected abstract void flushInet4InterfaceAddresses();
+
+    /**
+     * Flush the IPv6 {@code InterfaceAddresses} of this network interface.
+     */
+    protected abstract void flushInet6InterfaceAddresses();
+
+    protected void throwUnsupportedAddressFamilyException(final InetAddress address) {
+        throw new UnsupportedAddressTypeException();
+    }
 }

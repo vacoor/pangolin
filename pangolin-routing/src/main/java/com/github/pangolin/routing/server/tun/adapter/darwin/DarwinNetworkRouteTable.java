@@ -2,6 +2,7 @@ package com.github.pangolin.routing.server.tun.adapter.darwin;
 
 import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.*;
 
+import com.github.pangolin.routing.server.tun.adapter.NetworkRouteTable;
 import com.sun.jna.*;
 
 import java.net.Inet4Address;
@@ -14,12 +15,20 @@ import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
 import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 
-public class DarwinNetworkRoute {
+public class DarwinNetworkRouteTable extends NetworkRouteTable {
     private static final int RT_MSGHDR_SIZE = new rt_msghdr(new Pointer(0)).size();
     private static final int SOCKADDR_DL_SIZE = new sockaddr_dl(new Pointer(0)).size();
     private static final int SOCKADDR_IN_SIZE = 16;
     private static final int SOCKADDR_IN6_SIZE = new sockaddr_in6().size();
 
+    private static final DarwinNetworkRouteTable INSTANCE = new DarwinNetworkRouteTable();
+
+    private DarwinNetworkRouteTable() {
+    }
+
+    public static DarwinNetworkRouteTable get() {
+        return INSTANCE;
+    }
 
     public static void add(final InetAddress dst, final int prefix, final InetAddress gw, final String ifname) {
         final InetAddress netmask = cidrToNetmaskAddress(dst, prefix);

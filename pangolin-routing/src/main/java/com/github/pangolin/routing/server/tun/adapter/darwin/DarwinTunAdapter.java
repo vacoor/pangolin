@@ -199,8 +199,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter {
             mtuToUse = DarwinNetworkInterface.getMTU(fd, ifnameToUse);
         }
 
-        final DarwinTunAdapter adapter = new DarwinTunAdapter(fd, ifnameToUse, mtuToUse);
-        final DarwinNetworkInterface nix = new DarwinNetworkInterface(ifnameToUse);
+        final DarwinNetworkInterface nix = DarwinNetworkInterface.getByName(ifnameToUse);
         final Set<InetAddress> processes = Sets.newHashSet();
         for (final InterfaceAddressEx binding : bindings) {
             nix.addInterfaceAddress(binding);
@@ -213,10 +212,10 @@ public class DarwinTunAdapter extends AbstractTunAdapter {
             final int prefix = binding.getNetworkPrefixLength();
             final InetAddress dst = NetUtils2.getNetworkAddress(gw, prefix);
             if (processes.add(dst) && dst instanceof Inet4Address) {
-                DarwinNetworkRoute.add(dst, prefix, gw, ifnameToUse);
+                DarwinNetworkRouteTable.add(dst, prefix, gw, ifnameToUse);
             }
         }
-        return adapter;
+        return new DarwinTunAdapter(fd, ifnameToUse, mtuToUse);
     }
 
     private static int nameToUnit(final String ifname) {

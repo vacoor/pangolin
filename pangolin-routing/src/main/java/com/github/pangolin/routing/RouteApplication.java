@@ -13,7 +13,6 @@ import com.github.pangolin.routing.server.extra.ProxyAutoConfigurationServerHand
 import com.github.pangolin.routing.server.extra.SwitchyRuleConfigurationServerHandler;
 import com.github.pangolin.routing.server.fakedns.FakeDnsAcceptorFactory;
 import com.github.pangolin.routing.server.tun.TunAcceptorFactory;
-import com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkRoute;
 import com.github.pangolin.routing.upstream.*;
 import com.github.pangolin.routing.upstream.stats.StatsAware;
 import com.github.pangolin.routing.upstream.stats.StatsUpstreamCombiner;
@@ -23,7 +22,6 @@ import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
-import com.sun.jna.Platform;
 import io.netty.channel.*;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
