@@ -1,16 +1,15 @@
 package com.github.pangolin.routing.upstream.spi;
 
+import com.github.pangolin.routing.upstream.AbstractUpstream;
 import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.upstream.UpstreamCombiner;
 import com.github.pangolin.routing.upstream.UpstreamRegistry;
-import com.github.pangolin.routing.upstream.AbstractUpstream;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelInitializer;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.List;
 import java.util.stream.StreamSupport;
 
 public class UpstreamChainFactory implements UpstreamCombiner {

@@ -18,6 +18,7 @@ import com.github.pangolin.routing.upstream.UpstreamRegistry;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import io.netty.channel.ChannelHandler;
 
 import java.net.InetSocketAddress;
@@ -26,6 +27,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public abstract class AbstractRouteContext extends SimpleAliasRegistry implements RouteContext, RouteRegistry<InetSocketAddress>, UpstreamRegistry, AcceptorProvider {
@@ -102,6 +104,33 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
         return null != route ? getUpstream(route.getUpstream()) : null;
     }
 
+    /*
+    public List<Upstream> getChain(final InetSocketAddress destination) {
+        final Route route = getRoute(destination);
+        final Upstream upstream = null != route ? getUpstream(route.getUpstream()) : null;
+        return null != upstream ? getChain(upstream, destination) : Collections.emptyList();
+    }
+
+    private List<Upstream> getChain(final Upstream upstream, final InetSocketAddress destination) {
+        if (!upstream.isVirtual()) {
+            return Collections.unmodifiableList(Collections.singletonList(upstream));
+        }
+
+        final Set<Upstream> processes = Sets.newHashSet();
+        final List<Upstream> expand = Lists.newArrayList();
+
+        final List<Upstream> chain = upstream.chain(destination);
+        for (final Upstream hop : chain) {
+            if (!processes.add(hop)) {
+                // cycle ...
+                continue;
+            }
+            expand.addAll(getChain(hop, destination));
+        }
+        return expand;
+    }
+    */
+
     public void addAcceptors(final Acceptor... acceptors) {
         this.acceptors.addAll(Arrays.asList(acceptors));
     }
@@ -172,6 +201,10 @@ public abstract class AbstractRouteContext extends SimpleAliasRegistry implement
         @Override
         public boolean isVirtual() {
             return true;
+        }
+
+        public List<Upstream> upstreams() {
+            return Collections.unmodifiableList(context.upstreams());
         }
 
         @Override

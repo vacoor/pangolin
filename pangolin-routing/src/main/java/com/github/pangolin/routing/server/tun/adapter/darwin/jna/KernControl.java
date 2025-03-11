@@ -10,6 +10,7 @@ import com.sun.jna.Structure;
  *
  * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/kern_control.h">sys/kern_control.h</a>
  */
+@SuppressWarnings({"unused", "WeakerAccess"})
 public interface KernControl {
 
     /**

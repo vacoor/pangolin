@@ -9,6 +9,7 @@ import java.util.List;
 /**
  * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/route.h">net/route.h</a>
  */
+@SuppressWarnings({"unused"})
 public interface Route {
 
     /**
@@ -94,18 +95,50 @@ public interface Route {
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/route.h">net/route.h</a>
      */
     class rt_metrics extends Structure {
-        public int rmx_locks;      // 路由锁状态 (bitmask)
-        public int rmx_mtu;        // 路径MTU（字节）
-        public int rmx_hopcount;   // 跳数指标
-        public int rmx_expire;     // 超时时间（毫秒）
-        public int rmx_recvpipe;   // 接收带宽（字节/秒）
-        public int rmx_sendpipe;   // 发送带宽（字节/秒）
-        public int rmx_ssthresh;   // TCP慢启动阈值
-        public int rmx_rtt;        // 平均往返时间（微秒）
-        public int rmx_rttvar;     // RTT方差
-        public int rmx_pksent;     // 发送数据包计数（2025新增）
-        public int rmx_state;
-        public final int[] rmx_filler = new int[3];  // 保留字段
+        /**
+         * Kernel leaves these values alone.
+         */
+        public int rmx_locks;
+        /**
+         * MTU for this path.
+         */
+        public int rmx_mtu;
+        /**
+         * max hops expected.
+         */
+        public int rmx_hopcount;
+        /**
+         * lifetime for route, e.g. redirect.
+         */
+        public int rmx_expire;
+        /**
+         * inbound delay-bandwidth product.
+         */
+        public int rmx_recvpipe;
+        /**
+         * outbound delay-bandwidth product.
+         */
+        public int rmx_sendpipe;
+        /**
+         * outbound gateway buffer limit.
+         */
+        public int rmx_ssthresh;
+        /**
+         * estimated round trip time.
+         */
+        public int rmx_rtt;
+        /**
+         * estimated rtt variance.
+         */
+        public int rmx_rttvar;
+        /**
+         * packets sent using this route.
+         */
+        public int rmx_pksent;
+        /**
+         * will be used for TCP's peer-MSS cache.
+         */
+        public final int[] rmx_filler = new int[4];
 
         @Override
         protected List<String> getFieldOrder() {

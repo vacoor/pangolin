@@ -1,6 +1,5 @@
 package com.github.pangolin.routing.context.spi;
 
-import com.github.pangolin.routing.context.AbstractRouteContextFactory;
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.support.AliasRegistry;

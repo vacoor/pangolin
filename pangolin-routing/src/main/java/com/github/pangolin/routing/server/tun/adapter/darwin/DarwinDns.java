@@ -1,13 +1,23 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopRef;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopSourceRef;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreCallBack;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFArrayRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFDictionaryRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFIndex;
+import static com.sun.jna.platform.mac.CoreFoundation.CFMutableDictionaryRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFStringRef;
+
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration;
+import com.google.common.collect.Lists;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -15,12 +25,12 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopRef;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopSourceRef;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreCallBack;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreRef;
-import static com.sun.jna.platform.mac.CoreFoundation.*;
-
+/**
+ * Darwin system dns utilities.
+ *
+ * @author vacoor
+ * @since 1.0.0
+ */
 @Slf4j
 public final class DarwinDns {
     private static final CoreFoundation CF = CoreFoundation.INSTANCE;
@@ -54,28 +64,28 @@ public final class DarwinDns {
     public static boolean addDns(final String[] dns, final boolean cleanupOnShutdown) {
         final String name = DarwinDns.class.getSimpleName();
         final AtomicBoolean shutdownHolder = new AtomicBoolean();
-        final AtomicReference<String> serviceHolder = new AtomicReference<>();
+        final AtomicReference<String> serviceIdHolder = new AtomicReference<>();
         final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR(name), null, null);
         try {
             final String serviceId = getPrimaryInterfaceServiceId(store);
-            final boolean success = addDns(store, serviceId, dns);
-            if (success) {
-                serviceHolder.set(serviceId);
+            if (!addDns(store, serviceId, dns)) {
+                return false;
             }
 
+            serviceIdHolder.set(serviceId);
             watchInBackground(name, new String[]{GLOBAL_IPV4_KEY}, new SCDynamicStoreCallBack() {
                 @Override
                 public void invoke(final SCDynamicStoreRef store, final CFArrayRef changedKeys, final Pointer info) {
                     if (Thread.currentThread().isInterrupted() || shutdownHolder.get()) {
                         return;
                     }
-                    final String prevServiceId = serviceHolder.get();
+                    final String prevServiceId = serviceIdHolder.get();
                     final String nextServiceId = getPrimaryInterfaceServiceId(store);
                     if (null == nextServiceId) {
-                        serviceHolder.set(null);
+                        serviceIdHolder.set(null);
                         log.warn("• Network Service {} DOWN", prevServiceId);
                     } else {
-                        serviceHolder.set(addDns(store, nextServiceId, dns) ? nextServiceId : null);
+                        serviceIdHolder.set(addDns(store, nextServiceId, dns) ? nextServiceId : null);
                         if (!nextServiceId.equals(prevServiceId)) {
                             log.warn("• Network Service CHANGED: {} -> {}", prevServiceId, nextServiceId);
                         }
@@ -84,9 +94,9 @@ public final class DarwinDns {
             }).start();
 
             if (cleanupOnShutdown) {
-                Runtime.getRuntime().addShutdownHook(cleaner(name, serviceHolder, shutdownHolder, dns));
+                Runtime.getRuntime().addShutdownHook(cleaner(name, serviceIdHolder, shutdownHolder, dns));
             }
-            return success;
+            return true;
         } finally {
             CF.CFRelease(store);
         }
@@ -152,7 +162,7 @@ public final class DarwinDns {
      * @return true if add dns addresses is successful or unnecessary, otherwise false
      */
     private static boolean addDns(final SCDynamicStoreRef store, final String serviceId, final String[] dns) {
-        final List<String> dnsToUse = newArrayList();
+        final List<String> dnsToUse = Lists.newArrayList();
         final List<String> snapshot = getDns0(store, serviceId);
         for (final String dnsAddress : dns) {
             if (!snapshot.contains(dnsAddress)) {
@@ -173,7 +183,7 @@ public final class DarwinDns {
      */
     private static boolean removeDns(final SCDynamicStoreRef store, final String serviceId, final String[] dns) {
         final List<String> snapshot = getDns0(store, serviceId);
-        final List<String> dnsToUse = newArrayList(snapshot);
+        final List<String> dnsToUse = Lists.newArrayList(snapshot);
 
         boolean found = false;
         for (final String dnsAddress : dns) {
@@ -213,7 +223,7 @@ public final class DarwinDns {
      * @return dns addresses in the dns dictionary
      */
     private static List<String> getDns0(final SCDynamicStoreRef store, final CFStringRef dnsDictionaryKey) {
-        final List<String> dnsToUse = newArrayList();
+        final List<String> dnsToUse = Lists.newArrayList();
         final CFDictionaryRef dnsDictionary = SC.SCDynamicStoreCopyValue(store, dnsDictionaryKey);
         try {
             if (null != dnsDictionary && CF.CFDictionaryGetTypeID().equals(CF.CFGetTypeID(dnsDictionary))) {
@@ -359,7 +369,7 @@ public final class DarwinDns {
      * @return DNS service ID
      */
     private static List<String> getDnsServiceIds(final SCDynamicStoreRef store) {
-        final List<String> serviceKeys = newArrayList();
+        final List<String> serviceKeys = Lists.newArrayList();
         final CFArrayRef dnsDictionaryKeys = SC.SCDynamicStoreCopyKeyList(store, CFSTR("State:/Network/Service/.*/DNS"));
         if (null != dnsDictionaryKeys) {
             final int count = CF.CFArrayGetCount(dnsDictionaryKeys).intValue();
@@ -391,15 +401,4 @@ public final class DarwinDns {
         return CFStringRef.createCFString(str);
     }
 
-    private static <T> ArrayList<T> newArrayList() {
-        return new ArrayList<>();
-    }
-
-    private static <T> ArrayList<T> newArrayList(Iterable<T> elements) {
-        final ArrayList<T> ret = newArrayList();
-        for (final T element : elements) {
-            ret.add(element);
-        }
-        return ret;
-    }
 }

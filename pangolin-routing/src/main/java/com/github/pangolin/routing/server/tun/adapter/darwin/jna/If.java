@@ -9,6 +9,7 @@ import com.sun.jna.Union;
 /**
  * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if.h">net/if.h</a>
  */
+@SuppressWarnings({"unused", "WeakerAccess"})
 public interface If {
 
     int IFNAMSIZ = 16;
