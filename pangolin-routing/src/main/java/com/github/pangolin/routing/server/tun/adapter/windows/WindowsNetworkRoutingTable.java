@@ -1,16 +1,7 @@
 package com.github.pangolin.routing.server.tun.adapter.windows;
 
-import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.interfaceIndexToLuid;
-import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.interfaceNameToLuid;
-import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.toInetAddress;
-import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.writeSockAddr;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.MIB_IPFORWARD_ROW2;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.MIB_IPPROTO_NETMGMT;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.*;
-
-import com.github.pangolin.routing.server.tun.adapter.NetworkRouteTable;
+import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
 import com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib;
-import com.sun.jna.Pointer;
 import com.sun.jna.platform.win32.Win32Exception;
 import com.sun.jna.platform.win32.WinDef;
 import com.sun.jna.platform.win32.WinError;
@@ -20,39 +11,60 @@ import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 
+import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.interfaceIndexToLuid;
+import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.interfaceNameToLuid;
+import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.toInetAddress;
+import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.writeSockAddr;
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.*;
+
 /**
  *
  */
-public class WindowsNetworkRouteTable extends NetworkRouteTable {
+public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
     private static final IpHlpLib IP_HLP_API = IpHlpLib.INSTANCE;
 
-    private static final WindowsNetworkRouteTable INSTANCE = new WindowsNetworkRouteTable();
+    private static final WindowsNetworkRoutingTable INSTANCE = new WindowsNetworkRoutingTable();
 
-    private WindowsNetworkRouteTable() {
+    private WindowsNetworkRoutingTable() {
     }
 
-    public void add(final InetAddress destination, final byte prefix,
-                    final InetAddress gateway, final int metric, final String ifname) {
-        add0(destination, prefix, gateway, metric, null != ifname ? interfaceNameToLuid(ifname) : 0);
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void add(final InetAddress dst, final byte prefix,
+                    final InetAddress gw, final int metric, final String ifname) {
+        add0(dst, prefix, gw, metric, null != ifname ? interfaceNameToLuid(ifname) : 0);
     }
 
-    public void add(final InetAddress destination, final byte prefix,
-                    final InetAddress gateway, final int metric, final int ifindex) {
-        add0(destination, prefix, gateway, metric, 0 < ifindex ? interfaceIndexToLuid(ifindex) : 0);
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void add(final InetAddress dst, final byte prefix,
+                    final InetAddress gw, final int metric, final int ifindex) {
+        add0(dst, prefix, gw, metric, 0 < ifindex ? interfaceIndexToLuid(ifindex) : 0);
     }
 
-    public void delete(final InetAddress destination, final byte prefix, final String ifname) {
-        delete0(destination, prefix, null != ifname ? interfaceNameToLuid(ifname) : 0);
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void delete(final InetAddress dst, final byte prefix, final String ifname) {
+        delete0(dst, prefix, null != ifname ? interfaceNameToLuid(ifname) : 0);
     }
 
-    public void delete(final InetAddress destination, final byte prefix, final int ifindex) {
-        delete0(destination, prefix, 0 < ifindex ? interfaceIndexToLuid(ifindex) : 0);
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void delete(final InetAddress dst, final byte prefix, final int ifindex) {
+        delete0(dst, prefix, 0 < ifindex ? interfaceIndexToLuid(ifindex) : 0);
     }
 
-    public static WindowsNetworkRouteTable get() {
+    public static WindowsNetworkRoutingTable get() {
         return INSTANCE;
     }
-
 
     public static void add0(final InetAddress destination, final byte prefix,
                             final InetAddress gateway, final int metric, final long interfaceLuid) {
@@ -131,7 +143,7 @@ public class WindowsNetworkRouteTable extends NetworkRouteTable {
 //        InetAddress dst = InetAddress.getByName("198.18.0.0");
 //        int prefix = (byte) 24;
 
-//        NetworkRouteTable rt = WindowsNetworkRouteTable.get();
+//        NetworkRoutingTable rt = WindowsNetworkRoutingTable.get();
         final PointerByReference pTableRef = new PointerByReference();
         final int code = IP_HLP_API.GetIpForwardTable2(AF_UNSPEC, pTableRef);
         // something wrong
@@ -144,9 +156,10 @@ public class WindowsNetworkRouteTable extends NetworkRouteTable {
 
 //        Pointer ptr = table.Table.getPointer();
         for (int i = 0; i < table.NumEntries; i++) {
-            final MIB_IPFORWARD_ROW2 row = table.Table[i];;
+            final MIB_IPFORWARD_ROW2 row = table.Table[i];
+            ;
 //            if (AF_INET == row.DestinationPrefix.Prefix.si_family || AF_INET6 == row.DestinationPrefix.Prefix.si_family) {
-                System.out.println(toInetAddress(row.DestinationPrefix.Prefix) + "/" + row.DestinationPrefix.PrefixLength + " -> " + toInetAddress(row.NextHop) + " via " + row.InterfaceIndex);
+            System.out.println(toInetAddress(row.DestinationPrefix.Prefix) + "/" + row.DestinationPrefix.PrefixLength + " -> " + toInetAddress(row.NextHop) + " via " + row.InterfaceIndex);
 //            }
         }
         IP_HLP_API.FreeMibTable(table.getPointer());

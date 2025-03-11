@@ -1,46 +1,12 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.throwLastErrorException;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.toInet4Address;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.toInet6Address;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr4;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr6;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.ND6_INFINITE_LIFETIME;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET6;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_UNSPEC;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.SOCK_DGRAM;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCAIFADDR;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCAIFADDR_IN6;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCDIFADDR;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCDIFADDR_IN6;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCGIFADDR;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCGIFDSTADDR;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCGIFMTU;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCGIFNETMASK;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCSIFADDR;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCSIFDSTADDR;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCSIFMTU;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCSIFNETMASK;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.close;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.freeifaddrs;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.getifaddrs;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.ioctl;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.socket;
-import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
-import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.netmaskToPrefixLength;
-
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.NetworkInterfaceEx;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.ifaddrs;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.ifaliasreq;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.ifreq;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.in6_aliasreq;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in6;
+import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
 import com.github.pangolin.routing.server.tun.adapter.unix.UnixNetworkInterface;
+import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.google.common.collect.Lists;
 import com.sun.jna.Native;
 import com.sun.jna.NativeLong;
@@ -52,11 +18,21 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.util.List;
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.*;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.netmaskToPrefixLength;
+
 /**
  * This class represents a Network Interface on Darwin OS.
  */
 @Slf4j
 public class DarwinNetworkInterface extends UnixNetworkInterface implements NetworkInterfaceEx {
+
+    private static final LibC LIBC = LibC.INSTANTCE;
+
     /**
      * the name of this network interface.
      */
@@ -173,14 +149,15 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         return new DarwinNetworkInterface(ifname);
     }
 
-    /*- *********** ******* */
+
+    // ---------
 
     private static int fd4() {
-        return socket(AF_INET, SOCK_DGRAM, AF_UNSPEC);
+        return LIBC.socket(AF_INET, SOCK_DGRAM, AF_UNSPEC);
     }
 
     private static int fd6() {
-        return socket(AF_INET6, SOCK_DGRAM, AF_UNSPEC);
+        return LIBC.socket(AF_INET6, SOCK_DGRAM, AF_UNSPEC);
     }
 
     /**
@@ -198,7 +175,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
             // setInet4DstAddress(fd, ifname, address);
             setInet4Netmask(fd, ifname, netmask);
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
 
@@ -215,7 +192,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
             flushInterfaceAddresses0(fd, ifname, AF_INET6);
             addInet6InterfaceAddress(fd, ifname, address, netmask);
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
 
@@ -230,7 +207,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         try {
             addInet4InterfaceAddress(fd, ifname, address, toNetmask(address, prefix));
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
 
@@ -245,7 +222,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         try {
             addInet6InterfaceAddress(fd, ifname, address, toNetmask(address, prefix));
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
 
@@ -260,7 +237,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         try {
             deleteInet4Address(fd, ifname, address);
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
 
@@ -275,12 +252,8 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         try {
             deleteInet6InterfaceAddress(fd, ifname, address, toNetmask(address, prefix));
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
-    }
-
-    private static <A extends InetAddress> A toNetmask(final A address, final int prefix) {
-        return cidrToNetmaskAddress(address, prefix);
     }
 
     /**
@@ -293,7 +266,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         try {
             flushInterfaceAddresses0(fd, ifname, AF_INET);
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
 
@@ -307,7 +280,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         try {
             flushInterfaceAddresses0(fd, ifname, AF_INET6);
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
 
@@ -322,7 +295,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         try {
             return getMTU(fd, ifname);
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
 
@@ -337,7 +310,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         try {
             setMTU(fd, ifname, mtu);
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
 
@@ -379,7 +352,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         } finally {
             // FIXED when Structure.autoRead=true if the pointer is invalid, it will cause JVM crash
             ifa.setAutoRead(false);
-            freeifaddrs(ifa);
+            LIBC.freeifaddrs(ifa);
         }
     }
 
@@ -414,7 +387,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
         } finally {
             // FIXED when Structure.autoRead=true if the pointer is invalid, it will cause JVM crash
             ifa.setAutoRead(false);
-            freeifaddrs(ifa);
+            LIBC.freeifaddrs(ifa);
         }
     }
 
@@ -558,7 +531,10 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
                                                  final String ifname,
                                                  final Inet6Address address,
                                                  final Inet6Address netmask) {
-        final in6_aliasreq ifr6 = _in6AliasReq(ifname, address, netmask);
+        final in6_aliasreq ifr6 = new in6_aliasreq(ifname);
+        writeSockAddr6(ifr6.ifra_addr, address);
+        // writeSockAddr6(ifr6.ifra_dstaddr, address);
+        writeSockAddr6(ifr6.ifra_prefixmask, netmask);
 
         /* important!!! */
         ifr6.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
@@ -579,17 +555,12 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
                                                     final String ifname,
                                                     final Inet6Address address,
                                                     final Inet6Address netmask) {
-        ioctl0(fd, SIOCDIFADDR_IN6, _in6AliasReq(ifname, address, netmask));
-    }
-
-    private static in6_aliasreq _in6AliasReq(final String ifname,
-                                             final Inet6Address address,
-                                             final Inet6Address netmask) {
         final in6_aliasreq ifr6 = new in6_aliasreq(ifname);
         writeSockAddr6(ifr6.ifra_addr, address);
-        // writeSockAddr6(ifr6.ifra_dstaddr, address);
         writeSockAddr6(ifr6.ifra_prefixmask, netmask);
-        return ifr6;
+        // writeSockAddr6(ifr6.ifra_dstaddr, address);
+
+        ioctl0(fd, SIOCDIFADDR_IN6, ifr6);
     }
 
     // ------------------------ END IPv6 related ------------------------
@@ -601,7 +572,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
      * @param ifname the interface name
      * @return the value of the MTU for that interface.
      */
-    public static int getMTU(final int fd, final String ifname) {
+    static int getMTU(final int fd, final String ifname) {
         final ifreq ifr = new ifreq(ifname);
         return ioctl0(fd, SIOCGIFMTU, ifr).ifr_ifru.ifru_mtu;
     }
@@ -613,7 +584,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
      * @param ifname the interface name
      * @param mtu    the value of the MTU for that interface.
      */
-    public static void setMTU(final int fd, final String ifname, final int mtu) {
+    static void setMTU(final int fd, final String ifname, final int mtu) {
         final ifreq ifr = new ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_mtu");
         ifr.ifr_ifru.ifru_mtu = mtu;
@@ -621,17 +592,21 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
     }
 
     private static ifaddrs getifaddrs0(final ifaddrs ifa) {
-        if (getifaddrs(ifa) < 0) {
+        if (LIBC.getifaddrs(ifa) < 0) {
             throwLastErrorException(Native.getLastError());
         }
         return ifa;
     }
 
     private static <S extends Structure> S ioctl0(final int fd, final NativeLong request, final S argp) {
-        if (ioctl(fd, request, argp) < 0) {
+        if (LIBC.ioctl(fd, request, argp) < 0) {
             throwLastErrorException(Native.getLastError());
         }
         return argp;
+    }
+
+    private static <A extends InetAddress> A toNetmask(final A address, final int prefix) {
+        return cidrToNetmaskAddress(address, prefix);
     }
 
 }

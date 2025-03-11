@@ -19,12 +19,15 @@ import static com.github.pangolin.routing.server.tun.adapter.linux.jna.IfTun.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.SOCK_DGRAM;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Sockios.SIOCSIFFLAGS;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 import static com.sun.jna.platform.linux.Fcntl.O_RDWR;
 import static java.nio.charset.StandardCharsets.US_ASCII;
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkInterface.*;
 
 @Slf4j
 public class LinuxTunAdapter extends AbstractTunAdapter {
+
+    private static final LibC LIBC = LibC.INSTANTCE;
+
     private final int fd;
     private final String ifname;
     private final int mtu;
@@ -60,7 +63,7 @@ public class LinuxTunAdapter extends AbstractTunAdapter {
         final int mtu = getMTU();
 
         final ByteBuffer buf = ByteBuffer.allocateDirect(mtu);
-        final int bytesRead = LibC.read(fd, buf, mtu);
+        final int bytesRead = LIBC.read(fd, buf, mtu);
         if (-1 == bytesRead) {
             throw new IllegalStateException("fd closed");
         }
@@ -78,7 +81,7 @@ public class LinuxTunAdapter extends AbstractTunAdapter {
     protected void write0(final ByteBuffer packet) {
         final byte[] bytes = new byte[packet.remaining()];
         packet.get(bytes).clear();
-        LibC.write(fd, bytes, bytes.length);
+        LIBC.write(fd, bytes, bytes.length);
     }
 
     /**
@@ -86,7 +89,7 @@ public class LinuxTunAdapter extends AbstractTunAdapter {
      */
     @Override
     protected void destroy0() {
-        close(fd);
+        LIBC.close(fd);
     }
 
     /* ********************** */
@@ -96,7 +99,7 @@ public class LinuxTunAdapter extends AbstractTunAdapter {
         final String ifnameToCreate = checkName(tunName);
 
         // open tun device.
-        final int fd = LibC.open("/dev/net/tun", O_RDWR);
+        final int fd = LIBC.open("/dev/net/tun", O_RDWR);
         if (fd < 0) {
             throwLastErrorException(Native.getLastError());
         }
@@ -105,13 +108,13 @@ public class LinuxTunAdapter extends AbstractTunAdapter {
         final ifreq ifr = new ifreq(ifnameToCreate);
         ifr.ifr_ifru.setType("ifru_flags");
         ifr.ifr_ifru.ifru_flags = IFF_TUN | IFF_NO_PI;
-        if (ioctl(fd, TUNSETIFF, ifr) < 0) {
+        if (LIBC.ioctl(fd, TUNSETIFF, ifr) < 0) {
             throwLastErrorException(Native.getLastError());
         }
 
         final String ifnameToUse = Native.toString(ifr.ifr_name, StandardCharsets.US_ASCII);
 
-        final int skfd = socket(AF_INET, SOCK_DGRAM, 0);
+        final int skfd = LIBC.socket(AF_INET, SOCK_DGRAM, 0);
         if (skfd < 0) {
             throwLastErrorException(Native.getLastError());
         }
@@ -120,26 +123,23 @@ public class LinuxTunAdapter extends AbstractTunAdapter {
         final ifreq ifr2 = new ifreq(ifnameToUse);
         ifr2.ifr_ifru.setType("ifru_flags");
         ifr2.ifr_ifru.ifru_flags = IFF_UP | IFF_RUNNING | IFF_POINTOPOINT | IFF_MULTICAST;
-        if (ioctl(skfd, SIOCSIFFLAGS, ifr2) < 0) {
+        if (LIBC.ioctl(skfd, SIOCSIFFLAGS, ifr2) < 0) {
             throw new LastErrorException(Native.getLastError());
         }
 
         int mtuToUse = mtu;
         if (0 < mtuToUse) {
-            LinuxNetworkInterface.setMTU(skfd, ifnameToUse, mtuToUse);
+            setMTU(skfd, ifnameToUse, mtuToUse);
         } else {
             mtuToUse = LinuxNetworkInterface.getMTU(skfd, ifnameToUse);
         }
+        LIBC.close(skfd);
 
-        close(skfd);
-
-        LinuxTunAdapter ap = new LinuxTunAdapter(fd, ifnameToUse, mtuToUse);
-        LinuxNetworkInterface nix = new LinuxNetworkInterface(ifnameToUse);
-        for (InterfaceAddressEx binding : bindings) {
+        final LinuxNetworkInterface nix = LinuxNetworkInterface.getByName(ifnameToUse);
+        for (final InterfaceAddressEx binding : bindings) {
             nix.addInterfaceAddress(binding);
         }
-
-        return ap;
+        return new LinuxTunAdapter(fd, ifnameToUse, mtuToUse);
     }
 
     private static String checkName(final String name) {
@@ -161,7 +161,7 @@ public class LinuxTunAdapter extends AbstractTunAdapter {
     }
 
     private static Set<String> getIfnames() {
-        final ifaddrs ifa = LinuxNetworkInterface.getifaddrs0(new ifaddrs());
+        final ifaddrs ifa = getifaddrs0(new ifaddrs());
         try {
             final Set<String> ifnames = new HashSet<>();
             for (ifaddrs n = ifa; null != n; n = n.ifa_next) {
@@ -173,7 +173,7 @@ public class LinuxTunAdapter extends AbstractTunAdapter {
         } finally {
             // FIXED when Structure.autoRead=true if the pointer is invalid, it will cause JVM crash
             ifa.setAutoRead(false);
-            freeifaddrs(ifa);
+            LIBC.freeifaddrs(ifa);
         }
     }
 

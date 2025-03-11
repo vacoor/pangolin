@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
+import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Pointer;
 
@@ -15,6 +16,8 @@ import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.A
 import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 
 class DarwinUtils {
+
+    private static final LibC LIBC = LibC.INSTANTCE;
 
     static sockaddr_in writeSockAddr4(final sockaddr_in sockAddr, final Inet4Address addr) {
         return writeSockAddr4(sockAddr, addr.getAddress());
@@ -62,7 +65,7 @@ class DarwinUtils {
     }
 
     public static void throwLastErrorException(final int errno) {
-        final String errmsg = String.format("[%s] %s", errno, strerror(errno));
+        final String errmsg = String.format("[%s] %s", errno, LIBC.strerror(errno));
         throw new DarwinLastErrorException(errno, errmsg);
     }
 

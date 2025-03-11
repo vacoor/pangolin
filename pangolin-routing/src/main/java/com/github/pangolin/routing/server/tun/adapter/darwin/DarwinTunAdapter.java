@@ -1,23 +1,5 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinNetworkInterface.setMTU;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.throwLastErrorException;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfUtun.UTUN_CONTROL_NAME;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfUtun.UTUN_OPT_IFNAME;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.CTLIOCGINFO;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET6;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_SYSTEM;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_UNSPEC;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.SOCK_DGRAM;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SysDomain.SYSPROTO_CONTROL;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.close;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.connect;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.getsockopt;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.ioctl;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.socket;
-import static java.nio.charset.StandardCharsets.US_ASCII;
-
 import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.ctl_info;
@@ -36,8 +18,19 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.Set;
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinNetworkInterface.setMTU;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.throwLastErrorException;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfUtun.UTUN_CONTROL_NAME;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.IfUtun.UTUN_OPT_IFNAME;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.CTLIOCGINFO;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SysDomain.SYSPROTO_CONTROL;
+import static java.nio.charset.StandardCharsets.US_ASCII;
+
 @Slf4j
 public class DarwinTunAdapter extends AbstractTunAdapter {
+
+    private static final LibC LIBC = LibC.INSTANTCE;
 
     /**
      * Address family bytes.
@@ -96,7 +89,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter {
         final int mtu = getMTU();
         final int packetSize = mtu + AF_BYTES;
         final ByteBuffer buf = ByteBuffer.allocateDirect(packetSize);
-        final int bytesRead = LibC.read(fd, buf, packetSize);
+        final int bytesRead = LIBC.read(fd, buf, packetSize);
 
         // 4-bytes address family
         final int addressFamily = buf.getInt(0);
@@ -139,7 +132,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter {
         buf.put(packet);
         buf.flip();
 
-        LibC.write(fd, buf, buf.remaining());
+        LIBC.write(fd, buf, buf.remaining());
     }
 
     /**
@@ -147,7 +140,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter {
      */
     @Override
     protected void destroy0() {
-        close(fd);
+        LIBC.close(fd);
     }
 
     /* ********************** */
@@ -165,27 +158,27 @@ public class DarwinTunAdapter extends AbstractTunAdapter {
         final int scUnit = nameToUnit(ifname);
 
         // create socket
-        final int fd = socket(AF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
+        final int fd = LIBC.socket(AF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
         if (fd < 0) {
             throwLastErrorException(Native.getLastError());
         }
 
         // mark socket as utun device
         final ctl_info ctlInfo = new ctl_info(UTUN_CONTROL_NAME);
-        if (ioctl(fd, CTLIOCGINFO, ctlInfo) < 0) {
+        if (LIBC.ioctl(fd, CTLIOCGINFO, ctlInfo) < 0) {
             throwLastErrorException(Native.getLastError());
         }
 
         // define address of socket
         final sockaddr_ctl address = new sockaddr_ctl((byte) AF_SYSTEM, (short) SYSPROTO_CONTROL, ctlInfo.ctl_id, scUnit);
-        if (connect(fd, address, address.sc_len) < 0) {
+        if (LIBC.connect(fd, address, address.sc_len) < 0) {
             throwLastErrorException(Native.getLastError());
         }
 
         // get socket name
         final SockName sockName = new SockName();
         final IntByReference sockNameLen = new IntByReference(SockName.LENGTH);
-        if (getsockopt(fd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME, sockName, sockNameLen) < 0) {
+        if (LIBC.getsockopt(fd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME, sockName, sockNameLen) < 0) {
             throwLastErrorException(Native.getLastError());
         }
 
@@ -212,7 +205,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter {
             final int prefix = binding.getNetworkPrefixLength();
             final InetAddress dst = NetUtils2.getNetworkAddress(gw, prefix);
             if (processes.add(dst) && dst instanceof Inet4Address) {
-                DarwinNetworkRouteTable.add(dst, prefix, gw, ifnameToUse);
+                DarwinNetworkRoutingTable.add(dst, prefix, gw, ifnameToUse);
             }
         }
         return new DarwinTunAdapter(fd, ifnameToUse, mtuToUse);

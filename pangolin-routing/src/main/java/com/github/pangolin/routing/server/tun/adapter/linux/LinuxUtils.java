@@ -1,6 +1,8 @@
 package com.github.pangolin.routing.server.tun.adapter.linux;
 
+import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.sun.jna.LastErrorException;
+import com.sun.jna.Native;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -11,9 +13,10 @@ import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockad
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in6;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET6;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 
 class LinuxUtils {
+
+    private static final LibC LIBC = LibC.INSTANTCE;
 
     static sockaddr_in writeSockAddr4(final sockaddr_in sockAddr, final Inet4Address addr) {
         return writeSockAddr4(sockAddr, addr.getAddress());
@@ -58,10 +61,22 @@ class LinuxUtils {
         }
     }
 
+    @Deprecated
     public static void throwLastErrorException(final int errno) {
-        final String errmsg = String.format("[%s] %s", errno, strerror(errno));
+        final String errmsg = String.format("[%s] %s", errno, LIBC.strerror(errno));
         throw new LinuxLastErrorException(errno, errmsg);
     }
+
+    public static void throwLastErrorException(final String message) {
+        final int errno = Native.getLastError();
+        final String errmsg = LIBC.strerror(errno);
+
+        final String errmsgToUse = null == message || message.isEmpty()
+                ? String.format("[%s] %s", errno, errmsg)
+                : String.format("%s: [%s] %s", message, errno, errmsg);
+        throw new LinuxLastErrorException(errno, errmsgToUse);
+    }
+
 
     private static class LinuxLastErrorException extends LastErrorException {
 

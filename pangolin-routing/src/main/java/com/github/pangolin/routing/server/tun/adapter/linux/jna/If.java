@@ -179,4 +179,88 @@ public interface If {
     }
 
 
+    /*-
+     * Important comment:
+     * IFA_ADDRESS is prefix address, rather than local interface address.
+     * It makes no difference for normally configured broadcast interfaces,
+     * but for point-to-point IFA_ADDRESS is DESTINATION address,
+     * local address is supplied in IFA_LOCAL attribute.
+     *
+     * IFA_FLAGS is a u32 attribute that extends the u8 field ifa_flags.
+     * If present, the value from struct ifaddrmsg will be ignored.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/if_addr.h">uapi/linux/if_addr.h</a>
+     */
+
+    short IFA_UNSPEC = 0;
+    short IFA_ADDRESS = 1;
+    short IFA_LOCAL = 2;
+    short IFA_LABEL = 3;
+    short IFA_BROADCAST = 4;
+    short IFA_ANYCAST = 5;
+    short IFA_CACHEINFO = 6;
+    short IFA_MULTICAST = 7;
+    short IFA_FLAGS = 8;
+    /**
+     * u32, priority/metric for prefix route.
+     */
+    short IFA_RT_PRIORITY = 9;
+    short IFA_TARGET_NETNSID = 10;
+    /**
+     * u8, address protocol.
+     */
+    short IFA_PROTO = 11;
+
+    /*-
+     * ifa_flags
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/if_addr.h">uapi/linux/if_addr.h</a>
+     */
+
+    int IFA_F_SECONDARY = 0x01;
+    int IFA_F_TEMPORARY = IFA_F_SECONDARY;
+
+    int IFA_F_NODAD = 0x02;
+    int IFA_F_OPTIMISTI = 0x04;
+    int IFA_F_DADFAILED = 0x08;
+    int IFA_F_HOMEADDRES = 0x10;
+    int IFA_F_DEPRECATE = 0x20;
+    int IFA_F_TENTATIVE = 0x40;
+    int IFA_F_PERMANENT = 0x80;
+    int IFA_F_MANAGETEMPADD = 0x100;
+    int IFA_F_NOPREFIXROUT = 0x200;
+    int IFA_F_MCAUTOJOI = 0x400;
+    int IFA_F_STABLE_PRIVAC = 0x800;
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/if_addr.h">uapi/linux/if_addr.h</a>
+     */
+    @Structure.FieldOrder({"ifa_family", "ifa_prefixlen", "ifa_flags", "ifa_scope", "ifa_index"})
+    class ifaddrmsg extends Structure {
+        public byte ifa_family;
+        /**
+         * The prefix length.
+         */
+        public byte ifa_prefixlen;
+        /**
+         * Flags.
+         */
+        public byte ifa_flags;
+        /**
+         * Address scope.
+         */
+        public byte ifa_scope;
+        /**
+         * Link index.
+         */
+        public int ifa_index;
+
+        public ifaddrmsg() {
+        }
+
+        public ifaddrmsg(final Pointer p) {
+            super(p);
+        }
+    }
+
 }

@@ -84,7 +84,7 @@ public class TunAcceptorFactory implements AcceptorFactory {
                         // ip route add 192.168.2.0/24 via 192.168.1.1 dev eth0
 //                        Inet4Address addr = (Inet4Address) InetAddress.getByName("198.18.2.0");
 //                        Inet4Address gw = (Inet4Address) InetAddress.getByName("198.18.0.1");
-//                        LinuxNetworkRouteTable.add("tun8", addr, 24, gw, false);
+//                        LinuxNetworkRoutingTable.add("tun8", addr, 24, gw, false);
 
                     }
                 } else {

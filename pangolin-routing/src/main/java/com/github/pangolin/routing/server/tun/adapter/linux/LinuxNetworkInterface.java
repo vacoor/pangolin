@@ -8,170 +8,324 @@ import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.in6_ifreq;
 import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in;
 import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in6;
 import com.github.pangolin.routing.server.tun.adapter.unix.UnixNetworkInterface;
+import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.google.common.collect.Lists;
-import com.sun.jna.*;
+import com.sun.jna.Memory;
+import com.sun.jna.Native;
+import com.sun.jna.NativeLong;
+import com.sun.jna.Structure;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
+import java.net.InetAddress;
 import java.util.List;
 
 import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.*;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.ifaddrs;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.ifaddrmsg;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Sockios.*;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
 import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
 import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.netmaskToPrefixLength;
 
 /**
- *
+ * This class represents a Network Interface on Linux OS.
  */
+@Slf4j
 public class LinuxNetworkInterface extends UnixNetworkInterface implements NetworkInterfaceEx {
+
+    private static final LibC LIBC = LibC.INSTANTCE;
+
+    /**
+     * the name of this network interface.
+     */
     private final String ifname;
 
-    public LinuxNetworkInterface(final String ifname) {
+    private LinuxNetworkInterface(final String ifname) {
         this.ifname = ifname;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public String name() {
         return ifname;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public int getMTU() {
+        return getMTU0(ifname);
+    }
+
+    /**
+     * Set the Maximum Transmission Unit (MTU) of this interface.
+     *
+     * @param mtu the value of the MTU for that interface.
+     */
+    public void setMTU(final int mtu) {
+        setMTU0(ifname, mtu);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public List<InterfaceAddressEx> getInterfaceAddresses() {
+        return getInterfaceAddresses0(ifname, AF_UNSPEC);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void setInet4InterfaceAddress(final Inet4Address address, final int prefix) {
+        setInet4InterfaceAddress0(ifname, address, prefix);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void setInet6InterfaceAddress(final Inet6Address address, final int prefix) {
+        setInet6InterfaceAddress0(ifname, address, prefix);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void addInet4InterfaceAddress(final Inet4Address address, final int prefix) {
+        addInet4InterfaceAddress0(ifname, address, prefix);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void addInet6InterfaceAddress(final Inet6Address address, final int prefix) {
+        addInet6InterfaceAddress0(ifname, address, prefix);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void deleteInet4InterfaceAddress(final Inet4Address address, final int prefix) {
+        deleteInet4InterfaceAddress0(ifname, address, prefix);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void deleteInet6InterfaceAddress(final Inet6Address address, final int prefix) {
+        deleteInet6InterfaceAddress0(ifname, address, prefix);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void flushInet4InterfaceAddresses() {
+        flushInet4InterfaceAddresses0(ifname);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected void flushInet6InterfaceAddresses() {
+        flushInet6InterfaceAddresses0(ifname);
+    }
+
+    /**
+     * Creates the network interface with the specified name.
+     *
+     * @param ifname The name of the network interface.
+     * @return the network interface
+     */
+    public static LinuxNetworkInterface getByName(final String ifname) {
+        return new LinuxNetworkInterface(ifname);
+    }
+
+
+    // ---------
+
+    private static int fd4() {
+        return LIBC.socket(AF_INET, SOCK_DGRAM, AF_UNSPEC);
+    }
+
+    private static int fd6() {
+        return LIBC.socket(AF_INET6, SOCK_DGRAM, AF_UNSPEC);
+    }
+
+    /**
+     * Set the IPv4 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param ifname  the name of network interface
+     * @param address a IPv4 InterfaceAddresses bound to this network interface
+     */
+    private static void setInet4InterfaceAddress0(final String ifname, final Inet4Address address, final int prefix) {
+        final int fd = fd4();
+        try {
+            // XXX flushInterfaceAddress & addInet4InterfaceAddress
+            final Inet4Address netmask = toNetmask(address, prefix);
+            setInet4Address(fd, ifname, address);
+            // setInet4DstAddress(fd, ifname, address);
+            setInet4Netmask(fd, ifname, netmask);
+        } finally {
+            LIBC.close(fd);
+        }
+    }
+
+    /**
+     * Set the IPv6 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param ifname  the name of network interface
+     * @param address a IPv6 InterfaceAddresses bound to this network interface
+     */
+    private static void setInet6InterfaceAddress0(final String ifname, final Inet6Address address, final int prefix) {
+        final int fd = fd6();
+        try {
+            flushInterfaceAddresses0(fd, ifname, AF_INET6);
+            addInet6InterfaceAddress(fd, ifname, address, prefix);
+        } finally {
+            LIBC.close(fd);
+        }
+    }
+
+    /**
+     * Add the IPv4 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param ifname  the name of network interface
+     * @param address a IPv4 InterfaceAddresses bound to this network interface
+     */
+    private static void addInet4InterfaceAddress0(final String ifname, final Inet4Address address, final int prefix) {
+        addInet4InterfaceAddress(ifname, address, prefix);
+    }
+
+    /**
+     * Add the IPv6 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param ifname  the name of network interface
+     * @param address a IPv6 InterfaceAddresses bound to this network interface
+     */
+    private static void addInet6InterfaceAddress0(final String ifname, final Inet6Address address, final int prefix) {
+        final int fd = fd6();
+        try {
+            addInet6InterfaceAddress(fd, ifname, address, prefix);
+        } finally {
+            LIBC.close(fd);
+        }
+    }
+
+    /**
+     * Delete the IPv4 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param ifname  the name of network interface
+     * @param address a IPv4 InterfaceAddresses bound to this network interface
+     */
+    private static void deleteInet4InterfaceAddress0(final String ifname, final Inet4Address address, final int prefix) {
+        final int fd = fd4();
+        try {
+            deleteInet4Address(fd, ifname, address);
+        } finally {
+            LIBC.close(fd);
+        }
+    }
+
+    /**
+     * Delete the IPv6 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param ifname  the name of network interface
+     * @param address a IPv6 InterfaceAddresses bound to this network interface
+     */
+    private static void deleteInet6InterfaceAddress0(final String ifname, final Inet6Address address, final int prefix) {
+        final int fd = fd4();
+        try {
+            deleteInet6InterfaceAddress(fd, ifname, address, prefix);
+        } finally {
+            LIBC.close(fd);
+        }
+    }
+
+    /**
+     * Flush the IPv4 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param ifname the name of network interface
+     */
+    private static void flushInet4InterfaceAddresses0(final String ifname) {
+        final int fd = fd4();
+        try {
+            flushInterfaceAddresses0(fd, ifname, AF_INET);
+        } finally {
+            LIBC.close(fd);
+        }
+    }
+
+    /**
+     * Flush the IPv6 {@code InterfaceAddresses} of this network interface.
+     *
+     * @param ifname the name of network interface
+     */
+    private static void flushInet6InterfaceAddresses0(final String ifname) {
+        final int fd = fd6();
+        try {
+            flushInterfaceAddresses0(fd, ifname, AF_INET6);
+        } finally {
+            LIBC.close(fd);
+        }
+    }
+
+    /**
+     * Set the Maximum Transmission Unit (MTU) of this interface.
+     *
+     * @param ifname the interface name
+     * @return the value of the MTU for that interface.
+     */
+    private static int getMTU0(final String ifname) {
         final int fd = fd4();
         try {
             return getMTU(fd, ifname);
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
 
-    public void setMTU(final int mtu) {
+    /**
+     * Set the Maximum Transmission Unit (MTU) of this interface.
+     *
+     * @param ifname the interface name
+     * @param mtu    the value of the MTU for that interface.
+     */
+    private static void setMTU0(final String ifname, final int mtu) {
         final int fd = fd4();
         try {
             setMTU(fd, ifname, mtu);
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
-
-    @Override
-    public List<InterfaceAddressEx> getInterfaceAddresses() {
-        return getInterfaceAddresses(ifname, AF_UNSPEC);
-    }
-
-    @Override
-    protected void setInet4InterfaceAddress(final Inet4Address address, final int prefix) {
-        final int fd = fd4();
-        try {
-            // XXX flushInterfaceAddress & addInet4InterfaceAddress
-            final Inet4Address netmask = cidrToNetmaskAddress(address, prefix);
-            setAddress4(fd, ifname, address);
-            // setDstAddress4(fd, ifname, address);
-            setNetmask4(fd, ifname, netmask);
-        } finally {
-            close(fd);
-        }
-    }
-
-    @Override
-    protected void setInet6InterfaceAddress(final Inet6Address address, final int prefix) {
-        final int fd = fd6();
-        try {
-            flushInterfaceAddresses(fd, ifname, AF_INET6);
-            addInterfaceAddress6(fd, ifname, address, prefix);
-        } finally {
-            close(fd);
-        }
-    }
-
-    @Override
-    protected void addInet4InterfaceAddress(final Inet4Address address, final int prefix) {
-        addInterfaceAddress4(ifname, address, prefix);
-    }
-
-
-    @Override
-    protected void addInet6InterfaceAddress(final Inet6Address address, final int prefix) {
-        final int fd = fd6();
-        try {
-            addInterfaceAddress6(fd, ifname, address, prefix);
-        } finally {
-            close(fd);
-        }
-    }
-
-    @Override
-    protected void deleteInet4InterfaceAddress(final Inet4Address address, final int prefix) {
-        final int fd = fd4();
-        try {
-            deleteAddress4(fd, ifname, address);
-        } finally {
-            close(fd);
-        }
-    }
-
-    @Override
-    protected void deleteInet6InterfaceAddress(final Inet6Address address, final int prefix) {
-        final int fd = fd6();
-        try {
-            deleteInterfaceAddress6(fd, ifname, address, prefix);
-        } finally {
-            close(fd);
-        }
-    }
-
-    @Override
-    protected void flushInet4InterfaceAddresses() {
-        final int fd = fd4();
-        try {
-            flushInterfaceAddresses(fd, ifname, AF_INET);
-        } finally {
-            close(fd);
-        }
-    }
-
-    @Override
-    protected void flushInet6InterfaceAddresses() {
-        final int fd = fd6();
-        try {
-            flushInterfaceAddresses(fd, ifname, AF_INET6);
-        } finally {
-            close(fd);
-        }
-    }
-
-    private static int fd4() {
-        return socket(AF_INET, SOCK_DGRAM, 0);
-    }
-
-    private static int fd6() {
-        return socket(AF_INET6, SOCK_DGRAM, 0);
-    }
-
 
     // ------------------------ START Interface related ------------------------
 
-    static int getMTU(final int fd, final String ifname) {
-        final ifreq ifr = new ifreq(ifname);
-        return ioctl0(fd, SIOCGIFMTU, ifr).ifr_ifru.ifru_mtu;
-    }
-
-    static void setMTU(final int fd, final String ifname, final int mtu) {
-        final ifreq ifr = new ifreq(ifname);
-        ifr.ifr_ifru.setType("ifru_mtu");
-        ifr.ifr_ifru.ifru_mtu = mtu;
-        ioctl0(fd, SIOCSIFMTU, ifr);
-    }
-
-    // ------------------------ END Interface related ------------------------
-
-
-    private static List<InterfaceAddressEx> getInterfaceAddresses(final String ifname, final int family) {
+    /**
+     * Get a List of the {@code InterfaceAddresses}
+     * of this network interface.
+     *
+     * @param ifname the name of network interface
+     * @param family the address family
+     * @return a {@code List} object with all of the
+     * InterfaceAddresss of this network interface
+     */
+    private static List<InterfaceAddressEx> getInterfaceAddresses0(final String ifname, final int family) {
         final ifaddrs ifa = getifaddrs0(new ifaddrs());
         try {
             final List<InterfaceAddressEx> interfaceAddresses = Lists.newArrayList();
@@ -198,11 +352,18 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
         } finally {
             // FIXED when Structure.autoRead=true if the pointer is invalid, it will cause JVM crash
             ifa.setAutoRead(false);
-            freeifaddrs(ifa);
+            LIBC.freeifaddrs(ifa);
         }
     }
 
-    private static void flushInterfaceAddresses(final int fd, final String ifname, final int family) {
+    /**
+     * Flush the {@code InterfaceAddresses} of this network interface.
+     *
+     * @param fd     the file descriptor
+     * @param ifname the name of network interface
+     * @param family the address family
+     */
+    private static void flushInterfaceAddresses0(final int fd, final String ifname, final int family) {
         final ifaddrs ifa = getifaddrs0(new ifaddrs());
         try {
             for (ifaddrs n = ifa; null != n; n = n.ifa_next) {
@@ -211,20 +372,26 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
                 }
                 if (AF_INET == n.ifa_addr.sa_family) {
                     final sockaddr_in sockaddr = (sockaddr_in) n.ifa_addr.getTypedValue(sockaddr_in.class);
-                    deleteAddress4(fd, ifname, toInet4Address(sockaddr));
+                    final ifreq ifr = new ifreq(n.ifa_name);
+                    ifr.ifr_ifru.setType("ifru_addr");
+                    ifr.ifr_ifru.ifru_addr = sockaddr;
+                    ioctl0(fd, SIOCDIFADDR, ifr);
                 } else if (AF_INET6 == n.ifa_addr.sa_family) {
                     final sockaddr_in6 sockaddr = (sockaddr_in6) n.ifa_addr.getTypedValue(sockaddr_in6.class);
                     final sockaddr_in6 netmask = (sockaddr_in6) n.ifa_netmask.getTypedValue(sockaddr_in6.class);
-                    final int prefix = netmaskToPrefixLength(netmask.sin6_addr);
-                    deleteInterfaceAddress6(fd, ifname, toInet6Address(sockaddr), prefix);
+                    final in6_ifreq ifr6 = new in6_ifreq();
+                    ifr6.ifr6_ifindex = if_nametoindex0(fd, n.ifa_name);
+                    ifr6.ifr6_addr = sockaddr.sin6_addr;
+                    ifr6.ifr6_prefixlen = netmaskToPrefixLength(netmask.sin6_addr);
+                    ioctl0(fd, SIOCDIFADDR, ifr6);
                 } else {
-                    throw new UnsupportedOperationException("family: " + n.ifa_addr.sa_family);
+                    log.warn("SKIP unsupported address family: {}", n.ifa_addr.sa_family);
                 }
             }
         } finally {
             // FIXED when Structure.autoRead=true if the pointer is invalid, it will cause JVM crash
             ifa.setAutoRead(false);
-            freeifaddrs(ifa);
+            LIBC.freeifaddrs(ifa);
         }
     }
 
@@ -236,6 +403,8 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
         return AF_UNSPEC == family || ifaddr.ifa_addr.sa_family == family;
     }
 
+    // ------------------------ END Interface related ------------------------
+
 
     // ------------------------ START IPv4 related ------------------------
 
@@ -246,7 +415,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
      * @param ifname the interface name
      * @return the ifnet address
      */
-    private static Inet4Address getAddress4(final int fd, final String ifname) {
+    private static Inet4Address getInet4Address(final int fd, final String ifname) {
         final ifreq ifr = ioctl0(fd, SIOCGIFADDR, _ifreq(ifname, null));
         return toInet4Address(ifr.ifr_ifru.ifru_addr);
     }
@@ -258,7 +427,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
      * @param ifname  the interface name
      * @param address the ifnet address
      */
-    private static void setAddress4(final int fd, final String ifname, final Inet4Address address) {
+    private static void setInet4Address(final int fd, final String ifname, final Inet4Address address) {
         ioctl0(fd, SIOCSIFADDR, _ifreq(ifname, address));
     }
 
@@ -269,7 +438,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
      * @param ifname the interface name
      * @return the ifnet dst address
      */
-    private static Inet4Address getDstAddress4(final int fd, final String ifname) {
+    private static Inet4Address getInet4DstAddress(final int fd, final String ifname) {
         final ifreq ifr = ioctl0(fd, SIOCGIFDSTADDR, _ifreq(ifname, null));
         return toInet4Address(ifr.ifr_ifru.ifru_addr);
     }
@@ -281,7 +450,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
      * @param ifname  the interface name
      * @param address the ifnet dst address
      */
-    private static void setDstAddress4(final int fd, final String ifname, final Inet4Address address) {
+    private static void setInet4DstAddress(final int fd, final String ifname, final Inet4Address address) {
         ioctl0(fd, SIOCSIFDSTADDR, _ifreq(ifname, address));
     }
 
@@ -292,7 +461,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
      * @param ifname the interface name
      * @return the net addr mask
      */
-    private static Inet4Address getNetmask4(final int fd, final String ifname) {
+    private static Inet4Address getInet4Netmask(final int fd, final String ifname) {
         final ifreq ifr = ioctl0(fd, SIOCGIFNETMASK, _ifreq(ifname, null));
         return toInet4Address(ifr.ifr_ifru.ifru_addr);
     }
@@ -304,7 +473,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
      * @param ifname  the interface name
      * @param netmask the net addr mask
      */
-    private static void setNetmask4(final int fd, final String ifname, final Inet4Address netmask) {
+    private static void setInet4Netmask(final int fd, final String ifname, final Inet4Address netmask) {
         ioctl0(fd, SIOCSIFNETMASK, _ifreq(ifname, netmask));
     }
 
@@ -315,97 +484,10 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
      * @param ifname  the interface name
      * @param address the ifnet address
      */
-    private static void deleteAddress4(final int fd, final String ifname, final Inet4Address address) {
+    private static void deleteInet4Address(final int fd, final String ifname, final Inet4Address address) {
         // FIXME [25] Inappropriate ioctl for device
         ioctl0(fd, SIOCDIFADDR, _ifreq(ifname, address));
     }
-
-    private static void addInterfaceAddress4(final String ifname, final Inet4Address addr, final int prefix) {
-        _netlinkAddresses4(ifname, addr, prefix, false);
-    }
-
-    private static void _netlinkAddresses4(final String ifname, final Inet4Address addr, final int prefix, final boolean delete) {
-        int IFA_F_PERMANENT = 0x80;
-        int IFA_LOCAL = 0x02;
-
-        final byte[] address = addr.getAddress();
-        final int sockfd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
-        try {
-            final sockaddr_nl localAddr = new sockaddr_nl();
-            localAddr.nl_family = AF_NETLINK;
-            localAddr.nl_pid = API_INSTANTCE.getpid();
-
-            if (API_INSTANTCE.bind(sockfd, localAddr, localAddr.size()) < 0) {
-                throwLastErrorException(Native.getLastError());
-            }
-
-            int msgSize = 32; // nlmsghdr(16) + ifaddrmsg(8) + rtattr(4) + address(4)
-
-            // 初始化消息内存
-            final Memory buffer = new Memory(msgSize);
-            int offset = 0;
-
-            final nlmsghdr hl = new nlmsghdr(buffer.share(offset));
-            hl.nlmsg_len = msgSize;
-            hl.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE;
-            hl.nlmsg_type = (short) (!delete ? RTM_NEWADDR : RTM_DELADDR);
-            hl.write();
-            offset += hl.size();
-
-            final ifaddrmsg ifa = new ifaddrmsg(buffer.share(offset));
-            ifa.ifa_family = AF_INET;
-            ifa.ifa_prefixlen = (byte) prefix;
-            ifa.ifa_index = if_nametoindex0(ifname);
-            if (!delete) {
-                ifa.ifa_flags = (byte) IFA_F_PERMANENT;
-                ifa.ifa_scope = 0;
-            }
-            ifa.write();
-            offset += ifa.size();
-
-            // 填充rtattr（IP地址）
-            rtattr rta = new rtattr(buffer.share(offset));
-            rta.rta_len = (byte) (rta.size() + address.length);
-            rta.rta_type = (short) IFA_LOCAL;
-            rta.write();
-            offset += rta.size();
-
-            buffer.write(offset, address, 0, address.length);
-            offset += address.length;
-
-            final sockaddr_nl.ByRef dest_addr = new sockaddr_nl.ByRef();
-            dest_addr.nl_family = AF_NETLINK;
-            dest_addr.nl_pid = 0;
-            dest_addr.nl_groups = 0;
-
-            final IOVec.ByRef ioVec = new IOVec.ByRef();
-            ioVec.iov_base = buffer;
-            ioVec.iov_len = offset;
-
-            final MsgHdr msg = new MsgHdr();
-            msg.msg_name = dest_addr;
-            msg.msg_namelen = new NativeLong(dest_addr.size());
-            msg.msg_iov = ioVec;
-            msg.msg_iovlen = new NativeLong(1);
-            msg.msg_control = null;
-            msg.msg_controllen = new NativeLong(0);
-            msg.msg_flags = 0;
-
-            // final int written = API_INSTANTCE.sendmsg(sockfd, msg, 0);
-            final int written = API_INSTANTCE.send(sockfd, hl.getPointer(), offset, 0);
-            if (written < 0) {
-                throwLastErrorException(Native.getLastError());
-            }
-        } finally {
-            close(sockfd);
-        }
-    }
-
-    private static int nlmsgAlign(final int len) {
-        final int ALIGN = 4;  // NLMSG_ALIGN 通常为 4 字节对齐 ‌:ml-citation{ref="3,4" data="citationList"}
-        return (len + ALIGN - 1) & ~(ALIGN - 1);
-    }
-
 
     private static ifreq _ifreq(final String ifname, final Inet4Address addr) {
         final ifreq ifr = new ifreq(ifname);
@@ -417,41 +499,132 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
         return ifr;
     }
 
+    private static void addInet4InterfaceAddress(final String ifname, final Inet4Address addr, final int prefix) {
+        _netlinkAddresses4(ifname, addr, prefix, false);
+    }
+
+    private static void _netlinkAddresses4(final String ifname, final Inet4Address addr, final int prefix, final boolean delete) {
+        final byte[] address = addr.getAddress();
+        final int sockfd = LIBC.socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+        try {
+            final sockaddr_nl laddr = new sockaddr_nl();
+            laddr.nl_family = AF_NETLINK;
+            laddr.nl_pid = LIBC.getpid();
+
+            if (LIBC.bind(sockfd, laddr, laddr.size()) < 0) {
+                throwLastErrorException("cannot open netlink socket");
+            }
+
+            int msgSize = 32; // nlmsghdr(16) + ifaddrmsg(8) + rtattr(4) + address(4)
+
+            // 初始化消息内存
+            final Memory buffer = new Memory(msgSize);
+            int offset = 0;
+
+            final nlmsghdr nlmsg = new nlmsghdr(buffer.share(offset));
+            nlmsg.nlmsg_len = msgSize;
+            nlmsg.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE;
+            nlmsg.nlmsg_type = (short) (!delete ? RTM_NEWADDR : RTM_DELADDR);
+            nlmsg.write();
+            offset += nlmsg.size();
+
+            final ifaddrmsg ifa = new ifaddrmsg(buffer.share(offset));
+            ifa.ifa_index = if_nametoindex0(ifname);
+            ifa.ifa_family = AF_INET;
+            ifa.ifa_prefixlen = (byte) prefix;
+            if (!delete) {
+                ifa.ifa_flags = (byte) IFA_F_PERMANENT;
+                ifa.ifa_scope = 0;
+            }
+            ifa.write();
+            offset += ifa.size();
+
+            offset += LinuxNetworkRoutingTable.writeSockAddrIn(buffer.share(offset), IFA_LOCAL, address);
+
+            final int written = LIBC.send(sockfd, nlmsg.getPointer(), offset, 0);
+            if (written < 0) {
+                throwLastErrorException(Native.getLastError());
+            }
+        } finally {
+            LIBC.close(sockfd);
+        }
+    }
+
     // ------------------------ END IPv4 related ------------------------
 
     // ------------------------ START IPv6 related ------------------------
 
-
-    private static void addInterfaceAddress6(final int fd, final String ifname,
-                                             final Inet6Address addr, final int prefixLength) {
-        // Wrong: sysctl net.ipv6.conf.all.disable_ipv6 --> 1: [13] Permission denied
-        // sysctl net.ipv6.conf.all.disable_ipv6=0
-
+    /**
+     * Add ifnet6 address.
+     *
+     * @param fd           the file descriptor
+     * @param ifname       the interface name
+     * @param address      the ifnet6 address
+     * @param prefixLength the net addr mask prefix length
+     */
+    private static void addInet6InterfaceAddress(final int fd,
+                                                 final String ifname,
+                                                 final Inet6Address address,
+                                                 final int prefixLength) {
         final in6_ifreq ifr6 = new in6_ifreq();
-        ifr6.ifr6_addr = addr.getAddress();
-        ifr6.ifr6_prefixlen = prefixLength;
         ifr6.ifr6_ifindex = if_nametoindex0(fd, ifname);
+        ifr6.ifr6_prefixlen = prefixLength;
+        ifr6.ifr6_addr = address.getAddress();
 
-        // SIOCSIFADDR is append for IPv6
+        // XXX: SIOCSIFADDR is append for IPv6
         ioctl0(fd, SIOCSIFADDR, ifr6);
     }
 
-    private static void deleteInterfaceAddress6(final int fd, final String ifname, final Inet6Address addr, final int prefixLength) {
-        // Wrong: sysctl net.ipv6.conf.all.disable_ipv6 --> 1: [13] Permission denied
-        // sysctl net.ipv6.conf.all.disable_ipv6=0
-
+    /**
+     * Delete ifnet6 address.
+     *
+     * @param fd           the file descriptor
+     * @param ifname       the interface name
+     * @param address      the ifnet6 address
+     * @param prefixLength the net addr mask prefix length
+     */
+    private static void deleteInet6InterfaceAddress(final int fd,
+                                                    final String ifname,
+                                                    final Inet6Address address,
+                                                    final int prefixLength) {
         final in6_ifreq ifr6 = new in6_ifreq();
-        ifr6.ifr6_addr = addr.getAddress();
-        ifr6.ifr6_prefixlen = prefixLength;
         ifr6.ifr6_ifindex = if_nametoindex0(fd, ifname);
+        ifr6.ifr6_addr = address.getAddress();
+        ifr6.ifr6_prefixlen = prefixLength;
 
         ioctl0(fd, SIOCDIFADDR, ifr6);
     }
 
     // ------------------------ END IPv6 related ------------------------
 
+    /**
+     * Get the Maximum Transmission Unit (MTU) of this interface.
+     *
+     * @param fd     the file descriptor
+     * @param ifname the interface name
+     * @return the value of the MTU for that interface.
+     */
+    static int getMTU(final int fd, final String ifname) {
+        final ifreq ifr = new ifreq(ifname);
+        return ioctl0(fd, SIOCGIFMTU, ifr).ifr_ifru.ifru_mtu;
+    }
+
+    /**
+     * Set the Maximum Transmission Unit (MTU) of this interface.
+     *
+     * @param fd     the file descriptor
+     * @param ifname the interface name
+     * @param mtu    the value of the MTU for that interface.
+     */
+    static void setMTU(final int fd, final String ifname, final int mtu) {
+        final ifreq ifr = new ifreq(ifname);
+        ifr.ifr_ifru.setType("ifru_mtu");
+        ifr.ifr_ifru.ifru_mtu = mtu;
+        ioctl0(fd, SIOCSIFMTU, ifr);
+    }
+
     static ifaddrs getifaddrs0(final ifaddrs ifa) {
-        if (getifaddrs(ifa) < 0) {
+        if (LIBC.getifaddrs(ifa) < 0) {
             throwLastErrorException(Native.getLastError());
         }
         return ifa;
@@ -465,8 +638,8 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
         // return if_nametoindex(ifname);
     }
 
-    private static int if_nametoindex0(final String ifname) {
-        final int index = if_nametoindex(ifname);
+    static int if_nametoindex0(final String ifname) {
+        final int index = LIBC.if_nametoindex(ifname);
         if (0 == index) {
             throwLastErrorException(Native.getLastError());
         }
@@ -474,10 +647,14 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
     }
 
     private static <S extends Structure> S ioctl0(final int fd, final NativeLong request, final S argp) {
-        if (ioctl(fd, request, argp) < 0) {
+        if (LIBC.ioctl(fd, request, argp) < 0) {
             throwLastErrorException(Native.getLastError());
         }
         return argp;
+    }
+
+    private static <A extends InetAddress> A toNetmask(final A address, final int prefix) {
+        return cidrToNetmaskAddress(address, prefix);
     }
 
 }

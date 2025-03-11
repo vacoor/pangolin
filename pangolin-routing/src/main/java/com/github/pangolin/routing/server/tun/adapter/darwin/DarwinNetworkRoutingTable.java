@@ -1,9 +1,10 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
-import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.*;
-
-import com.github.pangolin.routing.server.tun.adapter.NetworkRouteTable;
-import com.sun.jna.*;
+import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
+import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
+import com.sun.jna.Memory;
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -13,20 +14,43 @@ import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.*;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
 
-public class DarwinNetworkRouteTable extends NetworkRouteTable {
+public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
+
+    private static final LibC LIBC = LibC.INSTANTCE;
+
     private static final int RT_MSGHDR_SIZE = new rt_msghdr(new Pointer(0)).size();
     private static final int SOCKADDR_DL_SIZE = new sockaddr_dl(new Pointer(0)).size();
     private static final int SOCKADDR_IN_SIZE = 16;
     private static final int SOCKADDR_IN6_SIZE = new sockaddr_in6().size();
 
-    private static final DarwinNetworkRouteTable INSTANCE = new DarwinNetworkRouteTable();
+    private static final DarwinNetworkRoutingTable INSTANCE = new DarwinNetworkRoutingTable();
 
-    private DarwinNetworkRouteTable() {
+    private DarwinNetworkRoutingTable() {
     }
 
-    public static DarwinNetworkRouteTable get() {
+    @Override
+    public void add(final InetAddress dst, final byte prefix, final InetAddress gw, final int metric, final String ifname) {
+
+    }
+
+    @Override
+    public void add(final InetAddress dst, final byte prefix, final InetAddress gw, final int metric, final int ifindex) {
+
+    }
+
+    @Override
+    public void delete(final InetAddress dst, final byte prefix, final String ifname) {
+
+    }
+
+    @Override
+    public void delete(final InetAddress dst, final byte prefix, final int ifindex) {
+
+    }
+
+    public static DarwinNetworkRoutingTable get() {
         return INSTANCE;
     }
 
@@ -93,18 +117,18 @@ public class DarwinNetworkRouteTable extends NetworkRouteTable {
         }
 
 
-        final int fd = socket(AF_ROUTE, SOCK_RAW, AF_UNSPEC);
+        final int fd = LIBC.socket(AF_ROUTE, SOCK_RAW, AF_UNSPEC);
         if (fd < 0) {
             throwLastErrorException(Native.getLastError());
         }
 
         try {
-            final int writtenBytes = write(fd, buffer, offset);
+            final int writtenBytes = LIBC.write(fd, buffer, offset);
             if (writtenBytes != offset) {
                 throwLastErrorException(Native.getLastError());
             }
         } finally {
-            close(fd);
+            LIBC.close(fd);
         }
     }
 
@@ -133,7 +157,7 @@ public class DarwinNetworkRouteTable extends NetworkRouteTable {
     }
 
     private static int if_nametoindex0(final String ifname) {
-        final int index = if_nametoindex(ifname);
+        final int index = LIBC.if_nametoindex(ifname);
         if (0 == index) {
             throwLastErrorException(Native.getLastError());
         }

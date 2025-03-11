@@ -1,11 +1,7 @@
 package com.github.pangolin.routing.server.tun.adapter.linux.jna;
 
-import com.sun.jna.NativeLong;
 import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
-
-import java.util.Arrays;
-import java.util.List;
 
 public interface Netlink {
     int NETLINK_ROUTE = 0;
@@ -57,67 +53,5 @@ public interface Netlink {
             super(p, ALIGN_NONE);
         }
     }
-
-
-
-    // 地址信息结构
-    @Structure.FieldOrder({"ifa_family", "ifa_prefixlen", "ifa_flags", "ifa_scope", "ifa_index"})
-    class ifaddrmsg extends Structure {
-        public byte ifa_family;    // AF_INET=2
-        public byte ifa_prefixlen;// 子网掩码位数（如24）
-        public byte ifa_flags;     // 标志位（通常为0）
-        public byte ifa_scope;     // 作用域（如RT_SCOPE_UNIVERSE）
-        public int ifa_index;      // 网卡索引（通过if_nametoindex获取）
-
-        public ifaddrmsg() {
-        }
-
-        public ifaddrmsg(final Pointer p) {
-            super(p);
-        }
-    }
-
-
-    // 映射 struct msghdr
-    public class MsgHdr extends Structure {
-        public sockaddr_nl.ByRef msg_name;     // 地址结构体指针（如 sockaddr_nl）‌:ml-citation{ref="4,7" data="citationList"}
-        public NativeLong msg_namelen;      // 地址长度
-        public IOVec.ByRef msg_iov;      // 指向 iovec 数组的指针 ‌:ml-citation{ref="4,7" data="citationList"}
-        public NativeLong msg_iovlen;       // iovec 数组长度
-        public Pointer msg_control;  // 辅助数据（通常为 NULL）
-        public NativeLong msg_controllen;   // 辅助数据长度
-        public int msg_flags;        // 标志位（通常忽略）
-
-        public MsgHdr() {
-        }
-
-        @Override
-        protected List<String> getFieldOrder() {
-            return Arrays.asList("msg_name", "msg_namelen", "msg_iov", "msg_iovlen",
-                    "msg_control", "msg_controllen", "msg_flags");
-        }
-
-        public static class ByRef extends MsgHdr implements ByReference {
-        }
-    }
-
-    // 映射 struct iovec
-    public class IOVec extends Structure {
-        public Pointer iov_base;  // 数据缓冲区起始地址 ‌:ml-citation{ref="4,7" data="citationList"}
-        public int iov_len;       // 缓冲区长度
-
-        public IOVec() {
-        }
-
-        @Override
-        protected List<String> getFieldOrder() {
-            return Arrays.asList("iov_base", "iov_len");
-        }
-
-        public static class ByRef extends IOVec implements ByReference {
-        }
-    }
-
-
 
 }
