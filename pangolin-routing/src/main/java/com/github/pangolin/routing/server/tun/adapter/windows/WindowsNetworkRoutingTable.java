@@ -3,7 +3,6 @@ package com.github.pangolin.routing.server.tun.adapter.windows;
 import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.interfaceAliasToLuid;
 import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.interfaceIndexToLuid;
 import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.interfaceLuidToAlias;
-import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.interfaceNameToLuid;
 import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.toInetAddress;
 import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.writeSockAddr;
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.AF_INET;
@@ -13,7 +12,6 @@ import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLi
 import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.MIB_IPPROTO_NETMGMT;
 import static com.sun.jna.platform.win32.IPHlpAPI.AF_UNSPEC;
 
-import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
 import com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib;
 import com.google.common.collect.Lists;
@@ -45,8 +43,8 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
      */
     @Override
     public void add(final InetAddress dst, final byte prefix,
-                    final InetAddress gw, final int metric, final String ifname) {
-        add0(dst, prefix, gw, metric, null != ifname ? interfaceAliasToLuid(ifname) : 0);
+                    final InetAddress gw, final String ifname, final int metric) {
+        add0(dst, prefix, gw, null != ifname ? interfaceAliasToLuid(ifname) : 0, metric);
     }
 
     /**
@@ -54,8 +52,8 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
      */
     @Override
     public void add(final InetAddress dst, final byte prefix,
-                    final InetAddress gw, final int metric, final int ifindex) {
-        add0(dst, prefix, gw, metric, 0 < ifindex ? interfaceIndexToLuid(ifindex) : 0);
+                    final InetAddress gw, final int ifindex, final int metric) {
+        add0(dst, prefix, gw, 0 < ifindex ? interfaceIndexToLuid(ifindex) : 0, metric);
     }
 
     /**
@@ -63,7 +61,7 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
      */
     @Override
     public void delete(final InetAddress dst, final byte prefix, final String ifname) {
-        delete0(dst, prefix, null != ifname ? interfaceNameToLuid(ifname) : 0);
+        delete0(dst, prefix, null != ifname ? interfaceAliasToLuid(ifname) : 0);
     }
 
     /**
@@ -79,12 +77,25 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
         return null != row ? toRoute(row) : null;
     }
 
+    public List<Route> getAll() {
+        return getAll0(AF_UNSPEC);
+    }
+
     public static WindowsNetworkRoutingTable get() {
         return INSTANCE;
     }
 
-    private static void add0(final InetAddress destination, final byte prefix,
-                             final InetAddress gateway, final int metric, final long interfaceLuid) {
+    /**
+     * Add a new route.
+     *
+     * @param dst           the destination network or host
+     * @param prefix        the netmask prefix length
+     * @param gw            the gateway used for route packets, the specified gateway must be reachable first.
+     * @param interfaceLuid the LUID of interface, force the route to be associated with the specified device
+     * @param metric        the metric field in the routing table (used by routing daemons)
+     */
+    private static void add0(final InetAddress dst, final byte prefix,
+                             final InetAddress gw, final long interfaceLuid, final int metric) {
         final MIB_IPFORWARD_ROW2 row = new MIB_IPFORWARD_ROW2();
         IP_HLP_API.InitializeIpForwardEntry(row);
 
@@ -95,10 +106,10 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
         row.PreferredLifetime = 0xFFFFFFFF;
         row.Metric = metric;
 
-        writeSockAddr(row.DestinationPrefix.Prefix, destination);
+        writeSockAddr(row.DestinationPrefix.Prefix, dst);
         row.DestinationPrefix.PrefixLength = prefix;
 
-        writeSockAddr(row.NextHop, gateway);
+        writeSockAddr(row.NextHop, gw);
 
         final int code = IP_HLP_API.CreateIpForwardEntry2(row);
         if (WinError.NO_ERROR != code) {
@@ -106,27 +117,41 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
         }
     }
 
-    private static void delete0(final InetAddress destination, final byte prefix, final long interfaceLuid) {
+    /**
+     * Delete a route.
+     *
+     * @param dst           the destination network or host
+     * @param prefix        the netmask prefix length
+     * @param interfaceLuid the LUID of interface, force the route to be associated with the specified device
+     */
+    private static void delete0(final InetAddress dst, final byte prefix, final long interfaceLuid) {
         final MIB_IPFORWARD_ROW2 row = new MIB_IPFORWARD_ROW2();
         IP_HLP_API.InitializeIpForwardEntry(row);
 
         row.Protocol = MIB_IPPROTO_NETMGMT;
         row.InterfaceLuid = interfaceLuid;
 
-        writeSockAddr(row.DestinationPrefix.Prefix, destination);
+        writeSockAddr(row.DestinationPrefix.Prefix, dst);
         row.DestinationPrefix.PrefixLength = prefix;
 
         final int code = IP_HLP_API.DeleteIpForwardEntry2(row);
-        if (WinError.NO_ERROR != code && WinError.ERROR_NOT_FOUND != code) {
+        if (WinError.NO_ERROR != code && WinError.ERROR_FILE_NOT_FOUND != code) {
             throw new Win32Exception(code);
         }
     }
 
-    private static MIB_IPFORWARD_ROW2 get0(final InetAddress destination, final byte prefix, final long interfaceLuid) {
+    /**
+     * Get a route.
+     *
+     * @param dst           the destination network or host
+     * @param prefix        the netmask prefix length
+     * @param interfaceLuid the LUID of interface, force the route to be associated with the specified device
+     */
+    private static MIB_IPFORWARD_ROW2 get0(final InetAddress dst, final byte prefix, final long interfaceLuid) {
         final MIB_IPFORWARD_ROW2 row = new MIB_IPFORWARD_ROW2();
         IP_HLP_API.InitializeIpForwardEntry(row);
 
-        writeSockAddr(row.DestinationPrefix.Prefix, destination);
+        writeSockAddr(row.DestinationPrefix.Prefix, dst);
         row.DestinationPrefix.PrefixLength = prefix;
         row.InterfaceLuid = interfaceLuid;
 
@@ -140,7 +165,13 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
         return row;
     }
 
-    private static List<Route> getAll(final int family) {
+    /**
+     * Get a list of all route.
+     *
+     * @param family the address family, AF_INET, AF_INET6, AF_UNSPEC
+     * @return the list of all route
+     */
+    private static List<Route> getAll0(final int family) {
         final PointerByReference pTableRef = new PointerByReference();
         final int code = IP_HLP_API.GetIpForwardTable2(family, pTableRef);
         // something wrong
@@ -185,29 +216,12 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
     }
 
     public static void main(String[] args) throws SocketException, UnknownHostException {
-//        final Enumeration<NetworkInterface> nix = NetworkInterface.getNetworkInterfaces();
-//        while (nix.hasMoreElements()) {
-//            NetworkInterface ni = nix.nextElement();
-//            System.out.println(ni.getIndex() + " -> " + ni.getName() + " -> " + ni.getDisplayName() + " -> " + ni.getParent());
-//        }
-        final WindowsNetworkInterface nix = WindowsNetworkInterface.getByName("以太网 2");
-        List<InterfaceAddressEx> interfaceAddresses = nix.getInterfaceAddresses();
-        final long luid = nix.luid();
-
-
-//        NetworkRoutingTable rt = WindowsNetworkRoutingTable.get();
-
-        InetAddress dst = InetAddress.getByName("198.19.0.0");
-        int prefix = (byte) 24;
-        InetAddress gw = InetAddress.getByName("10.188.70.1");
-        Route route = get(dst, (byte) prefix, "以太网 P");
-        System.out.println(route);
-        for (Route r : getAll(AF_UNSPEC)) {
-            System.out.println(r);
-        }
-
-//         add(dst, (byte) prefix, gw, luid);
-//        get(dst, (byte) prefix);
-//        delete(dst, (byte) prefix, luid);
+        final NetworkRoutingTable rt = NetworkRoutingTable.get();
+        final InetAddress dst = InetAddress.getByName("198.19.0.0");
+        final int prefix = (byte) 24;
+        final InetAddress gw = InetAddress.getByName("10.188.70.1");
+//        rt.add(dst, (byte) 24, gw, "以太网 P", 0);
+        rt.delete(dst, (byte) 24, "以太网 P");
+        System.out.println();
     }
 }

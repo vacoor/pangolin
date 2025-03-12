@@ -31,12 +31,12 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
     }
 
     @Override
-    public void add(final InetAddress dst, final byte prefix, final InetAddress gw, final int metric, final String ifname) {
+    public void add(final InetAddress dst, final byte prefix, final InetAddress gw, final String ifname, final int metric) {
 
     }
 
     @Override
-    public void add(final InetAddress dst, final byte prefix, final InetAddress gw, final int metric, final int ifindex) {
+    public void add(final InetAddress dst, final byte prefix, final InetAddress gw, final int ifindex, final int metric) {
 
     }
 

@@ -11,7 +11,7 @@ import java.net.InetAddress;
  *
  */
 public abstract class NetworkRoutingTable {
-    static class Route {
+    public static class Route {
         private final InetAddress address;
         private final int prefix;
         private final InetAddress gateway;
@@ -36,27 +36,25 @@ public abstract class NetworkRoutingTable {
 
     /**
      * Add a new route.
-     *
-     * @param dst    the destination network or host
+     *  @param dst    the destination network or host
      * @param prefix the netmask prefix length
      * @param gw     the gateway used for route packets, the specified gateway must be reachable first.
-     * @param metric the metric field in the routing table (used by routing daemons)
      * @param ifname the interface name, force the route to be associated with the specified device
+     * @param metric the metric field in the routing table (used by routing daemons)
      */
     public abstract void add(final InetAddress dst, final byte prefix,
-                             final InetAddress gw, final int metric, final String ifname);
+                             final InetAddress gw, final String ifname, final int metric);
 
     /**
      * Add a new route.
-     *
-     * @param dst     the destination network or host
+     *  @param dst     the destination network or host
      * @param prefix  the netmask prefix length
      * @param gw      the gateway used for route packets, the specified gateway must be reachable first.
-     * @param metric  the metric field in the routing table (used by routing daemons)
      * @param ifindex the interface index, force the route to be associated with the specified device
+     * @param metric  the metric field in the routing table (used by routing daemons)
      */
     public abstract void add(final InetAddress dst, final byte prefix,
-                             final InetAddress gw, final int metric, final int ifindex);
+                             final InetAddress gw, final int ifindex, final int metric);
 
     /**
      * Delete a route.
