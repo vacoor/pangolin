@@ -2,7 +2,10 @@ package com.github.pangolin.routing.server.tun.adapter.linux;
 
 import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.throwLastErrorException;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NETLINK_ROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLMSG_DONE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLMSG_ERROR;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_CREATE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_DUMP;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_REQUEST;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.nlmsghdr;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.sockaddr_nl;
@@ -11,6 +14,7 @@ import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_OIF;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_DELROUTE;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_NEWROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_GETROUTE;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTN_UNICAST;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTPROT_STATIC;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RT_SCOPE_UNIVERSE;
@@ -18,6 +22,7 @@ import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.rtattr;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.rtmsg;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET6;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_NETLINK;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.SOCK_RAW;
 import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.INSTANTCE;
@@ -116,9 +121,92 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
             // 填充rtattr（Interface）
             offset += writeIfindex(buffer.share(offset), ifindex);
 
-            final int written = INSTANTCE.send(sockfd, hl.getPointer(), offset, 0);
+            final int written = LIBC.send(sockfd, hl.getPointer(), offset, 0);
             if (written < 0) {
                 throwLastErrorException(Native.getLastError());
+            }
+        } finally {
+            LIBC.close(sockfd);
+        }
+    }
+
+    public static void getAll() {
+        final int sockfd = LIBC.socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+        try {
+            final sockaddr_nl localAddr = new sockaddr_nl();
+            localAddr.nl_family = AF_NETLINK;
+            localAddr.nl_pid = INSTANTCE.getpid();
+
+            if (INSTANTCE.bind(sockfd, localAddr, localAddr.size()) < 0) {
+                throwLastErrorException(Native.getLastError());
+            }
+
+            int msgSize = 16 + 12; // nlmsghdr(16) + rtmsg(12) + dst rtattr(4) + dst addr(4) + gw rtattr(4) + gw addr(4) + oif rtattr(4) + ifindex(4)
+
+            // 初始化消息内存
+            final Memory buffer = new Memory(msgSize);
+            int offset = 0;
+
+            final nlmsghdr hl = new nlmsghdr(buffer.share(offset));
+            hl.nlmsg_len = msgSize;
+            hl.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+            hl.nlmsg_type = RTM_GETROUTE;
+            hl.write();
+            offset += hl.size();
+
+            final rtmsg rt = new rtmsg(buffer.share(offset));
+            rt.rtm_family = AF_INET;
+            rt.rtm_dst_len = (byte) 0;
+            rt.rtm_table = (byte) RT_TABLE_MAIN;
+//            rt.rtm_protocol = RTPROT_STATIC;
+//            rt.rtm_scope = RT_SCOPE_UNIVERSE;
+//            rt.rtm_type = RTN_UNICAST;
+            rt.write();
+            offset += rt.size();
+
+            // 填充rtattr（DST 地址）
+//            offset += writeSockAddrIn(buffer.share(offset), (short) RTA_DST, dst);
+
+
+            // 填充rtattr（GATEWAY 地址）
+//            offset += writeSockAddrIn(buffer.share(offset), (short) RTA_GATEWAY, gw);
+
+            // 填充rtattr（Interface）
+//            offset += writeIfindex(buffer.share(offset), ifindex);
+
+            final int written = LIBC.send(sockfd, hl.getPointer(), offset, 0);
+            if (written < 0) {
+                throwLastErrorException(Native.getLastError());
+            }
+
+            System.out.println("RECV");
+
+            Memory buf = new Memory(1024);
+            int len;
+            while ((len = LIBC.recv(sockfd, buf, (int) buf.size(), 0)) > 0) {
+                for(int off = 0; off < len; ) {
+                    final nlmsghdr nlh = new nlmsghdr(buf.share(off));
+                    off += nlh.size();
+                    System.out.println(nlh.size() + " -> " + nlh.nlmsg_len + " -> " + nlh.nlmsg_type);
+
+                    if (nlh.nlmsg_type == NLMSG_ERROR) {
+                        return;
+                    }
+                    if (nlh.nlmsg_type == NLMSG_DONE) {
+                        break;
+                    }
+
+                    if (nlh.nlmsg_type == RTM_NEWROUTE) {
+                        final rtmsg rtmsg = new rtmsg(buf.share(offset));
+                        off += rtmsg.size();
+
+                        final int l = nlh.nlmsg_len - nlh.size() - rtmsg.size();
+                        System.out.println("Family = " + rtmsg.rtm_family);
+                        if (AF_INET == rtmsg.rtm_family || AF_INET6 == rtmsg.rtm_family) {
+                        }
+                        off += l;
+                    }
+                }
             }
         } finally {
             LIBC.close(sockfd);

@@ -210,6 +210,8 @@ public interface LibC extends LibCAPI, Library {
 
     int send(int sockfd, Pointer buf, int len, int flags);
 
+    int recv(int sockfd, Pointer buf, int len, int flags);
+
     int getpid();
 
 }

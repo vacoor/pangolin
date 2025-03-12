@@ -13,11 +13,23 @@ public interface Netlink {
     int NLM_F_DUMP_INTR = 0x10;    /* Dump was inconsistent due to sequence change */
     int NLM_F_DUMP_FILTERED = 0x20;    /* Dump was filtered as requested */
 
+    /* Modifiers to GET request */
+    int NLM_F_ROOT = 0x100;/* specify tree	root	*/
+    int NLM_F_MATCH = 0x200;    /* return all matching	*/
+    int NLM_F_ATOMIC = 0x400;    /* atomic GET		*/
+    int NLM_F_DUMP = (NLM_F_ROOT | NLM_F_MATCH);
+
     /* Modifiers to NEW request */
     int NLM_F_REPLACE = 0x100;    /* Override existing		*/
     int NLM_F_EXCL = 0x200;    /* Do not touch, if it exists	*/
     int NLM_F_CREATE = 0x400;    /* Create, if it does not exist	*/
     int NLM_F_APPEND = 0x800;    /* Add to end of list		*/
+
+    int NLMSG_NOOP = 0x1;/* Nothing.		*/
+    int NLMSG_ERROR = 0x2;/* Error		*/
+    int NLMSG_DONE = 0x3;/* End of a dump	*/
+    int NLMSG_OVERRUN = 0x4;/* Data lost		*/
+    int NLMSG_MIN_TYPE = 0x10;/* < 0x10: reserved control messages */
 
     /**
      * https://github.com/torvalds/linux/blob/master/include/uapi/linux/netlink.h#L37
