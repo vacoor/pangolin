@@ -146,7 +146,7 @@ public interface Route {
                     "rmx_locks", "rmx_mtu", "rmx_hopcount",
                     "rmx_expire", "rmx_recvpipe", "rmx_sendpipe",
                     "rmx_ssthresh", "rmx_rtt", "rmx_rttvar",
-                    "rmx_pksent", "rmx_state", "rmx_filler"
+                    "rmx_pksent", "rmx_filler"
             );
         }
     }

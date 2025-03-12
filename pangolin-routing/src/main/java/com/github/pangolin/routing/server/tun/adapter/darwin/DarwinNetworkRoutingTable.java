@@ -5,16 +5,20 @@ import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
+import com.sun.jna.ptr.IntByReference;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.nio.ByteBuffer;
 
 import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
 import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sysctl.*;
+import static com.sun.jna.Pointer.NULL;
 
 public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
 
@@ -81,6 +85,39 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         route((byte) RTM_DELETE, (short) ifindex, dst, gw, netmask);
     }
 
+    public static void get0() {
+        final rt_msghdr req = new rt_msghdr();
+        req.rtm_msglen = (short) req.size();
+        req.rtm_version = RTM_VERSION;
+        req.rtm_type = RTM_GET;
+        req.rtm_addrs = 0xFFFF;
+        req.write();
+
+        final int fd = LIBC.socket(AF_ROUTE, SOCK_RAW, AF_UNSPEC);
+        if (fd < 0) {
+            throwLastErrorException(Native.getLastError());
+        }
+
+        try {
+            final int writtenBytes = LIBC.write(fd, req.getPointer(), req.size());
+            if (writtenBytes != req.size()) {
+                throwLastErrorException(Native.getLastError());
+            }
+
+            int len;
+            final Memory buf = new Memory(4096);
+            while ((len = LIBC.read(fd, buf, buf.size())) > 0) {
+                final Pointer ptr = buf.share(0, len);
+                final rt_msghdr hdr = new rt_msghdr(ptr);
+                final int blen = hdr.rtm_msglen - hdr.size();
+
+                System.out.println(hdr.rtm_type);
+            }
+        } finally {
+            LIBC.close(fd);
+        }
+    }
+
     private static void route(final byte rtm_type, final short rtm_index,
                               final InetAddress dst, final InetAddress gw,
                               final InetAddress netmask) {
@@ -91,10 +128,9 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         final rt_msghdr hdr = new rt_msghdr(buffer.share(offset));
         for (int i = 0; i < 1; i++) {
             hdr.rtm_msglen = (short) buffer.size();
-
+            hdr.rtm_version = RTM_VERSION;
             hdr.rtm_type = rtm_type;
             hdr.rtm_flags = RTF_UP | RTF_GATEWAY | RTF_STATIC;
-            hdr.rtm_version = RTM_VERSION;
             hdr.rtm_addrs = RTA_DST | RTA_GATEWAY | RTA_NETMASK;
 
             if (rtm_index != 0) {
@@ -162,6 +198,40 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
             throwLastErrorException(Native.getLastError());
         }
         return index;
+    }
+
+    public static void main(String[] args) {
+        final int[] mib = {
+                CTL_NET,          // 网络子系统
+                AF_ROUTE,         // 路由协议族
+                0,                // 所有协议
+                0,                // 所有接口
+                NET_RT_DUMP,      // 操作类型：导出路由表
+                0                 // 保留位
+        };
+
+        final IntByReference lenRef = new IntByReference(0);
+        if (LIBC.sysctl(mib, mib.length, NULL, lenRef, NULL, new IntByReference(0)) < 0) {
+            throwLastErrorException(Native.getLastError());
+        }
+
+        final int length = lenRef.getValue();
+        if (length <= 0) {
+            return;
+        }
+
+        final Memory buffer = new Memory(length);
+        if (LIBC.sysctl(mib, mib.length, buffer, new IntByReference(length), NULL, new IntByReference(0)) < 0) {
+            buffer.close();
+            throwLastErrorException(Native.getLastError());
+        }
+
+        System.out.println(length);
+
+        final Pointer ptr = buffer.share(0, length);
+        final rt_msghdr rtm = new rt_msghdr(ptr);
+        rtm.read();
+        System.out.println(rtm.rtm_msglen);
     }
 
 }

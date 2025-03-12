@@ -99,6 +99,22 @@ public interface LibC extends LibCAPI, Library {
     int read(final int fd, final ByteBuffer buf, final long nbytes);
 
     /**
+     * Reads nbytes bytes of data from the offset in the file associated
+     * with fd into memory at buf. The offset is advanced by the number of
+     * bytes read.  It is not guaranteed that all nbytes bytes will be read;
+     * for example if the file refers to the console, at most one line will be
+     * returned. In any event the number of bytes read is returned. A return
+     * value of 0 is conventionally interpreted as end of file.
+     *
+     * @param fd     a file descriptor
+     * @param buf    the buf
+     * @param nbytes the nbytes
+     * @return the number of bytes read is returned.  A return
+     * value of 0 is conventionally interpreted as end of file.
+     */
+    int read(final int fd, final Pointer buf, final long nbytes);
+
+    /**
      * Writes nbytes bytes of data starting at buf to the file associ-
      * ated with fd at the file offset.  The offset is advanced by the number
      * of  bytes  written.   The  number of characters actually written is re-
@@ -213,5 +229,8 @@ public interface LibC extends LibCAPI, Library {
     int recv(int sockfd, Pointer buf, int len, int flags);
 
     int getpid();
+
+    int sysctl(int[] mib, int nameLen, Pointer oldp, IntByReference oldlenp, Pointer newp, IntByReference newlen);
+
 
 }
