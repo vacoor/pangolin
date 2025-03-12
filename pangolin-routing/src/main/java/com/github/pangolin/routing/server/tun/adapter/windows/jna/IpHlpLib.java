@@ -291,7 +291,14 @@ public interface IpHlpLib extends IPHlpAPI {
     class SOCKADDR_INET extends Union {
         public sockaddr_in Ipv4;
         public sockaddr_in6 Ipv6;
-        public int si_family; // TODO might be short?
+        public short si_family; // TODO might be short?
+
+        public SOCKADDR_INET() {
+        }
+
+        public SOCKADDR_INET(Pointer ptr) {
+            super(ptr);
+        }
     }
 
     /**
@@ -842,6 +849,15 @@ public interface IpHlpLib extends IPHlpAPI {
     // ------------------------ END AdapterAddresses related ------------------------
 
     /**
+     * The routing mechanism was not specified.
+     */
+    int MIB_IPPROTO_OTHER = 1;
+
+    /**
+     * A local interface.
+     */
+    int MIB_IPPROTO_LOCAL = 2;
+    /**
      * A static route. This value is used to identify route information
      * for IP routing set through network management such as the Dynamic
      * Host Configuration Protocol (DCHP), the Simple Network Management
@@ -857,6 +873,7 @@ public interface IpHlpLib extends IPHlpAPI {
     class IP_ADDRESS_PREFIX extends Structure {
         public SOCKADDR_INET Prefix;
         public byte PrefixLength;
+
     }
 
 
@@ -864,6 +881,8 @@ public interface IpHlpLib extends IPHlpAPI {
             "InterfaceLuid",
             "InterfaceIndex",
             "DestinationPrefix",
+//            "DestinationPrefixPrefix",
+//            "DestinationPrefixPrefixLength",
             "NextHop",
             "SitePrefixLength",
             "ValidLifetime",
@@ -881,6 +900,9 @@ public interface IpHlpLib extends IPHlpAPI {
         public long InterfaceLuid;
         public int InterfaceIndex;
         public IP_ADDRESS_PREFIX DestinationPrefix;
+//        public SOCKADDR_INET DestinationPrefixPrefix;
+//        public byte DestinationPrefixPrefixLength;
+
         public SOCKADDR_INET NextHop;
         public byte SitePrefixLength;
         public int ValidLifetime;
@@ -889,12 +911,11 @@ public interface IpHlpLib extends IPHlpAPI {
 
         //        NL_ROUTE_PROTOCOL Protocol;
         public int Protocol;
-        public WinDef.BOOL Loopback;
-        public WinDef.BOOL AutoconfigureAddress;
-        public WinDef.BOOL Publish;
-        public WinDef.BOOL Immortal;
+        public byte Loopback;
+        public byte AutoconfigureAddress;
+        public byte Publish;
+        public byte Immortal;
         public int Age;
-        //        NL_ROUTE_ORIGIN   Origin;
         public int Origin;
 
         public MIB_IPFORWARD_ROW2() {
@@ -946,7 +967,7 @@ public interface IpHlpLib extends IPHlpAPI {
         public MIB_IPFORWARD_TABLE2(final Pointer p) {
             super(p);
             Table = new MIB_IPFORWARD_ROW2[p.getInt(0)];
-            read();;
+            read();
         }
     }
 

@@ -11,18 +11,26 @@ import java.net.InetAddress;
  *
  */
 public abstract class NetworkRoutingTable {
-    public static class Route {
+    static class Route {
         private final InetAddress address;
         private final int prefix;
         private final InetAddress gateway;
+        private final String ifname;
         private final int metric;
 
         public Route(final InetAddress address, final int prefix,
-                     final InetAddress gateway, final int metric) {
+                     final InetAddress gateway, final String ifname, final int metric) {
             this.address = address;
             this.prefix = prefix;
             this.gateway = gateway;
             this.metric = metric;
+            this.ifname = ifname;
+        }
+
+        @Override
+        public String toString() {
+            final String net = address.getHostAddress() + "/" + prefix;
+            return String.format("%-40s\t%-35s\t%-10s\t%-5s", net, gateway.getHostAddress(), ifname, metric);
         }
     }
 

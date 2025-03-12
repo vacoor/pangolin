@@ -78,10 +78,6 @@ public class WindowsNetworkInterface implements NetworkInterfaceEx {
      */
     @Override
     public String name() {
-        return interfaceLuidToName(interfaceLuid);
-    }
-
-    public String alias() {
         return interfaceLuidToAlias(interfaceLuid);
     }
 
@@ -186,7 +182,7 @@ public class WindowsNetworkInterface implements NetworkInterfaceEx {
         return of(NetworkInterface.getByIndex(index));
     }
 
-    public static WindowsNetworkInterface getByAlias(final String interfaceAlias) throws SocketException {
+    public static WindowsNetworkInterface getByName(final String interfaceAlias) throws SocketException {
         /*-
          * java.net.NetworkInterface
          * - name: eth0 (windows平台也是)
