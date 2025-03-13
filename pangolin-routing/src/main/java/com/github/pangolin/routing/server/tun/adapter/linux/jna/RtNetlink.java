@@ -55,6 +55,8 @@ public interface RtNetlink {
     int RTA_OIF = 4;
     int RTA_GATEWAY = 5;
 
+    int RTA_MAX = 31;
+
     /* RTnetlink multicast groups - backwards compatibility for userspace */
     int RTMGRP_LINK = 1;
     int RTMGRP_NOTIFY = 2;
