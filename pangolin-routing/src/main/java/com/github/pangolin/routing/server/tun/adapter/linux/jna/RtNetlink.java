@@ -55,6 +55,27 @@ public interface RtNetlink {
     int RTA_OIF = 4;
     int RTA_GATEWAY = 5;
 
+    /* RTnetlink multicast groups - backwards compatibility for userspace */
+    int RTMGRP_LINK = 1;
+    int RTMGRP_NOTIFY = 2;
+    int RTMGRP_NEIGH = 4;
+    int RTMGRP_TC = 8;
+
+    int RTMGRP_IPV4_IFADDR = 0x10;
+    int RTMGRP_IPV4_MROUTE = 0x20;
+    int RTMGRP_IPV4_ROUTE = 0x40;
+    int RTMGRP_IPV4_RULE = 0x80;
+
+    int RTMGRP_IPV6_IFADDR = 0x100;
+    int RTMGRP_IPV6_MROUTE = 0x200;
+    int RTMGRP_IPV6_ROUTE = 0x400;
+    int RTMGRP_IPV6_IFINFO = 0x800;
+
+    int RTMGRP_DECnet_IFADDR = 0x1000;
+    int RTMGRP_DECnet_ROUTE = 0x4000;
+
+    int RTMGRP_IPV6_PREFIX = 0x20000;
+
     /**
      * Generic structure for encapsulation of optional route information.
      * It is reminiscent of sockaddr, but with sa_family replaced

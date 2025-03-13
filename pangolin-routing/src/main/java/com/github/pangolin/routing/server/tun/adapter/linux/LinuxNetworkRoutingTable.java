@@ -12,6 +12,8 @@ import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.s
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_DST;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_GATEWAY;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_OIF;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTMGRP_IPV4_ROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTMGRP_IPV6_ROUTE;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_DELROUTE;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_NEWROUTE;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_GETROUTE;
@@ -102,13 +104,13 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
             offset += hl.size();
 
             final rtmsg rt = new rtmsg(buffer.share(offset));
-            rt.rtm_family = AF_INET;
-            rt.rtm_dst_len = (byte) prefix;
-            rt.rtm_table = (byte) RT_TABLE_MAIN;
-            rt.rtm_protocol = RTPROT_STATIC;
-            rt.rtm_scope = RT_SCOPE_UNIVERSE;
-            rt.rtm_type = RTN_UNICAST;
-            rt.write();
+//            rt.rtm_family = AF_INET;
+//            rt.rtm_dst_len = (byte) prefix;
+//            rt.rtm_table = (byte) RT_TABLE_MAIN;
+//            rt.rtm_protocol = RTPROT_STATIC;
+//            rt.rtm_scope = RT_SCOPE_UNIVERSE;
+//            rt.rtm_type = RTN_UNICAST;
+//            rt.write();
             offset += rt.size();
 
             // 填充rtattr（DST 地址）
@@ -135,6 +137,7 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
         try {
             final sockaddr_nl localAddr = new sockaddr_nl();
             localAddr.nl_family = AF_NETLINK;
+            localAddr.nl_groups = RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_ROUTE;
             localAddr.nl_pid = INSTANTCE.getpid();
 
             if (INSTANTCE.bind(sockfd, localAddr, localAddr.size()) < 0) {
@@ -151,13 +154,15 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
             hl.nlmsg_len = msgSize;
             hl.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
             hl.nlmsg_type = RTM_GETROUTE;
+            hl.nlmsg_seq = 1;
+            hl.nlmsg_pid = LIBC.getpid();
             hl.write();
             offset += hl.size();
 
             final rtmsg rt = new rtmsg(buffer.share(offset));
-            rt.rtm_family = AF_INET;
-            rt.rtm_dst_len = (byte) 0;
-            rt.rtm_table = (byte) RT_TABLE_MAIN;
+//            rt.rtm_family = AF_INET;
+//            rt.rtm_dst_len = (byte) 0;
+//            rt.rtm_table = (byte) RT_TABLE_MAIN;
 //            rt.rtm_protocol = RTPROT_STATIC;
 //            rt.rtm_scope = RT_SCOPE_UNIVERSE;
 //            rt.rtm_type = RTN_UNICAST;
