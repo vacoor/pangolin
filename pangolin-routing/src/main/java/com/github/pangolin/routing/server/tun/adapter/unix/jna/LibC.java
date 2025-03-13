@@ -208,6 +208,7 @@ public interface LibC extends LibCAPI, Library {
      */
     int if_nametoindex(final String ifname);
 
+    String if_indextoname(final int ifindex, final byte[] ifname);
 
     /**
      * Get interface addresses.

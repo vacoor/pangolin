@@ -226,39 +226,52 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
             throwLastErrorException(Native.getLastError());
         }
 
-        System.out.println(length);
+//        System.out.println(length);
 
         final Pointer ptr = buffer.share(0, length);
         for (int offset = 0; offset < length; ) {
             final rt_msghdr rtm = new rt_msghdr(ptr.share(offset));
             rtm.read();
-            offset += rtm.size();
 
-            System.out.printf("Route Entry: Type=%s, Flags=[%s%s]\n", rtm.rtm_type, rtm.rtm_flags & RTF_UP, rtm.rtm_flags & RTF_GATEWAY);
+//            System.out.printf("Route Entry: Type=%s, Flags=[%s,%s], Addrs=%s\n", rtm.rtm_type, rtm.rtm_flags & RTF_UP, rtm.rtm_flags & RTF_GATEWAY, rtm.rtm_addrs);
             final int l = rtm.rtm_msglen - rtm.size();
-            System.out.println("Len = " + l);
+//            System.out.println("Len = " + l);
 
-            for (int i = 0; i < l;) {
-                final int len = ptr.getByte(offset + i) & 0xFF;
-                final int family = ptr.getByte(offset + i + 1) & 0xFF;
-                System.out.println("I = " + i + "(" + (offset + i) + ")" + " -> " + family + " -> " + len + " -> " + l);
-                if (AF_INET == family) {
-                    sockaddr_in sockaddr_in = new sockaddr_in(ptr.share(offset + i, len));
-                    i += sockaddr_in.size();
-                    System.out.println(toInet4Address(sockaddr_in));
-                } else if (AF_INET6 == family) {
-                    sockaddr_in6 sockaddr_in = new sockaddr_in6(ptr.share(offset + i, len));
-                    i += sockaddr_in.size();
-                    System.out.println(toInet6Address(sockaddr_in));
-                } else {
-//                    i += len;
-                    i = l;
-                }
-                // offset += len;
+            if ((rtm.rtm_addrs & RTA_DST) != 0) {
+                printAddr(ptr.share(offset + rtm.size()), "DST");
             }
-             offset += l;
+            if ((rtm.rtm_addrs & RTA_GATEWAY) != 0) {
+                printAddr(ptr.share(offset + rtm.size()), "GW");
+            }
+            if ((rtm.rtm_addrs & RTA_NETMASK) != 0) {
+                printAddr(ptr.share(offset + rtm.size()), "NETMASK");
+            }
+            /*
+            if ((rtm.rtm_addrs & RTA_IFP) != 0) {
+                sockaddr_dl sdl = new sockaddr_dl(ptr.share(offset + rtm.size()));
+                sdl.read();
+                System.out.printf("Dev: %s\t", sdl.sdl_index);
+            }
+            */
+            String dev = LIBC.if_indextoname(rtm.rtm_index, new byte[IFNAMSIZ]);
+            System.out.printf("Dev: %s\t", dev);
+//            System.out.println("Metric: " + rtm.rtm_inits);
+            System.out.println();
+            offset += rtm.rtm_msglen;
+        }
+    }
 
-            System.out.println(rtm.rtm_msglen);
+    private static void printAddr(final Pointer ptr, final String type) {
+        final int len = ptr.getByte(0) & 0xFF;
+        final int family = ptr.getByte(1) & 0xFF;
+        if (AF_INET == family) {
+            sockaddr_in sockaddr_in = new sockaddr_in(ptr.share(0, len));
+            sockaddr_in.read();
+            System.out.printf("%s: %s\t", type, toInet4Address(sockaddr_in).getHostAddress());
+        } else if (AF_INET6 == family) {
+            sockaddr_in6 sockaddr_in = new sockaddr_in6(ptr.share(0, len));
+            System.out.printf("%s: %s\t", type, toInet6Address(sockaddr_in).getHostAddress());
+        } else {
         }
     }
 
