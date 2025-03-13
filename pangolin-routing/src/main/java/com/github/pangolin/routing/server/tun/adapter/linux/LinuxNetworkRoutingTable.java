@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.server.tun.adapter.linux;
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.IFNAMSIZ;
 import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.throwLastErrorException;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NETLINK_ROUTE;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLMSG_DONE;
@@ -232,7 +233,10 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
                             if (null != tab[RTA_OIF]) {
                                 final rtattr rta = tab[RTA_OIF];
                                 int ifindex = rta.getPointer().getInt(rta.size());
-                                System.out.printf("IF: %s\t", LIBC.if_indextoname(ifindex, new byte[16]));
+                                final byte[] _buf = new byte[IFNAMSIZ];
+                                LIBC.if_indextoname(ifindex, _buf);
+                                String dev = Native.toString(_buf);
+                                System.out.printf("IF: %s\t", dev);
                             }
                             System.out.println();
 //                        }

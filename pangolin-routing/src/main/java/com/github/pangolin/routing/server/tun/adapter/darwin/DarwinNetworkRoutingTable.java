@@ -253,7 +253,9 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
                 System.out.printf("Dev: %s\t", sdl.sdl_index);
             }
             */
-            String dev = LIBC.if_indextoname(rtm.rtm_index, new byte[IFNAMSIZ]);
+            final byte[] buf = new byte[IFNAMSIZ];
+            LIBC.if_indextoname(rtm.rtm_index, buf);
+            String dev = Native.toString(buf);
             System.out.printf("Dev: %s\t", dev);
 //            System.out.println("Metric: " + rtm.rtm_inits);
             System.out.println();
