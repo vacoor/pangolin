@@ -229,9 +229,37 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         System.out.println(length);
 
         final Pointer ptr = buffer.share(0, length);
-        final rt_msghdr rtm = new rt_msghdr(ptr);
-        rtm.read();
-        System.out.println(rtm.rtm_msglen);
+        for (int offset = 0; offset < length; ) {
+            final rt_msghdr rtm = new rt_msghdr(ptr.share(offset));
+            rtm.read();
+            offset += rtm.size();
+
+            System.out.printf("Route Entry: Type=%s, Flags=[%s%s]\n", rtm.rtm_type, rtm.rtm_flags & RTF_UP, rtm.rtm_flags & RTF_GATEWAY);
+            final int l = rtm.rtm_msglen - rtm.size();
+            System.out.println("Len = " + l);
+
+            for (int i = 0; i < l;) {
+                final int len = ptr.getByte(offset + i) & 0xFF;
+                final int family = ptr.getByte(offset + i + 1) & 0xFF;
+                System.out.println("I = " + i + "(" + (offset + i) + ")" + " -> " + family + " -> " + len + " -> " + l);
+                if (AF_INET == family) {
+                    sockaddr_in sockaddr_in = new sockaddr_in(ptr.share(offset + i, len));
+                    i += sockaddr_in.size();
+                    System.out.println(toInet4Address(sockaddr_in));
+                } else if (AF_INET6 == family) {
+                    sockaddr_in6 sockaddr_in = new sockaddr_in6(ptr.share(offset + i, len));
+                    i += sockaddr_in.size();
+                    System.out.println(toInet6Address(sockaddr_in));
+                } else {
+//                    i += len;
+                    i = l;
+                }
+                // offset += len;
+            }
+             offset += l;
+
+            System.out.println(rtm.rtm_msglen);
+        }
     }
 
 }
