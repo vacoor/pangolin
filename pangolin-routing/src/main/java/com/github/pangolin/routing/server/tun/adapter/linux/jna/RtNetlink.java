@@ -54,6 +54,9 @@ public interface RtNetlink {
     int RTA_DST = 1;
     int RTA_OIF = 4;
     int RTA_GATEWAY = 5;
+    int RTA_PRIORITY = 6;
+    int RTA_METRICS = 8;
+    int RTA_TABLE = 15;
 
     int RTA_MAX = 31;
 

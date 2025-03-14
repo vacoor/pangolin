@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.server.tun.adapter.linux;
 
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.IFNAMSIZ;
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkInterface.if_nametoindex0;
 import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.throwLastErrorException;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NETLINK_ROUTE;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLMSG_DONE;
@@ -10,14 +11,26 @@ import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.N
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_REQUEST;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.nlmsghdr;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.sockaddr_nl;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_DST;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_GATEWAY;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_MAX;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_METRICS;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_OIF;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_PRIORITY;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_DELROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_GETROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_NEWROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTN_UNICAST;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTPROT_STATIC;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RT_SCOPE_UNIVERSE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RT_TABLE_MAIN;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.rtattr;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.rtmsg;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET6;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_NETLINK;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.SOCK_RAW;
 import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.INSTANTCE;
 
-import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkInterface.*;
 import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
 import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
@@ -111,7 +124,7 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
             offset += writeSockAddrIn(buffer.share(offset), (short) RTA_GATEWAY, gw);
 
             // 填充rtattr（Interface）
-            offset += writeIfindex(buffer.share(offset), ifindex);
+            offset += writeInt(buffer.share(offset), (short) RTA_OIF, ifindex);
 
             final int written = LIBC.send(sockfd, hl.getPointer(), offset, 0);
             if (written < 0) {
@@ -167,7 +180,7 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
 //            offset += writeSockAddrIn(buffer.share(offset), (short) RTA_GATEWAY, gw);
 
             // 填充rtattr（Interface）
-//            offset += writeIfindex(buffer.share(offset), ifindex);
+//            offset += writeInt(buffer.share(offset), ifindex);
 
             final int written = LIBC.send(sockfd, buffer, offset, 0);
             if (written < 0) {
@@ -176,12 +189,13 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
 
             System.out.println("RECV");
 
-            Memory buf = new Memory(4096);
+            Memory buf = new Memory(2096);
             int len;
             while ((len = LIBC.recv(sockfd, buf, (int) buf.size(), 0)) > 0) {
-                System.out.println("RECV: " + len);
-                for(int off = 0; off < len; ) {
-                    final Pointer ptr = buf.share(off, len);
+//                System.out.println("RECV: " + len);
+                for (int off = 0; off < len; ) {
+//                    System.out.println("OFF = " + off);
+                    final Pointer ptr = buf.share(off, len - off);
                     final nlmsghdr nlh = new nlmsghdr(ptr);
                     nlh.read();
 
@@ -199,46 +213,69 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
                         rtmsg.read();
                         bytesRead += rtmsg.size();
 
+                        final int rtattr_len = nlh.nlmsg_len - nlh.size() - rtmsg.size();
+//                        System.out.println("NLH.LEN: " + nlh.nlmsg_len + " RTTAS: " + rtattr_len);
+
 //                        if (AF_INET == rtmsg.rtm_family || AF_INET6 == rtmsg.rtm_family) {
-                            final rtattr[] tab = new rtattr[RTA_MAX + 1];
-                            final int rtattr_len = nlh.nlmsg_len - nlh.size() - rtmsg.size();
+                        /*
+                        final rtattr[] tab = new rtattr[RTA_MAX + 1];
+                        for (int _offset = bytesRead; _offset < bytesRead + rtattr_len; ) {
+                            rtattr rta = new rtattr(ptr.share(_offset));
+                            rta.read();
 
-                            for (int _offset = bytesRead; _offset < bytesRead + rtattr_len;) {
-                                rtattr rta = new rtattr(ptr.share(_offset));
-                                rta.read();
-                                if (rta.rta_type <= RTA_MAX) {
-                                    tab[rta.rta_type] = rta;
-                                }
-                                _offset += rta.rta_len;
+//                            System.out.println(String.format("OFFSET = %s, RTA: type = %s, len = %s", _offset, rta.rta_type, rta.rta_len));
+                            if (rta.rta_type <= RTA_MAX) {
+                                tab[rta.rta_type] = rta;
                             }
+                            _offset += align(rta.rta_len, 4);
+                        }
+                        */
+//                        System.out.println("Over");
+                        final rtattr[] tab = parseRtattr(ptr.share(bytesRead), rtattr_len);
 
-                            if (null != tab[RTA_DST]) {
-                                final rtattr rta = tab[RTA_DST];
-                                byte[] data = rta.getPointer().getByteArray(rta.size(), rta.rta_len - rta.size());
-                                System.out.printf("DST: %-40s\t", NetUtil.bytesToIpAddress(data));
-                                byte[] bytes = NetUtils2.cidrPrefixToNetmask(data, rt.rtm_dst_len);
-                                System.out.printf("MASK: %-40s\t", NetUtil.bytesToIpAddress(bytes));
-                            } else {
-                                System.out.printf("DST: %-40s\t", "0.0.0.0");
-                                System.out.printf("MASK: %-40s\t", "0.0.0.0");
-                            }
+                        if (null != tab[RTA_DST]) {
+                            final rtattr rta = tab[RTA_DST];
+                            byte[] data = rta.getPointer().getByteArray(rta.size(), rta.rta_len - rta.size());
+                            System.out.printf("DST: %-20s\t", NetUtil.bytesToIpAddress(data));
+                            byte[] bytes = NetUtils2.cidrPrefixToNetmask(data, rtmsg.rtm_dst_len);
+                            System.out.printf("MASK: %-20s(%s)\t", NetUtil.bytesToIpAddress(bytes), rtmsg.rtm_dst_len);
+//                            System.out.printf("MASK: %s\t", rtmsg.rtm_dst_len);
+                        } else {
+                            System.out.printf("DST: %-20s\t", "0.0.0.0");
+                            System.out.printf("MASK: %-20s\t", "0.0.0.0");
+                        }
 
-                            if (null != tab[RTA_GATEWAY]) {
-                                final rtattr rta = tab[RTA_GATEWAY];
-                                byte[] data = rta.getPointer().getByteArray(rta.size(), rta.rta_len - rta.size());
-                                System.out.printf("GW: %-40s\t", NetUtil.bytesToIpAddress(data));
-                            } else {
-                                System.out.printf("GW: %-40s\t", "0.0.0.0");
-                            }
-                            if (null != tab[RTA_OIF]) {
-                                final rtattr rta = tab[RTA_OIF];
-                                int ifindex = rta.getPointer().getInt(rta.size());
-                                final byte[] _buf = new byte[IFNAMSIZ];
-                                LIBC.if_indextoname(ifindex, _buf);
-                                String dev = Native.toString(_buf);
-                                System.out.printf("IF: %s\t", dev);
-                            }
-                            System.out.println();
+                        if (null != tab[RTA_GATEWAY]) {
+                            final rtattr rta = tab[RTA_GATEWAY];
+                            byte[] data = rta.getPointer().getByteArray(rta.size(), rta.rta_len - rta.size());
+                            System.out.printf("GW: %-20s\t", NetUtil.bytesToIpAddress(data));
+                        } else {
+                            System.out.printf("GW: %-20s\t", "0.0.0.0");
+                        }
+                        if (null != tab[RTA_OIF]) {
+                            final rtattr rta = tab[RTA_OIF];
+                            int ifindex = rta.getPointer().getInt(rta.size());
+                            final byte[] _buf = new byte[IFNAMSIZ];
+                            LIBC.if_indextoname(ifindex, _buf);
+                            String dev = Native.toString(_buf);
+                            System.out.printf("IF: %s\t", dev);
+                        }
+//                        System.out.printf("Metrics: %s", );
+                        /*
+                        if (null != tab[RTA_METRICS]) {
+                            final rtattr rta = tab[RTA_METRICS];
+                            System.out.println("METRICS");
+                            final rtattr[] mtab = parseRtattr(rta.getPointer().getPointer(rta.size()), rta.rta_len);
+                            System.out.printf("METRICS : %s\t", mtab[18]);
+                        }
+                        */
+                        if (null != tab[RTA_PRIORITY]) {
+                            final rtattr rta = tab[RTA_PRIORITY];
+                            final int metrics = rta.getPointer().getInt(rta.size());
+                            System.out.printf("Metrics: %s", metrics);
+                        }
+
+                        System.out.println();
 //                        }
                     }
                     off += nlh.nlmsg_len;
@@ -247,6 +284,25 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
         } finally {
             LIBC.close(sockfd);
         }
+    }
+
+    private static rtattr[] parseRtattr(final Pointer ptr, final int rtattr_len) {
+        final rtattr[] tab = new rtattr[RTA_MAX + 1];
+        for (int _offset = 0; _offset < rtattr_len; ) {
+            rtattr rta = new rtattr(ptr.share(_offset));
+            rta.read();
+
+//                            System.out.println(String.format("OFFSET = %s, RTA: type = %s, len = %s", _offset, rta.rta_type, rta.rta_len));
+            if (rta.rta_type <= RTA_MAX) {
+                tab[rta.rta_type] = rta;
+            }
+            _offset += align(rta.rta_len, 4);
+        }
+        return tab;
+    }
+
+    private static int align(final int len, final int align) {
+        return (len + align - 1) & ~(align - 1);
     }
 
     static int writeSockAddrIn(final Pointer ptr, final short rtaType, final byte[] addr) {
@@ -259,10 +315,10 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
         return rta.rta_len;
     }
 
-    private static int writeIfindex(final Pointer ptr, final int ifindex) {
+    private static int writeInt(final Pointer ptr, final short type, final int ifindex) {
         rtattr rta = new rtattr(ptr);
         rta.rta_len = (byte) (rta.size() + 4);
-        rta.rta_type = (short) RTA_OIF;
+        rta.rta_type = type; // (short) RTA_OIF;
         rta.write();
 //        offset += rta.size();
 

@@ -206,6 +206,8 @@ public interface Route {
          */
         public rt_metrics rtm_rmx = new rt_metrics();
 
+        // public short rtm_priority;
+
         public rt_msghdr() {
         }
 
@@ -220,6 +222,7 @@ public interface Route {
                     "rtm_index", "rtm_flags", "rtm_addrs",
                     "rtm_pid", "rtm_seq", "rtm_errno",
                     "rtm_use", "rtm_inits", "rtm_rmx"
+//                    , "rtm_priority"
             );
         }
     }

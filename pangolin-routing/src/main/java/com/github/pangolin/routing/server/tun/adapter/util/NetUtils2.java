@@ -21,10 +21,16 @@ public class NetUtils2 {
     public static byte[] cidrPrefixToNetmask(final byte[] bytes, int prefix) {
         final byte[] netmask = Arrays.copyOf(bytes, bytes.length);
         Arrays.fill(netmask, (byte) 0xFF);
+        /*
+        if (prefix == Byte.SIZE * bytes.length) {
+            return netmask;
+        }
         netmask[prefix / Byte.SIZE] <<= prefix % Byte.SIZE;
         prefix += prefix % Byte.SIZE;
-        for (int i = prefix / Byte.SIZE; i < netmask.length; i++) {
-            netmask[i] = 0;
+        */
+        for (int offset = prefix / Byte.SIZE; offset < netmask.length; offset++) {
+             int bits = Math.min(Byte.SIZE, Math.max(0, prefix - offset * Byte.SIZE));
+            netmask[offset] = (byte) (0xFF << (Byte.SIZE - bits));
         }
         return netmask;
     }
@@ -117,6 +123,11 @@ public class NetUtils2 {
     }
 
     public static void main(String[] args) throws UnknownHostException {
-        System.out.println(getNetworkAddress(InetAddress.getByName("198.18.0.1"), 24));
+//        System.out.println(getNetworkAddress(InetAddress.getByName("198.18.0.1"), 24));
+        Inet4Address addr = (Inet4Address) InetAddress.getByName("198.18.0.1");
+        System.out.println(cidrToNetmaskAddress(addr, 16));
+        System.out.println(cidrToNetmaskAddress(addr, 24));
+        System.out.println(cidrToNetmaskAddress(addr, 32));
+        System.out.println(cidrToNetmaskAddress(addr, 18));
     }
 }
