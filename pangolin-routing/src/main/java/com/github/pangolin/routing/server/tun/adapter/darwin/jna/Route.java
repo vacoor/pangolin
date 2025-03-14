@@ -226,4 +226,76 @@ public interface Route {
             );
         }
     }
+
+    class rt_msghdr2 extends Structure {
+        /**
+         * to skip over non-understood messages.
+         */
+        public short rtm_msglen;
+        /**
+         * future binary compatibility.
+         */
+        public byte rtm_version;
+        /**
+         * message type.
+         */
+        public byte rtm_type;
+        /**
+         * index for associated ifp.
+         */
+        public short rtm_index;
+        /**
+         * flags, incl. kern & message, e.g. DONE.
+         */
+        public int rtm_flags;
+        /**
+         * bitmask identifying sockaddrs in msg.
+         */
+        public int rtm_addrs;
+        /**
+         * reference count.
+         */
+        public int rtm_refcnt;
+        /**
+         * flags of the parent route.
+         */
+        public int rtm_parentflags;
+        /**
+         * reserved field set to 0.
+         */
+        public int rtm_reserved;
+        /**
+         * from rtentry.
+         */
+        public int rtm_use;
+        /**
+         * which metrics we are initializing.
+         */
+        public int rtm_inits;
+
+        /* metrics themselves. */
+        public rt_metrics rtm_rmx;
+
+        // public short rtm_priority;
+
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "rtm_msglen"
+                    , "rtm_version"
+                    , "rtm_type"
+                    , "rtm_index"
+                    , "rtm_flags"
+                    , "rtm_addrs"
+                    , "rtm_refcnt"
+                    , "rtm_parentflags"
+                    , "rtm_reserved"
+                    , "rtm_use"
+                    , "rtm_inits"
+                    , "rt_metrics "
+//                    , "rtm_priority"
+            );
+        }
+    }
+
 }
