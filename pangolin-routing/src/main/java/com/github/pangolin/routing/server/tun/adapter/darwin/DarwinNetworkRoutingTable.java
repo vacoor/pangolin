@@ -286,7 +286,7 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
             if ((rtm.rtm_addrs & (1 << i)) != 0) {
                 final int len = align(ptr.getByte(bytesRead) & 0xFF, 4);
                 if (len > 0) {
-                    tab[i] = ptr.share(bytesRead);
+                    tab[i] = ptr.share(bytesRead, rtm.rtm_msglen - bytesRead);
                 } else {
                     // skip 4-bytes pad.
                 }
