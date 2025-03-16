@@ -64,7 +64,7 @@ public interface Route {
     /**
      * Report Metrics.
      */
-    byte RTM_GET = 0x4;
+    int RTM_GET = 0x4;
 
 
     /*-
@@ -253,10 +253,16 @@ public interface Route {
         public rt_metrics rtm_rmx = new rt_metrics();
 
         public rt_msghdr() {
+            super();
         }
 
         public rt_msghdr(final Pointer p) {
             super(p);
+        }
+
+        @Override
+        protected void useMemory(final Pointer m) {
+            super.useMemory(m);
         }
 
         @Override

@@ -1,39 +1,9 @@
 package com.github.pangolin.routing.server.tun.adapter.linux;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.IFNAMSIZ;
-import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkInterface.if_nametoindex0;
-import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.throwLastErrorException;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NETLINK_ROUTE;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLMSG_DONE;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLMSG_ERROR;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_CREATE;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_DUMP;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_REQUEST;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.nlmsghdr;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.sockaddr_nl;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_DST;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_GATEWAY;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_MAX;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_METRICS;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_OIF;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_PRIORITY;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_DELROUTE;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_GETROUTE;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_NEWROUTE;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTN_UNICAST;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTPROT_STATIC;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RT_SCOPE_UNIVERSE;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RT_TABLE_MAIN;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.rtattr;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.rtmsg;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_NETLINK;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.SOCK_RAW;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.INSTANTCE;
-
 import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
 import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
+import com.google.common.collect.Lists;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
@@ -41,6 +11,17 @@ import io.netty.util.NetUtil;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.util.List;
+
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.IFNAMSIZ;
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkInterface.if_nametoindex0;
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.throwLastErrorException;
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.toInet4Address;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.*;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.INSTANTCE;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.toInetAddress;
 
 public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
 
@@ -69,6 +50,14 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
     @Override
     public void delete(final InetAddress dst, final byte prefix, final int ifindex) {
 
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public Iterable<Route> routes() {
+        return getAll0((byte) AF_UNSPEC);
     }
 
     public static LinuxNetworkRoutingTable get() {
@@ -135,129 +124,111 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
         }
     }
 
-    public static void getAll() {
+    private static List<Route> getAll0(final byte family) {
         final int sockfd = LIBC.socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
         try {
             final sockaddr_nl localAddr = new sockaddr_nl();
             localAddr.nl_family = AF_NETLINK;
-            // localAddr.nl_groups = RTMGRP_IPV4_ROUTE | RTMGRP_IPV6_ROUTE;
             localAddr.nl_pid = INSTANTCE.getpid();
 
             if (INSTANTCE.bind(sockfd, localAddr, localAddr.size()) < 0) {
                 throwLastErrorException(Native.getLastError());
             }
 
-            int msgSize = 16 + 12; // nlmsghdr(16) + rtmsg(12) + dst rtattr(4) + dst addr(4) + gw rtattr(4) + gw addr(4) + oif rtattr(4) + ifindex(4)
+            int msgSize = 16 + 12; // nlmsghdr(16) + rtmsg(12)
 
             // 初始化消息内存
             final Memory buffer = new Memory(msgSize);
-            int offset = 0;
 
-            final nlmsghdr hl = new nlmsghdr(buffer.share(offset));
+            int bytesWritten = 0;
+            final nlmsghdr hl = new nlmsghdr(buffer.share(bytesWritten));
             hl.nlmsg_len = msgSize;
             hl.nlmsg_type = RTM_GETROUTE;
             hl.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
             hl.nlmsg_seq = 1;
             hl.nlmsg_pid = LIBC.getpid();
             hl.write();
-            offset += hl.size();
+            bytesWritten += hl.size();
 
-            final rtmsg rt = new rtmsg(buffer.share(offset));
-            rt.rtm_family = AF_INET;
+            final rtmsg rt = new rtmsg(buffer.share(bytesWritten));
+//            rt.rtm_family = AF_INET;
+            rt.rtm_family = family;
 //            rt.rtm_dst_len = (byte) 0;
 //            rt.rtm_table = (byte) RT_TABLE_MAIN;
 //            rt.rtm_protocol = RTPROT_STATIC;
 //            rt.rtm_scope = RT_SCOPE_UNIVERSE;
 //            rt.rtm_type = RTN_UNICAST;
             rt.write();
-            offset += rt.size();
+            bytesWritten += rt.size();
 
-            // 填充rtattr（DST 地址）
-//            offset += writeSockAddrIn(buffer.share(offset), (short) RTA_DST, dst);
-
-
-            // 填充rtattr（GATEWAY 地址）
-//            offset += writeSockAddrIn(buffer.share(offset), (short) RTA_GATEWAY, gw);
-
-            // 填充rtattr（Interface）
-//            offset += writeInt(buffer.share(offset), ifindex);
-
-            final int written = LIBC.send(sockfd, buffer, offset, 0);
+            final int written = LIBC.send(sockfd, buffer, bytesWritten, 0);
             if (written < 0) {
                 throwLastErrorException(Native.getLastError());
             }
 
-            System.out.println("RECV");
-
-            int len;
+            final List<Route> routes = Lists.newLinkedList();
             final Memory buf = new Memory(2096);
-            while ((len = LIBC.recv(sockfd, buf, (int) buf.size(), 0)) > 0) {
+            int size;
+            while ((size = LIBC.recv(sockfd, buf, (int) buf.size(), 0)) > 0) {
                 /*-
                  * Parse nlmsg.
                  */
-                for (int off = 0; off < len; ) {
-                    final Pointer ptr = buf.share(off, len - off);
+                for (int bytesRead = 0; bytesRead < size; ) {
+                    final Pointer ptr = buf.share(bytesRead, size - bytesRead);
                     final nlmsghdr nlh = new nlmsghdr(ptr);
                     nlh.read();
 
                     if (nlh.nlmsg_type == NLMSG_ERROR) {
-                        return;
+                        return routes;
                     }
                     if (nlh.nlmsg_type == NLMSG_DONE) {
-                        return;
+                        return routes;
                     }
-
                     if (nlh.nlmsg_type == RTM_NEWROUTE) {
-                        int bytesRead = nlh.size();
+                        final int len = nlh.nlmsg_len - nlh.size();
+                        final rtmsg rtm = new rtmsg(ptr.share(nlh.size(), len));
+                        rtm.read();
 
-                        final rtmsg rtmsg = new rtmsg(ptr.share(bytesRead));
-                        rtmsg.read();
-                        bytesRead += rtmsg.size();
-
-                        final int rtattr_len = nlh.nlmsg_len - nlh.size() - rtmsg.size();
-                        final rtattr[] tab = parseRtattr(ptr.share(bytesRead), rtattr_len);
-
-                        if (null != tab[RTA_DST]) {
-                            final rtattr rta = tab[RTA_DST];
-                            byte[] data = rta.getPointer().getByteArray(rta.size(), rta.rta_len - rta.size());
-                            System.out.printf("DST: %-20s\t", NetUtil.bytesToIpAddress(data));
-                            byte[] bytes = NetUtils2.cidrPrefixToNetmask(data, rtmsg.rtm_dst_len);
-                            System.out.printf("MASK: %-20s(%s)\t", NetUtil.bytesToIpAddress(bytes), rtmsg.rtm_dst_len);
-                        } else {
-                            System.out.printf("DST: %-20s\t", "0.0.0.0");
-                            System.out.printf("MASK: %-20s\t", "0.0.0.0");
-                        }
-
-                        if (null != tab[RTA_GATEWAY]) {
-                            final rtattr rta = tab[RTA_GATEWAY];
-                            byte[] data = rta.getPointer().getByteArray(rta.size(), rta.rta_len - rta.size());
-                            System.out.printf("GW: %-20s\t", NetUtil.bytesToIpAddress(data));
-                        } else {
-                            System.out.printf("GW: %-20s\t", "0.0.0.0");
-                        }
-
-                        if (null != tab[RTA_OIF]) {
-                            final rtattr rta = tab[RTA_OIF];
-                            int ifindex = rta.getPointer().getInt(rta.size());
-                            final byte[] _buf = new byte[IFNAMSIZ];
-                            LIBC.if_indextoname(ifindex, _buf);
-                            String dev = Native.toString(_buf);
-                            System.out.printf("IF: %s\t", dev);
-                        }
-                        if (null != tab[RTA_PRIORITY]) {
-                            final rtattr rta = tab[RTA_PRIORITY];
-                            final int metrics = rta.getPointer().getInt(rta.size());
-                            System.out.printf("Metrics: %s", metrics);
-                        }
-
-                        System.out.println();
+                        routes.add(parseRouteEntry(rtm, len));
                     }
-                    off += nlh.nlmsg_len;
+                    bytesRead += nlh.nlmsg_len;
                 }
             }
+            return routes;
         } finally {
             LIBC.close(sockfd);
         }
+    }
+
+    private static Route parseRouteEntry(final rtmsg rtm, final int len) {
+        final Pointer ptr = rtm.getPointer();
+
+        final rtattr[] tab = new rtattr[RTA_MAX + 1];
+        for (int bytesRead = rtm.size(); bytesRead < len;) {
+            rtattr rta = new rtattr(ptr.share(bytesRead, len - bytesRead));
+            rta.read();
+
+            if (rta.rta_type <= RTA_MAX) {
+                tab[rta.rta_type] = rta;
+            }
+            bytesRead += align(rta.rta_len, 4);
+        }
+
+        final InetAddress def = AF_INET == rtm.rtm_family
+                ? toInetAddress(new byte[4])
+                : AF_INET6 == rtm.rtm_family
+                ? toInetAddress(new byte[16])
+                : null;
+
+        final int cidr = rtm.rtm_dst_len;
+        final InetAddress dst = null != tab[RTA_DST] ? parseInetAddress(tab[RTA_DST]) : def;
+        final InetAddress gw = null != tab[RTA_GATEWAY] ? parseInetAddress(tab[RTA_GATEWAY]) : def;
+        final int ifindex = null != tab[RTA_OIF] ? parseInt(tab[RTA_OIF]) : 0;
+        final int metrics = null != tab[RTA_PRIORITY] ? parseInt(tab[RTA_PRIORITY]) : -1;
+
+        final String ifname = 0 != ifindex ? if_indextoname0(ifindex) : null;
+        System.out.printf("%s/%s\t%s\t%s\t%s\n", dst, cidr, gw, ifname, metrics);
+        return new Route(dst, cidr, gw, ifname, metrics);
     }
 
     private static rtattr[] parseRtattr(final Pointer ptr, final int rtattr_len) {
@@ -272,6 +243,15 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
             offset += align(rta.rta_len, 4);
         }
         return tab;
+    }
+
+    private static InetAddress parseInetAddress(final rtattr rta) {
+        final byte[] addr = rta.getPointer().getByteArray(rta.size(), rta.rta_len - rta.size());
+        return toInetAddress(addr);
+    }
+
+    private static int parseInt(final rtattr rta) {
+        return rta.getPointer().getInt(rta.size());
     }
 
     private static int align(final int len, final int align) {
@@ -298,6 +278,12 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
         ptr.setInt(rta.size(), ifindex);
 //        offset += 4;
         return rta.size() + 4;
+    }
+
+    private static String if_indextoname0(final int ifindex) {
+        final byte[] _buf = new byte[IFNAMSIZ];
+        LIBC.if_indextoname(ifindex, _buf);
+        return Native.toString(_buf);
     }
 
 }

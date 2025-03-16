@@ -29,8 +29,9 @@ public abstract class NetworkRoutingTable {
 
         @Override
         public String toString() {
+            final String gw = null != gateway ? gateway.getHostAddress() : null;
             final String net = address.getHostAddress() + "/" + prefix;
-            return String.format("%-40s\t%-35s\t%-10s\t%-5s", net, gateway.getHostAddress(), ifname, metric);
+            return String.format("%-40s\t%-35s\t%-10s\t%-5s", net, gw, ifname, metric);
         }
     }
 
@@ -73,6 +74,8 @@ public abstract class NetworkRoutingTable {
      * @param ifindex the interface index, force the route to be associated with the specified device
      */
     public abstract void delete(final InetAddress dst, final byte prefix, final int ifindex);
+
+    public abstract Iterable<Route> routes();
 
     public static NetworkRoutingTable get() {
         if (Platform.isLinux()) {

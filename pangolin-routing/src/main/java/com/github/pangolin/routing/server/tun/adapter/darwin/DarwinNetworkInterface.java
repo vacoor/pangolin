@@ -23,7 +23,7 @@ import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
 import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.*;
 import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
-import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.netmaskToPrefixLength;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.binmaskToCidr;
 
 /**
  * This class represents a Network Interface on Darwin OS.
@@ -337,13 +337,13 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
                 if (AF_INET == n.ifa_addr.sa_family) {
                     final sockaddr_in sockaddr = new sockaddr_in(n.ifa_addr.getPointer());
                     final sockaddr_in netmask = new sockaddr_in(n.ifa_netmask.getPointer());
-                    final int prefix = netmaskToPrefixLength(netmask.sin_addr);
+                    final int prefix = binmaskToCidr(netmask.sin_addr);
 
                     interfaceAddresses.add(InterfaceAddressEx.of(toInet4Address(sockaddr), prefix));
                 } else if (AF_INET6 == n.ifa_addr.sa_family) {
                     final sockaddr_in6 sockaddr = new sockaddr_in6(n.ifa_addr.getPointer());
                     final sockaddr_in6 netmask = new sockaddr_in6(n.ifa_netmask.getPointer());
-                    final int prefix = netmaskToPrefixLength(netmask.sin6_addr);
+                    final int prefix = binmaskToCidr(netmask.sin6_addr);
 
                     interfaceAddresses.add(InterfaceAddressEx.of(toInet6Address(sockaddr), prefix));
                 }

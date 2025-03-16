@@ -35,14 +35,14 @@ public class NetUtils2 {
         return netmask;
     }
 
-    public static int netmaskToPrefixLength(final byte[] ipBytes) {
+    public static int binmaskToCidr(final byte[] ipBytes) {
         int prefix_length = 0;
         for (byte b : ipBytes) {
             if ((b & 0xFF) == 0xFF) {
                 prefix_length += Byte.SIZE;
                 continue;
             }
-            for (int j = 0; j < Byte.SIZE; j++) {
+            for (int j = Byte.SIZE - 1; j >= 0; j--) {
                 if ((b >> j & 1) != 1) {
                     return prefix_length;
                 }
@@ -65,7 +65,7 @@ public class NetUtils2 {
         throw new UnsupportedOperationException();
     }
 
-    private static InetAddress toInetAddress(final byte[] addr) {
+    public static InetAddress toInetAddress(final byte[] addr) {
         try {
             return InetAddress.getByAddress(addr);
         } catch (UnknownHostException e) {

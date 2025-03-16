@@ -205,7 +205,7 @@ public class DarwinTunAdapter extends AbstractTunAdapter {
             final int prefix = binding.getNetworkPrefixLength();
             final InetAddress dst = NetUtils2.getNetworkAddress(gw, prefix);
             if (processes.add(dst) && dst instanceof Inet4Address) {
-                DarwinNetworkRoutingTable.add(dst, prefix, gw, ifnameToUse);
+                DarwinNetworkRoutingTable.add0(dst, prefix, gw, ifnameToUse);
             }
         }
         return new DarwinTunAdapter(fd, ifnameToUse, mtuToUse);

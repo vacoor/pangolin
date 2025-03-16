@@ -1,17 +1,5 @@
 package com.github.pangolin.routing.server.tun.adapter.windows;
 
-import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.interfaceAliasToLuid;
-import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.interfaceIndexToLuid;
-import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.interfaceLuidToAlias;
-import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.toInetAddress;
-import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.writeSockAddr;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.AF_INET;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.AF_INET6;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.MIB_IPFORWARD_ROW2;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.MIB_IPFORWARD_TABLE2;
-import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.MIB_IPPROTO_NETMGMT;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_UNSPEC;
-
 import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
 import com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib;
 import com.google.common.collect.Lists;
@@ -25,6 +13,12 @@ import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.List;
+
+import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.*;
+import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.toInetAddress;
+import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsUtils.writeSockAddr;
+import static com.github.pangolin.routing.server.tun.adapter.windows.jna.IpHlpLib.*;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_UNSPEC;
 
 /**
  *
@@ -72,14 +66,19 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
         delete0(dst, prefix, 0 < ifindex ? interfaceIndexToLuid(ifindex) : 0);
     }
 
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public Iterable<Route> routes() {
+        return getAll0(AF_UNSPEC);
+    }
+
     public static Route get(final InetAddress destination, final byte prefix, final String ifname) {
         final MIB_IPFORWARD_ROW2 row = get0(destination, prefix, null != ifname ? interfaceAliasToLuid(ifname) : 0);
         return null != row ? toRoute(row) : null;
     }
 
-    public List<Route> getAll() {
-        return getAll0(AF_UNSPEC);
-    }
 
     public static WindowsNetworkRoutingTable get() {
         return INSTANCE;
@@ -168,7 +167,7 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
     /**
      * Get a list of all route.
      *
-     * @param family the address family, AF_INET, AF_INET6, AF_UNSPEC
+     * @param family the address family, AF_INET | AF_INET6 | AF_UNSPEC
      * @return the list of all route
      */
     private static List<Route> getAll0(final int family) {

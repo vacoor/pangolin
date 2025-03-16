@@ -29,7 +29,7 @@ import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Sockios.*;
 import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
-import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.netmaskToPrefixLength;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.binmaskToCidr;
 
 /**
  * This class represents a Network Interface on Linux OS.
@@ -337,13 +337,13 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
                 if (AF_INET == n.ifa_addr.sa_family) {
                     final sockaddr_in sockaddr = (sockaddr_in) n.ifa_addr.getTypedValue(sockaddr_in.class);
                     final sockaddr_in netmask = (sockaddr_in) n.ifa_netmask.getTypedValue(sockaddr_in.class);
-                    final int prefix = netmaskToPrefixLength(netmask.sin_addr);
+                    final int prefix = binmaskToCidr(netmask.sin_addr);
 
                     interfaceAddresses.add(InterfaceAddressEx.of(toInet4Address(sockaddr), prefix));
                 } else if (AF_INET6 == n.ifa_addr.sa_family) {
                     final sockaddr_in6 sockaddr = (sockaddr_in6) n.ifa_addr.getTypedValue(sockaddr_in6.class);
                     final sockaddr_in6 netmask = (sockaddr_in6) n.ifa_netmask.getTypedValue(sockaddr_in6.class);
-                    final int prefix = netmaskToPrefixLength(netmask.sin6_addr);
+                    final int prefix = binmaskToCidr(netmask.sin6_addr);
 
                     interfaceAddresses.add(InterfaceAddressEx.of(toInet6Address(sockaddr), prefix));
                 }
@@ -382,7 +382,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
                     final in6_ifreq ifr6 = new in6_ifreq();
                     ifr6.ifr6_ifindex = if_nametoindex0(fd, n.ifa_name);
                     ifr6.ifr6_addr = sockaddr.sin6_addr;
-                    ifr6.ifr6_prefixlen = netmaskToPrefixLength(netmask.sin6_addr);
+                    ifr6.ifr6_prefixlen = binmaskToCidr(netmask.sin6_addr);
                     ioctl0(fd, SIOCDIFADDR, ifr6);
                 } else {
                     log.warn("SKIP unsupported address family: {}", n.ifa_addr.sa_family);
