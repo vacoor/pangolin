@@ -189,17 +189,16 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
 
             System.out.println("RECV");
 
-            Memory buf = new Memory(2096);
             int len;
+            final Memory buf = new Memory(2096);
             while ((len = LIBC.recv(sockfd, buf, (int) buf.size(), 0)) > 0) {
-//                System.out.println("RECV: " + len);
+                /*-
+                 * Parse nlmsg.
+                 */
                 for (int off = 0; off < len; ) {
-//                    System.out.println("OFF = " + off);
                     final Pointer ptr = buf.share(off, len - off);
                     final nlmsghdr nlh = new nlmsghdr(ptr);
                     nlh.read();
-
-                    int bytesRead = nlh.size();
 
                     if (nlh.nlmsg_type == NLMSG_ERROR) {
                         return;
@@ -209,28 +208,13 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
                     }
 
                     if (nlh.nlmsg_type == RTM_NEWROUTE) {
+                        int bytesRead = nlh.size();
+
                         final rtmsg rtmsg = new rtmsg(ptr.share(bytesRead));
                         rtmsg.read();
                         bytesRead += rtmsg.size();
 
                         final int rtattr_len = nlh.nlmsg_len - nlh.size() - rtmsg.size();
-//                        System.out.println("NLH.LEN: " + nlh.nlmsg_len + " RTTAS: " + rtattr_len);
-
-//                        if (AF_INET == rtmsg.rtm_family || AF_INET6 == rtmsg.rtm_family) {
-                        /*
-                        final rtattr[] tab = new rtattr[RTA_MAX + 1];
-                        for (int _offset = bytesRead; _offset < bytesRead + rtattr_len; ) {
-                            rtattr rta = new rtattr(ptr.share(_offset));
-                            rta.read();
-
-//                            System.out.println(String.format("OFFSET = %s, RTA: type = %s, len = %s", _offset, rta.rta_type, rta.rta_len));
-                            if (rta.rta_type <= RTA_MAX) {
-                                tab[rta.rta_type] = rta;
-                            }
-                            _offset += align(rta.rta_len, 4);
-                        }
-                        */
-//                        System.out.println("Over");
                         final rtattr[] tab = parseRtattr(ptr.share(bytesRead), rtattr_len);
 
                         if (null != tab[RTA_DST]) {
@@ -239,7 +223,6 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
                             System.out.printf("DST: %-20s\t", NetUtil.bytesToIpAddress(data));
                             byte[] bytes = NetUtils2.cidrPrefixToNetmask(data, rtmsg.rtm_dst_len);
                             System.out.printf("MASK: %-20s(%s)\t", NetUtil.bytesToIpAddress(bytes), rtmsg.rtm_dst_len);
-//                            System.out.printf("MASK: %s\t", rtmsg.rtm_dst_len);
                         } else {
                             System.out.printf("DST: %-20s\t", "0.0.0.0");
                             System.out.printf("MASK: %-20s\t", "0.0.0.0");
@@ -252,6 +235,7 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
                         } else {
                             System.out.printf("GW: %-20s\t", "0.0.0.0");
                         }
+
                         if (null != tab[RTA_OIF]) {
                             final rtattr rta = tab[RTA_OIF];
                             int ifindex = rta.getPointer().getInt(rta.size());
@@ -260,15 +244,6 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
                             String dev = Native.toString(_buf);
                             System.out.printf("IF: %s\t", dev);
                         }
-//                        System.out.printf("Metrics: %s", );
-                        /*
-                        if (null != tab[RTA_METRICS]) {
-                            final rtattr rta = tab[RTA_METRICS];
-                            System.out.println("METRICS");
-                            final rtattr[] mtab = parseRtattr(rta.getPointer().getPointer(rta.size()), rta.rta_len);
-                            System.out.printf("METRICS : %s\t", mtab[18]);
-                        }
-                        */
                         if (null != tab[RTA_PRIORITY]) {
                             final rtattr rta = tab[RTA_PRIORITY];
                             final int metrics = rta.getPointer().getInt(rta.size());
@@ -276,7 +251,6 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
                         }
 
                         System.out.println();
-//                        }
                     }
                     off += nlh.nlmsg_len;
                 }
@@ -288,15 +262,14 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
 
     private static rtattr[] parseRtattr(final Pointer ptr, final int rtattr_len) {
         final rtattr[] tab = new rtattr[RTA_MAX + 1];
-        for (int _offset = 0; _offset < rtattr_len; ) {
-            rtattr rta = new rtattr(ptr.share(_offset));
+        for (int offset = 0; offset < rtattr_len; ) {
+            rtattr rta = new rtattr(ptr.share(offset));
             rta.read();
 
-//                            System.out.println(String.format("OFFSET = %s, RTA: type = %s, len = %s", _offset, rta.rta_type, rta.rta_len));
             if (rta.rta_type <= RTA_MAX) {
                 tab[rta.rta_type] = rta;
             }
-            _offset += align(rta.rta_len, 4);
+            offset += align(rta.rta_len, 4);
         }
         return tab;
     }

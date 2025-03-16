@@ -17,4 +17,5 @@ public interface Sysctl {
     int CTL_MACHDEP = 7;              /* machine dependent */
     int CTL_USER = 8;              /* user-level */
     int CTL_MAXID = 9;              /* number of valid top-level ids */
+
 }

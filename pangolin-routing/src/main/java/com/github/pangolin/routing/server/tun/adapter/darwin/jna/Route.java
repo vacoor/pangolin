@@ -79,14 +79,60 @@ public interface Route {
      * gateway sockaddr present.
      */
     int RTA_GATEWAY = 0x2;
+
     /**
      * netmask sockaddr present.
      */
     int RTA_NETMASK = 0x4;
+
+    /**
+     * cloning mask sockaddr present.
+     */
+    int RTA_GENMASK = 0x8;
     /**
      * interface name sockaddr present.
      */
     int RTA_IFP = 0x10;
+
+    /*
+     * Index offsets for sockaddr array for alternate internal encoding.
+     */
+    /**
+     * destination sockaddr present.
+     */
+    int RTAX_DST = 0;
+    /**
+     * gateway sockaddr present.
+     */
+    int RTAX_GATEWAY = 1;
+    /**
+     * netmask sockaddr present.
+     */
+    int RTAX_NETMASK = 2;
+    /**
+     * cloning mask sockaddr present.
+     */
+    int RTAX_GENMASK = 3;
+    /**
+     * interface name sockaddr present.
+     */
+    int RTAX_IFP = 4;
+    /**
+     * interface addr sockaddr present.
+     */
+    int RTAX_IFA = 5;
+    /**
+     * sockaddr for author of redirect.
+     */
+    int RTAX_AUTHOR = 6;
+    /**
+     * for NEWADDR, broadcast or p-p dest addr.
+     */
+    int RTAX_BRD = 7;
+    /**
+     * size of array to allocate.
+     */
+    int RTAX_MAX = 8;
 
     /**
      * These numbers are used by reliable protocols for determining
@@ -206,8 +252,6 @@ public interface Route {
          */
         public rt_metrics rtm_rmx = new rt_metrics();
 
-        // public short rtm_priority;
-
         public rt_msghdr() {
         }
 
@@ -222,7 +266,6 @@ public interface Route {
                     "rtm_index", "rtm_flags", "rtm_addrs",
                     "rtm_pid", "rtm_seq", "rtm_errno",
                     "rtm_use", "rtm_inits", "rtm_rmx"
-//                    , "rtm_priority"
             );
         }
     }
@@ -276,7 +319,12 @@ public interface Route {
         /* metrics themselves. */
         public rt_metrics rtm_rmx;
 
-        // public short rtm_priority;
+        public rt_msghdr2() {
+        }
+
+        public rt_msghdr2(final Pointer p) {
+            super(p);
+        }
 
         @Override
         protected List<String> getFieldOrder() {
@@ -292,8 +340,7 @@ public interface Route {
                     , "rtm_reserved"
                     , "rtm_use"
                     , "rtm_inits"
-                    , "rt_metrics "
-//                    , "rtm_priority"
+                    , "rtm_rmx"
             );
         }
     }

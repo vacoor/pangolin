@@ -4345,8 +4345,8 @@ public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSo
         return TimeUnit.NANOSECONDS.toMillis(tcp_clock_ns());
     }
 
-    private int ALIGN(int x, int a) {
-        return (((x) + ((a) - 1)) & ~((a) - 1));
+    private int ALIGN(int len, int align) {
+        return (((len) + ((align) - 1)) & ~((align) - 1));
     }
 
     private boolean time_after(long a, long b) {
