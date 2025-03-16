@@ -87,39 +87,6 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         route((byte) RTM_DELETE, (short) ifindex, dst, gw, netmask);
     }
 
-    public static void get0() {
-        final rt_msghdr req = new rt_msghdr();
-        req.rtm_msglen = (short) req.size();
-        req.rtm_version = RTM_VERSION;
-        req.rtm_type = RTM_GET;
-        req.rtm_addrs = 0xFFFF;
-        req.write();
-
-        final int fd = LIBC.socket(AF_ROUTE, SOCK_RAW, AF_UNSPEC);
-        if (fd < 0) {
-            throwLastErrorException(Native.getLastError());
-        }
-
-        try {
-            final int writtenBytes = LIBC.write(fd, req.getPointer(), req.size());
-            if (writtenBytes != req.size()) {
-                throwLastErrorException(Native.getLastError());
-            }
-
-            int len;
-            final Memory buf = new Memory(4096);
-            while ((len = LIBC.read(fd, buf, buf.size())) > 0) {
-                final Pointer ptr = buf.share(0, len);
-                final rt_msghdr hdr = new rt_msghdr(ptr);
-                final int blen = hdr.rtm_msglen - hdr.size();
-
-                System.out.println(hdr.rtm_type);
-            }
-        } finally {
-            LIBC.close(fd);
-        }
-    }
-
     private static void route(final byte rtm_type, final short rtm_index,
                               final InetAddress dst, final InetAddress gw,
                               final InetAddress netmask) {
@@ -239,7 +206,7 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         return len >= 16 ? len : 16;
     }
 
-    public static void getAll2() {
+    public static void get0() {
         final Memory memory = new Memory(1024);
         final rt_msghdr req = new rt_msghdr(memory);
         req.rtm_msglen = (short) (req.size() + 16);
