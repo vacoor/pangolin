@@ -177,7 +177,7 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
                 offset += writeSockAddrIn(ptr.share(offset), netmask);
             }
             if (rtm_index != 0) {
-                rtm.rtm_flags |= RTA_IFP;
+                rtm.rtm_addrs |= RTA_IFP;
                 rtm.rtm_index = rtm_index;
                 offset += writeSockAddrDl(ptr.share(offset), rtm_index);
             }
