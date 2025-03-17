@@ -13,8 +13,6 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 客户端代理处理器.
- *
- * @author vacoor
  */
 public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
     private final SocketAddress proxyAddress;

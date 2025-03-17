@@ -12,10 +12,6 @@ import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 
 /**
- * TODO DOC ME!.
- *
- * @author changhe.yang
- * @since 20250219
  */
 @Slf4j
 public class Tcp4Connection extends TcpConnection<IpV4Packet> {
