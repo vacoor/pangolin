@@ -387,7 +387,7 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
         final InetAddress dst = null != tab[RTA_DST] ? parseInetAddress(tab[RTA_DST]) : def;
         final InetAddress gw = null != tab[RTA_GATEWAY] ? parseInetAddress(tab[RTA_GATEWAY]) : def;
         final int ifindex = null != tab[RTA_OIF] ? parseInt(tab[RTA_OIF]) : 0;
-        final int metrics = null != tab[RTA_PRIORITY] ? parseInt(tab[RTA_PRIORITY]) : -1;
+        final int metrics = null != tab[RTA_PRIORITY] ? parseInt(tab[RTA_PRIORITY]) : 0;
 
         final String ifname = 0 != ifindex ? if_indextoname0(ifindex) : null;
         return new Route(dst, cidr, gw, ifname, metrics);
