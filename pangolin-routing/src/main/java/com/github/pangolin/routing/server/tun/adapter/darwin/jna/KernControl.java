@@ -92,10 +92,10 @@ public interface KernControl {
          */
         public int[] sc_reserved = new int[5];
 
-        public sockaddr_ctl(final byte scFamily, final short sysaddr,
+        public sockaddr_ctl(final byte family, final short sysaddr,
                             final int scId, final int scUnit, final int... reserved) {
             // sc_len = (byte) size();
-            sc_family = scFamily;
+            sc_family = family;
             ss_sysaddr = sysaddr;
             sc_id = scId;
             sc_unit = scUnit;

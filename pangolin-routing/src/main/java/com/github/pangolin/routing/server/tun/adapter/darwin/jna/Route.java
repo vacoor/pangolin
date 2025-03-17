@@ -186,6 +186,9 @@ public interface Route {
          */
         public final int[] rmx_filler = new int[4];
 
+        /**
+         * {@inheritDoc}
+         */
         @Override
         protected List<String> getFieldOrder() {
             return Arrays.asList(
@@ -252,19 +255,13 @@ public interface Route {
          */
         public rt_metrics rtm_rmx = new rt_metrics();
 
-        public rt_msghdr() {
-            super();
-        }
-
         public rt_msghdr(final Pointer p) {
             super(p);
         }
 
-        @Override
-        protected void useMemory(final Pointer m) {
-            super.useMemory(m);
-        }
-
+        /**
+         * {@inheritDoc}
+         */
         @Override
         protected List<String> getFieldOrder() {
             return Arrays.asList(
@@ -325,13 +322,13 @@ public interface Route {
         /* metrics themselves. */
         public rt_metrics rtm_rmx;
 
-        public rt_msghdr2() {
-        }
-
         public rt_msghdr2(final Pointer p) {
             super(p);
         }
 
+        /**
+         * {@inheritDoc}
+         */
         @Override
         protected List<String> getFieldOrder() {
             return Arrays.asList(

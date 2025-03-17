@@ -1,34 +1,61 @@
 package com.github.pangolin.routing.server.tun.adapter.linux;
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.IFNAMSIZ;
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkInterface.if_nametoindex0;
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.throwLastErrorException;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NETLINK_ROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLMSG_DONE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLMSG_ERROR;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_CREATE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_DUMP;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.NLM_F_REQUEST;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.nlmsghdr;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.sockaddr_nl;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_DST;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_GATEWAY;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_MAX;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_OIF;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTA_PRIORITY;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_DELROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_GETROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_NEWROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTN_UNICAST;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTPROT_STATIC;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RT_SCOPE_UNIVERSE;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RT_TABLE_MAIN;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.rtattr;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.rtmsg;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_INET6;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_NETLINK;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.AF_UNSPEC;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.SOCK_RAW;
+import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.INSTANTCE;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.toInetAddress;
+
 import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
 import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
-import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
 import com.google.common.collect.Lists;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
-import io.netty.util.NetUtil;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.util.List;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.IFNAMSIZ;
-import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkInterface.if_nametoindex0;
-import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.throwLastErrorException;
-import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.toInet4Address;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.*;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.*;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.*;
-import static com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC.INSTANTCE;
-import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.toInetAddress;
-
 public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
 
     private static final LibC LIBC = LibC.INSTANTCE;
 
+    /**
+     * Default instance.
+     */
     private static final LinuxNetworkRoutingTable INSTANCE = new LinuxNetworkRoutingTable();
 
+    /**
+     * Private constructor.
+     */
     private LinuxNetworkRoutingTable() {
     }
 
@@ -124,6 +151,42 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
         }
     }
 
+    /**
+     * Write a inet address to pointer.
+     *
+     * @param ptr  the pointer
+     * @param addr the inet address
+     * @return the bytes written
+     */
+    static int writeSockAddrIn(final Pointer ptr, final short rtaType, final byte[] addr) {
+        rtattr rta = new rtattr(ptr);
+        rta.rta_len = (byte) (rta.size() + addr.length);
+        rta.rta_type = rtaType;
+        rta.write();
+
+        ptr.write(rta.size(), addr, 0, addr.length);
+        // FIXME ALIGN 4-bytes ?
+        return rta.rta_len;
+    }
+
+    private static int writeInt(final Pointer ptr, final short type, final int ifindex) {
+        rtattr rta = new rtattr(ptr);
+        rta.rta_len = (byte) (rta.size() + 4);
+        rta.rta_type = type;
+        rta.write();
+
+        ptr.setInt(rta.size(), ifindex);
+        return rta.size() + 4;
+    }
+
+    /**
+     * Get a list of all route.
+     * <p/>
+     * <pre><code>netstat -nra</code></pre>
+     *
+     * @param family the address family, AF_INET | AF_INET6 | AF_UNSPEC
+     * @return the list of all route
+     */
     private static List<Route> getAll0(final byte family) {
         final int sockfd = LIBC.socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
         try {
@@ -151,13 +214,13 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
             bytesWritten += hl.size();
 
             final rtmsg rt = new rtmsg(buffer.share(bytesWritten));
-//            rt.rtm_family = AF_INET;
             rt.rtm_family = family;
-//            rt.rtm_dst_len = (byte) 0;
-//            rt.rtm_table = (byte) RT_TABLE_MAIN;
-//            rt.rtm_protocol = RTPROT_STATIC;
-//            rt.rtm_scope = RT_SCOPE_UNIVERSE;
-//            rt.rtm_type = RTN_UNICAST;
+            rt.rtm_table = (byte) RT_TABLE_MAIN;
+            /*-
+            rt.rtm_protocol = RTPROT_STATIC;
+            rt.rtm_scope = RT_SCOPE_UNIVERSE;
+            rt.rtm_type = RTN_UNICAST;
+            */
             rt.write();
             bytesWritten += rt.size();
 
@@ -200,11 +263,18 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
         }
     }
 
+    /**
+     * Parse route entry.
+     *
+     * @param rtm the route message
+     * @param len the length of rtm
+     * @return the route entry
+     */
     private static Route parseRouteEntry(final rtmsg rtm, final int len) {
         final Pointer ptr = rtm.getPointer();
 
         final rtattr[] tab = new rtattr[RTA_MAX + 1];
-        for (int bytesRead = rtm.size(); bytesRead < len;) {
+        for (int bytesRead = rtm.size(); bytesRead < len; ) {
             rtattr rta = new rtattr(ptr.share(bytesRead, len - bytesRead));
             rta.read();
 
@@ -220,64 +290,39 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
                 ? toInetAddress(new byte[16])
                 : null;
 
-        final int cidr = rtm.rtm_dst_len;
+        final int cidr = rtm.rtm_dst_len & 0xFF;
         final InetAddress dst = null != tab[RTA_DST] ? parseInetAddress(tab[RTA_DST]) : def;
         final InetAddress gw = null != tab[RTA_GATEWAY] ? parseInetAddress(tab[RTA_GATEWAY]) : def;
         final int ifindex = null != tab[RTA_OIF] ? parseInt(tab[RTA_OIF]) : 0;
         final int metrics = null != tab[RTA_PRIORITY] ? parseInt(tab[RTA_PRIORITY]) : -1;
 
         final String ifname = 0 != ifindex ? if_indextoname0(ifindex) : null;
-        System.out.printf("%s/%s\t%s\t%s\t%s\n", dst, cidr, gw, ifname, metrics);
         return new Route(dst, cidr, gw, ifname, metrics);
     }
 
-    private static rtattr[] parseRtattr(final Pointer ptr, final int rtattr_len) {
-        final rtattr[] tab = new rtattr[RTA_MAX + 1];
-        for (int offset = 0; offset < rtattr_len; ) {
-            rtattr rta = new rtattr(ptr.share(offset));
-            rta.read();
-
-            if (rta.rta_type <= RTA_MAX) {
-                tab[rta.rta_type] = rta;
-            }
-            offset += align(rta.rta_len, 4);
-        }
-        return tab;
-    }
-
+    /**
+     * Parse a inet address from the route attribute.
+     *
+     * @param rta the route attribute
+     * @return the inet address
+     */
     private static InetAddress parseInetAddress(final rtattr rta) {
         final byte[] addr = rta.getPointer().getByteArray(rta.size(), rta.rta_len - rta.size());
         return toInetAddress(addr);
     }
 
+    /**
+     * Parse a int value from the route attribute.
+     *
+     * @param rta the route attribute
+     * @return the int value
+     */
     private static int parseInt(final rtattr rta) {
         return rta.getPointer().getInt(rta.size());
     }
 
     private static int align(final int len, final int align) {
         return (len + align - 1) & ~(align - 1);
-    }
-
-    static int writeSockAddrIn(final Pointer ptr, final short rtaType, final byte[] addr) {
-        rtattr rta = new rtattr(ptr);
-        rta.rta_len = (byte) (rta.size() + addr.length);
-        rta.rta_type = rtaType;
-        rta.write();
-
-        ptr.write(rta.size(), addr, 0, addr.length);
-        return rta.rta_len;
-    }
-
-    private static int writeInt(final Pointer ptr, final short type, final int ifindex) {
-        rtattr rta = new rtattr(ptr);
-        rta.rta_len = (byte) (rta.size() + 4);
-        rta.rta_type = type; // (short) RTA_OIF;
-        rta.write();
-//        offset += rta.size();
-
-        ptr.setInt(rta.size(), ifindex);
-//        offset += 4;
-        return rta.size() + 4;
     }
 
     private static String if_indextoname0(final int ifindex) {

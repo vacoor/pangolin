@@ -1,5 +1,43 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.throwLastErrorException;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.toInet4Address;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.toInet6Address;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr4;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr6;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.IFNAMSIZ;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_dl;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in6;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTAX_DST;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTAX_GATEWAY;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTAX_IFP;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTAX_MAX;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTAX_NETMASK;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_DST;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_GATEWAY;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_IFP;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_NETMASK;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTF_GATEWAY;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTF_HOST;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTF_STATIC;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTF_UP;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTM_ADD;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTM_DELETE;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTM_GET;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTM_VERSION;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.rt_msghdr;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET6;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_LINK;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_ROUTE;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_UNSPEC;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.NET_RT_DUMP;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.SOCK_RAW;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sysctl.CTL_NET;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
+import static com.sun.jna.Pointer.NULL;
+
 import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
 import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
@@ -12,28 +50,26 @@ import com.sun.jna.ptr.IntByReference;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.List;
-
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sysctl.CTL_NET;
-import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
-import static com.sun.jna.Pointer.NULL;
 
 public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
 
     private static final LibC LIBC = LibC.INSTANTCE;
 
-    private static final int SOCKADDR_DL_SIZE = new sockaddr_dl(new Pointer(0)).size();
-    private static final int SOCKADDR_IN6_SIZE = new sockaddr_in6().size();
-    private static final int RT_MSGHDR_SIZE = new rt_msghdr(new Pointer(0)).size();
+    private static final Pointer NO_MEMEORY = new Pointer(0);
+    private static final int SOCKADDR_DL_SIZE = new sockaddr_dl(NO_MEMEORY).size();
+    private static final int SOCKADDR_IN6_SIZE = new sockaddr_in6(NO_MEMEORY).size();
+    private static final int RT_MSGHDR_SIZE = new rt_msghdr(NO_MEMEORY).size();
 
+    /**
+     * Default instance.
+     */
     private static final DarwinNetworkRoutingTable INSTANCE = new DarwinNetworkRoutingTable();
 
+    /**
+     * Private constructor.
+     */
     private DarwinNetworkRoutingTable() {
     }
 
@@ -145,6 +181,15 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         route0((byte) RTM_GET, dst, netmask, null, ifindex);
     }
 
+    /**
+     * Manipulates the kernel's IP routing tables.
+     *
+     * @param rtm_type  RTM_ADD | RTM_DELETE | RTM_GET
+     * @param dst       the destination network or host
+     * @param netmask   the netmask
+     * @param gw        the gateway used for route packets, the specified gateway must be reachable first.
+     * @param rtm_index the interface index to bound
+     */
     private static void route0(final byte rtm_type,
                                final InetAddress dst, final InetAddress netmask,
                                final InetAddress gw, final short rtm_index) {
@@ -201,6 +246,13 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         }
     }
 
+    /**
+     * Write a inet address to pointer.
+     *
+     * @param ptr     the pointer
+     * @param address the inet address
+     * @return the bytes written
+     */
     private static int writeSockAddrIn(final Pointer ptr, final InetAddress address) {
         if (address instanceof Inet4Address) {
             final sockaddr_in in = new sockaddr_in(ptr);
@@ -216,6 +268,13 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * Write a interface index (Link-Level sockaddr) to pointer.
+     *
+     * @param ptr     the pointer
+     * @param ifindex the interface index
+     * @return the bytes written
+     */
     private static int writeSockAddrDl(final Pointer ptr, final int ifindex) {
         final sockaddr_dl dl = new sockaddr_dl(ptr);
         dl.sdl_len = (byte) dl.size();
@@ -223,14 +282,6 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         dl.sdl_index = (short) ifindex;
         dl.write();
         return dl.size();
-    }
-
-    private static int if_nametoindex0(final String ifname) {
-        final int index = LIBC.if_nametoindex(ifname);
-        if (0 == index) {
-            throwLastErrorException(Native.getLastError());
-        }
-        return index;
     }
 
     /**
@@ -276,6 +327,12 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         }
     }
 
+    /**
+     * Parse route entry.
+     *
+     * @param rtm the route message
+     * @return the route entry
+     */
     private static Route parseRouteEntry(final rt_msghdr rtm) {
         final Pointer ptr = rtm.getPointer();
 
@@ -295,29 +352,33 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
             }
         }
 
-        final InetAddress dst = null != tab[RTAX_DST]
-                ? parseInetAddress(tab[RTAX_DST])
-                : null;
-        final InetAddress gw = null != tab[RTAX_GATEWAY]
-                ? parseInetAddress(tab[RTAX_GATEWAY])
-                : null;
+        final InetAddress dst = null != tab[RTAX_DST] ? parseInetAddress(tab[RTAX_DST]) : null;
+        final InetAddress gw = null != tab[RTAX_GATEWAY] ? parseInetAddress(tab[RTAX_GATEWAY]) : null;
 
-        int cidr = null != tab[RTAX_NETMASK]
+        final int cidr = null != tab[RTAX_NETMASK]
                 ? parseNetmask(tab[RTAX_NETMASK])
                 : null != dst && (rtm.rtm_flags & RTF_HOST) != 0
                 ? dst.getAddress().length * Byte.SIZE
                 : 0;
 
+        int ifindex = rtm.rtm_index;
         if (tab[RTAX_IFP] != null) {
+            // IFP never exists ?
             sockaddr_dl d = new sockaddr_dl(tab[RTAX_IFP]);
             d.read();
-            System.out.printf("Via %s\t", d.sdl_index);
+            ifindex = d.sdl_index;
         }
 
-        String dev = if_indextoname(rtm.rtm_index);
+        final String dev = if_indextoname(ifindex);
         return new Route(dst, cidr, gw, dev, -1);
     }
 
+    /**
+     * Parse a inet address from pointer.
+     *
+     * @param ptr the pointer
+     * @return the inet address
+     */
     private static InetAddress parseInetAddress(final Pointer ptr) {
         final int len = ptr.getByte(0) & 0xFF;
         final int family = ptr.getByte(1) & 0xFF;
@@ -340,6 +401,12 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         }
     }
 
+    /**
+     * Parse net mask.
+     *
+     * @param ptr the pointer
+     * @return the net mask
+     */
     private static int parseNetmask(final Pointer ptr) {
         final int len = ptr.getByte(0) & 0xFF;
         if (len <= 0) {
@@ -416,32 +483,18 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         return (len + align - 1) & ~(align - 1);
     }
 
+    private static int if_nametoindex0(final String ifname) {
+        final int index = LIBC.if_nametoindex(ifname);
+        if (0 == index) {
+            throwLastErrorException(Native.getLastError());
+        }
+        return index;
+    }
+
     private static String if_indextoname(final int ifindex) {
         final byte[] buf = new byte[IFNAMSIZ];
         LIBC.if_indextoname(ifindex, buf);
         return Native.toString(buf);
-    }
-
-
-    public static void main(String[] args) throws UnknownHostException {
-        InetAddress dst = InetAddress.getByName("198.19.0.1");
-//        InetAddress gw = InetAddress.getByName("198.19.0.1");
-//        add(dst, 24, gw, null);
-//        System.out.println(NetUtils2.binmaskToCidr(new byte[]{(byte) 1}));
-//        System.exit(0);
-        List<Route> all0 = getAll0(AF_UNSPEC);
-        for (Route route : all0) {
-            System.out.println(route);
-        }
-//        get0();
-        /*
-        System.out.println(networkCidr(new byte[]{
-                (byte) 192,
-                (byte) 168,
-                1,
-                10
-        }));
-        */
     }
 
 }

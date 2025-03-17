@@ -137,12 +137,8 @@ public interface If {
          */
         public int sin6_scope_id;
 
-        public sockaddr_in6() {
-        }
-
         public sockaddr_in6(final Pointer ptr) {
             super(ptr);
-            read();
         }
 
     }

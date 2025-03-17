@@ -1,10 +1,40 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.throwLastErrorException;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.toInet4Address;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.toInet6Address;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr4;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr6;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.ND6_INFINITE_LIFETIME;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET6;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_UNSPEC;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.SOCK_DGRAM;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCAIFADDR;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCAIFADDR_IN6;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCDIFADDR;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCDIFADDR_IN6;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCGIFADDR;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCGIFDSTADDR;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCGIFMTU;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCGIFNETMASK;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCSIFADDR;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCSIFDSTADDR;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCSIFMTU;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.SIOCSIFNETMASK;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.binmaskToCidr;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
+
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.NetworkInterfaceEx;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If;
-import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
+import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.ifaddrs;
+import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.ifaliasreq;
+import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.ifreq;
+import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.in6_aliasreq;
+import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in;
+import com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in6;
 import com.github.pangolin.routing.server.tun.adapter.unix.UnixNetworkInterface;
 import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.google.common.collect.Lists;
@@ -17,13 +47,6 @@ import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.util.List;
-
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sockio.*;
-import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
-import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.binmaskToCidr;
 
 /**
  * This class represents a Network Interface on Darwin OS.
@@ -343,8 +366,10 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
                 } else if (AF_INET6 == n.ifa_addr.sa_family) {
                     final sockaddr_in6 sockaddr = new sockaddr_in6(n.ifa_addr.getPointer());
                     final sockaddr_in6 netmask = new sockaddr_in6(n.ifa_netmask.getPointer());
-                    final int prefix = binmaskToCidr(netmask.sin6_addr);
+                    sockaddr.read();
+                    netmask.read();
 
+                    final int prefix = binmaskToCidr(netmask.sin6_addr);
                     interfaceAddresses.add(InterfaceAddressEx.of(toInet6Address(sockaddr), prefix));
                 }
             }
@@ -379,6 +404,8 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
                     final in6_aliasreq ifr6 = new in6_aliasreq(ifname);
                     ifr6.ifra_addr = new sockaddr_in6(n.ifa_addr.getPointer());
                     ifr6.ifra_prefixmask = new sockaddr_in6(n.ifa_netmask.getPointer());
+                    ifr6.ifra_addr.read();
+                    ifr6.ifra_prefixmask.read();
                     ioctl0(fd, SIOCDIFADDR_IN6, ifr6);
                 } else {
                     log.warn("SKIP unsupported address family: {}", n.ifa_addr.sa_family);
