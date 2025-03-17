@@ -8,7 +8,7 @@ import com.sun.jna.Platform;
 import java.net.InetAddress;
 
 /**
- *
+ * Manipulate the routing tables.
  */
 public abstract class NetworkRoutingTable {
     public static class Route {
@@ -37,7 +37,8 @@ public abstract class NetworkRoutingTable {
 
     /**
      * Add a new route.
-     *  @param dst    the destination network or host
+     *
+     * @param dst    the destination network or host
      * @param prefix the netmask prefix length
      * @param gw     the gateway used for route packets, the specified gateway must be reachable first.
      * @param ifname the interface name, force the route to be associated with the specified device
@@ -48,7 +49,8 @@ public abstract class NetworkRoutingTable {
 
     /**
      * Add a new route.
-     *  @param dst     the destination network or host
+     *
+     * @param dst     the destination network or host
      * @param prefix  the netmask prefix length
      * @param gw      the gateway used for route packets, the specified gateway must be reachable first.
      * @param ifindex the interface index, force the route to be associated with the specified device

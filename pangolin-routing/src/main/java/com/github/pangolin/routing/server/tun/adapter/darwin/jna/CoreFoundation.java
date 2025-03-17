@@ -10,6 +10,9 @@ import com.sun.jna.Pointer;
  */
 public interface CoreFoundation extends com.sun.jna.platform.mac.CoreFoundation {
 
+    /**
+     * CoreFoundation instance.
+     */
     CoreFoundation INSTANCE = Native.load("CoreFoundation", CoreFoundation.class);
 
     /**

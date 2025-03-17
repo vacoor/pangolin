@@ -2,6 +2,9 @@ package com.github.pangolin.routing.server.tun.adapter.darwin.jna;
 
 import com.sun.jna.Structure;
 
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * Definitions related to sockets: types, address families, options.
  *
@@ -107,7 +110,6 @@ public interface Socket {
      *
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/socket.h">sys/socket.h</a>
      */
-    @Structure.FieldOrder({"sa_len", "sa_family", "sa_data"})
     class sockaddr extends Structure {
         /**
          * total length.
@@ -121,6 +123,14 @@ public interface Socket {
          * [XSI] addr value.
          */
         public byte[] sa_data = new byte[14];
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList("sa_len", "sa_family", "sa_data");
+        }
 
         public static class ByRef extends sockaddr implements ByReference {
         }

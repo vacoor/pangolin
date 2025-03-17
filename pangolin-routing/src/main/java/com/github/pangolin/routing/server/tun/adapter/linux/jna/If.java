@@ -5,9 +5,12 @@ import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
 import com.sun.jna.Union;
 
+import java.util.Arrays;
+import java.util.List;
+
 
 /**
- * JNA mapping for <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/if.h">if.h</a>.
+ * @see <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/if.h">if.h</a>
  */
 public interface If {
 
@@ -91,26 +94,24 @@ public interface If {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/in.h">in.h</a>
      */
-    @Structure.FieldOrder({"sin_family", "sin_port", "sin_addr", "sin_zero"})
     class sockaddr_in extends Structure {
         public short sin_family;
         public short sin_port;
         public byte[] sin_addr = new byte[4];
         public byte[] sin_zero = new byte[8];
 
-        public sockaddr_in() {
-        }
-
-        public sockaddr_in(final Pointer p) {
-            super(p);
-            read();
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList("sin_family", "sin_port", "sin_addr", "sin_zero");
         }
     }
 
     /**
      * https://github.com/torvalds/linux/blob/master/include/uapi/linux/in.h
      */
-    @Structure.FieldOrder({"ifr_name", "ifr_ifru"})
     class ifreq extends Structure {
         /**
          * if name, e.g. "en0".
@@ -120,6 +121,14 @@ public interface If {
 
         public ifreq(final String ifname) {
             Utils.writeToBytes(ifname, ifr_name);
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList("ifr_name", "ifr_ifru");
         }
 
         public static class ifr_ifru extends Union {
@@ -138,27 +147,42 @@ public interface If {
         }
     }
 
-
-    @Structure.FieldOrder({"sin6_family", "sin6_port", "sin6_flowinfo", "sin6_addr", "sin6_scope_id"})
     class sockaddr_in6 extends Structure {
         public short sin6_family;
         public short sin6_port;
         public int sin6_flowinfo;
         public byte[] sin6_addr = new byte[16];
         public int sin6_scope_id;
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "sin6_family", "sin6_port",
+                    "sin6_flowinfo", "sin6_addr", "sin6_scope_id"
+            );
+        }
     }
 
     /**
      * https://github.com/torvalds/linux/blob/master/include/uapi/linux/ipv6.h
      */
-    @Structure.FieldOrder({"ifr6_addr", "ifr6_prefixlen", "ifr6_ifindex"})
     class in6_ifreq extends Structure {
         public byte[] ifr6_addr = new byte[16];
         public int ifr6_prefixlen;
         public int ifr6_ifindex;
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList("ifr6_addr", "ifr6_prefixlen", "ifr6_ifindex");
+        }
     }
 
-    @Structure.FieldOrder({"ifa_next", "ifa_name", "ifa_flags", "ifa_addr", "ifa_netmask", "ifa_ifu", "ifa_data"})
     class ifaddrs extends Structure {
         public ByRef ifa_next;
         public String ifa_name;
@@ -167,6 +191,17 @@ public interface If {
         public sockaddr.ByRef ifa_netmask;
         public IfaIfu ifa_ifu;
         public Pointer ifa_data;
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "ifa_next", "ifa_name", "ifa_flags",
+                    "ifa_addr", "ifa_netmask", "ifa_ifu", "ifa_data"
+            );
+        }
 
         public static class IfaIfu extends Union {
             public sockaddr ifu_broadaddr;
@@ -177,7 +212,6 @@ public interface If {
         }
 
     }
-
 
     /*-
      * Important comment:
@@ -235,7 +269,6 @@ public interface If {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/if_addr.h">uapi/linux/if_addr.h</a>
      */
-    @Structure.FieldOrder({"ifa_family", "ifa_prefixlen", "ifa_flags", "ifa_scope", "ifa_index"})
     class ifaddrmsg extends Structure {
         public byte ifa_family;
         /**
@@ -255,11 +288,19 @@ public interface If {
          */
         public int ifa_index;
 
-        public ifaddrmsg() {
-        }
-
         public ifaddrmsg(final Pointer p) {
             super(p);
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "ifa_family", "ifa_prefixlen",
+                    "ifa_flags", "ifa_scope", "ifa_index"
+            );
         }
     }
 

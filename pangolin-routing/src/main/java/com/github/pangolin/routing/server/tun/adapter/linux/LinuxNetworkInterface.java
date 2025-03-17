@@ -3,10 +3,7 @@ package com.github.pangolin.routing.server.tun.adapter.linux;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.NetworkInterfaceEx;
 import com.github.pangolin.routing.server.tun.adapter.linux.jna.If;
-import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.ifreq;
-import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.in6_ifreq;
-import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in;
-import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.sockaddr_in6;
+import com.github.pangolin.routing.server.tun.adapter.linux.jna.If.*;
 import com.github.pangolin.routing.server.tun.adapter.unix.UnixNetworkInterface;
 import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.google.common.collect.Lists;
@@ -21,15 +18,16 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.util.List;
 
+import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkRoutingTable.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxUtils.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.*;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.If.ifaddrmsg;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Netlink.*;
-import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.*;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_DELADDR;
+import static com.github.pangolin.routing.server.tun.adapter.linux.jna.RtNetlink.RTM_NEWADDR;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Socket.*;
 import static com.github.pangolin.routing.server.tun.adapter.linux.jna.Sockios.*;
-import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
 import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.binmaskToCidr;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
 
 /**
  * This class represents a Network Interface on Linux OS.
@@ -37,7 +35,12 @@ import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.binm
 @Slf4j
 public class LinuxNetworkInterface extends UnixNetworkInterface implements NetworkInterfaceEx {
 
+    /**
+     * Lib C instance.
+     */
     private static final LibC LIBC = LibC.INSTANTCE;
+
+    private static final int IFADDRMSG_SIZE = new ifaddrmsg(PLACEHOLDER_MEMORY).size();
 
     /**
      * the name of this network interface.
@@ -505,30 +508,22 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
 
     private static void _netlinkAddresses4(final String ifname, final Inet4Address addr, final int prefix, final boolean delete) {
         final byte[] address = addr.getAddress();
-        final int sockfd = LIBC.socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+        final int sockfd = bind();
         try {
-            final sockaddr_nl laddr = new sockaddr_nl();
-            laddr.nl_family = AF_NETLINK;
-            laddr.nl_pid = LIBC.getpid();
+            final int wLen = NLMSGHDR_SIZE + IFADDRMSG_SIZE + rtaAlign(RTATTR_SIZE + address.length);
+            final Memory wBuf = new Memory(nlmsgAlign(wLen));
 
-            if (LIBC.bind(sockfd, laddr, laddr.size()) < 0) {
-                throwLastErrorException("cannot open netlink socket");
-            }
+            int bytesWritten = 0;
+            final nlmsghdr nlm = new nlmsghdr(wBuf.share(bytesWritten));
+            nlm.nlmsg_len = wLen;
+            nlm.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE;
+            nlm.nlmsg_type = (short) (!delete ? RTM_NEWADDR : RTM_DELADDR);
+            nlm.nlmsg_seq = 1;
+            nlm.nlmsg_pid = LIBC.getpid();
+            nlm.write();
+            bytesWritten += nlm.size();
 
-            int msgSize = 32; // nlmsghdr(16) + ifaddrmsg(8) + rtattr(4) + address(4)
-
-            // 初始化消息内存
-            final Memory buffer = new Memory(msgSize);
-            int offset = 0;
-
-            final nlmsghdr nlmsg = new nlmsghdr(buffer.share(offset));
-            nlmsg.nlmsg_len = msgSize;
-            nlmsg.nlmsg_flags = NLM_F_REQUEST | NLM_F_CREATE;
-            nlmsg.nlmsg_type = (short) (!delete ? RTM_NEWADDR : RTM_DELADDR);
-            nlmsg.write();
-            offset += nlmsg.size();
-
-            final ifaddrmsg ifa = new ifaddrmsg(buffer.share(offset));
+            final ifaddrmsg ifa = new ifaddrmsg(wBuf.share(bytesWritten));
             ifa.ifa_index = if_nametoindex0(ifname);
             ifa.ifa_family = AF_INET;
             ifa.ifa_prefixlen = (byte) prefix;
@@ -537,12 +532,11 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
                 ifa.ifa_scope = 0;
             }
             ifa.write();
-            offset += ifa.size();
+            bytesWritten += ifa.size();
 
-            offset += LinuxNetworkRoutingTable.writeSockAddrIn(buffer.share(offset), IFA_LOCAL, address);
+            bytesWritten += writeBytesRtAttr(wBuf.share(bytesWritten), IFA_LOCAL, address);
 
-            final int written = LIBC.send(sockfd, nlmsg.getPointer(), offset, 0);
-            if (written < 0) {
+            if (LIBC.send(sockfd, nlm.getPointer(), bytesWritten, 0) < 0) {
                 throwLastErrorException(Native.getLastError());
             }
         } finally {

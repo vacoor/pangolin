@@ -360,6 +360,8 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
                 if (AF_INET == n.ifa_addr.sa_family) {
                     final sockaddr_in sockaddr = new sockaddr_in(n.ifa_addr.getPointer());
                     final sockaddr_in netmask = new sockaddr_in(n.ifa_netmask.getPointer());
+                    sockaddr.read();
+                    netmask.read();
                     final int prefix = binmaskToCidr(netmask.sin_addr);
 
                     interfaceAddresses.add(InterfaceAddressEx.of(toInet4Address(sockaddr), prefix));
@@ -399,6 +401,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
                     final ifreq ifr = new ifreq(ifname);
                     ifr.ifr_ifru.setType("ifru_addr");
                     ifr.ifr_ifru.ifru_addr = new sockaddr_in(n.ifa_addr.getPointer());
+                    ifr.ifr_ifru.ifru_addr.read();
                     ioctl0(fd, SIOCDIFADDR, ifr);
                 } else if (AF_INET6 == n.ifa_addr.sa_family) {
                     final in6_aliasreq ifr6 = new in6_aliasreq(ifname);

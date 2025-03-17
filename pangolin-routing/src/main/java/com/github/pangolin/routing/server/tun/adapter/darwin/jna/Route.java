@@ -332,18 +332,10 @@ public interface Route {
         @Override
         protected List<String> getFieldOrder() {
             return Arrays.asList(
-                    "rtm_msglen"
-                    , "rtm_version"
-                    , "rtm_type"
-                    , "rtm_index"
-                    , "rtm_flags"
-                    , "rtm_addrs"
-                    , "rtm_refcnt"
-                    , "rtm_parentflags"
-                    , "rtm_reserved"
-                    , "rtm_use"
-                    , "rtm_inits"
-                    , "rtm_rmx"
+                    "rtm_msglen", "rtm_version", "rtm_type"
+                    , "rtm_index", "rtm_flags", "rtm_addrs"
+                    , "rtm_refcnt", "rtm_parentflags", "rtm_reserved"
+                    , "rtm_use", "rtm_inits", "rtm_rmx"
             );
         }
     }

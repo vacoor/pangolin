@@ -8,25 +8,45 @@ public interface Sysctl {
      * Top-level identifiers
      */
 
-    /* unused .**/
+    /**
+     * unused .
+     **/
     int CTL_UNSPEC = 0;
-    /* "high k*ernel": proc, limits. */
+    /**
+     * "high k*ernel": proc, limits.
+     */
     int CTL_KERN = 1;
-    /* virtual* memory. */
+    /**
+     * virtual* memory.
+     */
     int CTL_VM = 2;
-    /* file sy*stem, mount type is next. */
+    /**
+     * file sy*stem, mount type is next.
+     */
     int CTL_VFS = 3;
-    /* network*, see socket.h. */
+    /**
+     * network*, see socket.h.
+     */
     int CTL_NET = 4;
-    /* debuggi*ng parameters. */
+    /**
+     * debuggi*ng parameters.
+     */
     int CTL_DEBUG = 5;
-    /* generic* cpu/io. */
+    /**
+     * generic* cpu/io.
+     */
     int CTL_HW = 6;
-    /* machine* dependent. */
+    /**
+     * machine* dependent.
+     */
     int CTL_MACHDEP = 7;
-    /* user-le*vel. */
+    /**
+     * user-le*vel.
+     */
     int CTL_USER = 8;
-    /* number *of valid top-level ids. */
+    /**
+     * number *of valid top-level ids.
+     */
     int CTL_MAXID = 9;
 
 }

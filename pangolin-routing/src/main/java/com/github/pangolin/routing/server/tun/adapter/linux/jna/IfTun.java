@@ -3,7 +3,7 @@ package com.github.pangolin.routing.server.tun.adapter.linux.jna;
 import com.sun.jna.NativeLong;
 
 /**
- * JNA mapping for <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/if_tun.h">if_tun.h</a>.
+ * @see <a href="https://github.com/torvalds/linux/blob/master/include/uapi/linux/if_tun.h">if_tun.h</a>
  */
 public interface IfTun {
 

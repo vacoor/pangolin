@@ -5,6 +5,9 @@ import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
 import com.sun.jna.Union;
 
+import java.util.Arrays;
+import java.util.List;
+
 
 /**
  * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if.h">net/if.h</a>
@@ -32,10 +35,6 @@ public interface If {
      *
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet/in.h">netinet/in.h</a>
      */
-    @Structure.FieldOrder({
-            "sin_len", "sin_family",
-            "sin_port", "sin_addr", "sin_zero"
-    })
     class sockaddr_in extends Structure {
         public byte sin_len;
         public byte sin_family;
@@ -43,12 +42,19 @@ public interface If {
         public byte[] sin_addr = new byte[4];
         public byte[] sin_zero = new byte[8];
 
-        public sockaddr_in() {
-        }
-
         public sockaddr_in(final Pointer p) {
             super(p);
-            read();
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "sin_len", "sin_family",
+                    "sin_port", "sin_addr", "sin_zero"
+            );
         }
     }
 
@@ -60,7 +66,6 @@ public interface If {
      *
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if.h">net/if.h</a>
      */
-    @Structure.FieldOrder({"ifr_name", "ifr_ifru"})
     class ifreq extends Structure {
         /**
          * if name, e.g. "en0".
@@ -70,6 +75,14 @@ public interface If {
 
         public ifreq(final String ifname) {
             Utils.writeToBytes(ifname, ifr_name);
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList("ifr_name", "ifr_ifru");
         }
 
         public static class ifr_ifru extends Union {
@@ -83,14 +96,12 @@ public interface If {
             public int ifru_media;
             public int ifru_intval;
             // ...
-
         }
     }
 
     /**
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if.h">net/if.h</a>
      */
-    @Structure.FieldOrder({"ifra_name", "ifra_addr", "ifra_broadaddr", "ifra_mask"})
     class ifaliasreq extends Structure {
         /**
          * if name, e.g. "en0".
@@ -103,6 +114,17 @@ public interface If {
         public ifaliasreq(final String ifname) {
             Utils.writeToBytes(ifname, ifra_name);
         }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "ifra_name", "ifra_addr",
+                    "ifra_broadaddr", "ifra_mask"
+            );
+        }
     }
 
     /**
@@ -110,7 +132,7 @@ public interface If {
      *
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/in6.h">netinet6/in6.h</a>
      */
-    @Structure.FieldOrder({"sin6_len", "sin6_family", "sin6_port", "sin6_flowinfo", "sin6_addr", "sin6_scope_id"})
+    @Structure.FieldOrder({})
     class sockaddr_in6 extends Structure {
         /**
          * length of this struct(sa_family_t).
@@ -141,6 +163,16 @@ public interface If {
             super(ptr);
         }
 
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "sin6_len", "sin6_family", "sin6_port",
+                    "sin6_flowinfo", "sin6_addr", "sin6_scope_id"
+            );
+        }
     }
 
     /**
@@ -153,7 +185,6 @@ public interface If {
      *
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/in6_var.h">netinet6/in6_var.h</a>
      */
-    @Structure.FieldOrder({"ia6t_expire", "ia6t_preferred", "ia6t_vltime", "ia6t_pltime"})
     class in6_addrlifetime extends Structure {
         /**
          * valid lifetime expiration time.
@@ -171,18 +202,36 @@ public interface If {
          * prefix lifetime.
          */
         public int ia6t_pltime;
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "ia6t_expire", "ia6t_preferred",
+                    "ia6t_vltime", "ia6t_pltime"
+            );
+        }
     }
 
     /**
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/in6_var.h">netinet6/in6_var.h</a>
      */
-    @Structure.FieldOrder({"ifr_name", "ifr_ifru"})
     class in6_ifreq extends Structure {
         public byte[] ifr_name = new byte[IFNAMSIZ];
         public IfrIfru ifr_ifru;
 
         public in6_ifreq(final String ifname) {
             Utils.writeToBytes(ifname, ifr_name);
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList("ifr_name", "ifr_ifru");
         }
 
         public static class IfrIfru extends Union {
@@ -203,7 +252,6 @@ public interface If {
     /**
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/in6_var.h">netinet6/in6_var.h</a>
      */
-    @Structure.FieldOrder({"ifra_name", "ifra_addr", "ifra_dstaddr", "ifra_prefixmask", "ifra_flags", "ifra_lifetime"})
     class in6_aliasreq extends Structure {
         public byte[] ifra_name = new byte[IFNAMSIZ];
         public sockaddr_in6 ifra_addr;
@@ -215,16 +263,23 @@ public interface If {
         public in6_aliasreq(final String ifname) {
             Utils.writeToBytes(ifname, ifra_name);
         }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "ifra_name", "ifra_addr", "ifra_dstaddr",
+                    "ifra_prefixmask", "ifra_flags", "ifra_lifetime"
+            );
+        }
     }
 
 
     /**
      * ifaddrs.h
      */
-    @Structure.FieldOrder({
-            "ifa_next", "ifa_name", "ifa_flags",
-            "ifa_addr", "ifa_netmask", "ifa_dstaddr", "ifa_data"
-    })
     class ifaddrs extends Structure {
         public ByRef ifa_next;
         public String ifa_name;
@@ -233,6 +288,17 @@ public interface If {
         public Socket.sockaddr.ByRef ifa_netmask;
         public Socket.sockaddr.ByRef ifa_dstaddr;
         public Pointer ifa_data;
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "ifa_next", "ifa_name", "ifa_flags",
+                    "ifa_addr", "ifa_netmask", "ifa_dstaddr", "ifa_data"
+            );
+        }
 
         public static class ByRef extends ifaddrs implements ByReference {
         }
@@ -243,10 +309,6 @@ public interface If {
      *
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/net/if_dl.h">net/if_dl.h</a>
      */
-    @Structure.FieldOrder({
-            "sdl_len", "sdl_family", "sdl_index", "sdl_type",
-            "sdl_nlen", "sdl_alen", "sdl_slen", "sdl_data"
-    })
     class sockaddr_dl extends Structure {
         /**
          * Total length of sockaddr.
@@ -283,6 +345,17 @@ public interface If {
 
         public sockaddr_dl(final Pointer p) {
             super(p);
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "sdl_len", "sdl_family", "sdl_index", "sdl_type",
+                    "sdl_nlen", "sdl_alen", "sdl_slen", "sdl_data"
+            );
         }
     }
 }

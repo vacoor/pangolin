@@ -1,43 +1,5 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.throwLastErrorException;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.toInet4Address;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.toInet6Address;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr4;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.writeSockAddr6;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.IFNAMSIZ;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_dl;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.sockaddr_in6;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTAX_DST;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTAX_GATEWAY;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTAX_IFP;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTAX_MAX;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTAX_NETMASK;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_DST;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_GATEWAY;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_IFP;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTA_NETMASK;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTF_GATEWAY;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTF_HOST;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTF_STATIC;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTF_UP;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTM_ADD;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTM_DELETE;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTM_GET;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.RTM_VERSION;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.rt_msghdr;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_INET6;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_LINK;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_ROUTE;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.AF_UNSPEC;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.NET_RT_DUMP;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.SOCK_RAW;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sysctl.CTL_NET;
-import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
-import static com.sun.jna.Pointer.NULL;
-
 import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
 import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.github.pangolin.routing.server.tun.adapter.util.NetUtils2;
@@ -53,14 +15,35 @@ import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.List;
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.DarwinUtils.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.If.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Route.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Socket.*;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sysctl.CTL_NET;
+import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
+import static com.sun.jna.Pointer.NULL;
+
 public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
 
+    /**
+     * Lib C instance.
+     */
     private static final LibC LIBC = LibC.INSTANTCE;
 
-    private static final Pointer NO_MEMEORY = new Pointer(0);
-    private static final int SOCKADDR_DL_SIZE = new sockaddr_dl(NO_MEMEORY).size();
-    private static final int SOCKADDR_IN6_SIZE = new sockaddr_in6(NO_MEMEORY).size();
-    private static final int RT_MSGHDR_SIZE = new rt_msghdr(NO_MEMEORY).size();
+    /**
+     * Placeholder pointer to help avoid auto-allocation of memory where a
+     * Structure needs a valid pointer but want to avoid actually reading from it.
+     */
+    private static final Pointer PLACEHOLDER_MEMORY = new Pointer(0) {
+        @Override
+        public Pointer share(final long offset, final long sz) {
+            return this;
+        }
+    };
+
+    private static final int RT_MSGHDR_SIZE = new rt_msghdr(PLACEHOLDER_MEMORY).size();
+    private static final int SOCKADDR_DL_SIZE = new sockaddr_dl(PLACEHOLDER_MEMORY).size();
+    private static final int SOCKADDR_IN6_SIZE = new sockaddr_in6(PLACEHOLDER_MEMORY).size();
 
     /**
      * Default instance.
@@ -348,7 +331,7 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
                     // skip 4-bytes pad.
                 }
                 // move pointer to next sockaddr.
-                bytesRead += roundup(len, 4);
+                bytesRead += roundUp(len, 4);
             }
         }
 
@@ -370,7 +353,7 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         }
 
         final String dev = if_indextoname(ifindex);
-        return new Route(dst, cidr, gw, dev, -1);
+        return new Route(dst, cidr, gw, dev, 0);
     }
 
     /**
@@ -425,9 +408,7 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         } else if (AF_LINK == family) {
             final sockaddr_dl dl = new sockaddr_dl(ptr.share(0, len));
             dl.read();
-            //
-            System.out.println("LINK-" + dl.sdl_index);
-            throw new UnsupportedOperationException();
+            throw new UnsupportedOperationException("Netmask family AF_LINK: " + dl.sdl_index);
         } else if (len <= 8 && family == 0xFF) {
             /*-
              * IPv4 netmask:
@@ -475,7 +456,7 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         }
     }
 
-    private static int roundup(final int len, final int align) {
+    private static int roundUp(final int len, final int align) {
         return ((len) > 0 ? (1 + (((len) - 1) | (align - 1))) : align);
     }
 

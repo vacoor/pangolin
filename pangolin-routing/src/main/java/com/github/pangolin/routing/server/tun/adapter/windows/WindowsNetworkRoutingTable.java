@@ -10,8 +10,6 @@ import com.sun.jna.ptr.PointerByReference;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetAddress;
-import java.net.SocketException;
-import java.net.UnknownHostException;
 import java.util.List;
 
 import static com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInterface.*;
@@ -214,13 +212,4 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
         );
     }
 
-    public static void main(String[] args) throws SocketException, UnknownHostException {
-        final NetworkRoutingTable rt = NetworkRoutingTable.get();
-        final InetAddress dst = InetAddress.getByName("198.19.0.0");
-        final int prefix = (byte) 24;
-        final InetAddress gw = InetAddress.getByName("10.188.70.1");
-//        rt.add(dst, (byte) 24, gw, "以太网 P", 0);
-        rt.delete(dst, (byte) 24, "以太网 P");
-        System.out.println();
-    }
 }

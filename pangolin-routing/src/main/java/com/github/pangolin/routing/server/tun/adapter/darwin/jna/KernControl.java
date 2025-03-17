@@ -4,6 +4,9 @@ import com.github.pangolin.routing.server.tun.adapter.unix.Utils;
 import com.sun.jna.NativeLong;
 import com.sun.jna.Structure;
 
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * This header defines an API to communicate between a kernel
  * extension and a process outside of the kernel.
@@ -30,7 +33,6 @@ public interface KernControl {
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/kern_control.h">sys/kern_control.h</a>
      */
     @SuppressWarnings({"java:S116", "java:S1104", "java:S2160"})
-    @Structure.FieldOrder({"ctl_id", "ctl_name"})
     class ctl_info extends Structure {
         /**
          * The kernel control id, filled out upon return.
@@ -44,6 +46,14 @@ public interface KernControl {
 
         public ctl_info(final String name) {
             Utils.writeToBytes(name, ctl_name);
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList("ctl_id", "ctl_name");
         }
     }
 
@@ -60,7 +70,6 @@ public interface KernControl {
      * @see <a href="https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/kern_control.h">sys/kern_control.h</a>
      */
     @SuppressWarnings({"java:S109", "java:S116", "java:S1104", "java:S2160"})
-    @Structure.FieldOrder({"sc_len", "sc_family", "ss_sysaddr", "sc_id", "sc_unit", "sc_reserved"})
     class sockaddr_ctl extends Structure {
         /**
          * The length of the structure.
@@ -94,12 +103,23 @@ public interface KernControl {
 
         public sockaddr_ctl(final byte family, final short sysaddr,
                             final int scId, final int scUnit, final int... reserved) {
-            // sc_len = (byte) size();
+            sc_len = (byte) size();
             sc_family = family;
             ss_sysaddr = sysaddr;
             sc_id = scId;
             sc_unit = scUnit;
             System.arraycopy(reserved, 0, sc_reserved, 0, reserved.length);
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList(
+                    "sc_len", "sc_family", "ss_sysaddr",
+                    "sc_id", "sc_unit", "sc_reserved"
+            );
         }
     }
 }

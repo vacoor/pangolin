@@ -5,33 +5,36 @@ package com.github.pangolin.routing.server.tun.adapter.linux.jna;
  */
 public interface Socket {
 
-  /**
-   * stream socket.
-   */
-  int SOCK_STREAM = 1;
+    /**
+     * stream socket.
+     */
+    int SOCK_STREAM = 1;
 
-  /**
-   * datagram socket.
-   */
-  int SOCK_DGRAM = 2;
+    /**
+     * datagram socket.
+     */
+    int SOCK_DGRAM = 2;
 
-  int SOCK_RAW = 3;
+    int SOCK_RAW = 3;
 
-  /**
-   * .
-   */
-  int AF_UNSPEC = 0;
+    /**
+     * .
+     */
+    int AF_UNSPEC = 0;
 
-  /**
-   * IPv4.
-   */
-  int AF_INET = 2;
+    /**
+     * IPv4.
+     */
+    int AF_INET = 2;
 
-  /**
-   * IPv6.
-   */
-  int AF_INET6 = 10;
+    /**
+     * IPv6.
+     */
+    int AF_INET6 = 10;
 
-  int AF_NETLINK = 16;
+    /**
+     * Netlink.
+     */
+    int AF_NETLINK = 16;
 
 }
