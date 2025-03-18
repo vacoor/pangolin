@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.handler.server;
+package com.github.pangolin.routing.handler.codec.socks5;
 
 import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.buffer.ByteBuf;

@@ -28,4 +28,5 @@ public interface TunChannelConfig extends ChannelConfig {
      * Sets the {@link TunChannelOption#TUN_MTU} option.
      */
     TunChannelConfig setMtu(int mtu);
+
 }

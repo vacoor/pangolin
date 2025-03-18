@@ -71,7 +71,6 @@ public class Socks5ClientDatagramPacketCodec extends MessageToMessageCodec<Datag
         }
 
         out.add(new DatagramPacket(payloadToReplace, proxyAddress, packet.sender()));
-//        out.add(packet.replace(payloadToReplace));
     }
 
     private void writeSocketAddress(final ByteBuf buf, final InetSocketAddress address,

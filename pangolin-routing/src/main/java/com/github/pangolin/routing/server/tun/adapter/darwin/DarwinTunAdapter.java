@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
-import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
+import com.github.pangolin.routing.server.tun.adapter.TunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.ctl_info;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.KernControl.sockaddr_ctl;
@@ -28,7 +28,7 @@ import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SysDomai
 import static java.nio.charset.StandardCharsets.US_ASCII;
 
 @Slf4j
-public class DarwinTunAdapter extends AbstractTunAdapter {
+public class DarwinTunAdapter extends TunAdapter {
 
     private static final LibC LIBC = LibC.INSTANTCE;
 

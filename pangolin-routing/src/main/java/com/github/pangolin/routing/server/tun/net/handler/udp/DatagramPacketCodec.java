@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.server.tun.net.handler;
+package com.github.pangolin.routing.server.tun.net.handler.udp;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;

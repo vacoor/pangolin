@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.server.tun.net;
+package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
@@ -10,6 +10,8 @@ import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
+import static org.pcap4j.packet.IpPacket.IpHeader;
+import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 
 /**
  */
@@ -33,14 +35,14 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
      * @param skb
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a>
      */
-    private void tcp_v4_rcv(final IpV4Packet.IpV4Header ih, TcpPacket skb) {
+    private void tcp_v4_rcv(final IpV4Header ih, TcpPacket skb) {
         tcp_v4_do_rcv(ih, skb);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1897">tcp_v4_do_rcv</a>
      */
-    private void tcp_v4_do_rcv(final IpV4Packet.IpV4Header ih, TcpPacket skb) {
+    private void tcp_v4_do_rcv(final IpV4Header ih, TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c
         // https://www.cnblogs.com/wanpengcoder/p/11750747.html
 
@@ -65,7 +67,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
-    private void tcp_v4_send_reset(IpV4Packet.IpV4Header ih, TcpPacket skb, int err) {
+    private void tcp_v4_send_reset(IpV4Header ih, TcpPacket skb, int err) {
         log.warn("SEND-RST: {}", err);
         // FIXME
         // send reset.
@@ -122,33 +124,34 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1722">tcp_v4_conn_request</a>
      */
     @Override
-    protected boolean conn_request(final IpPacket.IpHeader ih, final TcpPacket skb) {
+    protected boolean conn_request(final IpHeader ih, final TcpPacket skb) {
         return super.conn_request(ih, skb);
     }
 
     @Override
-    protected void send_synack(final IpPacket.IpHeader ih, final TcpPacket syn_skb) {
+    protected void send_synack(final IpHeader ih, final TcpPacket syn_skb) {
         tcp_v4_send_synack(ih, syn_skb);
     }
 
-    private void tcp_v4_send_synack(final IpPacket.IpHeader ipHdr, final TcpPacket syn_skb) {
+    private void tcp_v4_send_synack(final IpHeader iphdr, final TcpPacket syn_skb) {
+        final IpV4Header iph = (IpV4Header) iphdr;
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
-        final TcpPacket.Builder skb = tcp_make_synack(ipHdr, syn_skb)
+        final TcpPacket.Builder skb = tcp_make_synack(iph, syn_skb)
                 .asBuilder()
-                .srcAddr(ipHdr.getDstAddr())
-                .dstAddr(ipHdr.getSrcAddr())
+                .srcAddr(iph.getDstAddr())
+                .dstAddr(iph.getSrcAddr())
                 .srcPort(syn_skb.getHeader().getDstPort())
                 .dstPort(syn_skb.getHeader().getSrcPort())
                 ;
 
         final IpV4Packet ipPacket = new IpV4Packet.Builder()
                 .version(IpVersion.IPV4)
-                .tos(((IpV4Packet.IpV4Header) ipHdr).getTos())
-                .ttl(((IpV4Packet.IpV4Header) ipHdr).getTtl())
-                .identification(((IpV4Packet.IpV4Header) ipHdr).getIdentification())
-                .fragmentOffset(((IpV4Packet.IpV4Header) ipHdr).getFragmentOffset())
-                .srcAddr(((IpV4Packet.IpV4Header) ipHdr).getDstAddr())
-                .dstAddr(((IpV4Packet.IpV4Header) ipHdr).getSrcAddr())
+                .tos(iph.getTos())
+                .ttl(iph.getTtl())
+                .identification(iph.getIdentification())
+                .fragmentOffset(iph.getFragmentOffset())
+                .srcAddr(iph.getDstAddr())
+                .dstAddr(iph.getSrcAddr())
                 .protocol(IpNumber.TCP)
 
                 .paddingAtBuild(true)

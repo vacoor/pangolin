@@ -3,14 +3,38 @@ package com.github.pangolin.routing.server.tun.adapter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-public interface TunAdapter {
+public abstract class TunAdapter {
+    protected volatile boolean closed;
 
-    String name();
+    public abstract String name();
 
-    ByteBuffer read() throws IOException;
+    public ByteBuffer read() throws IOException {
+        checkOpen();
+        return read0();
+    }
 
-    void write(final ByteBuffer packet) throws IOException;
+    public void write(final ByteBuffer packet) throws IOException {
+        checkOpen();
+        write0(packet);
+    }
 
-    void destroy() throws IOException;
+    private void checkOpen() {
+        if (closed) {
+            throw new IllegalStateException("Device is closed.");
+        }
+    }
+
+    public void destroy() throws IOException {
+        if (!closed) {
+            closed = true;
+            destroy0();
+        }
+    }
+
+    protected abstract ByteBuffer read0() throws IOException;
+
+    protected abstract void write0(final ByteBuffer buffer) throws IOException;
+
+    protected abstract void destroy0() throws IOException;
 
 }

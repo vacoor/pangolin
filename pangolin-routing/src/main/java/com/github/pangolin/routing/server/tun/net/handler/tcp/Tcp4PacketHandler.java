@@ -1,9 +1,7 @@
-package com.github.pangolin.routing.server.tun.net.handler;
+package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
-import com.github.pangolin.routing.server.tun.net.Tcp4Connection;
-import com.github.pangolin.routing.server.tun.net.TcpConnection;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;

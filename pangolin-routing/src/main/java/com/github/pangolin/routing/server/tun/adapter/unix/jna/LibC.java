@@ -1,6 +1,10 @@
 package com.github.pangolin.routing.server.tun.adapter.unix.jna;
 
-import com.sun.jna.*;
+import com.sun.jna.Library;
+import com.sun.jna.Native;
+import com.sun.jna.NativeLong;
+import com.sun.jna.Pointer;
+import com.sun.jna.Structure;
 import com.sun.jna.platform.unix.LibCAPI;
 import com.sun.jna.ptr.IntByReference;
 
@@ -11,14 +15,10 @@ import java.nio.ByteBuffer;
  */
 public interface LibC extends LibCAPI, Library {
 
+    /**
+     * Lib c instance.
+     */
     LibC INSTANTCE = Native.load("c", LibC.class);
-
-    /*-
-    static {
-        // WARN: Failed to allocate closure on Armbian
-        Native.register("c");
-    }
-    */
 
     /**
      * Look up the error message string corresponding to an error number.
@@ -64,6 +64,7 @@ public interface LibC extends LibCAPI, Library {
      * and {@code errno} is set appropriately.
      * {@code close()} should not be retried after an error.
      */
+    @Override
     int close(final int fd);
 
     /**

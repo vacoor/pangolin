@@ -98,6 +98,8 @@ public class TrojanProxyHandler extends ChannelDuplexHandler {
          */
         buffer.writeBytes(getSecretKey(password));
         buffer.writeBytes(CRLF);
+
+        // Write TCP connect request.
         buffer.writeByte(Socks5CommandType.CONNECT.byteValue());
         if (sa.isUnresolved()) {
             buffer.writeByte(Socks5AddressType.DOMAIN.byteValue());
@@ -115,12 +117,6 @@ public class TrojanProxyHandler extends ChannelDuplexHandler {
             }
         }
         buffer.writeShort(sa.getPort());
-        /*
-        buffer.writeByte(Socks5CommandType.UDP_ASSOCIATE.byteValue());
-        buffer.writeByte(Socks5AddressType.IPv4.byteValue());
-        Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.IPv4, "0.0.0.0", buffer);
-        buffer.writeShort(0);
-        */
 
         buffer.writeBytes(CRLF);
         ctx.writeAndFlush(buffer);

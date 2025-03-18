@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.server.tun.net;
+package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
@@ -48,7 +48,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
-public abstract class TcpConnection<P extends IpPacket> extends InetConnectionSock {
+public abstract class TcpConnection<P extends IpPacket> {
     private static final byte FIN = 0x0001;
     private static final byte SYN = 0x0002;
     private static final byte RST = 0x0004;

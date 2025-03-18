@@ -22,8 +22,8 @@ import static com.github.pangolin.routing.server.tun.adapter.windows.jna.WintunL
 import static com.sun.jna.platform.win32.Guid.GUID;
 import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
 
-import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
+import com.github.pangolin.routing.server.tun.adapter.TunAdapter;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
@@ -42,7 +42,7 @@ import java.nio.ByteBuffer;
  * Windows tun adapter based on <a href="https://www.wintun.net/">wintun</a>.
  */
 @Slf4j
-public class WindowsTunAdapter extends AbstractTunAdapter {
+public class WindowsTunAdapter extends TunAdapter {
     private static final int INFINITE = 0xFFFFFFFF;
 
     private final long luid;
@@ -150,12 +150,13 @@ public class WindowsTunAdapter extends AbstractTunAdapter {
     /* ********************** */
 
     public static WindowsTunAdapter open(final String name, final String type, final int mtu, final InterfaceAddressEx... bindings) throws IOException {
-        return open(name, type, (GUID) null, mtu, bindings);
+        return open(name, type, (String) null, mtu, bindings);
     }
 
     public static WindowsTunAdapter open(final String name, final String type,
                                          final String guid, final int mtu, final InterfaceAddressEx... bindings) throws IOException {
-        return open(name, type, GUID.fromString(guid), mtu, bindings);
+        final GUID guidToUse = null != guid ? GUID.fromString(guid) : GUID.newGuid();
+        return open(name, type, guidToUse, mtu, bindings);
     }
 
     /**

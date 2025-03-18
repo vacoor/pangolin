@@ -7,7 +7,15 @@ import com.github.pangolin.routing.server.tun.adapter.linux.LinuxTunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.windows.WindowsTunAdapter;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.AbstractChannel;
+import io.netty.channel.ChannelConfig;
+import io.netty.channel.ChannelMetadata;
+import io.netty.channel.ChannelOutboundBuffer;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ChannelPromise;
+import io.netty.channel.DefaultEventLoop;
+import io.netty.channel.EventLoop;
+import io.netty.channel.RecvByteBufAllocator;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -82,7 +90,10 @@ public class TunChannel extends AbstractChannel {
         if (PlatformDependent.isOsx()) {
             device = DarwinTunAdapter.open(ifname, mtu, bindings);
         } else if (PlatformDependent.isWindows()) {
-            device = WindowsTunAdapter.open(ifname, "Proxies Host-Only", "{2B54EB73-2CF2-4C1A-B900-E193C9E16966}", mtu, bindings);
+            final String wintunType = config.getOption(TunChannelOption.WINTUN_TYPE);
+            final String wintunUuid = config.getOption(TunChannelOption.WINTUN_UUID);
+            final String wintunTypeToUse = null != wintunType ? wintunType : ifname;
+            device = WindowsTunAdapter.open(ifname, wintunTypeToUse, wintunUuid, mtu, bindings);
         } else {
             device = LinuxTunAdapter.open(ifname, mtu, bindings);
         }

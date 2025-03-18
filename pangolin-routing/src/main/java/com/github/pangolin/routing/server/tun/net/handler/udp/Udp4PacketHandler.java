@@ -1,10 +1,10 @@
-package com.github.pangolin.routing.server.tun.net.handler;
+package com.github.pangolin.routing.server.tun.net.handler.udp;
 
+import com.github.pangolin.routing.server.tun.net.handler.IpPacketHandler;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.socket.DatagramPacket;
-import io.netty.handler.codec.DatagramPacketDecoder;
 import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.UdpPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
@@ -14,6 +14,7 @@ import java.net.Inet4Address;
 import java.net.InetSocketAddress;
 
 /**
+ *
  */
 public class Udp4PacketHandler extends IpPacketHandler<IpV4Packet> {
 
@@ -38,8 +39,6 @@ public class Udp4PacketHandler extends IpPacketHandler<IpV4Packet> {
             ctx.fireChannelRead(new DatagramPacket(data, recipient, sender));
         }
     }
-
-
 
 
 }

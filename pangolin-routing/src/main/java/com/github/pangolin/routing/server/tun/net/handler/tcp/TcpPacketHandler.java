@@ -1,8 +1,8 @@
-package com.github.pangolin.routing.server.tun.net.handler;
+package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
+import com.github.pangolin.routing.server.tun.net.handler.IpPacketHandler;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
-import com.github.pangolin.routing.server.tun.net.TcpConnection;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 import freework.reflect.Types;
@@ -23,8 +23,7 @@ import java.net.InetAddress;
 import java.util.Map;
 
 @Slf4j
-public abstract class TcpPacketHandler<P extends IpPacket> extends IpPacketHandler<P> {
-    private final Class<P> ipPacketType;
+public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandler<T> {
     private final DnsEngine dnsEngine;
     private final SocketChannelFactory socketChannelFactory;
     private final EventLoopGroup childGroup = new NioEventLoopGroup();
@@ -37,16 +36,10 @@ public abstract class TcpPacketHandler<P extends IpPacket> extends IpPacketHandl
         this.socketChannelFactory = factory;
         final Type type = Types.resolveType(TcpPacketHandler.class.getTypeParameters()[0], getClass());
         Preconditions.checkState(type instanceof Class<?>, "Can't resolve %s IpPacket Class", TcpPacketHandler.class.getName());
-        this.ipPacketType = (Class<P>) type;
     }
 
     @Override
-    public boolean acceptInboundMessage(final Object msg) throws Exception {
-        return super.acceptInboundMessage(msg) && ipPacketType.isInstance(msg);
-    }
-
-    @Override
-    protected void channelRead0(final ChannelHandlerContext ctx, final P ipPacket) throws Exception {
+    protected void channelRead0(final ChannelHandlerContext ctx, final T ipPacket) throws Exception {
         final IpHeader ipHeader = ipPacket.getHeader();
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
@@ -63,13 +56,13 @@ public abstract class TcpPacketHandler<P extends IpPacket> extends IpPacketHandl
                     sessionMap.remove(sockKey);
             }));
         }
-        TcpConnection<P> tcpConnection = sessionMap.get(sockKey);
+        TcpConnection<T> tcpConnection = sessionMap.get(sockKey);
         if (null != tcpConnection) {
             tcpConnection.handler(ipPacket, tcpPacket);
         }
     }
 
-    protected abstract TcpConnection<P> create(Channel parent, EventLoopGroup childGroup,
-                                            DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory,
-                                            Runnable destroyCallback);
+    protected abstract TcpConnection<T> create(Channel parent, EventLoopGroup childGroup,
+                                               DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory,
+                                               Runnable destroyCallback);
 }

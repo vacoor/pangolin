@@ -1,5 +1,7 @@
 package com.github.pangolin.routing;
 
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
+
 import com.github.pangolin.routing.context.InMemoryRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.context.RouteContextFactory;
@@ -13,7 +15,16 @@ import com.github.pangolin.routing.server.extra.ProxyAutoConfigurationServerHand
 import com.github.pangolin.routing.server.extra.SwitchyRuleConfigurationServerHandler;
 import com.github.pangolin.routing.server.fakedns.FakeDnsAcceptorFactory;
 import com.github.pangolin.routing.server.tun.TunAcceptorFactory;
-import com.github.pangolin.routing.upstream.*;
+import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
+import com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkRoutingTable;
+import com.github.pangolin.routing.upstream.DirectUpstream;
+import com.github.pangolin.routing.upstream.DropUpstream;
+import com.github.pangolin.routing.upstream.RejectUpstream;
+import com.github.pangolin.routing.upstream.Upstream;
+import com.github.pangolin.routing.upstream.UpstreamCombiner;
+import com.github.pangolin.routing.upstream.UpstreamCombinersAware;
+import com.github.pangolin.routing.upstream.UpstreamFactoriesAware;
+import com.github.pangolin.routing.upstream.UpstreamFactory;
 import com.github.pangolin.routing.upstream.stats.StatsAware;
 import com.github.pangolin.routing.upstream.stats.StatsUpstreamCombiner;
 import com.github.pangolin.routing.upstream.stats.StatsUpstreamFactory;
@@ -22,7 +33,12 @@ import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.netflix.loadbalancer.LoadBalancerStats;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.socket.SocketChannel;
@@ -33,13 +49,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.system.ApplicationHome;
 
 import java.io.File;
-import java.net.*;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.net.URL;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
-
-import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 @Slf4j
 public class RouteApplication {
@@ -199,6 +215,10 @@ public class RouteApplication {
     }
 
     public static void main(String[] args) throws Exception {
+        for (NetworkRoutingTable.Route route : LinuxNetworkRoutingTable.get().routes()) {
+            System.out.println(route);
+        }
+
         final ApplicationHome home = new ApplicationHome(RouteApplication.class);
         final URL conf = new File(home.getDir(), "conf/default.conf").toURI().toURL();
         final RouteApplication app = new RouteApplication();

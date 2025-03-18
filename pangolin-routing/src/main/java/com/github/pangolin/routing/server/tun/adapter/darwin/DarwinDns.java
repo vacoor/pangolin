@@ -1,5 +1,15 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopRef;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopSourceRef;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreCallBack;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFArrayRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFDictionaryRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFIndex;
+import static com.sun.jna.platform.mac.CoreFoundation.CFMutableDictionaryRef;
+import static com.sun.jna.platform.mac.CoreFoundation.CFStringRef;
+
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration;
 import com.google.common.collect.Lists;
@@ -15,16 +25,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopRef;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopSourceRef;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreCallBack;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreRef;
-import static com.sun.jna.platform.mac.CoreFoundation.*;
-
 /**
  * Darwin system dns utilities.
- *
- * @since 1.0.0
  */
 @Slf4j
 public final class DarwinDns {
@@ -43,6 +45,9 @@ public final class DarwinDns {
     private static final String SERVICE_ID_DNS_KEY_FMT = "State:/Network/Service/%s/DNS";
     private static final Pattern SERVICE_ID_PATTERN = Pattern.compile("^State:/Network/Service/([-a-zA-Z0-9]+)/.*");
 
+    /**
+     * Private constructor.
+     */
     private DarwinDns() {
     }
 

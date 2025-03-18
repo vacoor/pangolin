@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.server.tun.adapter.linux;
 
 
-import com.github.pangolin.routing.server.tun.adapter.AbstractTunAdapter;
+import com.github.pangolin.routing.server.tun.adapter.TunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.unix.jna.LibC;
 import com.sun.jna.LastErrorException;
@@ -24,7 +24,7 @@ import static java.nio.charset.StandardCharsets.US_ASCII;
 import static com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkInterface.*;
 
 @Slf4j
-public class LinuxTunAdapter extends AbstractTunAdapter {
+public class LinuxTunAdapter extends TunAdapter {
 
     private static final LibC LIBC = LibC.INSTANTCE;
 

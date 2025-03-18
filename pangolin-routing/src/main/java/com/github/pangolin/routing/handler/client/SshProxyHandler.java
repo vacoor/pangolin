@@ -171,7 +171,9 @@ public class SshProxyHandler extends ChannelDuplexHandler {
         }
     }
 
-    private SshFutureListener<AuthFuture> authToNext(final ChannelHandlerContext ctx, final Consumer<ChannelHandlerContext> next, final ChannelPromise promise) {
+    private SshFutureListener<AuthFuture> authToNext(final ChannelHandlerContext ctx,
+                                                     final Consumer<ChannelHandlerContext> next,
+                                                     final ChannelPromise promise) {
         return new SshFutureListener<AuthFuture>() {
             @Override
             public void operationComplete(final AuthFuture future) {

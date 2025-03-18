@@ -117,6 +117,7 @@ public class BouncyCastleCipherAlgorithmSpi extends CipherAlgorithmSpi {
             return ivSize;
         }
 
+        @Override
         public CipherHandle getCipher(final boolean encrypt, final byte[] key, final byte[] iv) {
             final StreamCipher cipher = factory.apply(this);
             cipher.init(encrypt, new ParametersWithIV(new KeyParameter(key), iv));
@@ -135,6 +136,7 @@ public class BouncyCastleCipherAlgorithmSpi extends CipherAlgorithmSpi {
                 return cipher.processBytes(inBytes, inOffset, inLength, outBytes, outOffset);
             }
 
+            @Override
             public int doFinal(final byte[] inBytes, final int inOffset, final int inLength, final byte[] outBytes, final int outOffset) throws Exception {
                 return cipher.processBytes(inBytes, inOffset, inLength, outBytes, outOffset);
             }
@@ -205,6 +207,7 @@ public class BouncyCastleCipherAlgorithmSpi extends CipherAlgorithmSpi {
             return tagSize;
         }
 
+        @Override
         public CipherHandle getCipher(final boolean encrypt, final byte[] key, final byte[] nonce) {
             final AEADCipher cipher = factory.apply(this);
             final CipherParameters cipherParameters = new AEADParameters(new KeyParameter(key), tagSize * Byte.SIZE, nonce);
@@ -224,6 +227,7 @@ public class BouncyCastleCipherAlgorithmSpi extends CipherAlgorithmSpi {
                 return cipher.processBytes(inBytes, inOffset, inLength, outBytes, outOffset);
             }
 
+            @Override
             public int doFinal(final byte[] inBytes, final int inOffset, final int inLength, final byte[] outBytes, final int outOffset) throws Exception {
                 final int len = cipher.processBytes(inBytes, inOffset, inLength, outBytes, outOffset);
                 return len + cipher.doFinal(outBytes, outOffset + len);

@@ -85,7 +85,7 @@ public class TrojanDatagramProxyHandler extends ChannelDuplexHandler {
                 true, udpCtx.channel().eventLoop(), new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(SocketChannel ch) {
-                        ch.pipeline().addLast(new TrojanProxyHandshakeHandler(proxyAddress, proxyPassword));
+                        ch.pipeline().addLast(new TrojanDatagramProxyHandshakeHandler(proxyAddress, proxyPassword));
                         ch.pipeline().addLast(new TrojanUdpOverTcpCodec(proxyAddress, addressEncoder, addressDecoder));
                         ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramPacket>() {
                             @Override
