@@ -16,7 +16,6 @@ import com.github.pangolin.routing.server.extra.SwitchyRuleConfigurationServerHa
 import com.github.pangolin.routing.server.fakedns.FakeDnsAcceptorFactory;
 import com.github.pangolin.routing.server.tun.TunAcceptorFactory;
 import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
-import com.github.pangolin.routing.server.tun.adapter.linux.LinuxNetworkRoutingTable;
 import com.github.pangolin.routing.upstream.DirectUpstream;
 import com.github.pangolin.routing.upstream.DropUpstream;
 import com.github.pangolin.routing.upstream.RejectUpstream;
@@ -215,7 +214,7 @@ public class RouteApplication {
     }
 
     public static void main(String[] args) throws Exception {
-        for (NetworkRoutingTable.Route route : LinuxNetworkRoutingTable.get().routes()) {
+        for (NetworkRoutingTable.Route route : NetworkRoutingTable.get().routes()) {
             System.out.println(route);
         }
 
@@ -224,10 +223,9 @@ public class RouteApplication {
         final RouteApplication app = new RouteApplication();
         final RouteContext context = app.run(conf);
 
-        app.channelGroup.add(new FakeDnsAcceptorFactory().apply(0, "FakeDNS").start(context).channel());
-
         if (args.length > 0 && "tun".equalsIgnoreCase(args[0])) {
             final String[] args2 = Arrays.copyOfRange(args, 1, args.length);
+            app.channelGroup.add(new FakeDnsAcceptorFactory().apply(0, "FakeDNS").start(context).channel());
             app.channelGroup.add(new TunAcceptorFactory().apply(0, args2).start(context).channel());
         }
 

@@ -1,17 +1,17 @@
 package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
-import com.github.pangolin.routing.support.SocketChannelFactory;
+import static org.pcap4j.packet.IpPacket.IpHeader;
+import static org.pcap4j.packet.IpV4Packet.IpV4Header;
+
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
+import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
-import static org.pcap4j.packet.IpPacket.IpHeader;
-import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 
 /**
  */
@@ -26,7 +26,16 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
 
     @Override
     public synchronized void handler(final IpV4Packet ip, final TcpPacket tcpPacket) {
-        tcp_v4_rcv(ip.getHeader(), tcpPacket);
+        tcp_v4_rcv(ip, tcpPacket);
+    }
+
+    @Override
+    protected void init() {
+        tcp_v4_init_sock();
+    }
+
+    private void tcp_v4_init_sock() {
+        tcp_init_sock();
     }
 
     /**
@@ -35,15 +44,14 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
      * @param skb
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a>
      */
-    private void tcp_v4_rcv(final IpV4Header ih, TcpPacket skb) {
+    private void tcp_v4_rcv(final IpV4Packet ih, TcpPacket skb) {
         tcp_v4_do_rcv(ih, skb);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1897">tcp_v4_do_rcv</a>
      */
-    private void tcp_v4_do_rcv(final IpV4Header ih, TcpPacket skb) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c
+    private void tcp_v4_do_rcv(final IpV4Packet ih, TcpPacket skb) {
         // https://www.cnblogs.com/wanpengcoder/p/11750747.html
 
         /*
@@ -53,11 +61,11 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
         }
         */
 
-        trace(ih, skb, true);
+        trace(ih.getHeader(), skb, true);
         try {
             int err = tcp_rcv_state_process(ih, skb);
             if (0 != err) {
-                tcp_v4_send_reset(ih, skb, err);
+                tcp_v4_send_reset(ih.getHeader(), skb, err);
                 destroy();
             }
         } catch (final Throwable cause) {
@@ -67,7 +75,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
-    private void tcp_v4_send_reset(IpV4Header ih, TcpPacket skb, int err) {
+    void tcp_v4_send_reset(IpV4Header ih, TcpPacket skb, int err) {
         log.warn("SEND-RST: {}", err);
         // FIXME
         // send reset.
@@ -124,7 +132,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1722">tcp_v4_conn_request</a>
      */
     @Override
-    protected boolean conn_request(final IpHeader ih, final TcpPacket skb) {
+    protected boolean conn_request(final IpV4Packet ih, final TcpPacket skb) {
         return super.conn_request(ih, skb);
     }
 

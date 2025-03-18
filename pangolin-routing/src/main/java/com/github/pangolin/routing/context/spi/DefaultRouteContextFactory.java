@@ -84,7 +84,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
         Ini.Section listen = ini.getSection("Listen");
         if (null == listen) {
             listen = ini.addSection("Listen");
-            listen.put("1080", "DEFAULT, SOCKS5, SOCKS4, HTTP");
+//            listen.put("1080", "DEFAULT, SOCKS5, SOCKS4, HTTP");
         }
 
         for (final Map.Entry<String, String> entry : listen.entrySet()) {

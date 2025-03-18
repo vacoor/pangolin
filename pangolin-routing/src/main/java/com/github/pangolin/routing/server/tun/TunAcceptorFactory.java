@@ -13,6 +13,7 @@ import com.github.pangolin.routing.server.tun.adapter.windows.WindowsNetworkInte
 import com.github.pangolin.routing.server.tun.adapter.windows.WindowsTunAdapter;
 import com.github.pangolin.routing.server.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.server.tun.net.channel.TunChannel;
+import com.github.pangolin.routing.server.tun.net.channel.TunChannelOption;
 import com.github.pangolin.routing.server.tun.net.handler.IpPacketCodec;
 import com.github.pangolin.routing.server.tun.net.handler.tcp.Tcp4PacketHandler;
 import com.github.pangolin.routing.support.SocketChannelFactory;
@@ -44,18 +45,19 @@ public class TunAcceptorFactory implements AcceptorFactory {
 
     public static ChannelFuture startTun(final String ifname, final DnsEngine dnsEngine, final SocketChannelFactory factory) throws Exception {
         final EventLoopGroup group = new DefaultEventLoopGroup(1);
+
+        final String wintunType = "Proxies Host-Only";
+        final String wintunUuid = "{2B54EB73-2CF2-4C1A-B900-E193C9E16966}";
+
         final Bootstrap b = new Bootstrap()
                 .group(group)
                 .channel(TunChannel.class)
+                .option(TunChannelOption.WINTUN_TYPE, wintunType)
+                .option(TunChannelOption.WINTUN_UUID, wintunUuid)
                 .handler(new ChannelInitializer<Channel>() {
                     @Override
                     protected void initChannel(final Channel ch) throws Exception {
                         ch.pipeline().addLast(new IpPacketCodec());
-//                            ch.pipeline().addLast(new SimpleTcpPacketHandler(dnsEngine, factory));
-//                        ch.pipeline().addLast(new Icmp4PacketHandler());
-//                        ch.pipeline().addLast(new DatagramPacketCodec());
-
-//                        ch.pipeline().addLast(new Udp4PacketHandler());
                         ch.pipeline().addLast(new Tcp4PacketHandler(dnsEngine, factory));
                     }
                 });

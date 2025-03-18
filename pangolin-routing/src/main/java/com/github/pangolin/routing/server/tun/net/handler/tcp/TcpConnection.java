@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
-import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
+import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import io.netty.buffer.ByteBuf;
@@ -268,14 +268,14 @@ public abstract class TcpConnection<P extends IpPacket> {
      *
      */
 
-    private int rcv_isn;
+    int rcv_isn;
     private int rcv_wup;
     private int rcv_nxt;
     private int rcv_wnd;
 
     private int copied_seq;
 
-    private byte rcv_wscale = 6;
+    byte rcv_wscale = 6;
 
     private int icsk_ack_rcv_mss;
 
@@ -304,7 +304,7 @@ public abstract class TcpConnection<P extends IpPacket> {
      * Usable window = snd.una + snd.wnd - snd.nxt
      */
 
-    private int snt_isn;
+    int snt_isn;
     private int snd_una;
     private int snd_wnd;
     private int snd_nxt;
@@ -379,12 +379,15 @@ public abstract class TcpConnection<P extends IpPacket> {
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
-        tcp_v4_init_sock();
+        init();
         this.listen();
     }
 
-    private void listen() {
+    protected abstract void init();
+
+    private TcpConnection<P>  listen() {
         inet_listen(100);
+        return this;
     }
 
     /**
@@ -501,7 +504,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     private final AtomicInteger ireq_snd_wscale_ref = new AtomicInteger();
     private final AtomicInteger ireq_rcv_wscale_ref = new AtomicInteger();
 
-    protected boolean conn_request(final IpHeader ih, final TcpPacket skb) {
+    protected boolean conn_request(final P ih, final TcpPacket skb) {
         return tcp_conn_request(ih, skb);
     }
 
@@ -510,7 +513,8 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
-    private boolean tcp_conn_request(final IpHeader ipHdr, final TcpPacket skb) {
+    private boolean tcp_conn_request(final P pkg, final TcpPacket skb) {
+        final IpHeader ipHdr = pkg.getHeader();
         /*-
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
@@ -765,10 +769,6 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     }
 
-    private void tcp_v4_init_sock() {
-        tcp_init_sock();
-    }
-
     private long mdev_us;
     private long mdev_max_us;
     private long rttvar_us;
@@ -780,7 +780,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     // FIXME TODO tcp_init_sock https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L422
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2492
-    private void tcp_init_sock() {
+    protected void tcp_init_sock() {
         // ...
         icsk_rto = TCP_TIMEOUT_INIT;
         icsk_delack_max = TCP_DELACK_MAX;
@@ -898,8 +898,9 @@ public abstract class TcpConnection<P extends IpPacket> {
                 icsk_ack_quick = 0;
                 /* Leaving quickack mode we deflate ATO. */
                 icsk_ack_ato = TCP_ATO_MIN;
-            } else
+            } else {
                 icsk_ack_quick -= pkts;
+            }
         }
     }
 
@@ -994,8 +995,9 @@ public abstract class TcpConnection<P extends IpPacket> {
                 new_sample += m;
             } else {
                 m <<= 3;
-                if (m < new_sample)
+                if (m < new_sample) {
                     new_sample = m;
+                }
             }
         } else {
             /* No previous measure. */
@@ -1109,20 +1111,23 @@ public abstract class TcpConnection<P extends IpPacket> {
                  * but also it limits too fast rto decreases,
                  * happening in pure Eifel.
                  */
-                if (m > 0)
+                if (m > 0) {
                     m >>= 3;
+                }
             } else {
                 m -= (mdev_us >> 2);   /* similar update on mdev */
             }
             mdev_us += m;        /* mdev = 3/4 mdev + 1/4 new */
             if (mdev_us > mdev_max_us) {
                 mdev_max_us = mdev_us;
-                if (mdev_max_us > rttvar_us)
+                if (mdev_max_us > rttvar_us) {
                     rttvar_us = mdev_max_us;
+                }
             }
             if (after(snd_una, rtt_seq)) {
-                if (mdev_max_us < rttvar_us)
+                if (mdev_max_us < rttvar_us) {
                     rttvar_us -= (rttvar_us - mdev_max_us) >> 2;
+                }
                 rtt_seq = snd_nxt;
                 mdev_max_us = tcp_rto_min_us();
 
@@ -1825,10 +1830,15 @@ public abstract class TcpConnection<P extends IpPacket> {
         }
 
         // if ....
-        if (false) {
+//        if (false) {
+        if (snd_wnd > 0
+                // && !sock_flag(sk, SOCK_DEAD)
+                && ((1 << state.get().ordinal()) & (TCPF_SYN_SENT | TCPF_SYN_RECV)) != 0) {
+
             long us_or_ms1 = tcp_time_stamp_ts();
             long retrans_stamp0 = retrans_stamp != 0 ? retrans_stamp : tcp_skb_timestamp_ts(tcp_usec_ts, skb);
             long rtx_delta = us_or_ms1 - retrans_stamp0;
+
             if (tcp_usec_ts != 0) {
                 // rtx_delta /= 1000;  // ms
                 rtx_delta = TimeUnit.MICROSECONDS.toMillis(rtx_delta);
@@ -2661,7 +2671,7 @@ public abstract class TcpConnection<P extends IpPacket> {
              */
             if (!ipv4_sysctl_tcp_shrink_window || 0 != rcv_wscale) {
                 /* Never shrink the offered window */
-                new_win = ALIGN(cur_win, 1 << rcv_wscale);
+                new_win = align(cur_win, 1 << rcv_wscale);
             }
         }
 
@@ -3146,7 +3156,7 @@ public abstract class TcpConnection<P extends IpPacket> {
              * 1<<rcv_wscale > mss.
              */
             // FIXME
-            window = ALIGN(window, (1 << rcv_wscale));
+            window = align(window, (1 << rcv_wscale));
         } else {
             window = rcv_wnd;
             /* Get the largest window that is a nice multiple of mss.
@@ -3526,8 +3536,9 @@ public abstract class TcpConnection<P extends IpPacket> {
          * Karn's algorithm forbids taking RTT if some retransmitted data
          * is acked (RFC6298).
          */
-        if (seq_rtt_us < 0)
+        if (seq_rtt_us < 0) {
             seq_rtt_us = sack_rtt_us;
+        }
 
         /* RTTM Rule: A TSecr value received in a segment is used to
          * update the averaged RTT measurement only if the segment
@@ -3539,8 +3550,9 @@ public abstract class TcpConnection<P extends IpPacket> {
 //            seq_rtt_us = ca_rtt_us = tcp_rtt_tsopt_us(tp);
 
         // rs->rtt_us = ca_rtt_us; /* RTT of last (S)ACKed packet (or -1) */
-        if (seq_rtt_us < 0)
+        if (seq_rtt_us < 0) {
             return false;
+        }
 
         /* ca_rtt_us >= 0 is counting on the invariant that ca_rtt_us is
          * always taken together with ACK, SACK, or TS-opts. Any negative
@@ -4063,7 +4075,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         tcp_send_delayed_ack();
     }
 
-    private void tcp_ack_snd_check(final IpHeader ipHdr, final TcpPacket skb) {
+    private void tcp_ack_snd_check(final P ipHdr, final TcpPacket skb) {
         if (!inet_csk_ack_scheduled()) {
             /* We sent a data segment already. */
             return;
@@ -4125,7 +4137,7 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @throws IOException
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6743">tcp_rcv_state_process</a>
      */
-    protected int tcp_rcv_state_process(final IpHeader ih, final TcpPacket skb) throws IOException {
+    protected int tcp_rcv_state_process(final P ih, final TcpPacket skb) throws IOException {
         final TcpHeader th = skb.getHeader();
 
         /*-
@@ -4345,7 +4357,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         return TimeUnit.NANOSECONDS.toMillis(tcp_clock_ns());
     }
 
-    private int ALIGN(int len, int align) {
+    private int align(final int len, final int align) {
         return (((len) + ((align) - 1)) & ~((align) - 1));
     }
 
