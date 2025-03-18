@@ -8,6 +8,7 @@ import com.github.pangolin.routing.handler.codec.ss.crypto.StreamCipherAlgorithm
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelDuplexHandler;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
@@ -27,14 +28,13 @@ import java.security.SecureRandom;
  */
 public class SsProxyHandler extends ChannelDuplexHandler {
     private final SocketAddress proxyAddress;
-    private final StreamCipherAlgorithm streamCipherAlgorithm;
-    private final AeadCipherAlgorithm aeadCipherAlgorithm;
-    private final String password;
+    private final ChannelHandler codec;
 
     private volatile SocketAddress destinationAddress;
 
     public SsProxyHandler(final SocketAddress proxyAddress, final CipherAlgorithm algorithm, final String password) {
         this.proxyAddress = ObjectUtil.checkNotNull(proxyAddress, "proxyAddress");
+        /*
         if (algorithm instanceof StreamCipherAlgorithm) {
             aeadCipherAlgorithm = null;
             streamCipherAlgorithm = (StreamCipherAlgorithm) algorithm;
@@ -44,16 +44,22 @@ public class SsProxyHandler extends ChannelDuplexHandler {
         } else {
             throw new UnsupportedOperationException("algorithm not supported: " + algorithm.getName());
         }
-        this.password = password;
+        */
+        this.codec = newCodec(algorithm, password);
+    }
+
+    private ChannelHandler newCodec(final CipherAlgorithm algorithm, final String password) {
+        if (algorithm instanceof StreamCipherAlgorithm) {
+            return new SsSocketStreamCryptCodec((StreamCipherAlgorithm) algorithm, password, new SecureRandom());
+        } else if (algorithm instanceof AeadCipherAlgorithm) {
+            return new SsSocketAeadCryptCodec((AeadCipherAlgorithm) algorithm, password, new SecureRandom());
+        }
+        throw new UnsupportedOperationException("algorithm not supported: " + algorithm.getName());
     }
 
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
-        if (null != aeadCipherAlgorithm) {
-            ctx.pipeline().addBefore(ctx.name(), null, new SsSocketAeadCryptCodec(aeadCipherAlgorithm, password, new SecureRandom()));
-        } else {
-            ctx.pipeline().addBefore(ctx.name(), null, new SsSocketStreamCryptCodec(streamCipherAlgorithm, password, new SecureRandom()));
-        }
+        ctx.pipeline().addBefore(ctx.name(), null, codec);
     }
 
     @Override

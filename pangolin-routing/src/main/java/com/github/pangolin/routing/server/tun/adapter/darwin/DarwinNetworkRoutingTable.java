@@ -23,6 +23,9 @@ import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.Sysctl.C
 import static com.github.pangolin.routing.server.tun.adapter.util.NetUtils2.cidrToNetmaskAddress;
 import static com.sun.jna.Pointer.NULL;
 
+/**
+ * Manipulate the routing tables on mac OS.
+ */
 public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
 
     /**

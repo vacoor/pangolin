@@ -383,7 +383,9 @@ public abstract class TcpConnection<P extends IpPacket> {
         this.listen();
     }
 
-    protected abstract void init();
+    protected void init() {
+        tcp_init_sock();
+    }
 
     private TcpConnection<P>  listen() {
         inet_listen(100);
@@ -1144,7 +1146,7 @@ public abstract class TcpConnection<P extends IpPacket> {
             // tcp_bpf_rtt(sk, mrtt_us, srtt);
         }
         srtt_us = Math.max(1, srtt);
-        log.info("SRTT = {}", srtt_us);
+        log.debug("SRTT = {}", srtt_us);
     }
 
     /**
@@ -1176,7 +1178,7 @@ public abstract class TcpConnection<P extends IpPacket> {
          * guarantees that rto is higher.
          */
         tcp_bound_rto();
-        log.info("ICSK_RTO = {}", icsk_rto);
+        log.debug("ICSK_RTO = {}", icsk_rto);
     }
 
     /**
@@ -2319,9 +2321,6 @@ public abstract class TcpConnection<P extends IpPacket> {
 
 
     protected void trace(final IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
-//        if (true) {
-//            return;
-//        }
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         final TcpHeader tcpHeader = tcpPacket.getHeader();
@@ -2407,7 +2406,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         }
         */
 
-        log.info(buff.toString());
+        log.debug(buff.toString());
     }
 
     private long tcp_jiffies32() {
@@ -2865,6 +2864,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
         trace(ipPacket.getHeader(), buf.build(), false);
         parent.writeAndFlush(ipPacket);
+//         parent.writeAndFlush(ipPacket).syncUninterruptibly();
     }
 
     /**
@@ -2964,7 +2964,11 @@ public abstract class TcpConnection<P extends IpPacket> {
             mss_now = tcp_sync_mss(mtu);
         }
 
-        int optLen = tcp_established_options().stream().mapToInt(TcpOption::length).reduce(Integer::sum).orElse(0);
+        int optLen = tcp_established_options()
+                .stream()
+                .mapToInt(TcpOption::length)
+                .reduce(Integer::sum)
+                .orElse(0);
         int header_len = optLen + SIZE_OF_TCP_HDR;
         if (header_len != tcp_header_len) {
             int delta = header_len - tcp_header_len;
@@ -3681,7 +3685,7 @@ public abstract class TcpConnection<P extends IpPacket> {
             seq_rtt_us = tcp_stamp_us_delta(tcp_mstamp, first_ackt);
             ca_rtt_us = tcp_stamp_us_delta(tcp_mstamp, last_ackt);
 
-            log.info("SEQ RTT = {}", seq_rtt_us);
+            log.debug("SEQ RTT = {}", seq_rtt_us);
         }
 
         /*-

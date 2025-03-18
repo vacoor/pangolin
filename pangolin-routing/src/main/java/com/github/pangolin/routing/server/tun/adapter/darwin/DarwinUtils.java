@@ -64,7 +64,7 @@ class DarwinUtils {
         }
     }
 
-    public static void throwLastErrorException(final int errno) {
+    static void throwLastErrorException(final int errno) {
         final String errmsg = String.format("[%s] %s", errno, LIBC.strerror(errno));
         throw new DarwinLastErrorException(errno, errmsg);
     }

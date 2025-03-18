@@ -4,6 +4,7 @@ import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.server.acceptor.Acceptor;
 import com.github.pangolin.routing.server.acceptor.AcceptorFactory;
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
+import com.github.pangolin.routing.server.tun.adapter.NetworkRoutingTable;
 import com.github.pangolin.routing.server.tun.adapter.TunAdapter;
 import com.github.pangolin.routing.server.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.server.tun.adapter.darwin.DarwinDns;
@@ -17,6 +18,7 @@ import com.github.pangolin.routing.server.tun.net.channel.TunChannelOption;
 import com.github.pangolin.routing.server.tun.net.handler.IpPacketCodec;
 import com.github.pangolin.routing.server.tun.net.handler.tcp.Tcp4PacketHandler;
 import com.github.pangolin.routing.support.SocketChannelFactory;
+import com.github.pangolin.routing.util.SocketUtils;
 import com.sun.jna.Platform;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
@@ -44,7 +46,7 @@ public class TunAcceptorFactory implements AcceptorFactory {
     }
 
     public static ChannelFuture startTun(final String ifname, final DnsEngine dnsEngine, final SocketChannelFactory factory) throws Exception {
-        final EventLoopGroup group = new DefaultEventLoopGroup(1);
+        final EventLoopGroup group = new DefaultEventLoopGroup();
 
         final String wintunType = "Proxies Host-Only";
         final String wintunUuid = "{2B54EB73-2CF2-4C1A-B900-E193C9E16966}";
@@ -89,6 +91,9 @@ public class TunAcceptorFactory implements AcceptorFactory {
 //                        LinuxNetworkRoutingTable.add("tun8", addr, 24, gw, false);
 
                     }
+                    final InetAddress dst = SocketUtils.addressByName("10.188.71.3", true);
+                    final InetAddress gw = SocketUtils.addressByName("198.18.0.1", true);
+                    NetworkRoutingTable.get().add(dst, (byte) 24, gw, adapter.name(), 0);
                 } else {
                     log.error("Tun adapter bound error: {}", future.cause().getMessage(), future.cause());
                 }

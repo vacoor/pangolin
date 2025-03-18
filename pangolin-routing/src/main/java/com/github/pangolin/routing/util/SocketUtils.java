@@ -10,7 +10,7 @@ public abstract class SocketUtils {
     private SocketUtils() {
     }
 
-    public static InetAddress toAddress(final String host, final boolean resolve) {
+    public static InetAddress addressByName(final String host, final boolean resolve) {
         try {
             if (resolve) {
                 return InetAddress.getByName(host);
@@ -30,7 +30,7 @@ public abstract class SocketUtils {
     }
 
     public static InetSocketAddress toSocketAddress(final String host, final int port, final boolean resolve) {
-        final InetAddress inetAddress = toAddress(host, resolve);
+        final InetAddress inetAddress = addressByName(host, resolve);
         return null != inetAddress ? new InetSocketAddress(inetAddress, port) : InetSocketAddress.createUnresolved(host, port);
     }
 
@@ -38,7 +38,7 @@ public abstract class SocketUtils {
         if (!socketAddress.isUnresolved()) {
             return socketAddress.getAddress();
         }
-        return toAddress(socketAddress.getHostString(), resolve);
+        return addressByName(socketAddress.getHostString(), resolve);
     }
 
 }

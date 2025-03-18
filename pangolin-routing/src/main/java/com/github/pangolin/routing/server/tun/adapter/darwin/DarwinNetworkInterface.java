@@ -49,7 +49,7 @@ import java.net.InetAddress;
 import java.util.List;
 
 /**
- * This class represents a Network Interface on Darwin OS.
+ * This class represents a Network Interface on mac OS.
  */
 @Slf4j
 public class DarwinNetworkInterface extends UnixNetworkInterface implements NetworkInterfaceEx {
