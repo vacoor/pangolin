@@ -1,15 +1,5 @@
 package com.github.pangolin.routing.server.tun.adapter.darwin;
 
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopRef;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopSourceRef;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreCallBack;
-import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreRef;
-import static com.sun.jna.platform.mac.CoreFoundation.CFArrayRef;
-import static com.sun.jna.platform.mac.CoreFoundation.CFDictionaryRef;
-import static com.sun.jna.platform.mac.CoreFoundation.CFIndex;
-import static com.sun.jna.platform.mac.CoreFoundation.CFMutableDictionaryRef;
-import static com.sun.jna.platform.mac.CoreFoundation.CFStringRef;
-
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation;
 import com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration;
 import com.google.common.collect.Lists;
@@ -24,6 +14,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopRef;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.CoreFoundation.CFRunLoopSourceRef;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreCallBack;
+import static com.github.pangolin.routing.server.tun.adapter.darwin.jna.SystemConfiguration.SCDynamicStoreRef;
+import static com.sun.jna.platform.mac.CoreFoundation.*;
 
 /**
  * Darwin system dns utilities.
@@ -156,6 +152,19 @@ public final class DarwinDns {
         };
     }
 
+    /**
+     * Notify OS flush dns cache.
+     *
+     * @return true if notify OS successful, otherwise false
+     */
+    public static boolean flushDnsCache() {
+        final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR("DNS-FLUSHER"), null, null);
+        try {
+            return flushDnsCache0(store);
+        } finally {
+            CF.CFRelease(store);
+        }
+    }
 
     /* ******* ********* */
 
@@ -310,7 +319,7 @@ public final class DarwinDns {
      * @param store the dynamic store session
      * @return true if notify OS successful, otherwise false
      */
-    private boolean flushDnsCache(final SCDynamicStoreRef store) {
+    private static boolean flushDnsCache0(final SCDynamicStoreRef store) {
         return SC.SCDynamicStoreNotifyValue(store, CFSTR(GLOBAL_DNS_KEY));
     }
 

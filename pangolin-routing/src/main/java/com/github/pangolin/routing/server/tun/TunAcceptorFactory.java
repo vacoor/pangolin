@@ -84,6 +84,7 @@ public class TunAcceptorFactory implements AcceptorFactory {
                         // log.info("networksetup -setdnsservers \"Wi-Fi\" 127.0.0.1(empty)");
                         // log.info("sudo killall -HUP mDNSResponder;");
                         DarwinDns.addDns(new String[]{"::1", "127.0.0.1"});
+                        DarwinDns.flushDnsCache();
                     } else if (adapter instanceof LinuxTunAdapter) {
                         // ip route add 192.168.2.0/24 via 192.168.1.1 dev eth0
 //                        Inet4Address addr = (Inet4Address) InetAddress.getByName("198.18.2.0");
