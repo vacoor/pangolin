@@ -356,16 +356,6 @@ public abstract class TcpConnection<P extends IpPacket> {
     private ConcurrentLinkedQueue<TcpBuffer> sk_write_queue = new ConcurrentLinkedQueue<>();
     private ConcurrentLinkedQueue<TcpBuffer> tcp_rtx_queue = new ConcurrentLinkedQueue<>();
 
-    private ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1, new ThreadFactory() {
-        @Override
-        public Thread newThread(final Runnable r) {
-            Thread t = new Thread(r);
-            t.setDaemon(true);
-            return t;
-        }
-    });
-
-
     protected final Channel parent;
     private final DnsEngine dnsEngine;
     private final EventLoopGroup childGroup;
@@ -1614,7 +1604,8 @@ public abstract class TcpConnection<P extends IpPacket> {
     private final ConcurrentMap<Runnable, Future<?>> timers = Maps.newConcurrentMap();
 
     private int __mod_timer(Runnable timer, long expires, int options) {
-        final ScheduledFuture<?> nf = scheduler.schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
+        io.netty.util.concurrent.ScheduledFuture<?> nf = parent.eventLoop().schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
+//        final ScheduledFuture<?> nf = scheduler.schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
         Future<?> future = timers.put(timer, nf);
         if (null != future && !future.isDone() && !future.isCancelled()) {
             future.cancel(false);
@@ -3371,12 +3362,18 @@ public abstract class TcpConnection<P extends IpPacket> {
             return;
         }
 
-        final int sndSeq = tcp_acceptable_seq();
+        final TcpBuffer buf = new TcpBuffer();
 
-        TcpBuffer current = new TcpBuffer().ack(true).sequenceNumber(sndSeq);
-        __tcp_transmit_skb(current, false, rcv_nxt);
+        buf.sequenceNumber(tcp_acceptable_seq())
+           .ack(true);
+
+        /* Send it off, this clears delayed acks for us. */
+        __tcp_transmit_skb(buf, false, rcv_nxt);
     }
 
+    /**
+     * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4279.
+     */
     private void tcp_send_ack() {
         __tcp_send_ack(rcv_nxt);
     }
@@ -4050,6 +4047,9 @@ public abstract class TcpConnection<P extends IpPacket> {
         tcp_check_space();
     }
 
+    /**
+     * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5760.
+     */
     private void __tcp_ack_snd_check() {
         if (tcp_in_quickack_mode() || 0 != (icsk_ack_pending & ICSK_ACK_NOW)) {
             tcp_send_ack();
@@ -4059,6 +4059,9 @@ public abstract class TcpConnection<P extends IpPacket> {
         tcp_send_delayed_ack();
     }
 
+    /**
+     * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5827.
+     */
     private void tcp_ack_snd_check(final P ipHdr, final TcpPacket skb) {
         if (!inet_csk_ack_scheduled()) {
             /* We sent a data segment already. */
