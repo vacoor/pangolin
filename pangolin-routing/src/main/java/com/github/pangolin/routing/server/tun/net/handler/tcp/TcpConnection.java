@@ -1,8 +1,5 @@
 package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
-import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
-import static com.sun.jna.platform.linux.ErrNo.EINVAL;
-
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.google.common.collect.Lists;
@@ -10,24 +7,13 @@ import com.google.common.collect.Maps;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpPacket;
+import org.pcap4j.packet.*;
 import org.pcap4j.packet.IpPacket.IpHeader;
-import org.pcap4j.packet.Packet;
-import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
-import org.pcap4j.packet.TcpNoOperationOption;
-import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.TcpPacket.TcpOption;
-import org.pcap4j.packet.TcpWindowScaleOption;
-import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.io.IOException;
@@ -37,15 +23,14 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+
+import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
+import static com.sun.jna.platform.linux.ErrNo.EINVAL;
 
 @Slf4j
 public abstract class TcpConnection<P extends IpPacket> {
@@ -361,7 +346,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     private final EventLoopGroup childGroup;
     private final SocketChannelFactory socketChannelFactory;
 
-    private volatile Channel child;
+    volatile Channel child;
     private int connTimeoutMs = 10 * 1000;
 
     protected TcpConnection(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
@@ -428,7 +413,15 @@ public abstract class TcpConnection<P extends IpPacket> {
         return 0;
     }
 
-    public abstract void handler(final P ipHeader, final TcpPacket tcpPacket);
+    public void handler(final P ipHeader, final TcpPacket tcpPacket) {
+        if (null != child) {
+            child.eventLoop().execute(() -> handler0(ipHeader, tcpPacket));
+        } else {
+            handler0(ipHeader, tcpPacket);
+        }
+    }
+
+    protected abstract void handler0(final P ipHeader, final TcpPacket tcpPacket);
 
     /**
      * 接收窗口可用大小.
@@ -564,6 +557,15 @@ public abstract class TcpConnection<P extends IpPacket> {
 
                     // tcp data len = tcp snd.mss - tcp options.len
                     // 超过 tcp data len 不切割, 会使用TSO功能通过网卡来分段.
+                    /*
+                    tcp_sendmsg2(new TcpBuffer()
+                            .ack(true)
+                            .psh(true)
+                            .payloadBuilder(
+                                    UnknownPacket.newPacket(payload, 0, payload.length).getBuilder()
+                            ), true);
+                            */
+
                     final int dataMaxLen = tcp_current_mss();
                     for (int i = 0; i < payload.length - 1; i += dataMaxLen) {
                         final int maxEndIndex = i + dataMaxLen;
@@ -1604,7 +1606,8 @@ public abstract class TcpConnection<P extends IpPacket> {
     private final ConcurrentMap<Runnable, Future<?>> timers = Maps.newConcurrentMap();
 
     private int __mod_timer(Runnable timer, long expires, int options) {
-        io.netty.util.concurrent.ScheduledFuture<?> nf = parent.eventLoop().schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
+//        io.netty.util.concurrent.ScheduledFuture<?> nf = parent.eventLoop().schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
+        io.netty.util.concurrent.ScheduledFuture<?> nf = child.eventLoop().schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
 //        final ScheduledFuture<?> nf = scheduler.schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
         Future<?> future = timers.put(timer, nf);
         if (null != future && !future.isDone() && !future.isCancelled()) {
@@ -3365,7 +3368,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         final TcpBuffer buf = new TcpBuffer();
 
         buf.sequenceNumber(tcp_acceptable_seq())
-           .ack(true);
+                .ack(true);
 
         /* Send it off, this clears delayed acks for us. */
         __tcp_transmit_skb(buf, false, rcv_nxt);

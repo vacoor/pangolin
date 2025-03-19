@@ -25,7 +25,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
     }
 
     @Override
-    public synchronized void handler(final IpV4Packet ip, final TcpPacket tcpPacket) {
+    protected synchronized void handler0(final IpV4Packet ip, final TcpPacket tcpPacket) {
         tcp_v4_rcv(ip, tcpPacket);
     }
 
