@@ -2557,9 +2557,14 @@ public abstract class TcpConnection<P extends IpPacket> {
         long now = tcp_jiffies32();
 
         lsndtime = now;
+
         /*-
          * If it is a reply for ato after last received
          * packet, increase pingpong count.
+         *
+         * 如果本地对最后收到数据包的回复在ATO之前,
+         * 本地可能在快速发送数据, 增加 ping-pong 次数,
+         * (允许后续延迟ACK使用最大超时时间, 以便减少ACK发送更多数据).
          */
         if (now - icsk_ack_lrcvtime < icsk_ack_ato) {
             inet_csk_inc_pingpong_cnt();
