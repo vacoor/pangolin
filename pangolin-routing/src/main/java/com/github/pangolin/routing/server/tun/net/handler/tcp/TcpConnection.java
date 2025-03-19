@@ -3907,7 +3907,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4521
     private void tcp_done_with_error(int err) {
-        log.error("TCP DONW WITH ERROR: {}", err);
+        log.error("TCP DOWN WITH ERROR: {}", err);
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4515
         tcp_done();
     }
