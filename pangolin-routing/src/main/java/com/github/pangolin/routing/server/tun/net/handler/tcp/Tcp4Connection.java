@@ -173,4 +173,33 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
 
         parent.writeAndFlush(ipPacket);
     }
+
+    @Override
+    protected void INDIRECT_CALL_INET(final TcpBuffer skb) {
+        final IpV4Header ipHdr = (IpV4Header) ipHeader;
+
+        TcpPacket.Builder buf = skb
+                .asBuilder()
+                .paddingAtBuild(true)
+                .correctLengthAtBuild(true)
+                .correctChecksumAtBuild(true);
+
+        final IpV4Packet ipPacket = new IpV4Packet.Builder()
+                .version(IpVersion.IPV4)
+                .tos(ipHdr.getTos())
+                .ttl(ipHdr.getTtl())
+                .identification(ipHdr.getIdentification())
+                .fragmentOffset(ipHdr.getFragmentOffset())
+                .srcAddr(ipHdr.getDstAddr())
+                .dstAddr(ipHdr.getSrcAddr())
+                .protocol(IpNumber.TCP)
+                .paddingAtBuild(true)
+                .correctLengthAtBuild(true)
+                .correctChecksumAtBuild(true)
+                .payloadBuilder(buf)
+                .build();
+
+        trace(ipPacket.getHeader(), buf.build(), false);
+        parent.writeAndFlush(ipPacket);
+    }
 }

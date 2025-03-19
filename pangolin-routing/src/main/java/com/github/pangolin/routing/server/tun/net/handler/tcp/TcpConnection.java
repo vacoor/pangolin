@@ -1,5 +1,8 @@
 package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
+import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
+import static com.sun.jna.platform.linux.ErrNo.EINVAL;
+
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.google.common.collect.Lists;
@@ -17,7 +20,6 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
-import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
 import org.pcap4j.packet.TcpNoOperationOption;
@@ -26,8 +28,6 @@ import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.TcpPacket.TcpOption;
 import org.pcap4j.packet.TcpWindowScaleOption;
 import org.pcap4j.packet.UnknownPacket;
-import org.pcap4j.packet.namednumber.IpNumber;
-import org.pcap4j.packet.namednumber.IpVersion;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.io.IOException;
@@ -205,7 +205,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     }
 
 
-    private IpHeader ipHeader;
+    IpHeader ipHeader;
     private TcpPort tcpSrcPort;
     private TcpPort tcpDstPort;
 
@@ -387,7 +387,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         tcp_init_sock();
     }
 
-    private TcpConnection<P>  listen() {
+    private TcpConnection<P> listen() {
         inet_listen(100);
         return this;
     }
@@ -2563,6 +2563,10 @@ public abstract class TcpConnection<P extends IpPacket> {
         long now = tcp_jiffies32();
 
         lsndtime = now;
+        /*-
+         * If it is a reply for ato after last received
+         * packet, increase pingpong count.
+         */
         if (now - icsk_ack_lrcvtime < icsk_ack_ato) {
             inet_csk_inc_pingpong_cnt();
         }
@@ -2573,10 +2577,14 @@ public abstract class TcpConnection<P extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L182">tcp_event_ack_sent</a>
      */
-    private void tcp_event_ack_sent(int rcv_nxt) {
+    private void tcp_event_ack_sent(final int rcv_nxt) {
         if (rcv_nxt != this.rcv_nxt) {
             return;
         }
+
+        /*-
+         * 如果最后一个收到的包也 ACK 了, 快速ACK次数 - 1, 不需要再执行延迟 ACK.
+         */
         tcp_dec_quickack_mode();
         inet_csk_clear_xmit_timer(ICSK_TIME_DACK);
     }
@@ -2773,10 +2781,16 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1290">__tcp_transmit_skb</a>
      */
     private int __tcp_transmit_skb(final TcpBuffer skb, final boolean clone, int rcv_nxt) {
+        BUG_ON(null == skb || tcp_skb_pcount(skb) == 0);
+
         long prior_wstamp = tcp_wstamp_ns;
         tcp_wstamp_ns = Math.max(tcp_wstamp_ns, tcp_clock_cache);
 
         skb_set_delivery_time(skb, tcp_wstamp_ns, "SKB_CLOCK_MONOTONIC");
+
+        if (clone) {
+            // TODO
+        }
 
         List<TcpOption> options;
         if (skb.syn()) {
@@ -2792,10 +2806,13 @@ public abstract class TcpConnection<P extends IpPacket> {
         // FIXME ....
         // skb_set_dst_pending_confirm(skb, READ_ONCE(sk->sk_dst_pending_confirm));
 
+        skb.srcAddr(ipHeader.getDstAddr());
+        skb.dstAddr(ipHeader.getSrcAddr());
+        skb.srcPort(tcpDstPort);
+        skb.dstPort(tcpSrcPort);
         skb.acknowledgmentNumber(rcv_nxt);
 
         // ...
-
 
         if (!skb.syn()) {
             skb.window((short) tcp_select_window());
@@ -2809,9 +2826,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
         skb.options(options);
 
-
         INDIRECT_CALL_INET(skb);
-
 
         if (skb.ack()) {
             tcp_event_ack_sent(rcv_nxt);
@@ -2821,7 +2836,6 @@ public abstract class TcpConnection<P extends IpPacket> {
         int len = null != p ? p.build().length() : 0;
         if (len > 0) {
             tcp_event_data_sent();
-            // TODO
             data_segs_out += tcp_skb_pcount(skb);
             bytes_sent += len;
         }
@@ -2833,39 +2847,13 @@ public abstract class TcpConnection<P extends IpPacket> {
         return 0;
     }
 
-    private void INDIRECT_CALL_INET(final TcpBuffer skb) {
-        final IpHeader ipHdr = ipHeader;
-
-        TcpPacket.Builder buf = skb
-                .srcAddr(ipHdr.getDstAddr())
-                .dstAddr(ipHdr.getSrcAddr())
-                .dstPort(tcpSrcPort)
-                .srcPort(tcpDstPort)
-                //
-                .asBuilder()
-                .paddingAtBuild(true)
-                .correctLengthAtBuild(true)
-                .correctChecksumAtBuild(true);
-
-        final IpV4Packet ipPacket = new IpV4Packet.Builder()
-                .version(IpVersion.IPV4)
-                .tos(((IpV4Packet.IpV4Header) ipHdr).getTos())
-                .ttl(((IpV4Packet.IpV4Header) ipHdr).getTtl())
-                .identification(((IpV4Packet.IpV4Header) ipHdr).getIdentification())
-                .fragmentOffset(((IpV4Packet.IpV4Header) ipHdr).getFragmentOffset())
-                .srcAddr(((IpV4Packet.IpV4Header) ipHdr).getDstAddr())
-                .dstAddr(((IpV4Packet.IpV4Header) ipHdr).getSrcAddr())
-                .protocol(IpNumber.TCP)
-                .paddingAtBuild(true)
-                .correctLengthAtBuild(true)
-                .correctChecksumAtBuild(true)
-                .payloadBuilder(buf)
-                .build();
-
-        trace(ipPacket.getHeader(), buf.build(), false);
-        parent.writeAndFlush(ipPacket);
-//         parent.writeAndFlush(ipPacket).syncUninterruptibly();
+    private static void BUG_ON(final boolean expr) {
+        if (expr) {
+            throw new IllegalStateException("BUG ON");
+        }
     }
+
+    protected abstract void INDIRECT_CALL_INET(final TcpBuffer skb);
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1486">tcp_transmit_skb</a>
@@ -3188,18 +3176,12 @@ public abstract class TcpConnection<P extends IpPacket> {
         if (before(seq, snd_una) && skb.syn()) {
             skb.syn(false);
             skb.sequenceNumber(++seq);
-//            b = skb.build();
-//            th = b.getHeader();
         }
 
-//        TcpPacket b = skb.asBuilder().build();
-//        TcpHeader th = b.getHeader();
-        if (before(skb.sequenceNumber(), snd_una)) {
+        if (before(seq, snd_una)) {
             int end_seq = determineEndSeq(skb);
             if (before(end_seq, snd_una)) {
-                // ACKED.
-                // return -EINVAL;
-//                return -1;
+                return -EINVAL;
             }
             // ...
         }
@@ -3215,13 +3197,11 @@ public abstract class TcpConnection<P extends IpPacket> {
          */
         if (avail_wnd <= 0) {
             if (skb.sequenceNumber() != snd_una) {
-                // return -EAGAIN;
-                return -1;
+                return -EAGAIN;
             }
             avail_wnd = cur_mss;
         }
 
-        // FIXME
         int len = cur_mss * segs;
         if (len > avail_wnd) {
             len = rounddown(avail_wnd, cur_mss);
@@ -3234,11 +3214,11 @@ public abstract class TcpConnection<P extends IpPacket> {
         log.warn("TCP_RETRNSMIT_SKB");
 
 //        int plen = b.length();
-        int plen = skb.asBuilder()
+        int skbLen = skb.asBuilder()
                 .srcAddr(ipHeader.getDstAddr())
                 .dstAddr(ipHeader.getSrcAddr())
                 .build().length();
-        if (plen > avail_wnd) {
+        if (skbLen > avail_wnd) {
             // FIXME
             // fragment
             return -1;
@@ -3249,7 +3229,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         segs = tcp_skb_pcount(skb);
 
 //        total_retrans += segs;
-//        bytes_retrans += plen;
+//        bytes_retrans += skbLen;
 
         if (false) {
 
@@ -3269,7 +3249,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     private int tcp_retransmit_skb(final TcpBuffer skb, int segs) {
         int err = __tcp_retransmit_skb(skb, segs);
         if (0 == err) {
-            //skb.sacked |= TCPCB_RETRANS;
+            skb.sacked |= TCPCB_RETRANS;
             retrans_out += tcp_skb_pcount(skb);
         }
 
