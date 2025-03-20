@@ -1,5 +1,7 @@
 package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
+import org.pcap4j.packet.Packet;
+
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -99,4 +101,22 @@ abstract class TcpUtils {
         }
         return value;
     }
+
+    static int determineEndSeq(final TcpBuffer skb) {
+        int endSeq = skb.sequenceNumber();
+        if (skb.syn()) {
+            endSeq++;
+        }
+        if (skb.fin()) {
+            endSeq++;
+        }
+        final Packet.Builder b = skb.payloadBuilder();
+        final int len = null != b ? b.build().length() : 0;
+        return endSeq + len;
+    }
+
+    static int rounddown(int a, int b) {
+        return a - (a % b);
+    }
+
 }
