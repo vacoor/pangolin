@@ -58,7 +58,7 @@ class TcpOutput {
 
         // XXX unlink skb from sk_write_queue and append to tcp_rtx_queue.
         // __skb_unlink(skb, &sk->sk_write_queue);
-        tp.sk_write_queue.remove(skb);
+//        tp.sk_write_queue.remove(skb);
 
         // tcp_rbtree_insert(&sk->tcp_rtx_queue, skb);
         tp.tcp_rtx_queue.offer(skb);
@@ -604,6 +604,9 @@ class TcpOutput {
                 } else {
                     break;
                 }
+            }
+            if (!tp.sk_write_queue.remove(skb)) {
+                continue;
             }
             // cwnd_quota = Math.min(cwnd_quota, tso_max_segs);
             // int missing_bytes = cwnd_quota * mss_now - skb.length();
