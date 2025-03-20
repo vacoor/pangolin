@@ -1,5 +1,10 @@
 package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.after;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.before;
+import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
+import static com.sun.jna.platform.linux.ErrNo.EINVAL;
+
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.google.common.collect.Lists;
@@ -7,13 +12,24 @@ import com.google.common.collect.Maps;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.EventLoopGroup;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.*;
+import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
+import org.pcap4j.packet.Packet;
+import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
+import org.pcap4j.packet.TcpNoOperationOption;
+import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.TcpPacket.TcpOption;
+import org.pcap4j.packet.TcpWindowScaleOption;
+import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.io.IOException;
@@ -28,9 +44,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-
-import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
-import static com.sun.jna.platform.linux.ErrNo.EINVAL;
 
 @Slf4j
 public abstract class TcpConnection<P extends IpPacket> {
@@ -191,10 +204,10 @@ public abstract class TcpConnection<P extends IpPacket> {
 
 
     IpHeader ipHeader;
-    private TcpPort tcpSrcPort;
-    private TcpPort tcpDstPort;
+    TcpPort tcpSrcPort;
+    TcpPort tcpDstPort;
 
-    private final AtomicReference<State> state = new AtomicReference<>(State.TCP_CLOSE);
+    final AtomicReference<State> state = new AtomicReference<>(State.TCP_CLOSE);
 
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L243
@@ -205,9 +218,9 @@ public abstract class TcpConnection<P extends IpPacket> {
      */
     private static final int TCP_INFINITE_SSTHRESH = 0x7fffffff;
 
-    private static final byte TCP_MAX_WSCALE = 14;
+    static final byte TCP_MAX_WSCALE = 14;
 
-    private static final int HZ = 1000;
+    static final int HZ = 1000;
     private static final boolean sysctl_tcp_window_scaling = true;
     private static final int sysctl_tcp_retries1 = 5;
     private static final int sysctl_tcp_retries2 = 5;
@@ -225,7 +238,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     /**
      * 本端能接收的最大MSS, 通告对端的MSS.
      */
-    private int advmss;
+    int advmss;
 
     /**
      * 缓存发送方当前有效的MSS, 根据pmtu变动.
@@ -236,7 +249,7 @@ public abstract class TcpConnection<P extends IpPacket> {
      */
     private int rcv_mss;
 
-    private boolean wscale_ok;
+    boolean wscale_ok;
 
     /*-
      *              |<------- TCP recv window ------->|
@@ -254,22 +267,22 @@ public abstract class TcpConnection<P extends IpPacket> {
      */
 
     int rcv_isn;
-    private int rcv_wup;
-    private int rcv_nxt;
-    private int rcv_wnd;
+    int rcv_wup;
+    int rcv_nxt;
+    int rcv_wnd;
 
     private int copied_seq;
 
     byte rcv_wscale = 6;
 
-    private int icsk_ack_rcv_mss;
+    int icsk_ack_rcv_mss;
 
 
     private int bytes_acked;
     private long bytes_received;
-    private int bytes_sent;
-    private int data_segs_out;
-    private int segs_out;
+    int bytes_sent;
+    int data_segs_out;
+    int segs_out;
 
 
     /*-
@@ -290,16 +303,16 @@ public abstract class TcpConnection<P extends IpPacket> {
      */
 
     int snt_isn;
-    private int snd_una;
-    private int snd_wnd;
-    private int snd_nxt;
+    int snd_una;
+    int snd_wnd;
+    int snd_nxt;
     /**
      * Urgent pointer.
      *
      * @deprecated
      */
     @Deprecated
-    private int snd_up;
+    int snd_up;
     private int snd_sml;
 
     private byte snd_wscale;
@@ -324,19 +337,19 @@ public abstract class TcpConnection<P extends IpPacket> {
     /**
      * 下一个写入发送队列的序号.
      */
-    private int write_seq;
+    int write_seq;
 
     /**
      * Last pushed seq, required to talk to windows.
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L264">pushed_seq</a>
      */
-    private int pushed_seq;
+    int pushed_seq;
 
     /**
      * 已发出待接收ACK的数据包数量.
      */
-    private int packets_out;
+    int packets_out;
 
     private ConcurrentLinkedQueue<TcpBuffer> sk_write_queue = new ConcurrentLinkedQueue<>();
     private ConcurrentLinkedQueue<TcpBuffer> tcp_rtx_queue = new ConcurrentLinkedQueue<>();
@@ -349,11 +362,14 @@ public abstract class TcpConnection<P extends IpPacket> {
     volatile Channel child;
     private int connTimeoutMs = 10 * 1000;
 
+    TcpOutput output;
+
     protected TcpConnection(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         this.parent = parent;
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
+        this.output = new TcpOutput(this);
         init();
         this.listen();
     }
@@ -423,18 +439,6 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     protected abstract void handler0(final P ipHeader, final TcpPacket tcpPacket);
 
-    /**
-     * 接收窗口可用大小.
-     * Compute the actual receive window we are currently advertising.
-     * Rcv_nxt can be after the window if our peer push more data
-     * than the offered window.
-     *
-     * @return the actual receive window
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L813">tcp_receive_window</a>
-     */
-    private int tcp_receive_window() {
-        return Math.max(rcv_wup + rcv_wnd - rcv_nxt, 0);
-    }
 
     /**
      * 发送可用/拥塞窗口大小.
@@ -449,7 +453,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     /**
      * 发送窗口右边界.
      */
-    private int tcp_wnd_end() {
+    int tcp_wnd_end() {
         return snd_una + snd_wnd;
     }
 
@@ -468,8 +472,8 @@ public abstract class TcpConnection<P extends IpPacket> {
     private int icsk_ext_hdr_len;
     private int TCPOLEN_TSTAMP_ALIGNED = 12;
 
-    private int window_clamp;
-    private int rcv_ssthresh;
+    int window_clamp;
+    int rcv_ssthresh;
 
     /* ************** Initialize Connection Request [[ ************ */
 
@@ -478,11 +482,11 @@ public abstract class TcpConnection<P extends IpPacket> {
     private AtomicBoolean tmp_opt_wscale_ok = new AtomicBoolean();
     private AtomicInteger tmp_opt_snd_wscale = new AtomicInteger();
 
-    private final AtomicInteger req_snt_isn_ref = new AtomicInteger();
-    private final AtomicInteger req_rcv_isn_ref = new AtomicInteger();
-    private final AtomicInteger req_rcv_nxt_ref = new AtomicInteger();
+    final AtomicInteger req_snt_isn_ref = new AtomicInteger();
+    final AtomicInteger req_rcv_isn_ref = new AtomicInteger();
+    final AtomicInteger req_rcv_nxt_ref = new AtomicInteger();
     private final AtomicInteger req_mss_ref = new AtomicInteger();
-    private final AtomicInteger req_rsk_rcv_wnd_ref = new AtomicInteger();
+    final AtomicInteger req_rsk_rcv_wnd_ref = new AtomicInteger();
     private final AtomicInteger req_rsk_window_clamp_ref = new AtomicInteger();
 
     private final AtomicBoolean ireq_wscale_ok_ref = new AtomicBoolean();
@@ -637,7 +641,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     private void tcp_openreq_init_rwin(TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L422
-        int full_space = tcp_full_space();
+        int full_space = output.tcp_full_space();
         final int mss = tcp_mss_clamp(dst_metric_advmss());
 
         req_rsk_window_clamp_ref.set(dst_metric(RTAX_WINDOW));
@@ -651,7 +655,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         // ...
 
         AtomicInteger rcv_wscale_ref = new AtomicInteger();
-        tcp_select_initial_window(
+        output.tcp_select_initial_window(
                 full_space,
                 mss, // - stamp
                 req_rsk_rcv_wnd_ref,
@@ -766,7 +770,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     private long mdev_us;
     private long mdev_max_us;
     private long rttvar_us;
-    private long srtt_us;
+    long srtt_us;
     private int rtt_seq;
 
     private int snd_ssthresh;
@@ -853,7 +857,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L86
     private static final int TCP_MAX_QUICKACKS = 16;
-    private int icsk_ack_quick;
+    int icsk_ack_quick;
 
 
     /* *************** */
@@ -883,7 +887,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L357">tcp_dec_quickack_mode</a>
      */
-    private void tcp_dec_quickack_mode() {
+    void tcp_dec_quickack_mode() {
         if (icsk_ack_quick != 0) {
             /* How many ACKs S/ACKing new data have we sent? */
             final int pkts = inet_csk_ack_scheduled() ? 1 : 0;
@@ -1023,8 +1027,11 @@ public abstract class TcpConnection<P extends IpPacket> {
     /**
      * 最后一次收到数据的时间.
      */
-    private long icsk_ack_lrcvtime;
+    long icsk_ack_lrcvtime;
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L820">tcp_event_data_recv</a>
+     */
     private void tcp_event_data_recv(final TcpPacket skb) throws IOException {
         inet_csk_schedule_ack();
 
@@ -1041,6 +1048,10 @@ public abstract class TcpConnection<P extends IpPacket> {
             icsk_ack_ato = TCP_ATO_MIN;
         } else {
             long m = now - icsk_ack_lrcvtime;
+            /*-
+             * 1. 如果两次收到数据的间隔 <= TCP_ATO_MIN / 2, ato = ato / 2 + TCP_ATO_MIN / 2
+             * 2. 如果收到数据间隔 > TCP_ATO_MIN / 2 && < ato, ato = ato / 2 + 间隔, 最大不超过rto
+             */
             if (m <= TCP_ATO_MIN / 2) {
                 /* The fastest case is the first. */
                 icsk_ack_ato = (icsk_ack_ato >> 1) + TCP_ATO_MIN / 2;
@@ -1138,7 +1149,7 @@ public abstract class TcpConnection<P extends IpPacket> {
             // tcp_bpf_rtt(sk, mrtt_us, srtt);
         }
         srtt_us = Math.max(1, srtt);
-        log.debug("SRTT = {}", srtt_us);
+        log.debug("SRTT = {}us", srtt_us >> 3);
     }
 
     /**
@@ -1170,7 +1181,7 @@ public abstract class TcpConnection<P extends IpPacket> {
          * guarantees that rto is higher.
          */
         tcp_bound_rto();
-        log.debug("ICSK_RTO = {}", icsk_rto);
+        log.debug("RTO = {}ms", icsk_rto);
     }
 
     /**
@@ -1297,7 +1308,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         if (0 != ((1 << state.get().ordinal()) & (TCPF_ESTABLISHED | TCPF_CLOSE_WAIT))) {
             /* Clear out any half completed packets.  FIN if needed. */
             if (tcp_close_state()) {
-                tcp_send_fin();
+                output.tcp_send_fin();
             }
         }
     }
@@ -1328,7 +1339,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     private void tcp_push_pending_frames() {
         // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2102
-        __tcp_push_pending_frames(tcp_current_mss());
+        output.__tcp_push_pending_frames(this, output.tcp_current_mss());
     }
 
 
@@ -1375,13 +1386,13 @@ public abstract class TcpConnection<P extends IpPacket> {
 
 
     private static final int U8_MAX = 255;
-    private static final int U16_MAX = 65535;
+    static final int U16_MAX = 65535;
 
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2021">tcp_send_head</a>
      */
-    private TcpBuffer tcp_send_head() {
+    TcpBuffer tcp_send_head() {
         return sk_write_queue.peek();
     }
 
@@ -1401,7 +1412,7 @@ public abstract class TcpConnection<P extends IpPacket> {
             final byte[] bytes = skb.getPayload().getRawData();
 
             final int offset = rcv_nxt - hdr.getSequenceNumber();
-            final int length = Math.min(tcp_receive_window(), bytes.length - offset);
+            final int length = Math.min(output.tcp_receive_window(this), bytes.length - offset);
             child.writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
         }
     }
@@ -1435,22 +1446,6 @@ public abstract class TcpConnection<P extends IpPacket> {
         final int len = null != b ? b.build().length() : 0;
         return endSeq + len;
     }
-
-    private boolean before(final int seq1, final int seq2) {
-        /*-
-         * eg: Integer.MAX_VALUE - (Integer.MAX_VALUE + 1) => -1 < 0
-         */
-        return seq1 - seq2 < 0;
-    }
-
-    private boolean after(final int seq2, final int seq1) {
-        return before(seq1, seq2);
-    }
-
-    private boolean between(final int seq1, final int seq2, final int seq3) {
-        return seq3 - seq2 >= seq1 - seq2;
-    }
-
     /**
      *
      */
@@ -1506,12 +1501,12 @@ public abstract class TcpConnection<P extends IpPacket> {
     /* Zero window probe timer */
     private static final int ICSK_TIME_PROBE0 = 3;
     /* Tail loss probe timer */
-    private static final int ICSK_TIME_LOSS_PROBE = 5;
+    static final int ICSK_TIME_LOSS_PROBE = 5;
     /* Reordering timer */
     private static final int ICSK_TIME_REO_TIMEOUT = 6;
 
     private Runnable icsk_retransmit_timer;
-    private Runnable icsk_delack_timer;
+    Runnable icsk_delack_timer;
     private Runnable sk_timer;
 
     private void tcp_init_xmit_timers() {
@@ -1593,7 +1588,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         }
     }
 
-    private void sk_reset_timer(Runnable timer, long expires) {
+    void sk_reset_timer(Runnable timer, long expires) {
         // https://github.com/torvalds/linux/blob/master/net/core/sock.c#L3539
         mod_timer(timer, expires);
     }
@@ -1618,19 +1613,19 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     /* *********** DELAY ACK [[ ************** */
 
-    private static final int TCP_DELACK_MIN = HZ / 25;
-    private static final int TCP_DELACK_MAX = HZ / 5;
+    static final int TCP_DELACK_MIN = HZ / 25;
+    static final int TCP_DELACK_MAX = HZ / 5;
 
     /**
      * <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L161">inet_csk_ack_state_t</a>
      */
-    private static final int ICSK_ACK_SCHED = 1;
-    private static final int ICSK_ACK_TIMER = 1 << 1;
-    private static final int ICSK_ACK_PUSHED = 1 << 2;
-    private static final int ICSK_ACK_PUSHED2 = 1 << 3;
-    private static final int ICSK_ACK_NOW = 1 << 4;
-    private static final int ICSK_ACK_NOMEM = 1 << 5;
-    private static final int TCP_ATO_MIN = HZ / 25;
+    static final int ICSK_ACK_SCHED = 1;
+    static final int ICSK_ACK_TIMER = 1 << 1;
+    static final int ICSK_ACK_PUSHED = 1 << 2;
+    static final int ICSK_ACK_PUSHED2 = 1 << 3;
+    static final int ICSK_ACK_NOW = 1 << 4;
+    static final int ICSK_ACK_NOMEM = 1 << 5;
+    static final int TCP_ATO_MIN = HZ / 25;
 
     /**
      * ACK 超时时间(offset).
@@ -1638,12 +1633,12 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @see #tcp_event_data_recv(TcpPacket)
      * @see #tcp_event_data_sent()
      */
-    private long icsk_ack_ato = 0;
-    private int icsk_ack_pending;
-    private long icsk_ack_timeout;
+    long icsk_ack_ato = 0;
+    int icsk_ack_pending;
+    long icsk_ack_timeout;
     private int icsk_ack_retry;
     private int icsk_rto_min = TCP_RTO_MIN;//40;
-    private int icsk_delack_max;
+    int icsk_delack_max;
 
     private static final int sysctl_tcp_pingpong_thresh = 1;
     private int icsk_ack_pingpong;
@@ -1652,7 +1647,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         return jiffies_to_usecs(tcp_rto_min());
     }
 
-    private int tcp_rto_min() {
+    int tcp_rto_min() {
         // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L783
         return icsk_rto_min;
     }
@@ -1663,40 +1658,41 @@ public abstract class TcpConnection<P extends IpPacket> {
         tcp_delack_timer_handler();
     }
 
+    /**
+     * @see <a href="https://www.cnblogs.com/wanpengcoder/p/11749449.html">TCP定时器 之 延迟确认定时器</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L307">tcp_delack_timer_handler</a>
+     */
     private void tcp_delack_timer_handler() {
-        //  https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L307
-        // https://www.cnblogs.com/wanpengcoder/p/11749449.html
-        if (State.TCP_CLOSE.equals(state.get())) {
+        final int state = this.state.get().ordinal();
+        if (((1 << state) & (TCPF_CLOSE | TCPF_LISTEN)) != 0) {
             return;
         }
 
-        if (0 == (icsk_ack_pending & ICSK_ACK_TIMER)) {
+        if ((icsk_ack_pending & ICSK_ACK_TIMER) == 0) {
             return;
         }
-        if (icsk_ack_timeout > jiffies()) {
-            // reset ??.
+
+        if (time_after(icsk_ack_timeout, jiffies())) {
             sk_reset_timer(icsk_delack_timer, icsk_ack_timeout);
-//            log.warn("RESCHEDULE");
             return;
         }
 
         icsk_ack_pending &= ~ICSK_ACK_TIMER;
         if (inet_csk_ack_scheduled()) {
-            // ...
             if (!inet_csk_in_pingpong_model()) {
                 /* Delayed ACK missed: inflate ATO. */
                 icsk_ack_ato = Math.min(icsk_ack_ato << 1, icsk_rto);
             } else {
-                /* Delayed ACK missed: leave pingpong mode and
-                 * deflate ATO.
+                /*-
+                 * Delayed ACK missed: leave pingpong mode and deflate ATO.
+                 * ping-pong 模式触发了延迟ACK, 说明ATO周期内没有数据要发送, 退出 ping-pong 模式.
                  */
                 inet_csk_exit_pingpong_mode();
                 icsk_ack_ato = TCP_ATO_MIN;
             }
 
             tcp_mstamp_refresh();
-            tcp_send_ack();
-            // ...
+            output.tcp_send_ack(this);
         }
     }
 
@@ -1711,23 +1707,30 @@ public abstract class TcpConnection<P extends IpPacket> {
         return 0 != (icsk_ack_pending & ICSK_ACK_SCHED);
     }
 
-    private void inet_csk_inc_pingpong_cnt() {
+    void inet_csk_inc_pingpong_cnt() {
         if (icsk_ack_pingpong < U8_MAX) {
+            if (!inet_csk_in_pingpong_model()) {
+                log.trace("increment PING-PONG count");
+            }
             icsk_ack_pingpong++;
         }
     }
 
-    private boolean inet_csk_in_pingpong_model() {
+    boolean inet_csk_in_pingpong_model() {
         return icsk_ack_pingpong >= sysctl_tcp_pingpong_thresh;
     }
 
-    private void inet_csk_enter_pingpong_mode() {
+    void inet_csk_enter_pingpong_mode() {
         // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L329
         icsk_ack_pingpong = sysctl_tcp_pingpong_thresh;
+        log.trace("enter PING-PONG mode");
     }
 
-    private void inet_csk_exit_pingpong_mode() {
+    void inet_csk_exit_pingpong_mode() {
         // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L335
+        if (inet_csk_in_pingpong_model()) {
+            log.trace("exit PING-PONG mode");
+        }
         icsk_ack_pingpong = 0;
     }
 
@@ -1742,7 +1745,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L146
     private static final int TCP_RTO_MAX = 120 * HZ;
     private static final int TCP_RTO_MIN = HZ / 5;
-    private int icsk_pending;
+    int icsk_pending;
     private long icsk_timeout;
 
     /**
@@ -2000,7 +2003,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     }
 
 
-    private int rounddown(int a, int b) {
+    static int rounddown(int a, int b) {
         return a - (a % b);
     }
 
@@ -2008,7 +2011,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         return 1;
     }
 
-    private long tcp_skb_timestamp_ts(int usec_ts, TcpBuffer skb) {
+    long tcp_skb_timestamp_ts(int usec_ts, TcpBuffer skb) {
         // FIXME
         long skb_mstamp_ns = 0; //skb.skb_mstamp_ns;
         if (usec_ts != 0) {
@@ -2031,7 +2034,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/v6.13/include/linux/skbuff.h#L4322
-    private void skb_set_delivery_time(TcpBuffer skb, long kt, String tstamp_type) {
+    void skb_set_delivery_time(TcpBuffer skb, long kt, String tstamp_type) {
         // FIXME
 //        skb.tstamp = kt;
         skb.tstamp = kt;
@@ -2246,70 +2249,6 @@ public abstract class TcpConnection<P extends IpPacket> {
     }
 
 
-    private boolean tcp_under_memory_pressure() {
-        // FIXME
-        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L274
-        return true;
-    }
-
-    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1583
-    private void tcp_adjust_rcv_ssthresh() {
-        __tcp_adjust_rcv_ssthresh(advmss << 2);
-    }
-
-    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1572
-    private void __tcp_adjust_rcv_ssthresh(int new_ssthresh) {
-        rcv_ssthresh = Math.min(rcv_ssthresh, new_ssthresh);
-        // ...
-    }
-
-    /**
-     * Note: caller must be prepared to deal with negative returns.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1560">tcp_space</a>
-     */
-    private int tcp_space() {
-        /*
-        接收缓冲区大小 - 待接收 - 已使用.
-        return tcp_win_from_space(sk, READ_ONCE(sk->sk_rcvbuf) -
-				  READ_ONCE(sk->sk_backlog.len) -
-				  atomic_read(&sk->sk_rmem_alloc));
-         */
-        return tcp_full_space();
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1567">tcp_full_space</a>
-     */
-    private int tcp_full_space() {
-        // FIXME
-        final int sk_rcvbuf = U16_MAX << 6;
-        return tcp_win_from_space(sk_rcvbuf);
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1530">tcp_win_from_space</a>
-     */
-    private int tcp_win_from_space(int space) {
-        // FIXME
-        final int scaling_ratio = TCP_DEFAULT_SCALING_RATIO;
-        return __tcp_win_from_space(scaling_ratio, space);
-    }
-
-    private static final int TCP_RMEM_TO_WIN_SCALE = 8;
-
-    /**
-     * Assume a 50% default for skb->len/skb->truesize ratio.
-     * This may be adjusted later in tcp_measure_rcv_mss().
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1552">TCP_DEFAULT_SCALING_RATIO</a>
-     */
-    private static final int TCP_DEFAULT_SCALING_RATIO = (1 << (TCP_RMEM_TO_WIN_SCALE - 1));
-
-    private int __tcp_win_from_space(int scaling_ratio, int space) {
-        int scaled_space = space * scaling_ratio;
-        return scaled_space >> TCP_RMEM_TO_WIN_SCALE;
-    }
 
     /* *********** ]] ************** */
 
@@ -2403,58 +2342,6 @@ public abstract class TcpConnection<P extends IpPacket> {
         log.debug(buff.toString());
     }
 
-    private long tcp_jiffies32() {
-        return jiffies();
-    }
-
-    /*-
-     * 定时器相关使用.
-     */
-    private long jiffies() {
-        return msecs_to_jiffies(System.currentTimeMillis());
-    }
-
-    private long usecs_to_jiffies(long us) {
-        return msecs_to_jiffies(TimeUnit.MICROSECONDS.toMillis(us));
-    }
-
-    private long msecs_to_jiffies(long ms) {
-        int MSEC_PER_SEC = 1000;
-        if (0 == (HZ % MSEC_PER_SEC)) {
-            return (HZ / MSEC_PER_SEC) * ms;
-        }
-        return (long) ((HZ * 1F / MSEC_PER_SEC) * ms);
-    }
-
-    private long jiffies_to_usecs(long jiffies) {
-        long USEC_PER_SEC = 1000 * 1000;
-        if (0 == (USEC_PER_SEC % HZ)) {
-            return USEC_PER_SEC / HZ * jiffies;
-        }
-        return (long) ((1000F * 1000 / HZ) * jiffies);
-    }
-
-    private long jiffies_to_msecs(long jiffies) {
-        return TimeUnit.MICROSECONDS.toMillis(jiffies_to_usecs(jiffies));
-    }
-
-    private long toUint32(final int value) {
-        return value & 0xFFFFFFFFL;
-    }
-
-    private int ilog2(int a) {
-        return (int) (Math.log(a) / Math.log(2));
-    }
-
-    private int clamp(int value, int min, int max) {
-        if (value < min) {
-            return min;
-        }
-        if (value > max) {
-            return max;
-        }
-        return value;
-    }
 
     int RTAX_WINDOW = 1;
     int RTAX_INITRWND = 2;
@@ -2485,20 +2372,13 @@ public abstract class TcpConnection<P extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L68">TCP_MAX_WINDOW</a>
      */
-    private static final int TCP_MAX_WINDOW = 32767;
+    static final int TCP_MAX_WINDOW = 32767;
 
 
-    private long tcp_clock_cache;
-    /**
-     * 有符号Window.
-     */
-    private boolean ipv4_sysctl_tcp_workaround_signed_windows;
-    private int ipv4_sysctl_tcp_rmem_2;
-    private int sysctl_rmem_max;
-    private boolean ipv4_sysctl_tcp_shrink_window;
+    long tcp_clock_cache;
     private int ipv4_sysctl_tcp_min_snd_mss;
-    private long tcp_wstamp_ns;
-    private long lsndtime;
+    long tcp_wstamp_ns;
+    long lsndtime;
     private int icsk_pmtu_cookie;
 
     private void tcp_mstamp_refresh() {
@@ -2507,991 +2387,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         tcp_mstamp = (int) TimeUnit.NANOSECONDS.toMicros(ns);
     }
 
-    /**
-     * Account for new data that has been sent to the network.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L67">tcp_event_new_data_sent</a>
-     */
-    private void tcp_event_new_data_sent(TcpBuffer skb) {
-        final int prior_packets = packets_out;
 
-        snd_nxt = determineEndSeq(skb);
-
-        // XXX unlink skb from sk_write_queue and append to tcp_rtx_queue.
-        tcp_rtx_queue.offer(skb);
-
-        packets_out += tcp_skb_pcount(skb);
-
-        if (prior_packets <= 0 || icsk_pending == ICSK_TIME_LOSS_PROBE) {
-            tcp_rearm_rto();
-        }
-
-        tcp_check_space();
-    }
-
-
-    /**
-     * SND.NXT, if window was not shrunk or the amount of shrunk was less than one
-     * window scaling factor due to loss of precision.
-     * If window has been shrunk, what should we make? It is not clear at all.
-     * Using SND.UNA we will fail to open window, SND.NXT is out of window. :-(
-     * Anything in between SND.UNA...SND.UNA+SND.WND also can be already
-     * invalid. OK, let's make this for now:
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L97">tcp_acceptable_seq</a>
-     */
-    private int tcp_acceptable_seq() {
-        if (tcp_wnd_end() >= snd_nxt
-                || (wscale_ok && snd_nxt - tcp_wnd_end() < (1 << rcv_wscale))) {
-            return snd_nxt;
-        }
-        return tcp_wnd_end();
-    }
-
-    /**
-     * Congestion state accounting after a packet has been sent.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L163">tcp_event_data_sent</a>
-     */
-    private void tcp_event_data_sent() {
-        long now = tcp_jiffies32();
-
-        lsndtime = now;
-
-        /*-
-         * If it is a reply for ato after last received
-         * packet, increase pingpong count.
-         *
-         * 如果本地对最后收到数据包的回复在ATO之前,
-         * 本地可能在快速发送数据, 增加 ping-pong 次数,
-         * (允许后续延迟ACK使用最大超时时间, 以便减少ACK发送更多数据).
-         */
-        if (now - icsk_ack_lrcvtime < icsk_ack_ato) {
-            inet_csk_inc_pingpong_cnt();
-        }
-    }
-
-    /**
-     * Account for an ACK we sent.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L182">tcp_event_ack_sent</a>
-     */
-    private void tcp_event_ack_sent(final int rcv_nxt) {
-        if (rcv_nxt != this.rcv_nxt) {
-            return;
-        }
-
-        /*-
-         * 如果最后一个收到的包也 ACK 了, 快速ACK次数 - 1, 不需要再执行延迟 ACK.
-         */
-        tcp_dec_quickack_mode();
-        inet_csk_clear_xmit_timer(ICSK_TIME_DACK);
-    }
-
-    /**
-     * Determine a window scaling and initial window to offer.
-     * Based on the assumption that the given amount of space
-     * will be offered. Store the results in the tp structure.
-     * NOTE: for smooth operation initial space offering should
-     * be a multiple of mss if possible. We assume here that mss >= 1.
-     * This MUST be enforced by all callers.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L207">tcp_select_initial_window</a>
-     */
-    private void tcp_select_initial_window(final int __space, final int mss,
-                                           final AtomicInteger rcv_wnd, final AtomicInteger __window_clamp,
-                                           final boolean wscale_ok,
-                                           final AtomicInteger rcv_wscale, final int init_rcv_wnd) {
-        int space = __space < 0 ? 0 : __space;
-        int window_clamp = __window_clamp.get();
-
-        /* If no clamp set the clamp to the max possible scaled window */
-        if (window_clamp == 0) {
-            window_clamp = (U16_MAX << TCP_MAX_WSCALE);
-        }
-        space = Math.min(window_clamp, space);
-
-        /* Quantize space offering to a multiple of mss if possible. */
-        if (space > mss) {
-            space = rounddown(space, mss);
-        }
-
-        /*-
-         * NOTE: offering an initial window larger than 32767
-         * will break some buggy TCP stacks. If the admin tells us
-         * it is likely we could be speaking with such a buggy stack
-         * we will truncate our initial window offering to 32K-1
-         * unless the remote has sent us a window scaling option,
-         * which we interpret as a sign the remote TCP is not
-         * misinterpreting the window field as a signed quantity.
-         */
-        if (ipv4_sysctl_tcp_workaround_signed_windows) {
-            rcv_wnd.set(Math.min(space, TCP_MAX_WINDOW));
-        } else {
-            rcv_wnd.set(space);
-        }
-
-        if (0 != init_rcv_wnd) {
-            rcv_wnd.set(Math.min(rcv_wnd.get(), init_rcv_wnd * mss));
-        }
-
-        rcv_wscale.set(0);
-        if (wscale_ok) {
-            /* Set window scaling on max possible window */
-            space = Math.max(space, ipv4_sysctl_tcp_rmem_2);
-            space = Math.max(space, sysctl_rmem_max);
-            space = Math.min(space, window_clamp);
-            rcv_wscale.set(clamp(ilog2(space) - 15, 0, TCP_MAX_WSCALE));
-        }
-        /* Set the clamp no higher than max representable value */
-        __window_clamp.set(Math.min(U16_MAX << rcv_wscale.get(), window_clamp));
-    }
-
-    /**
-     * Chose a new window to advertise, update state in tcp_sock for the
-     * socket, and return result with RFC1323 scaling applied.  The return
-     * value can be stuffed directly into th->window for an outgoing
-     * frame.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L260">tcp_select_window</a>
-     */
-    private int tcp_select_window() {
-        int old_win = rcv_wnd;
-        int cur_win = tcp_receive_window();
-        int new_win = __tcp_select_window();
-
-        /*-
-         * Make the window 0 if we failed to queue the data because we
-         * are out of memory.
-         */
-        // XXX NOMEM ?
-
-        if (new_win < cur_win) {
-            /*-
-             * Danger Will Robinson!
-             * Don't update rcv_wup/rcv_wnd here or else
-             * we will not be able to advertise a zero
-             * window in time.  --DaveM
-             *
-             * Relax Will Robinson.
-             */
-            if (!ipv4_sysctl_tcp_shrink_window || 0 != rcv_wscale) {
-                /* Never shrink the offered window */
-                new_win = align(cur_win, 1 << rcv_wscale);
-            }
-        }
-
-        this.rcv_wnd = new_win;
-        // XXX  放在这里一点也不合适.
-        this.rcv_wup = this.rcv_nxt;
-
-        /*-
-         * Make sure we do not exceed the maximum possible
-         * scaled window.
-         */
-        if (rcv_wscale == 0 && ipv4_sysctl_tcp_workaround_signed_windows) {
-            new_win = Math.min(new_win, TCP_MAX_WINDOW);
-        } else {
-            new_win = Math.min(new_win, U16_MAX << rcv_wscale);
-        }
-
-        /* RFC1323 scaling applied */
-        new_win >>= rcv_wscale;
-
-        /* If we advertise zero window, disable fast path. */
-        if (new_win == 0) {
-            // TODO
-//            tp->pred_flags = 0;
-            if (0 != old_win) {
-//                NET_INC_STATS(net, LINUX_MIB_TCPTOZEROWINDOWADV);
-            }
-        } else if (old_win == 0) {
-//            log.trace();
-//            NET_INC_STATS(net, LINUX_MIB_TCPFROMZEROWINDOWADV);
-        }
-
-        return new_win;
-    }
-
-    /**
-     * Compute TCP options for SYN packets. This is not the final
-     * network wire format yet.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L817">tcp_syn_options</a>
-     */
-    private List<TcpOption> tcp_syn_options() {
-        // TODO
-        return Collections.emptyList();
-    }
-
-    /**
-     * Set up TCP options for SYN-ACKs.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L902">tcp_synack_options</a>
-     */
-    private List<TcpOption> tcp_synack_options(int mss) {
-
-        final List<TcpOption> options = Lists.newArrayList();
-
-        // TODO
-
-        /* We always send an MSS option. */
-        options.add(new TcpMaximumSegmentSizeOption.Builder()
-                .maxSegSize((short) mss)
-                .correctLengthAtBuild(true).build());
-
-        if (ireq_wscale_ok_ref.get()) {
-            // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L902
-            options.add(TcpNoOperationOption.getInstance());
-            options.add(new TcpWindowScaleOption.Builder()
-                    .shiftCount((byte) ireq_rcv_wscale_ref.get())
-                    .correctLengthAtBuild(true)
-                    .build());
-        }
-
-        // TODO ...
-
-        return options;
-    }
-
-    /**
-     * Compute TCP options for ESTABLISHED sockets. This is not the
-     * final wire format yet.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L978">tcp_established_options</a>
-     */
-    private List<TcpOption> tcp_established_options() {
-        // TODO
-        return Collections.emptyList();
-    }
-
-    /**
-     * This routine actually transmits TCP packets queued in by
-     * tcp_do_sendmsg().  This is used by both the initial
-     * transmission and possible later retransmissions.
-     * All SKB's seen here are completely headerless.  It is our
-     * job to build the TCP header, and pass the packet down to
-     * IP so it can do the same plus pass the packet off to the
-     * device.
-     * <p>
-     * We are working here with either a clone of the original
-     * SKB, or a fresh unique copy made by the retransmit engine.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1290">__tcp_transmit_skb</a>
-     */
-    private int __tcp_transmit_skb(final TcpBuffer skb, final boolean clone, int rcv_nxt) {
-        BUG_ON(null == skb || tcp_skb_pcount(skb) == 0);
-
-        long prior_wstamp = tcp_wstamp_ns;
-        tcp_wstamp_ns = Math.max(tcp_wstamp_ns, tcp_clock_cache);
-
-        skb_set_delivery_time(skb, tcp_wstamp_ns, "SKB_CLOCK_MONOTONIC");
-
-        if (clone) {
-            // TODO
-        }
-
-        List<TcpOption> options;
-        if (skb.syn()) {
-            options = tcp_syn_options();
-        } else {
-            options = tcp_established_options();
-            if (tcp_skb_pcount(skb) > 1) {
-                // FIXME tcb->tcp_flags |= TCPHDR_PSH;
-                skb.psh(true);
-            }
-        }
-
-        // FIXME ....
-        // skb_set_dst_pending_confirm(skb, READ_ONCE(sk->sk_dst_pending_confirm));
-
-        skb.srcAddr(ipHeader.getDstAddr());
-        skb.dstAddr(ipHeader.getSrcAddr());
-        skb.srcPort(tcpDstPort);
-        skb.dstPort(tcpSrcPort);
-        skb.acknowledgmentNumber(rcv_nxt);
-
-        // ...
-
-        if (!skb.syn()) {
-            skb.window((short) tcp_select_window());
-        } else {
-            /*
-             * RFC1323: The window in SYN & SYN/ACK segments
-             * is never scaled.
-             */
-            skb.window((short) Math.min(rcv_wnd, U16_MAX));
-        }
-
-        skb.options(options);
-
-        INDIRECT_CALL_INET(skb);
-
-        if (skb.ack()) {
-            tcp_event_ack_sent(rcv_nxt);
-        }
-
-        Packet.Builder p = skb.payloadBuilder();
-        int len = null != p ? p.build().length() : 0;
-        if (len > 0) {
-            tcp_event_data_sent();
-            data_segs_out += tcp_skb_pcount(skb);
-            bytes_sent += len;
-        }
-
-        segs_out += tcp_skb_pcount(skb);
-
-        /* Leave earliest departure time in skb->tstamp (skb->skb_mstamp_ns) */
-
-        return 0;
-    }
-
-    private static void BUG_ON(final boolean expr) {
-        if (expr) {
-            throw new IllegalStateException("BUG ON");
-        }
-    }
-
-    protected abstract void INDIRECT_CALL_INET(final TcpBuffer skb);
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1486">tcp_transmit_skb</a>
-     */
-    private int tcp_transmit_skb(final TcpBuffer skb, final boolean clone) {
-        return __tcp_transmit_skb(skb, clone, rcv_nxt);
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498">tcp_queue_skb</a>
-     */
-    private void tcp_queue_skb(TcpBuffer skb) {
-        write_seq = determineEndSeq(skb);
-        sk_write_queue.offer(skb);
-    }
-
-    /**
-     * Calculate MSS not accounting any TCP options.
-     *
-     * @param pmtu Path MTU
-     * @return mss to use
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1755">__tcp_mtu_to_mss</a>
-     */
-    private int __tcp_mtu_to_mss(final int pmtu) {
-        // XXX icsk->icsk_af_ops->net_header_len
-        final int net_header_len = IP_HEADER_SIZE;
-
-        /*-
-         * Calculate base mss without TCP options:
-         * It is MMS_S - sizeof(tcphdr) of rfc1122
-         */
-        int mss_now = pmtu - net_header_len - SIZE_OF_TCP_HDR;
-        if (mss_now > mss_clamp) {
-            mss_now = mss_clamp;
-        }
-
-        /* XXX Now subtract optional transport overhead */
-        mss_now -= icsk_ext_hdr_len;
-
-        /* Then reserve room for full set of TCP options and 8 bytes of data */
-        // mss_now = max(mss_now, READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_min_snd_mss));
-        mss_now = Math.max(mss_now, ipv4_sysctl_tcp_min_snd_mss);
-        return mss_now;
-    }
-
-    /**
-     * Calculate MSS. Not accounting for SACKs here.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1780">tcp_mtu_to_mss</a>
-     */
-    private int tcp_mtu_to_mss(final int pmtu) {
-        /* Subtract TCP options size, not including SACKs */
-        return __tcp_mtu_to_mss(pmtu) - (tcp_header_len - SIZE_OF_TCP_HDR);
-    }
-
-    /**
-     * MTU probing init per socket.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1802">tcp_output.c</a>
-     */
-    private void tcp_mtup_init() {
-        // TODO
-    }
-
-    /**
-     * This function synchronize snd mss to current pmtu/exthdr set.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1840"></a>
-     */
-    private int tcp_sync_mss(int pmtu) {
-        // XXX icsk->icsk_mtup.search_high
-
-        int mss_now = tcp_mtu_to_mss(pmtu);
-        mss_now = tcp_bound_to_half_wnd(mss_now);
-
-        /* And store cached results */
-        icsk_pmtu_cookie = pmtu;
-
-        // ... XXX icsk->icsk_mtup.enabled
-
-        mss_cache = mss_now;
-        return mss_now;
-    }
-
-    /**
-     * Compute the current effective MSS, taking SACKs and IP options,
-     * and even PMTU discovery events into account.
-     *
-     * @return
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1865">tcp_current_mss</a>
-     */
-    private int tcp_current_mss() {
-        int mss_now = mss_cache;
-        int mtu = dst_mtu();
-        if (mtu != icsk_pmtu_cookie) {
-            mss_now = tcp_sync_mss(mtu);
-        }
-
-        int optLen = tcp_established_options()
-                .stream()
-                .mapToInt(TcpOption::length)
-                .reduce(Integer::sum)
-                .orElse(0);
-        int header_len = optLen + SIZE_OF_TCP_HDR;
-        if (header_len != tcp_header_len) {
-            int delta = header_len - tcp_header_len;
-            mss_now -= delta;
-        }
-        return mss_now;
-    }
-
-    /**
-     * Can at least one segment of SKB be sent right now, according to the
-     * congestion window rules?  If so, return how many segments are allowed.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2086">tcp_cwnd_test</a>
-     */
-    private int tcp_cwnd_test() {
-        int in_flight = tcp_packets_in_flight();
-        int cwnd = tcp_snd_cwnd();
-        if (in_flight >= cwnd) {
-            return 0;
-        }
-
-        /*-
-         * For better scheduling, ensure we have at least
-         * 2 GSO packets in flight.
-         */
-        int halfcwnd = Math.max(cwnd >> 1, 1);
-        return Math.min(halfcwnd, cwnd - in_flight);
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2434">tcp_mtu_probe</a>
-     */
-    private int tcp_mtu_probe() {
-        // XXX NOT IMPLEMENTED.
-        return -1;
-    }
-
-    /**
-     * @param mss_now
-     * @param push_one
-     * @return overflow window (continue push)
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2739">tcp_write_xmit</a>
-     */
-    private boolean tcp_write_xmit(int mss_now, final int push_one) {
-
-        tcp_mstamp_refresh();
-        if (push_one == 0) {
-            int mtu = tcp_mtu_probe();
-            if (0 == mtu) {
-                return false;
-            } else if (mtu > 0) {
-//                    sent_pkts = 1;
-            }
-        }
-
-
-        TcpBuffer skb;
-        while (null != (skb = sk_write_queue.peek())) {
-//            TcpPacket build = skb.asBuilder().build();
-//            TcpHeader th = build.getHeader();
-
-            int cwnd_quota = tcp_cwnd_test();
-//            log.warn("cwnd_quota={}", cwnd_quota);
-            if (cwnd_quota == 0) {
-                if (push_one == 2) {
-                    /* Force out a loss probe pkt. */
-                    cwnd_quota = 1;
-                } else {
-                    break;
-                }
-            }
-
-            if (!sk_write_queue.remove(skb)) {
-                continue;
-            }
-
-            // cwnd_quota = min(cwnd_quota, tso_max_segs);
-
-//            log.info("transmit MSS: {}", mss_now);
-//            int missing_bytes = cwnd_quota * mss_now - build.length();
-//            if (missing_bytes > 0) {
-//            }
-
-            //
-            if (skb.sequenceNumber() == determineEndSeq(skb)) {
-                break;
-            }
-            if (0 != tcp_transmit_skb(skb, true)) {
-                break;
-            }
-            tcp_event_new_data_sent(skb);
-        }
-
-        return packets_out <= 0 && !sk_write_queue.isEmpty();
-    }
-
-    /**
-     * Push out any pending frames which were held back due to
-     * TCP_CORK or attempt at coalescing tiny packets.
-     * The socket must be locked by the caller.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3005">__tcp_push_pending_frames</a>
-     */
-    private void __tcp_push_pending_frames(int mss) {
-        /*-
-         * If we are closed, the bytes will have to remain here.
-         * In time closedown will finish, we empty the write queue and
-         * all will be happy.
-         */
-        if (State.TCP_CLOSE.equals(state.get())) {
-            return;
-        }
-        if (tcp_write_xmit(mss, 0)) {
-            tcp_check_probe_timer();
-        }
-    }
-
-    private int __tcp_select_window() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3084
-        /*-
-         * MSS for the peer's data.  Previous versions used mss_clamp
-         * here.  I don't know if the value based on our guesses
-         * of peer's MSS is better for the performance.  It's more correct
-         * but may be worse for the performance because of rcv_mss
-         * fluctuations.  --SAW  1998/11/1
-         */
-        int mss = icsk_ack_rcv_mss;
-        int free_space = tcp_space();
-        int allowed_space = tcp_full_space();
-
-        int full_space = Math.min(window_clamp, allowed_space);
-        if (mss > full_space) {
-            mss = full_space;
-            if (mss <= 0) {
-                return 0;
-            }
-        }
-
-        /*-
-         * Only allow window shrink if the sysctl is enabled and we have
-         * a non-zero scaling factor in effect.
-         */
-        // XXX ....
-
-        /* do not allow window to shrink */
-        if (free_space < (full_space >> 1)) {
-            // 窗口已使用一半, 认为将要变紧张.
-            icsk_ack_quick = 0;
-
-            if (tcp_under_memory_pressure()) {
-                tcp_adjust_rcv_ssthresh();
-            }
-
-            /*-
-             * free_space might become our new window, make sure we don't
-             * increase it due to wscale.
-             * FIXME 1. rounddown --> round_down, 2. 和 free_space >> rcv_wscale << rcv_wscale 什么区别 ??
-             * free_space = round_down(free_space, 1 << rcv_wscale);
-             */
-            free_space = free_space >> rcv_wscale << rcv_wscale;
-
-            /*-
-             * if free space is less than mss estimate, or is below 1/16th
-             * of the maximum allowed, try to move to zero-window, else
-             * tcp_clamp_window() will grow rcv buf up to tcp_rmem[2], and
-             * new incoming data is dropped due to memory limits.
-             * With large window, mss test triggers way too late in order
-             * to announce zero window in time before rmem limit kicks in.
-             */
-            if (free_space < (allowed_space >> 4) || free_space < mss) {
-                return 0;
-            }
-        }
-
-        if (free_space > rcv_ssthresh) {
-            free_space = rcv_ssthresh;
-        }
-
-        /*-
-         * Don't do rounding if we are using window scaling, since the
-         * scaled window will not line up with the MSS boundary anyway.
-         */
-        int window;
-        if (rcv_wscale > 0) {
-            window = free_space;
-
-            /* Advertise enough space so that it won't get scaled away.
-             * Import case: prevent zero window announcement if
-             * 1<<rcv_wscale > mss.
-             */
-            // FIXME
-            window = align(window, (1 << rcv_wscale));
-        } else {
-            window = rcv_wnd;
-            /* Get the largest window that is a nice multiple of mss.
-             * Window clamp already applied above.
-             * If our current window offering is within 1 mss of the
-             * free space we just keep it. This prevents the divide
-             * and multiply from happening most of the time.
-             * We also don't do any window rounding when the free space
-             * is too small.
-             */
-            if (window <= free_space - mss || window > free_space) {
-                window = rounddown(free_space, mss);
-            } else if (mss == full_space && free_space > window + (full_space >> 1)) {
-                window = free_space;
-            }
-        }
-        return window;
-    }
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3321
-    private int __tcp_retransmit_skb(final TcpBuffer skb, int segs) {
-        // start
-        int seq = skb.sequenceNumber();
-
-        if (before(seq, snd_una) && skb.syn()) {
-            skb.syn(false);
-            skb.sequenceNumber(++seq);
-        }
-
-        if (before(seq, snd_una)) {
-            int end_seq = determineEndSeq(skb);
-            if (before(end_seq, snd_una)) {
-                return -EINVAL;
-            }
-            // ...
-        }
-
-        // ...
-        int cur_mss = tcp_current_mss();
-        int avail_wnd = tcp_wnd_end() - skb.sequenceNumber();
-
-        /* If receiver has shrunk his window, and skb is out of
-         * new window, do not retransmit it. The exception is the
-         * case, when window is shrunk to zero. In this case
-         * our retransmit of one segment serves as a zero window probe.
-         */
-        if (avail_wnd <= 0) {
-            if (skb.sequenceNumber() != snd_una) {
-                return -EAGAIN;
-            }
-            avail_wnd = cur_mss;
-        }
-
-        int len = cur_mss * segs;
-        if (len > avail_wnd) {
-            len = rounddown(avail_wnd, cur_mss);
-            if (0 == len) {
-                len = avail_wnd;
-            }
-        }
-
-        // FIXME
-        log.warn("TCP_RETRNSMIT_SKB");
-
-//        int plen = b.length();
-        int skbLen = skb.asBuilder()
-                .srcAddr(ipHeader.getDstAddr())
-                .dstAddr(ipHeader.getSrcAddr())
-                .build().length();
-        if (skbLen > avail_wnd) {
-            // FIXME
-            // fragment
-            return -1;
-        } else {
-            // FIXME
-        }
-
-        segs = tcp_skb_pcount(skb);
-
-//        total_retrans += segs;
-//        bytes_retrans += skbLen;
-
-        if (false) {
-
-        } else {
-            return tcp_transmit_skb(skb, true);
-        }
-
-        /* To avoid taking spuriously low RTT samples based on a timestamp
-         * for a transmit that never happened, always mark EVER_RETRANS
-         */
-        // TCP_SKB_CB(skb)->sacked |= TCPCB_EVER_RETRANS;
-
-        return 0;
-    }
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3448
-    private int tcp_retransmit_skb(final TcpBuffer skb, int segs) {
-        int err = __tcp_retransmit_skb(skb, segs);
-        if (0 == err) {
-            skb.sacked |= TCPCB_RETRANS;
-            retrans_out += tcp_skb_pcount(skb);
-        }
-
-        /* Save stamp of the first (attempted) retransmit. */
-        if (retrans_stamp == 0) {
-            retrans_stamp = tcp_skb_timestamp_ts(tcp_usec_ts, skb);
-        }
-
-        if (undo_retrans < 0) {
-            undo_retrans = 0;
-        }
-        undo_retrans += tcp_skb_pcount(skb);
-        return err;
-    }
-
-    private void tcp_send_fin() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3578
-        TcpBuffer skb = new TcpBuffer()
-                .sequenceNumber(write_seq)
-                .ack(true).fin(true);
-        tcp_queue_skb(skb);
-        __tcp_push_pending_frames(tcp_current_mss());
-    }
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708
-    protected TcpBuffer tcp_make_synack(final IpHeader ipHdr, final TcpPacket skb) {
-        int mss = tcp_mss_clamp(dst_metric_advmss());
-        long now = tcp_clock_ns();
-
-        final TcpBuffer current = new TcpBuffer()
-                .srcAddr(ipHdr.getDstAddr())
-                .dstAddr(ipHdr.getSrcAddr())
-                .srcPort(skb.getHeader().getDstPort())
-                .dstPort(skb.getHeader().getSrcPort())
-                .syn(true).ack(true)
-                .sequenceNumber(req_snt_isn_ref.get())
-                .acknowledgmentNumber(req_rcv_nxt_ref.get())
-                .window((short) Math.min(req_rsk_rcv_wnd_ref.get(), U16_MAX));
-
-        skb_set_delivery_time(current, now, "SKB_CLOCK_MONOTONIC");
-
-        current.options(tcp_synack_options(mss));
-
-
-        return current;
-    }
-
-    private int tcp_delack_max() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4172
-        int tcp_rto_min = tcp_rto_min();
-        int icsk_delack_max = this.icsk_delack_max;
-        int delack_from_rto_min = Math.max(tcp_rto_min, 2) - 1;
-        return Math.min(icsk_delack_max, delack_from_rto_min);
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4183">tcp_send_delayed_ack</a>
-     */
-    private void tcp_send_delayed_ack() {
-        long ato = icsk_ack_ato;
-        if (ato > TCP_DELACK_MIN) {
-            int max_ato = HZ / 2;
-
-            if (inet_csk_in_pingpong_model() || 0 != (icsk_ack_pending & ICSK_ACK_PUSHED)) {
-                max_ato = TCP_DELACK_MAX;
-            }
-
-            /* Slow path, intersegment interval is "high". */
-
-            /* If some rtt estimate is known, use it to bound delayed ack.
-             * Do not use inet_csk(sk)->icsk_rto here, use results of rtt measurements
-             * directly.
-             */
-            if (srtt_us != 0) {
-                int rtt = (int) Math.min(usecs_to_jiffies(srtt_us >> 3), TCP_DELACK_MIN);
-                if (rtt < max_ato) {
-                    max_ato = rtt;
-                }
-            }
-
-            ato = Math.min(ato, max_ato);
-        }
-
-        ato = Math.min(ato, tcp_delack_max());
-
-        /* Stay within the limit we were given */
-        long timeout = jiffies() + ato;
-
-        /* Use new timeout only if there wasn't a older one earlier. */
-        if ((icsk_ack_pending & ICSK_ACK_TIMER) != 0) {
-
-            /* If delack timer is about to expire, send ACK now. */
-            if (time_before_eq(icsk_ack_timeout, jiffies() + (ato >> 2))) {
-                // send now.
-                tcp_send_ack();
-                return;
-            }
-
-            if (!time_before(timeout, icsk_ack_timeout)) {
-                timeout = icsk_ack_timeout;
-            }
-        }
-
-        // XXX smp_store_release
-        icsk_ack_pending |= ICSK_ACK_SCHED | ICSK_ACK_TIMER;
-
-        if (icsk_ack_timeout != timeout) {
-            icsk_ack_timeout = timeout;
-            sk_reset_timer(icsk_delack_timer, timeout);
-        }
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4237">__tcp_send_ack</a>
-     */
-    private void __tcp_send_ack(final int rcv_nxt) {
-        /* If we have been reset, we may not send again. */
-        if (State.TCP_CLOSE.equals(state.get())) {
-            return;
-        }
-
-        final TcpBuffer buf = new TcpBuffer();
-
-        buf.sequenceNumber(tcp_acceptable_seq())
-                .ack(true);
-
-        /* Send it off, this clears delayed acks for us. */
-        __tcp_transmit_skb(buf, false, rcv_nxt);
-    }
-
-    /**
-     * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4279.
-     */
-    private void tcp_send_ack() {
-        __tcp_send_ack(rcv_nxt);
-    }
-
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4295">tcp_xmit_probe_skb</a>
-     */
-    private int tcp_xmit_probe_skb(int urgent, int mib) {
-        /*-
-         * Use a previous sequence.  This should cause the other
-         * end to send an ack.  Don't queue or clone SKB, just
-         * send it.
-         */
-        final int seq = snd_una - (0 == urgent ? 1 : 0);
-        TcpBuffer skb = new TcpBuffer().sequenceNumber(seq).ack(true);
-        return tcp_transmit_skb(skb, false);
-    }
-
-    /**
-     * Initiate keepalive or window probe from timer.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4328">tcp_write_wakeup</a>
-     */
-    private int tcp_write_wakeup(int mib) {
-        if (State.TCP_CLOSE.equals(state.get())) {
-            return -1;
-        }
-
-        final TcpBuffer buf = tcp_send_head();
-        final TcpBuffer skb = null != buf ? buf : null;
-        if (null != skb && skb.sequenceNumber() < tcp_wnd_end()) {
-            final int seq = skb.sequenceNumber();
-            final int mss = tcp_current_mss();
-            int seg_size = tcp_wnd_end() - seq;
-
-            int end_seq = determineEndSeq(skb);
-            if (before(pushed_seq, end_seq)) {
-                // XXX ???
-                pushed_seq = end_seq;
-            }
-
-            /* We are probing the opening of a window
-             * but the window size is != 0
-             * must have been a result SWS avoidance ( sender )
-             */
-            // FIXME
-//            final int len = skb.asBuilder().length();
-//            final int len = skb.length() - skb.getHeader().length();
-//            if (seg_size < end_seq - seq || len > mss) {
-//                seg_size = Math.min(seg_size, mss);
-//                buf.psh(true);
-
-            // FIXME
-//            }
-
-            // ...
-
-            buf.psh(true);
-
-//            TcpPacket build = buf.build();
-            int err = tcp_transmit_skb(skb, true);
-            if (0 == err) {
-                tcp_event_new_data_sent(skb);
-            }
-            return err;
-        } else {
-            // XXX ????
-            if (snd_up <= snd_una + 1 && snd_una + 1 <= snd_una + 0xFFFF) {
-                tcp_xmit_probe_skb(1, mib);
-            }
-            return tcp_xmit_probe_skb(0, mib);
-        }
-    }
-
-    /**
-     * A window probe timeout has occurred.  If window is not closed send
-     * a partial packet else a zero probe.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4374">tcp_send_probe0</a>
-     */
-    private void tcp_send_probe0() {
-        // LINUX_MIB_TCPWINPROBE
-        int err = tcp_write_wakeup(0);
-
-        if (packets_out > 0 || tcp_write_queue_empty()) {
-            /* Cancel probe timer, if it is not required. */
-            icsk_backoff = 0;
-            icsk_probes_out = 0;
-            icsk_probes_tstamp = 0;
-            return;
-        }
-
-        icsk_probes_out++;
-        long timeout;
-        if (err <= 0) {
-            if (icsk_backoff < sysctl_tcp_retries2) {
-                icsk_backoff++;
-            }
-            timeout = tcp_probe0_when(TCP_RTO_MAX);
-        } else {
-            /* If packet was not sent due to local congestion,
-             * Let senders fight for local resources conservatively.
-             */
-            timeout = TCP_RESOURCE_PROBE_INTERVAL;
-        }
-
-        timeout = tcp_clamp_probe0_to_user_timeout(timeout);
-        tcp_reset_xmit_timer(ICSK_TIME_PROBE0, timeout, TCP_RTO_MAX);
-    }
 
 
     /* ************* */
@@ -3603,7 +2499,7 @@ public abstract class TcpConnection<P extends IpPacket> {
             final int seq = skb.sequenceNumber();
             final int end_seq = determineEndSeq(skb);
             int acked_pcount = 1;
-            int sacked = 0; // FIXME
+            int sacked = skb.sacked;
 
             /* Determine how many packets and what bytes were acked, tso and else */
             if (after(end_seq, snd_una)) {
@@ -3670,7 +2566,7 @@ public abstract class TcpConnection<P extends IpPacket> {
             seq_rtt_us = tcp_stamp_us_delta(tcp_mstamp, first_ackt);
             ca_rtt_us = tcp_stamp_us_delta(tcp_mstamp, last_ackt);
 
-            log.debug("SEQ RTT = {}", seq_rtt_us);
+            log.debug("SEQ RTT = {}us", seq_rtt_us);
         }
 
         /*-
@@ -4013,7 +2909,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         }
 
         if (seq == rcv_nxt) {
-            if (tcp_receive_window() == 0) {
+            if (output.tcp_receive_window(this) == 0) {
                 final int len = skb.length() - hdr.length();
                 if (!(0 >= len && hdr.getFin())) {
                     out_of_window(skb, SKB_DROP_REASON_TCP_ZEROWINDOW);
@@ -4027,12 +2923,12 @@ public abstract class TcpConnection<P extends IpPacket> {
             tcp_rcv_spurious_retrans(skb);
             /* A retransmit, 2nd most common case.  Force an immediate ack. */
             out_of_window(skb, SKB_DROP_REASON_TCP_OLD_DATA);
-        } else if (!before(seq, rcv_nxt + tcp_receive_window())) {
+        } else if (!before(seq, rcv_nxt + output.tcp_receive_window(this))) {
             /* Out of window. F.e. zero window probe. */
             out_of_window(skb, SKB_DROP_REASON_TCP_OVERWINDOW);
         } else if (before(seq, rcv_nxt)) {
             /* Partial packet, seq < rcv_next < end_seq */
-            if (tcp_receive_window() == 0) {
+            if (output.tcp_receive_window(this) == 0) {
                 out_of_window(skb, SKB_DROP_REASON_TCP_ZEROWINDOW);
             } else {
                 // goto queue_and_out
@@ -4339,8 +3235,10 @@ public abstract class TcpConnection<P extends IpPacket> {
         return 0;
     }
 
+    protected abstract void INDIRECT_CALL_INET(final TcpBuffer skb);
 
-    private long tcp_clock_ns() {
+
+    long tcp_clock_ns() {
         return System.nanoTime();
     }
 
@@ -4352,23 +3250,4 @@ public abstract class TcpConnection<P extends IpPacket> {
         return TimeUnit.NANOSECONDS.toMillis(tcp_clock_ns());
     }
 
-    private int align(final int len, final int align) {
-        return (((len) + ((align) - 1)) & ~((align) - 1));
-    }
-
-    private boolean time_after(long a, long b) {
-        return (b - a) < 0;
-    }
-
-    private boolean time_after_eq(long a, long b) {
-        return (a - b) >= 0;
-    }
-
-    private boolean time_before(long a, long b) {
-        return time_after(b, a);
-    }
-
-    private boolean time_before_eq(long a, long b) {
-        return time_after_eq(b, a);
-    }
 }
