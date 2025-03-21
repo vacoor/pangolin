@@ -2911,9 +2911,9 @@ public abstract class TcpConnection<T extends IpPacket> {
      * @throws IOException
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6743">tcp_rcv_state_process</a>
      */
-    protected int tcp_rcv_state_process(final T ih, final TcpPacket skb) throws IOException {
+    protected int tcp_rcv_state_process(final T ipPacket, final TcpPacket skb) throws IOException {
         final TcpHeader th = skb.getHeader();
-        ipHeader = ih.getHeader();
+        ipHeader = ipPacket.getHeader();
         tcpSrcPort = th.getSrcPort();
         tcpDstPort = th.getDstPort();
 
@@ -2949,7 +2949,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                     /*-
                      * 创建状态为TCP_NEW_SYN_RECV的请求套接字(request_sock)放入半连接队列.
                      */
-                    final boolean accept = conn_request(ih, skb);
+                    final boolean accept = conn_request(ipPacket, skb);
                     if (!accept) {
                         return SKB_DROP_REASON_NO_SOCKET;
                     }

@@ -969,8 +969,13 @@ class TcpOutput<T extends IpPacket> {
         return err;
     }
 
+    /**
+     * Send a FIN. The caller locks the socket for us.
+     * We should try to send a FIN packet really hard, but eventually give up.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3578">tcp_send_fin</a>
+     */
     void tcp_send_fin(final TcpConnection<T> tp) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3578
         TcpBuffer skb = new TcpBuffer()
                 .sequenceNumber(tp.write_seq)
                 .ack(true).fin(true);
