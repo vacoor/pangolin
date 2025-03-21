@@ -20,8 +20,8 @@ import static org.pcap4j.packet.TcpPacket.TcpOption;
  * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_output.c</a>
  */
 @Slf4j
-class TcpOutput {
-    private final TcpConnection<?> conn;
+class TcpOutput<T extends IpPacket> {
+    private final TcpConnection<T> conn;
 
     boolean ipv4_sysctl_tcp_shrink_window;
     /**
@@ -32,7 +32,7 @@ class TcpOutput {
     private int sysctl_rmem_max;
     private int ipv4_sysctl_tcp_min_snd_mss;
 
-    TcpOutput(final TcpConnection<?> conn) {
+    TcpOutput(final TcpConnection<T> conn) {
         this.conn = conn;
     }
 
@@ -40,7 +40,7 @@ class TcpOutput {
      * Refresh clocks of a TCP socket,
      * ensuring monotically increasing values.
      */
-    void tcp_mstamp_refresh(final TcpConnection<?> tp) {
+    void tcp_mstamp_refresh(final TcpConnection<T> tp) {
         final long ns = tcp_clock_ns();
         tp.tcp_clock_cache = ns;
         tp.tcp_mstamp = (int) TimeUnit.NANOSECONDS.toMicros(ns);
@@ -51,7 +51,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L67">tcp_event_new_data_sent</a>
      */
-    private void tcp_event_new_data_sent(final TcpConnection<?> tp, TcpBuffer skb) {
+    private void tcp_event_new_data_sent(final TcpConnection<T> tp, TcpBuffer skb) {
         final int prior_packets = tp.packets_out;
 
         tp.snd_nxt = determineEndSeq(skb);
@@ -83,7 +83,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L97">tcp_acceptable_seq</a>
      */
-    private int tcp_acceptable_seq(final TcpConnection<?> tp) {
+    private int tcp_acceptable_seq(final TcpConnection<T> tp) {
         if (!before(tp.tcp_wnd_end(), tp.snd_nxt)
                 || (tp.wscale_ok && tp.snd_nxt - tp.tcp_wnd_end() < (1 << tp.rcv_wscale))) {
             return tp.snd_nxt;
@@ -96,7 +96,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L163">tcp_event_data_sent</a>
      */
-    void tcp_event_data_sent(final TcpConnection<?> tp) {
+    void tcp_event_data_sent(final TcpConnection<T> tp) {
         long now = tcp_jiffies32();
 
         tp.lsndtime = now;
@@ -119,7 +119,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L182">tcp_event_ack_sent</a>
      */
-    private void tcp_event_ack_sent(final TcpConnection<?> tp, final int rcv_nxt) {
+    private void tcp_event_ack_sent(final TcpConnection<T> tp, final int rcv_nxt) {
         if (rcv_nxt != tp.rcv_nxt) {
             return;
         }
@@ -142,7 +142,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L207">tcp_select_initial_window</a>
      */
-    void tcp_select_initial_window(final TcpConnection<?> tp,
+    void tcp_select_initial_window(final TcpConnection<T> tp,
                                    final int __space, final int mss,
                                    final AtomicInteger rcv_wnd, final AtomicInteger __window_clamp,
                                    final boolean wscale_ok,
@@ -201,7 +201,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L260">tcp_select_window</a>
      */
-    int tcp_select_window(final TcpConnection<?> tp) {
+    int tcp_select_window(final TcpConnection<T> tp) {
         int old_win = tp.rcv_wnd;
         int cur_win = tcp_receive_window(tp);
         int new_win = __tcp_select_window(tp);
@@ -275,7 +275,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L902">tcp_synack_options</a>
      */
-    private List<TcpOption> tcp_synack_options(TcpConnection<?> tp, int mss) {
+    private List<TcpOption> tcp_synack_options(TcpConnection<T> tp, int mss) {
         final List<TcpOption> options = Lists.newArrayList();
 
         // XXX
@@ -323,7 +323,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1290">__tcp_transmit_skb</a>
      */
-    private int __tcp_transmit_skb(final TcpConnection<?> tp, final TcpBuffer skb, final boolean clone, int rcv_nxt) {
+    private int __tcp_transmit_skb(final TcpConnection<T> tp, final TcpBuffer skb, final boolean clone, int rcv_nxt) {
         BUG_ON(null == skb || tcp_skb_pcount(skb) == 0);
 
         long prior_wstamp = tp.tcp_wstamp_ns;
@@ -407,7 +407,7 @@ class TcpOutput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1486">tcp_transmit_skb</a>
      */
-    private int tcp_transmit_skb(final TcpConnection<?> tp, final TcpBuffer skb, final boolean clone) {
+    private int tcp_transmit_skb(final TcpConnection<T> tp, final TcpBuffer skb, final boolean clone) {
         return __tcp_transmit_skb(tp, skb, clone, tp.rcv_nxt);
     }
 
@@ -419,7 +419,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498">tcp_queue_skb</a>
      */
-    private void tcp_queue_skb(final TcpConnection<?> tp, TcpBuffer skb) {
+    private void tcp_queue_skb(final TcpConnection<T> tp, TcpBuffer skb) {
         tp.write_seq = determineEndSeq(skb);
         tp.sk_write_queue.offer(skb);
     }
@@ -431,7 +431,7 @@ class TcpOutput {
      * @return mss to use
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1755">__tcp_mtu_to_mss</a>
      */
-    private int __tcp_mtu_to_mss(final TcpConnection<?> tp, final int pmtu) {
+    private int __tcp_mtu_to_mss(final TcpConnection<T> tp, final int pmtu) {
         // XXX icsk->icsk_af_ops->net_header_len
         final int net_header_len = IP_HEADER_SIZE;
 
@@ -460,7 +460,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1780">tcp_mtu_to_mss</a>
      */
-    private int tcp_mtu_to_mss(final TcpConnection<?> tp, final int pmtu) {
+    private int tcp_mtu_to_mss(final TcpConnection<T> tp, final int pmtu) {
         /* Subtract TCP options size, not including SACKs */
         return __tcp_mtu_to_mss(tp, pmtu) - (tp.tcp_header_len - SIZE_OF_TCP_HDR);
     }
@@ -479,7 +479,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1840"></a>
      */
-    int tcp_sync_mss(TcpConnection<?> tp, int pmtu) {
+    int tcp_sync_mss(TcpConnection<T> tp, int pmtu) {
         // XXX icsk->icsk_mtup.search_high
 
         int mss_now = tcp_mtu_to_mss(tp, pmtu);
@@ -501,7 +501,7 @@ class TcpOutput {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1865">tcp_current_mss</a>
      */
-    int tcp_current_mss(final TcpConnection<?> tp) {
+    int tcp_current_mss(final TcpConnection<T> tp) {
         int mss_now = tp.mss_cache;
         int mtu = tp.dst_mtu();
         if (mtu != tp.icsk_pmtu_cookie) {
@@ -529,7 +529,7 @@ class TcpOutput {
      * But we can avoid doing the divide again given we already have
      *  skb_pcount = skb->len / mss_now
      */
-    static void tcp_minshall_update(TcpConnection<?> tp, int mss_now, TcpBuffer skb) {
+    void tcp_minshall_update(TcpConnection<T> tp, int mss_now, TcpBuffer skb) {
 //        if (skb->len < tcp_skb_pcount(skb) * mss_now) {
 //            tp.snd_sml = determineEndSeq(skb);
 //        }
@@ -541,7 +541,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2086">tcp_cwnd_test</a>
      */
-    private int tcp_cwnd_test(final TcpConnection<?> tp) {
+    private int tcp_cwnd_test(final TcpConnection<T> tp) {
         int in_flight = tp.tcp_packets_in_flight();
         int cwnd = tp.tcp_snd_cwnd();
         if (in_flight >= cwnd) {
@@ -570,7 +570,7 @@ class TcpOutput {
      * @return overflow window (continue push)
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2739">tcp_write_xmit</a>
      */
-    private boolean tcp_write_xmit(TcpConnection<?> tp, int mss_now, final int push_one) {
+    private boolean tcp_write_xmit(TcpConnection<T> tp, int mss_now, final int push_one) {
 
         int sent_pkts = 0;
         boolean is_cwnd_limited = false;
@@ -658,17 +658,17 @@ class TcpOutput {
      * @return the actual receive window
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L813">tcp_receive_window</a>
      */
-    int tcp_receive_window(TcpConnection<?> tp) {
+    int tcp_receive_window(TcpConnection<T> tp) {
         return Math.max(tp.rcv_wup + tp.rcv_wnd - tp.rcv_nxt, 0);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3084">__tcp_select_window</a>
      */
-    private int __tcp_select_window(final TcpConnection<?> sock) {
+    private int __tcp_select_window(final TcpConnection<T> sock) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3084
-        TcpConnection<?> icsk = sock;
-        TcpConnection<?> tp = sock;
+        TcpConnection<T> icsk = sock;
+        TcpConnection<T> tp = sock;
         /*-
          * MSS for the peer's data.  Previous versions used mss_clamp
          * here.  I don't know if the value based on our guesses
@@ -770,12 +770,12 @@ class TcpOutput {
     }
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1583
-    private void tcp_adjust_rcv_ssthresh(final TcpConnection<?> tp) {
+    private void tcp_adjust_rcv_ssthresh(final TcpConnection<T> tp) {
         __tcp_adjust_rcv_ssthresh(tp, tp.advmss << 2);
     }
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1572
-    private void __tcp_adjust_rcv_ssthresh(final TcpConnection<?> tp, int new_ssthresh) {
+    private void __tcp_adjust_rcv_ssthresh(final TcpConnection<T> tp, int new_ssthresh) {
         tp.rcv_ssthresh = Math.min(tp.rcv_ssthresh, new_ssthresh);
         // ...
     }
@@ -785,7 +785,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1560">tcp_space</a>
      */
-    private int tcp_space(TcpConnection<?> tp) {
+    private int tcp_space(TcpConnection<T> tp) {
         /*
         接收缓冲区大小 - 待接收 - 已使用.
         return tcp_win_from_space(sk, READ_ONCE(sk->sk_rcvbuf) -
@@ -798,7 +798,7 @@ class TcpOutput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1567">tcp_full_space</a>
      */
-    int tcp_full_space(TcpConnection<?> tp) {
+    int tcp_full_space(TcpConnection<T> tp) {
         // FIXME
         final int sk_rcvbuf = U16_MAX << 6;
         return tcp_win_from_space(sk_rcvbuf);
@@ -847,7 +847,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3005">__tcp_push_pending_frames</a>
      */
-    void __tcp_push_pending_frames(final TcpConnection<?> tp, int mss) {
+    void __tcp_push_pending_frames(final TcpConnection<T> tp, int mss) {
         /*-
          * If we are closed, the bytes will have to remain here.
          * In time closedown will finish, we empty the write queue and
@@ -872,7 +872,7 @@ class TcpOutput {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3321">__tcp_retransmit_skb</a>
      */
-    private int __tcp_retransmit_skb(final TcpConnection<?> tp, final TcpBuffer skb, int segs) {
+    private int __tcp_retransmit_skb(final TcpConnection<T> tp, final TcpBuffer skb, int segs) {
         // start
         int seq = skb.sequenceNumber();
 
@@ -950,7 +950,7 @@ class TcpOutput {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3448
-    int tcp_retransmit_skb(final TcpConnection<?> tp, final TcpBuffer skb, int segs) {
+    int tcp_retransmit_skb(final TcpConnection<T> tp, final TcpBuffer skb, int segs) {
         int err = __tcp_retransmit_skb(tp, skb, segs);
         if (0 == err) {
             skb.sacked |= TCPCB_RETRANS;
@@ -969,7 +969,7 @@ class TcpOutput {
         return err;
     }
 
-    void tcp_send_fin(final TcpConnection<?> tp) {
+    void tcp_send_fin(final TcpConnection<T> tp) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3578
         TcpBuffer skb = new TcpBuffer()
                 .sequenceNumber(tp.write_seq)
@@ -979,7 +979,7 @@ class TcpOutput {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708
-    protected TcpBuffer tcp_make_synack(final TcpConnection<?> tp, final IpPacket.IpHeader ipHdr, final TcpPacket skb) {
+    protected TcpBuffer tcp_make_synack(final TcpConnection<T> tp, final IpPacket.IpHeader ipHdr, final TcpPacket skb) {
         int mss = tp.tcp_mss_clamp(tp.dst_metric_advmss());
         long now = tcp_clock_ns();
 
@@ -1001,7 +1001,7 @@ class TcpOutput {
         return current;
     }
 
-    private int tcp_delack_max(final TcpConnection<?> tp) {
+    private int tcp_delack_max(final TcpConnection<T> tp) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4172
         int tcp_rto_min = tp.tcp_rto_min();
         int icsk_delack_max = tp.icsk_delack_max;
@@ -1012,7 +1012,7 @@ class TcpOutput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4183">tcp_send_delayed_ack</a>
      */
-    void tcp_send_delayed_ack(final TcpConnection<?> tp) {
+    void tcp_send_delayed_ack(final TcpConnection<T> tp) {
         long ato = tp.icsk_ack_ato;
         if (ato > TCP_DELACK_MIN) {
             int max_ato = HZ / 2;
@@ -1075,7 +1075,7 @@ class TcpOutput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4237">__tcp_send_ack</a>
      */
-    private void __tcp_send_ack(final TcpConnection<?> tp, final int rcv_nxt) {
+    private void __tcp_send_ack(final TcpConnection<T> tp, final int rcv_nxt) {
         /* If we have been reset, we may not send again. */
         if (TcpConnection.State.TCP_CLOSE.equals(tp.state.get())) {
             return;
@@ -1093,7 +1093,7 @@ class TcpOutput {
     /**
      * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4279.
      */
-    void tcp_send_ack(final TcpConnection<?> tp) {
+    void tcp_send_ack(final TcpConnection<T> tp) {
         __tcp_send_ack(tp, tp.rcv_nxt);
     }
 
@@ -1101,7 +1101,7 @@ class TcpOutput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4295">tcp_xmit_probe_skb</a>
      */
-    private int tcp_xmit_probe_skb(final TcpConnection<?> tp, int urgent, int mib) {
+    private int tcp_xmit_probe_skb(final TcpConnection<T> tp, int urgent, int mib) {
         /*-
          * Use a previous sequence.  This should cause the other
          * end to send an ack.  Don't queue or clone SKB, just
@@ -1117,7 +1117,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4328">tcp_write_wakeup</a>
      */
-    private int tcp_write_wakeup(TcpConnection<?> tp, int mib) {
+    private int tcp_write_wakeup(TcpConnection<T> tp, int mib) {
         if (TcpConnection.State.TCP_CLOSE.equals(tp.state.get())) {
             return -1;
         }
@@ -1174,7 +1174,7 @@ class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4374">tcp_send_probe0</a>
      */
-    void tcp_send_probe0(final TcpConnection<?> tp) {
+    void tcp_send_probe0(final TcpConnection<T> tp) {
         // LINUX_MIB_TCPWINPROBE
         int err = tcp_write_wakeup(tp, 0);
 

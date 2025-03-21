@@ -345,14 +345,14 @@ public abstract class TcpConnection<P extends IpPacket> {
     volatile Channel child;
     private int connTimeoutMs = 10 * 1000;
 
-    TcpOutput output;
+    TcpOutput<P> output;
 
     protected TcpConnection(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         this.parent = parent;
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
-        this.output = new TcpOutput(this);
+        this.output = new TcpOutput<P>(this);
         init();
         this.listen();
     }
