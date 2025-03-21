@@ -92,9 +92,12 @@ public class TunAcceptorFactory implements AcceptorFactory {
 //                        LinuxNetworkRoutingTable.add("tun8", addr, 24, gw, false);
 
                     }
+
+                    /*
                     final InetAddress dst = SocketUtils.addressByName("10.188.71.3", true);
                     final InetAddress gw = SocketUtils.addressByName("198.18.0.1", true);
                     NetworkRoutingTable.get().add(dst, (byte) 24, gw, adapter.name(), 0);
+                    */
                 } else {
                     log.error("Tun adapter bound error: {}", future.cause().getMessage(), future.cause());
                 }

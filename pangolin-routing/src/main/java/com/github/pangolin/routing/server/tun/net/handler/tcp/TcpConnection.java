@@ -1,18 +1,39 @@
 package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.after;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.before;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.between;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.jiffies;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.jiffies_to_msecs;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.jiffies_to_usecs;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.msecs_to_jiffies;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.tcp_jiffies32;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.time_after;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.usecs_to_jiffies;
+
 import com.github.pangolin.routing.server.fakedns.DnsEngine;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.google.common.collect.Maps;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.EventLoopGroup;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.*;
+import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
+import org.pcap4j.packet.Packet;
+import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
+import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.TcpPacket.TcpOption;
+import org.pcap4j.packet.TcpWindowScaleOption;
+import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.io.IOException;
@@ -26,10 +47,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.*;
-
 @Slf4j
-public abstract class TcpConnection<P extends IpPacket> {
+public abstract class TcpConnection<T extends IpPacket> {
     private static final byte FIN = 0x0001;
     private static final byte SYN = 0x0002;
     private static final byte RST = 0x0004;
@@ -345,14 +364,16 @@ public abstract class TcpConnection<P extends IpPacket> {
     volatile Channel child;
     private int connTimeoutMs = 10 * 1000;
 
-    TcpOutput<P> output;
+    TcpInput<T> input;
+    TcpOutput<T> output;
 
     protected TcpConnection(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         this.parent = parent;
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
-        this.output = new TcpOutput<P>(this);
+        this.output = new TcpOutput<T>(this);
+        this.input = new TcpInput<>(this.output);
         init();
         this.listen();
     }
@@ -361,7 +382,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         tcp_init_sock();
     }
 
-    private TcpConnection<P> listen() {
+    private TcpConnection<T> listen() {
         inet_listen(100);
         return this;
     }
@@ -412,7 +433,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         return 0;
     }
 
-    public void handler(final P ipHeader, final TcpPacket tcpPacket) {
+    public void handler(final T ipHeader, final TcpPacket tcpPacket) {
         if (null != child) {
             child.eventLoop().execute(() -> handler0(ipHeader, tcpPacket));
         } else {
@@ -420,7 +441,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         }
     }
 
-    protected abstract void handler0(final P ipHeader, final TcpPacket tcpPacket);
+    protected abstract void handler0(final T ipHeader, final TcpPacket tcpPacket);
 
 
     /**
@@ -476,7 +497,7 @@ public abstract class TcpConnection<P extends IpPacket> {
     private final AtomicInteger ireq_snd_wscale_ref = new AtomicInteger();
     final AtomicInteger ireq_rcv_wscale_ref = new AtomicInteger();
 
-    protected boolean conn_request(final P ih, final TcpPacket skb) {
+    protected boolean conn_request(final T ih, final TcpPacket skb) {
         return tcp_conn_request(ih, skb);
     }
 
@@ -485,7 +506,7 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
-    private boolean tcp_conn_request(final P pkg, final TcpPacket skb) {
+    private boolean tcp_conn_request(final T pkg, final TcpPacket skb) {
         final IpHeader ipHdr = pkg.getHeader();
         /*-
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
@@ -534,7 +555,7 @@ public abstract class TcpConnection<P extends IpPacket> {
             // no socket.
             return false;
         }
-        log.info("{} Connecting...", resolved);
+        logInfo("Connecting: {}", resolved);
         final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, true, childGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
@@ -572,21 +593,17 @@ public abstract class TcpConnection<P extends IpPacket> {
 
         try {
             child = cf.sync().channel();
-            log.info("{} Connected.", resolved);
+            logInfo("ESTABLISHED: {}", resolved);
             child.closeFuture().addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(final ChannelFuture future) throws Exception {
-                    if (future.isSuccess()) {
-                        log.info("{} Disconnect.", resolved);
-                        shutdown(SEND_SHUTDOWN);
-                    } else {
-                        log.warn("{} Connect error", resolved, future.cause());
-                    }
+                    logInfo("DISCONNECTED: {}", resolved);
+                    shutdown(SEND_SHUTDOWN);
                 }
             });
             return true;
         } catch (InterruptedException e) {
-            log.info("{} Connection reset.", resolved, e.getMessage(), e);
+            log.info("CONNECTION RESET by {}: {}", e.getMessage(), resolved, e);
             return false;
         }
     }
@@ -868,64 +885,6 @@ public abstract class TcpConnection<P extends IpPacket> {
         }
     }
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L357">tcp_dec_quickack_mode</a>
-     */
-    void tcp_dec_quickack_mode() {
-        if (icsk_ack_quick != 0) {
-            /* How many ACKs S/ACKing new data have we sent? */
-            final int pkts = inet_csk_ack_scheduled() ? 1 : 0;
-
-            if (pkts >= icsk_ack_quick) {
-                icsk_ack_quick = 0;
-                /* Leaving quickack mode we deflate ATO. */
-                icsk_ack_ato = TCP_ATO_MIN;
-            } else {
-                icsk_ack_quick -= pkts;
-            }
-        }
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L300">tcp_incr_quickack</a>
-     */
-    void tcp_incr_quickack(int max_quickacks) {
-        int quickacks = rcv_wnd / (2 * icsk_ack_rcv_mss);
-        if (0 == quickacks) {
-            quickacks = 2;
-        }
-        quickacks = Math.min(quickacks, max_quickacks);
-        if (quickacks > icsk_ack_quick) {
-            icsk_ack_quick = quickacks;
-        }
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_enter_quickack_mode</a>
-     */
-    void tcp_enter_quickack_mode(int max_quickacks) {
-        tcp_incr_quickack(max_quickacks);
-        inet_csk_exit_pingpong_mode();
-        icsk_ack_ato = TCP_ATO_MIN;
-    }
-
-    /*-
-     * Send ACKs quickly, if "quick" count is not exhausted
-     * and the session is not interactive.
-     */
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_in_quickack_mode</a>
-     */
-    boolean tcp_in_quickack_mode() {
-        //const struct dst_entry *dst = __sk_dst_get(sk);
-
-        /*
-        return (dst && dst_metric(dst, RTAX_QUICKACK)) ||
-                (icsk->icsk_ack.quick && !inet_csk_in_pingpong_mode(sk));
-                */
-        return icsk_ack_quick > 0 && !inet_csk_in_pingpong_model();
-    }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L622">tcp_initialize_rcv_mss</a>
@@ -1133,7 +1092,7 @@ public abstract class TcpConnection<P extends IpPacket> {
             // tcp_bpf_rtt(sk, mrtt_us, srtt);
         }
         srtt_us = Math.max(1, srtt);
-        log.debug("SRTT = {}us", srtt_us >> 3);
+        logTrace("Compute a smoothed rtt: {}us", srtt_us >> 3);
     }
 
     /**
@@ -1165,7 +1124,7 @@ public abstract class TcpConnection<P extends IpPacket> {
          * guarantees that rto is higher.
          */
         tcp_bound_rto();
-        log.debug("RTO = {}ms", icsk_rto);
+        logTrace("Set retransmission timeout: {}ms", icsk_rto);
     }
 
     /**
@@ -1231,6 +1190,9 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     private void tcp_sendmsg_locked() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L1052
+
+        // restart:
+        final int mss_now = tcp_send_mss(this);
     }
 
     private synchronized void tcp_sendmsg2(TcpBuffer skb, boolean flush) {
@@ -1674,37 +1636,109 @@ public abstract class TcpConnection<P extends IpPacket> {
         icsk_ack_pending |= ICSK_ACK_SCHED;
     }
 
-    private boolean inet_csk_ack_scheduled() {
+    boolean inet_csk_ack_scheduled() {
         // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h
         return 0 != (icsk_ack_pending & ICSK_ACK_SCHED);
     }
 
-    void inet_csk_inc_pingpong_cnt() {
-        if (icsk_ack_pingpong < U8_MAX) {
-            if (!inet_csk_in_pingpong_model()) {
-                log.trace("increment PING-PONG count");
-            }
-            icsk_ack_pingpong++;
-        }
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L329">inet_csk_enter_pingpong_mode</a>
+     */
+    void inet_csk_enter_pingpong_mode() {
+        logTrace("[PING-PONG] enter PING-PONG mode: PING-PONG threshold = {}", sysctl_tcp_pingpong_thresh);
+        icsk_ack_pingpong = sysctl_tcp_pingpong_thresh;
     }
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L335">inet_csk_exit_pingpong_mode</a>
+     */
+    void inet_csk_exit_pingpong_mode() {
+        if (inet_csk_in_pingpong_model()) {
+            logTrace("[PING-PONG] exit PING-PONG mode");
+        }
+        icsk_ack_pingpong = 0;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L340">inet_csk_in_pingpong_model</a>
+     */
     boolean inet_csk_in_pingpong_model() {
         return icsk_ack_pingpong >= sysctl_tcp_pingpong_thresh;
     }
 
-    void inet_csk_enter_pingpong_mode() {
-        // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L329
-        icsk_ack_pingpong = sysctl_tcp_pingpong_thresh;
-        log.trace("enter PING-PONG mode");
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L346">inet_csk_inc_pingpong_cnt</a>
+     */
+    void inet_csk_inc_pingpong_cnt() {
+        if (icsk_ack_pingpong < U8_MAX) {
+            logTrace("[PING-PONG] increment PING-PONG count: {} -> {}", icsk_ack_pingpong, icsk_ack_pingpong + 1);
+            icsk_ack_pingpong++;
+        }
     }
 
-    void inet_csk_exit_pingpong_mode() {
-        // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L335
-        if (inet_csk_in_pingpong_model()) {
-            log.trace("exit PING-PONG mode");
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L357">tcp_dec_quickack_mode</a>
+     */
+    void tcp_dec_quickack_mode() {
+        if (icsk_ack_quick != 0) {
+            /* How many ACKs S/ACKing new data have we sent? */
+            final int pkts = inet_csk_ack_scheduled() ? 1 : 0;
+
+            if (pkts >= icsk_ack_quick) {
+                logTrace("[QUICK-ACK] decrement QUICK-ARK count: {} -> {}", icsk_ack_quick, 0);
+                icsk_ack_quick = 0;
+                /* Leaving quickack mode we deflate ATO. */
+                icsk_ack_ato = TCP_ATO_MIN;
+            } else {
+                logTrace("[QUICK-ACK] decrement QUICK-ARK count: {} -> {}", icsk_ack_quick, icsk_ack_quick - pkts);
+                icsk_ack_quick -= pkts;
+            }
         }
-        icsk_ack_pingpong = 0;
     }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L300">tcp_incr_quickack</a>
+     */
+    void tcp_incr_quickack(int max_quickacks) {
+        int quickacks = rcv_wnd / (2 * icsk_ack_rcv_mss);
+        if (0 == quickacks) {
+            quickacks = 2;
+        }
+        quickacks = Math.min(quickacks, max_quickacks);
+        if (quickacks > icsk_ack_quick) {
+            logTrace("[QUICK-ACK] increment QUICK-ARK count: {} -> {}", icsk_ack_quick, quickacks);
+            icsk_ack_quick = quickacks;
+        }
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_enter_quickack_mode</a>
+     */
+    void tcp_enter_quickack_mode(int max_quickacks) {
+        logTrace("[QUICK-ACK] enter QUICK-ARK count: {} -> {}", icsk_ack_quick, max_quickacks);
+        tcp_incr_quickack(max_quickacks);
+        inet_csk_exit_pingpong_mode();
+        icsk_ack_ato = TCP_ATO_MIN;
+    }
+
+    /*-
+     * Send ACKs quickly, if "quick" count is not exhausted
+     * and the session is not interactive.
+     */
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_in_quickack_mode</a>
+     */
+    boolean tcp_in_quickack_mode() {
+        //const struct dst_entry *dst = __sk_dst_get(sk);
+
+        /*
+        return (dst && dst_metric(dst, RTAX_QUICKACK)) ||
+                (icsk->icsk_ack.quick && !inet_csk_in_pingpong_mode(sk));
+                */
+        return icsk_ack_quick > 0 && !inet_csk_in_pingpong_model();
+    }
+
 
     /* *********** ]] DELAY ACK ************** */
 
@@ -2221,96 +2255,6 @@ public abstract class TcpConnection<P extends IpPacket> {
     /* *********** ]] ************** */
 
 
-    protected void trace(final IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
-        final InetAddress srcAddr = ipHeader.getSrcAddr();
-        final InetAddress dstAddr = ipHeader.getDstAddr();
-        final TcpHeader tcpHeader = tcpPacket.getHeader();
-        final String srcHostName = srcAddr.getHostAddress();
-        final String dstHostName = dstAddr.getHostAddress();
-        final int srcPort = tcpHeader.getSrcPort().valueAsInt();
-        final int dstPort = tcpHeader.getDstPort().valueAsInt();
-
-        /*
-        String dstHostNameToUse = resolve(dstAddr);
-        if (null != dstHostNameToUse) {
-            dstHostNameToUse = dstHostName + "(" + dstHostNameToUse +  ")";
-        } else {
-            dstHostNameToUse = dstHostName;
-        }
-        */
-        String dstHostNameToUse = dstHostName;
-
-        final StringBuilder buff = new StringBuilder()
-                .append(inbound ? srcHostName : dstHostNameToUse).append(":").append(srcPort)
-                .append(" => ")
-                .append(inbound ? dstHostNameToUse : srcHostName).append(":").append(dstPort);
-
-        final int len = buff.length();
-        if (tcpHeader.getFin()) {
-            buff.append("FIN,");
-        }
-        if (tcpHeader.getSyn()) {
-            buff.append("SYN,");
-        }
-        if (tcpHeader.getRst()) {
-            buff.append("RST,");
-        }
-        if (tcpHeader.getPsh()) {
-            buff.append("PSH,");
-        }
-        if (tcpHeader.getAck()) {
-            buff.append("ACK,");
-        }
-        if (tcpHeader.getUrg()) {
-            buff.append("URG,");
-        }
-
-        if (buff.length() > len) {
-            buff.replace(buff.length() - 1, buff.length(), "] ").insert(len, " [");
-        }
-
-        final boolean useRelative = true;
-        long sequence = tcpHeader.getSequenceNumberAsLong();
-        long acknowledgment = tcpHeader.getAcknowledgmentNumberAsLong();
-        if (useRelative) {
-            final long rcv_isn_l = rcv_isn & 0xFFFFFFFFL;
-            final long snt_isn_l = snt_isn & 0xFFFFFFFFL;
-            final boolean syn = tcpHeader.getSyn();
-            if (inbound) {
-                sequence -= !syn ? rcv_isn_l : sequence;
-                acknowledgment -= !syn ? snt_isn_l : acknowledgment - 1;
-            } else {
-                sequence -= !syn ? snt_isn_l : sequence;
-                acknowledgment -= !syn ? rcv_isn_l : acknowledgment - 1;
-            }
-        }
-
-        buff.append("Seq=").append(sequence);
-        if (tcpHeader.getAck()) {
-            buff.append(" Ack=").append(acknowledgment);
-        }
-
-        final int window = tcpHeader.getWindowAsInt() << (inbound ? rcv_wscale : snd_wscale);
-        buff.append(" Win=").append(window);
-
-        final int payloadLen = tcpPacket.length() - tcpHeader.length();
-        buff.append(" Len=").append(payloadLen);
-
-        if (tcpHeader.getSyn()) {
-
-        }
-
-        /*
-        final Packet payload = tcpPacket.getPayload();
-        if (null != payload) {
-            buff.append(" ").append(Bytes.toString(payload.getRawData()));
-        }
-        */
-
-        log.debug(buff.toString());
-    }
-
-
     int RTAX_WINDOW = 1;
     int RTAX_INITRWND = 2;
 
@@ -2447,6 +2391,7 @@ public abstract class TcpConnection<P extends IpPacket> {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3340
 
         int first_ackt = 0;
+        int first_ackseq = 0;
         int last_ackt = 0;
         int flag = 0;
         boolean fully_acked = true;
@@ -2455,8 +2400,6 @@ public abstract class TcpConnection<P extends IpPacket> {
 
         TcpBuffer skb;
         while (null != (skb = tcp_rtx_queue.peek())) {
-//            TcpPacket tp = skb.asBuilder().build();
-//            final TcpHeader th = tp.getHeader();
             final int seq = skb.sequenceNumber();
             final int end_seq = TcpUtils.determineEndSeq(skb);
             int acked_pcount = 1;
@@ -2495,6 +2438,7 @@ public abstract class TcpConnection<P extends IpPacket> {
                 last_ackt = tcp_skb_timestamp_us(skb);
                 if (0 == first_ackt) {
                     first_ackt = last_ackt;
+                    first_ackseq = skb.sequenceNumber();
                 }
             }
 
@@ -2527,7 +2471,7 @@ public abstract class TcpConnection<P extends IpPacket> {
             seq_rtt_us = tcp_stamp_us_delta(tcp_mstamp, first_ackt);
             ca_rtt_us = tcp_stamp_us_delta(tcp_mstamp, last_ackt);
 
-            log.debug("SEQ RTT = {}us", seq_rtt_us);
+            logTrace("Seq {} round-trip-time: {}us", first_ackseq, seq_rtt_us);
         }
 
         /*-
@@ -2769,7 +2713,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4521
     private void tcp_done_with_error(int err) {
-        log.error("TCP DOWN WITH ERROR: {}", err);
+        logError("TCP DONE WITH ERROR: {}", err);
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4515
         tcp_done();
     }
@@ -2912,28 +2856,6 @@ public abstract class TcpConnection<P extends IpPacket> {
         tcp_check_space();
     }
 
-    /**
-     * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5760.
-     */
-    private void __tcp_ack_snd_check() {
-        if (tcp_in_quickack_mode() || 0 != (icsk_ack_pending & ICSK_ACK_NOW)) {
-            output.tcp_send_ack(this);
-            return;
-        }
-
-        output.tcp_send_delayed_ack(this);
-    }
-
-    /**
-     * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5827.
-     */
-    private void tcp_ack_snd_check(final P ipHdr, final TcpPacket skb) {
-        if (!inet_csk_ack_scheduled()) {
-            /* We sent a data segment already. */
-            return;
-        }
-        __tcp_ack_snd_check();
-    }
 
     private boolean tcp_reset_check(final TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5939
@@ -2989,8 +2911,11 @@ public abstract class TcpConnection<P extends IpPacket> {
      * @throws IOException
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6743">tcp_rcv_state_process</a>
      */
-    protected int tcp_rcv_state_process(final P ih, final TcpPacket skb) throws IOException {
+    protected int tcp_rcv_state_process(final T ih, final TcpPacket skb) throws IOException {
         final TcpHeader th = skb.getHeader();
+        ipHeader = ih.getHeader();
+        tcpSrcPort = th.getSrcPort();
+        tcpDstPort = th.getDstPort();
 
         /*-
          * 握手处理.
@@ -3154,7 +3079,7 @@ public abstract class TcpConnection<P extends IpPacket> {
 
         if (!State.TCP_CLOSE.equals(state.get())) {
             tcp_data_snd_check();
-            tcp_ack_snd_check(ih, skb);
+            input.tcp_ack_snd_check(this);
         }
 
         return SKB_DROP_REASON_NOT_SPECIFIED;
@@ -3199,5 +3124,137 @@ public abstract class TcpConnection<P extends IpPacket> {
     protected abstract void INDIRECT_CALL_INET(final TcpBuffer skb);
 
 
+    int tcp_send_mss(final TcpConnection<T> tp) {
+        return output.tcp_current_mss(tp);
+    }
 
+    void logTrace(final String format, final Object... args) {
+        log.trace(format(format), args);
+    }
+
+    void logDebug(final String format, final Object... args) {
+        log.debug(format(format), args);
+    }
+
+    void logInfo(final String format, final Object... args) {
+        log.info(format(format), args);
+    }
+
+    void logWarn(final String format, final Object... args) {
+        log.warn(format(format), args);
+    }
+
+    void logError(final String format, final Object... args) {
+        log.error(format(format), args);
+    }
+
+    private String format(final String format) {
+        final InetAddress srcAddr = ipHeader.getSrcAddr();
+        final InetAddress dstAddr = ipHeader.getDstAddr();
+
+        final int srcPort = tcpSrcPort.valueAsInt();
+        final int dstPort = tcpDstPort.valueAsInt();
+
+        final String srcHostAddr = srcAddr.getHostAddress();
+        final String dstHostAddr = dstAddr.getHostAddress();
+
+        final StringBuilder buff = new StringBuilder();
+        buff.append(srcHostAddr).append(":").append(srcPort)
+                .append(" => ")
+                .append(dstHostAddr).append(":").append(dstPort);
+        if (null != child) {
+            buff.append(" [").append(child.id()).append("]");
+        }
+        buff.append(" ");
+
+        buff.append(format);
+        return buff.toString();
+    }
+
+    protected void debug(final IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
+//        if (true) {
+//            return;
+//        }
+        final InetAddress srcAddr = ipHeader.getSrcAddr();
+        final InetAddress dstAddr = ipHeader.getDstAddr();
+        final TcpHeader tcpHeader = tcpPacket.getHeader();
+        final String srcHostName = srcAddr.getHostAddress();
+        final String dstHostName = dstAddr.getHostAddress();
+        final int srcPort = tcpHeader.getSrcPort().valueAsInt();
+        final int dstPort = tcpHeader.getDstPort().valueAsInt();
+
+        /*
+        String dstHostNameToUse = resolve(dstAddr);
+        if (null != dstHostNameToUse) {
+            dstHostNameToUse = dstHostName + "(" + dstHostNameToUse +  ")";
+        } else {
+            dstHostNameToUse = dstHostName;
+        }
+        */
+        String dstHostNameToUse = dstHostName;
+
+        final StringBuilder buff = new StringBuilder()
+                .append(srcHostName).append(":").append(srcPort)
+                .append(" => ")
+                .append(dstHostNameToUse).append(":").append(dstPort);
+
+        final int len = buff.length();
+        if (tcpHeader.getFin()) {
+            buff.append("FIN,");
+        }
+        if (tcpHeader.getSyn()) {
+            buff.append("SYN,");
+        }
+        if (tcpHeader.getRst()) {
+            buff.append("RST,");
+        }
+        if (tcpHeader.getPsh()) {
+            buff.append("PSH,");
+        }
+        if (tcpHeader.getAck()) {
+            buff.append("ACK,");
+        }
+        if (tcpHeader.getUrg()) {
+            buff.append("URG,");
+        }
+
+        if (buff.length() > len) {
+            buff.replace(buff.length() - 1, buff.length(), "] ").insert(len, " [");
+        }
+
+        final boolean useRelative = true;
+        long sequence = tcpHeader.getSequenceNumberAsLong();
+        long acknowledgment = tcpHeader.getAcknowledgmentNumberAsLong();
+        if (useRelative) {
+            final long rcv_isn_l = rcv_isn & 0xFFFFFFFFL;
+            final long snt_isn_l = snt_isn & 0xFFFFFFFFL;
+            final boolean syn = tcpHeader.getSyn();
+            sequence -= !syn ? rcv_isn_l : sequence;
+            acknowledgment -= !syn ? snt_isn_l : acknowledgment - 1;
+        }
+
+        buff.append("Seq=").append(sequence);
+        if (tcpHeader.getAck()) {
+            buff.append(" Ack=").append(acknowledgment);
+        }
+
+        final int window = tcpHeader.getWindowAsInt() << (inbound ? rcv_wscale : snd_wscale);
+        buff.append(" Win=").append(window);
+
+        final int payloadLen = tcpPacket.length() - tcpHeader.length();
+        buff.append(" Len=").append(payloadLen);
+
+        if (tcpHeader.getSyn()) {
+
+        }
+
+        /*
+        final Packet payload = tcpPacket.getPayload();
+        if (null != payload) {
+            buff.append(" ").append(Bytes.toString(payload.getRawData()));
+        }
+        */
+
+        log.debug(buff.toString());
+    }
 }

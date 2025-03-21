@@ -1037,7 +1037,7 @@ class TcpOutput<T extends IpPacket> {
                 int rtt = (int) Math.max(usecs_to_jiffies(tp.srtt_us >> 3), TCP_DELACK_MIN);
                 if (rtt < max_ato) {
                     max_ato = rtt;
-                    log.trace("Delay ACK timeout = RTT({}ms)", rtt);
+                    tp.logTrace("Delay ACK timeout = RTT({}ms)", rtt);
                 }
             }
             ato = Math.min(ato, max_ato);

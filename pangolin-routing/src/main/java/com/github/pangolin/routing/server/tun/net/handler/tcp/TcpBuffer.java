@@ -29,9 +29,9 @@ public class TcpBuffer {
     private InetAddress srcAddr;
     private InetAddress dstAddr;
 
-    public int sacked;
 
     long tstamp;
+    int sacked;
 
     public TcpPort srcPort() {
         return srcPort;

@@ -61,7 +61,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
         }
         */
 
-        trace(ih.getHeader(), skb, true);
+        debug(ih.getHeader(), skb, true);
         try {
             int err = tcp_rcv_state_process(ih, skb);
             if (0 != err) {
@@ -169,7 +169,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
                 .payloadBuilder(skb)
                 .build();
 
-        trace(ipPacket.getHeader(), skb.build(), false);
+        debug(ipPacket.getHeader(), skb.build(), false);
 
         parent.writeAndFlush(ipPacket);
     }
@@ -199,7 +199,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
                 .payloadBuilder(buf)
                 .build();
 
-        trace(ipPacket.getHeader(), buf.build(), false);
+        debug(ipPacket.getHeader(), buf.build(), false);
         parent.writeAndFlush(ipPacket);
     }
 }
