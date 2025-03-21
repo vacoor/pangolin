@@ -987,7 +987,7 @@ public abstract class TcpConnection<T extends IpPacket> {
              * The _first_ data packet received, initialize
              * delayed ACK engine.
              */
-            tcp_incr_quickack(TCP_MAX_QUICKACKS);
+            input.tcp_incr_quickack(this, TCP_MAX_QUICKACKS);
             icsk_ack_ato = TCP_ATO_MIN;
         } else {
             long m = now - icsk_ack_lrcvtime;
@@ -1008,7 +1008,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                  * Too long gap. Apparently sender failed to
                  * restart window, so that we send ACKs quickly.
                  */
-                tcp_incr_quickack(TCP_MAX_QUICKACKS);
+                input.tcp_incr_quickack(this, TCP_MAX_QUICKACKS);
             }
         }
         icsk_ack_lrcvtime = now;
@@ -1696,48 +1696,6 @@ public abstract class TcpConnection<T extends IpPacket> {
         }
     }
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L300">tcp_incr_quickack</a>
-     */
-    void tcp_incr_quickack(int max_quickacks) {
-        int quickacks = rcv_wnd / (2 * icsk_ack_rcv_mss);
-        if (0 == quickacks) {
-            quickacks = 2;
-        }
-        quickacks = Math.min(quickacks, max_quickacks);
-        if (quickacks > icsk_ack_quick) {
-            logTrace("[QUICK-ACK] increment QUICK-ARK count: {} -> {}", icsk_ack_quick, quickacks);
-            icsk_ack_quick = quickacks;
-        }
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_enter_quickack_mode</a>
-     */
-    void tcp_enter_quickack_mode(int max_quickacks) {
-        logTrace("[QUICK-ACK] enter QUICK-ARK count: {} -> {}", icsk_ack_quick, max_quickacks);
-        tcp_incr_quickack(max_quickacks);
-        inet_csk_exit_pingpong_mode();
-        icsk_ack_ato = TCP_ATO_MIN;
-    }
-
-    /*-
-     * Send ACKs quickly, if "quick" count is not exhausted
-     * and the session is not interactive.
-     */
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_in_quickack_mode</a>
-     */
-    boolean tcp_in_quickack_mode() {
-        //const struct dst_entry *dst = __sk_dst_get(sk);
-
-        /*
-        return (dst && dst_metric(dst, RTAX_QUICKACK)) ||
-                (icsk->icsk_ack.quick && !inet_csk_in_pingpong_mode(sk));
-                */
-        return icsk_ack_quick > 0 && !inet_csk_in_pingpong_model();
-    }
 
 
     /* *********** ]] DELAY ACK ************** */
@@ -3108,7 +3066,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     }
 
     private void out_of_window(final TcpPacket skb, final int reason) {
-        tcp_enter_quickack_mode(TCP_MAX_QUICKACKS);
+        input.tcp_enter_quickack_mode(this, TCP_MAX_QUICKACKS);
         inet_csk_schedule_ack();
         drop(skb, reason);
     }
