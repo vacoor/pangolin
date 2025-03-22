@@ -579,10 +579,14 @@ public abstract class TcpConnection<T extends IpPacket> {
                         final int maxEndIndex = i + dataMaxLen;
                         if (maxEndIndex >= payload.length) {
                             final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, i, payload.length - i).getBuilder();
-                            tcp_sendmsg2(new TcpBuffer().ack(true).psh(true).payloadBuilder(builder), true);
+                            tcp_sendmsg2(new TcpBuffer().ack(true)
+                                    //.psh(true)
+                                    .payloadBuilder(builder), true);
                         } else {
                             UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, i, dataMaxLen).getBuilder();
-                            tcp_sendmsg2(new TcpBuffer().ack(true).psh(true).payloadBuilder(builder), false);
+                            tcp_sendmsg2(new TcpBuffer().ack(true)
+                                    // .psh(true)
+                                    .payloadBuilder(builder), false);
                         }
                     }
                 } finally {
