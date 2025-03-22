@@ -10,7 +10,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpConnection.*;
-import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.HZ;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpTimer.*;
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpConstants.HZ;
 import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.*;
 import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
 import static com.sun.jna.platform.linux.ErrNo.EINVAL;
@@ -69,7 +70,7 @@ class TcpOutput<T extends IpPacket> {
             tp.tcp_rearm_rto();
         }
 
-        tp.tcp_check_space();
+        tp.input.tcp_check_space();
     }
 
 
@@ -857,7 +858,7 @@ class TcpOutput<T extends IpPacket> {
             return;
         }
         if (tcp_write_xmit(tp, mss, 0)) {
-            tp.tcp_check_probe_timer();
+            tp.timer.tcp_check_probe_timer();
         }
     }
 
@@ -1073,7 +1074,7 @@ class TcpOutput<T extends IpPacket> {
 
         if (tp.icsk_ack_timeout != timeout) {
             tp.icsk_ack_timeout = timeout;
-            tp.sk_reset_timer(tp.icsk_delack_timer, timeout);
+            tp.timer.sk_reset_timer(tp.timer.icsk_delack_timer, timeout);
         }
     }
 

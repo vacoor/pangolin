@@ -9,7 +9,6 @@ import java.util.concurrent.TimeUnit;
  *
  */
 abstract class TcpUtils {
-    public static final int HZ = 1000;
 
     private TcpUtils() {
     }
@@ -67,18 +66,18 @@ abstract class TcpUtils {
 
     static long msecs_to_jiffies(long ms) {
         int MSEC_PER_SEC = 1000;
-        if (0 == (HZ % MSEC_PER_SEC)) {
-            return (HZ / MSEC_PER_SEC) * ms;
+        if (0 == (TcpConstants.HZ % MSEC_PER_SEC)) {
+            return (TcpConstants.HZ / MSEC_PER_SEC) * ms;
         }
-        return (long) ((HZ * 1F / MSEC_PER_SEC) * ms);
+        return (long) ((TcpConstants.HZ * 1F / MSEC_PER_SEC) * ms);
     }
 
     static long jiffies_to_usecs(long jiffies) {
         long USEC_PER_SEC = 1000 * 1000;
-        if (0 == (USEC_PER_SEC % HZ)) {
-            return USEC_PER_SEC / HZ * jiffies;
+        if (0 == (USEC_PER_SEC % TcpConstants.HZ)) {
+            return USEC_PER_SEC / TcpConstants.HZ * jiffies;
         }
-        return (long) ((1000F * 1000 / HZ) * jiffies);
+        return (long) ((1000F * 1000 / TcpConstants.HZ) * jiffies);
     }
 
     static long jiffies_to_msecs(long jiffies) {
