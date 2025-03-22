@@ -312,6 +312,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         this.socketChannelFactory = socketChannelFactory;
         this.output = new TcpOutput<T>(this);
         this.input = new TcpInput<>(this.output);
+        this.timer = new TcpTimer<>(this);
         init();
         this.listen();
     }
