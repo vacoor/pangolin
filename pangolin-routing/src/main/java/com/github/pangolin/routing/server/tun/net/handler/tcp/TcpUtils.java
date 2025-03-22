@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
 import org.pcap4j.packet.Packet;
+import org.pcap4j.packet.TcpPacket;
 
 import java.util.concurrent.TimeUnit;
 
@@ -100,6 +101,23 @@ abstract class TcpUtils {
             return max;
         }
         return value;
+    }
+
+    /**
+     * @param skb
+     * @return
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c">tcp_ipv4.c</a>
+     */
+    static int determineEndSeq(final TcpPacket skb) {
+        final TcpPacket.TcpHeader hdr = skb.getHeader();
+        int endSeq = hdr.getSequenceNumber();
+        if (hdr.getSyn()) {
+            endSeq++;
+        }
+        if (hdr.getFin()) {
+            endSeq++;
+        }
+        return endSeq + skb.length() - hdr.length();
     }
 
     static int determineEndSeq(final TcpBuffer skb) {

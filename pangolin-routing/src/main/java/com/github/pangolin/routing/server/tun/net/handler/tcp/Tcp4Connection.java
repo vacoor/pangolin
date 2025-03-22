@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.server.tun.net.handler.tcp;
 
+import static com.github.pangolin.routing.server.tun.net.handler.tcp.TcpUtils.determineEndSeq;
 import static org.pcap4j.packet.IpPacket.IpHeader;
 import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 
@@ -200,6 +201,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
                 .build();
 
         debug(ipPacket.getHeader(), buf.build(), false);
+//        parent.writeAndFlush(ipPacket).syncUninterruptibly();
         parent.writeAndFlush(ipPacket);
     }
 }

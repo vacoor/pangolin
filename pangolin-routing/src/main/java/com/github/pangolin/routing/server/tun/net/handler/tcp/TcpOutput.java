@@ -914,7 +914,7 @@ class TcpOutput<T extends IpPacket> {
         }
 
         // FIXME
-        log.warn("TCP_RETRNSMIT_SKB");
+        tp.logWarn("TCP_RETRNSMIT_SKB");
 
 //        int plen = b.length();
         int skbLen = skb.asBuilder()
