@@ -513,19 +513,21 @@ public abstract class TcpConnection<T extends IpPacket> {
                             ), true);
                             */
 
-                    final int dataMaxLen = output.tcp_current_mss(TcpConnection.this);
-                    for (int i = 0; i < payload.length - 1; i += dataMaxLen) {
-                        final int maxEndIndex = i + dataMaxLen;
-                        if (maxEndIndex >= payload.length) {
-                            final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, i, payload.length - i).getBuilder();
+                    final int mss = output.tcp_current_mss(TcpConnection.this);
+                    for (int offset = 0; offset < payload.length; ) {
+                        final int len = payload.length - offset;
+                        if (len <= mss) {
+                            final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, len).getBuilder();
                             tcp_sendmsg2(new TcpBuffer().ack(true)
                                     //.psh(true)
                                     .payloadBuilder(builder), true);
+                            offset += len;
                         } else {
-                            UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, i, dataMaxLen).getBuilder();
+                            UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, mss).getBuilder();
                             tcp_sendmsg2(new TcpBuffer().ack(true)
                                     // .psh(true)
                                     .payloadBuilder(builder), false);
+                            offset += mss;
                         }
                     }
                 } finally {
