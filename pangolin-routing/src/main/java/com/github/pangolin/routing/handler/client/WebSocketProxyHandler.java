@@ -95,7 +95,7 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
     }
 
     @Override
-    protected ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise promise) throws Exception {
+    protected ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise handshakePromise) throws Exception {
         final InetSocketAddress address = destinationAddress();
         final DefaultHttpHeaders customHandshakeHttpHeadersToUse = new DefaultHttpHeaders();
         customHandshakeHttpHeadersToUse.add(customHandshakeHttpHeaders);
@@ -115,12 +115,12 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 if (!future.isSuccess()) {
-                    promise.tryFailure(future.cause());
+                    handshakePromise.tryFailure(future.cause());
                 }
             }
         });
         ctx.channel().attr(HANDSHAKER_ATTR_KEY).set(handshaker);
-        return promise;
+        return handshakePromise;
     }
 
     @Override

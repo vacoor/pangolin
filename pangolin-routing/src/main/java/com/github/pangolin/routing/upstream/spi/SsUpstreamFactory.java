@@ -3,7 +3,7 @@ package com.github.pangolin.routing.upstream.spi;
 import com.github.pangolin.routing.handler.codec.ss.crypto.CipherAlgorithm;
 import com.github.pangolin.routing.handler.codec.ss.crypto.spi.CipherAlgorithmSpi;
 import com.github.pangolin.routing.handler.client.SsDatagramProxyHandler;
-import com.github.pangolin.routing.handler.client.SsProxyHandler;
+import com.github.pangolin.routing.handler.client.v2.SsProxyHandler;
 import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.upstream.AbstractUpstream;
 import freework.codec.Base64;

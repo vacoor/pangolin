@@ -21,6 +21,12 @@ public class SsDatagramProxyHandler extends ChannelDuplexHandler {
         this.codec = newCodec(algorithm, password);
     }
 
+    @Override
+    public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
+        ctx.pipeline().addBefore(ctx.name(), null, codec);
+        ctx.pipeline().addBefore(ctx.name(), null, new SsClientDatagramCodec(proxyAddress));
+    }
+
     private ChannelHandler newCodec(final CipherAlgorithm algorithm, final String password) {
         if (algorithm instanceof StreamCipherAlgorithm) {
             return new SsDatagramStreamCryptCodec((StreamCipherAlgorithm) algorithm, password, new SecureRandom());
@@ -30,10 +36,4 @@ public class SsDatagramProxyHandler extends ChannelDuplexHandler {
         throw new UnsupportedOperationException("algorithm not supported: " + algorithm.getName());
     }
 
-
-    @Override
-    public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
-        ctx.pipeline().addBefore(ctx.name(), null, codec);
-        ctx.pipeline().addBefore(ctx.name(), null, new SsClientDatagramCodec(proxyAddress));
-    }
 }

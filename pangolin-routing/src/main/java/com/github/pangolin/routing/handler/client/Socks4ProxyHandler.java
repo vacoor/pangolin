@@ -41,7 +41,7 @@ public class Socks4ProxyHandler extends AbstractProxyHandler {
     }
 
     @Override
-    protected ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise promise) throws Exception {
+    protected ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise handshakePromise) throws Exception {
         final InetSocketAddress destination = destinationAddress();
         final String address = destination.isUnresolved() ? destination.getHostString() : destination.getAddress().getHostAddress();
         /*
@@ -57,7 +57,7 @@ public class Socks4ProxyHandler extends AbstractProxyHandler {
                 address, destination.getPort(),
                 null != username ? username : NONE
         ));
-        return promise;
+        return handshakePromise;
     }
 
     @Override

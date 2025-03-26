@@ -1,5 +1,6 @@
-package com.github.pangolin.routing.handler.client;
+package com.github.pangolin.routing.handler.client.v2;
 
+import com.github.pangolin.routing.handler.client.AbstractProxyHandler;
 import freework.codec.Hex;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -12,9 +13,11 @@ import io.netty.handler.codec.socksx.v5.Socks5CommandType;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import io.netty.util.NetUtil;
 import io.netty.util.internal.ObjectUtil;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.channels.ConnectionPendingException;
@@ -26,17 +29,21 @@ import java.security.NoSuchAlgorithmException;
  * @see <a href="https://trojan-gfw.github.io/trojan/protocol">The Trojan Protocol</a>
  */
 @Slf4j
-public class TrojanDatagramProxyHandshakeHandler extends ChannelDuplexHandler {
+public class TrojanProxyHandler extends AbstractProxyHandler  {
     private static final byte[] CRLF = {0x0D, 0x0A};
 
-    private final SocketAddress proxyAddress;
     private final String password;
+    private final Socks5CommandType commandType;
 
-    private volatile SocketAddress destinationAddress;
+    public TrojanProxyHandler(final SocketAddress proxyAddress, final String password) {
+        this(proxyAddress, password, Socks5CommandType.CONNECT);
+    }
 
-    public TrojanDatagramProxyHandshakeHandler(final SocketAddress proxyAddress, final String password) {
-        this.proxyAddress = ObjectUtil.checkNotNull(proxyAddress, "proxyAddress");
+    public TrojanProxyHandler(final SocketAddress proxyAddress, final String password,
+                              final Socks5CommandType commandType) {
+        super(proxyAddress);
         this.password = password;
+        this.commandType = commandType;
     }
 
     @Override
@@ -45,22 +52,13 @@ public class TrojanDatagramProxyHandshakeHandler extends ChannelDuplexHandler {
                 .trustManager(InsecureTrustManagerFactory.INSTANCE)
                 .build();
         ctx.pipeline().addBefore(ctx.name(), null, sslContext.newHandler(ctx.alloc()));
+        super.handlerAdded(ctx);
     }
 
     @Override
-    public void connect(final ChannelHandlerContext ctx, final SocketAddress remoteAddress, final SocketAddress localAddress, ChannelPromise promise) throws Exception {
-        if (null != destinationAddress) {
-            promise.setFailure(new ConnectionPendingException());
-        } else {
-            destinationAddress = remoteAddress;
-            ctx.connect(proxyAddress, localAddress, promise);
-        }
-    }
-
-    @Override
-    public void channelActive(final ChannelHandlerContext ctx) throws Exception {
-        final InetSocketAddress sa = (InetSocketAddress) destinationAddress;
-        final ByteBuf buffer = Unpooled.buffer();
+    protected ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise handshakePromise) throws Exception {
+        final InetSocketAddress sa = destinationAddress();
+        final ByteBuf buffer = ctx.alloc().buffer();
 
         /*-
          +-----------------------+---------+----------------+---------+----------+
@@ -97,16 +95,43 @@ public class TrojanDatagramProxyHandshakeHandler extends ChannelDuplexHandler {
         buffer.writeBytes(getSecretKey(password));
         buffer.writeBytes(CRLF);
 
-        // Write UDP associate (UDP over TCP) request.
-        buffer.writeByte(Socks5CommandType.UDP_ASSOCIATE.byteValue());
-        buffer.writeByte(Socks5AddressType.IPv4.byteValue());
-        Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.IPv4, "0.0.0.0", buffer);
-        buffer.writeShort(0);
+        if (Socks5CommandType.CONNECT.equals(commandType)) {
+            // Write TCP connect request.
+            buffer.writeByte(Socks5CommandType.CONNECT.byteValue());
+            if (sa.isUnresolved()) {
+                buffer.writeByte(Socks5AddressType.DOMAIN.byteValue());
+                Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.DOMAIN, sa.getHostString(), buffer);
+            } else {
+                final String host = sa.getAddress().getHostAddress();
+                if (NetUtil.isValidIpV4Address(host)) {
+                    buffer.writeByte(Socks5AddressType.IPv4.byteValue());
+                    Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.IPv4, host, buffer);
+                } else if (NetUtil.isValidIpV6Address(host)) {
+                    buffer.writeByte(Socks5AddressType.IPv6.byteValue());
+                    Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.IPv6, host, buffer);
+                } else {
+                    throw new ConnectException("unknown address type: " + sa.getClass().getName());
+                }
+            }
+            buffer.writeShort(sa.getPort());
+        } else if (Socks5CommandType.UDP_ASSOCIATE.equals(commandType)) {
+            // Write UDP associate (UDP over TCP) request.
+            buffer.writeByte(Socks5AddressType.IPv4.byteValue());
+            Socks5AddressEncoder.DEFAULT.encodeAddress(Socks5AddressType.IPv4, "0.0.0.0", buffer);
+            buffer.writeShort(0);
+        } else {
+            throw new UnsupportedOperationException(String.valueOf(commandType));
+        }
 
         buffer.writeBytes(CRLF);
-        ctx.writeAndFlush(buffer);
 
-        ctx.fireChannelActive();
+        ctx.writeAndFlush(buffer, handshakePromise);
+        return handshakePromise;
+    }
+
+    @Override
+    protected boolean handshakeRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+        throw new UnsupportedOperationException();
     }
 
     private byte[] getSecretKey(final String password) throws NoSuchAlgorithmException {
