@@ -17,7 +17,7 @@ public class StatsUpstream extends Server implements Upstream {
     private final LoadBalancerStats stats;
 
     public StatsUpstream(final Upstream delegate, final LoadBalancerStats stats) {
-        super(delegate.name());
+        super(delegate.name().replace(":", "："));
         this.delegate = delegate;
         this.stats = stats;
     }
