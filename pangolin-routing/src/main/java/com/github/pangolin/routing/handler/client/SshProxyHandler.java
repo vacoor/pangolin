@@ -149,7 +149,7 @@ public class SshProxyHandler extends ChannelDuplexHandler {
         ctx.channel().eventLoop().execute(() -> onConnected0(ctx, remoteAddress, promise));
     }
 
-    private void onConnected0(final ChannelHandlerContext ctx, final InetSocketAddress remoteAddress, final ChannelPromise promise) {
+    private void onConnected0(final ChannelHandlerContext ctx, final InetSocketAddress remoteAddress, final ChannelPromise handshakePromise) {
         try {
             final ClientSession session = this.getClientSession(ioSession);
             session.addCloseFutureListener(new SshFutureListener<CloseFuture>() {
@@ -165,7 +165,7 @@ public class SshProxyHandler extends ChannelDuplexHandler {
 
             session.setUsername(username);
             session.addPasswordIdentity(password);
-            session.auth().addListener(authToNext(ctx, ctx0 -> this.onAuthenticated(ctx0, remoteAddress, promise), promise));
+            session.auth().addListener(authToNext(ctx, ctx0 -> this.onAuthenticated(ctx0, remoteAddress, handshakePromise), handshakePromise));
         } catch (final IOException ioe) {
             ctx.fireExceptionCaught(ioe);
         }
@@ -173,20 +173,20 @@ public class SshProxyHandler extends ChannelDuplexHandler {
 
     private SshFutureListener<AuthFuture> authToNext(final ChannelHandlerContext ctx,
                                                      final Consumer<ChannelHandlerContext> next,
-                                                     final ChannelPromise promise) {
+                                                     final ChannelPromise handshakePromise) {
         return new SshFutureListener<AuthFuture>() {
             @Override
             public void operationComplete(final AuthFuture future) {
                 if (future.isSuccess()) {
                     next.accept(ctx);
                 } else {
-                    promise.tryFailure(future.getException());
+                    handshakePromise.tryFailure(future.getException());
                 }
             }
         };
     }
 
-    private void onAuthenticated(final ChannelHandlerContext ctx, final InetSocketAddress remoteAddress, final ChannelPromise promise) {
+    private void onAuthenticated(final ChannelHandlerContext ctx, final InetSocketAddress remoteAddress, final ChannelPromise handshakePromise) {
         try {
             // TODO
             final SshdSocketAddress source = new SshdSocketAddress(0);
@@ -196,21 +196,21 @@ public class SshProxyHandler extends ChannelDuplexHandler {
             this.getClientSession(ioSession).getService(ConnectionService.class).registerChannel(channel);
             channel.open().addListener(openToNext(ctx, ctx0 -> {
                 ctx.channel().pipeline().addAfter(SSH_NETTY_ADAPTER_NAME, SSH_NETTY_DIRECT_BRIDGE_ADAPTER_NAME, channel.adapter);
-            }, promise));
+            }, handshakePromise));
         } catch (IOException e) {
-            promise.tryFailure(e);
+            handshakePromise.tryFailure(e);
         }
     }
 
-    private SshFutureListener<OpenFuture> openToNext(final ChannelHandlerContext ctx, final Consumer<ChannelHandlerContext> next, final ChannelPromise promise) {
+    private SshFutureListener<OpenFuture> openToNext(final ChannelHandlerContext ctx, final Consumer<ChannelHandlerContext> next, final ChannelPromise handshakePromise) {
         return new SshFutureListener<OpenFuture>() {
             @Override
             public void operationComplete(final OpenFuture future) {
                 if (future.isOpened()) {
                     next.accept(ctx);
-                    promise.trySuccess();
+                    handshakePromise.trySuccess();
                 } else {
-                    promise.tryFailure(future.getException());
+                    handshakePromise.tryFailure(future.getException());
                 }
             }
         };

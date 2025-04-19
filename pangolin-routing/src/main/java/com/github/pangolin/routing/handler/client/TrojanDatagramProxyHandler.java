@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.handler.client;
 
+import com.github.pangolin.routing.handler.client.v2.TrojanProxyHandler;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.util.SocketUtils;
@@ -17,6 +18,7 @@ import io.netty.handler.codec.MessageToMessageCodec;
 import io.netty.handler.codec.socksx.v5.Socks5AddressDecoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressEncoder;
 import io.netty.handler.codec.socksx.v5.Socks5AddressType;
+import io.netty.handler.codec.socksx.v5.Socks5CommandType;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import lombok.extern.slf4j.Slf4j;
@@ -85,7 +87,7 @@ public class TrojanDatagramProxyHandler extends ChannelDuplexHandler {
                 true, udpCtx.channel().eventLoop(), new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(SocketChannel ch) {
-                        ch.pipeline().addLast(new TrojanDatagramProxyHandshakeHandler(proxyAddress, proxyPassword));
+                        ch.pipeline().addLast(new TrojanProxyHandler(proxyAddress, proxyPassword, Socks5CommandType.UDP_ASSOCIATE));
                         ch.pipeline().addLast(new TrojanUdpOverTcpCodec(proxyAddress, addressEncoder, addressDecoder));
                         ch.pipeline().addLast(new SimpleChannelInboundHandler<DatagramPacket>() {
                             @Override

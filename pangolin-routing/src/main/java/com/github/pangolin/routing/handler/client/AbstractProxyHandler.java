@@ -118,9 +118,11 @@ public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
             }
         });
         applyHandshakeTimeout(ctx, handshakePromise, ctx.channel().config().getConnectTimeoutMillis());
+
+        readIfNeeded(ctx);
     }
 
-    protected abstract ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise promise) throws Exception;
+    protected abstract ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise handshakePromise) throws Exception;
 
     protected abstract boolean handshakeRead(final ChannelHandlerContext ctx, final Object msg) throws Exception;
 

@@ -50,11 +50,11 @@ public class Socks5ProxyHandler extends AbstractProxyHandler {
     }
 
     @Override
-    protected ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise promise) throws Exception {
+    protected ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise handshakePromise) throws Exception {
         // ctx.writeAndFlush(createInitialRequest(), promise);
         // FIXME if write fail -> promise fail
         ctx.writeAndFlush(createInitialRequest());
-        return promise;
+        return handshakePromise;
     }
 
     @Override
