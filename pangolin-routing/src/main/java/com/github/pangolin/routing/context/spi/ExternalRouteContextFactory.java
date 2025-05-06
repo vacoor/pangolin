@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.context.spi;
 
-import com.github.pangolin.routing.context.InMemoryRouteContext;
+import com.github.pangolin.routing.context.InheritableRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.support.AliasRegistry;
 import com.google.common.base.Preconditions;
@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
 
     @Override
-    public RouteContext createContext(final URL url, final RouteContext parent) throws Exception {
+    public RouteContext create(final URL url, final RouteContext parent) throws Exception {
         return load(url, parent);
     }
 
@@ -32,7 +32,7 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
         final List<ClashConfiguration.ProxyGroupDefinition> proxyGroupDefinitions = nvl(conf.getProxyGroups(), Collections.emptyList());
         final List<String> rules = nvl(conf.getRules(), Collections.emptyList());
 
-        final InMemoryRouteContext context = new InMemoryRouteContext(parent);
+        final InheritableRouteContext context = new InheritableRouteContext(parent);
 
         proxyDefinitions.stream()
                 .filter(d -> !"0.0.0.0".equals(d.getServer()))

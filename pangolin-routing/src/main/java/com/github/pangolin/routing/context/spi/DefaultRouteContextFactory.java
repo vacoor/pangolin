@@ -1,11 +1,12 @@
 package com.github.pangolin.routing.context.spi;
 
-import com.github.pangolin.routing.context.InMemoryRouteContext;
+import com.github.pangolin.routing.context.InheritableRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
-import com.github.pangolin.routing.server.acceptor.Acceptor;
-import com.github.pangolin.routing.server.acceptor.AcceptorFactory;
-import com.github.pangolin.routing.server.acceptor.MixinAcceptorFactory;
+import com.github.pangolin.routing.acceptor.Acceptor;
+import com.github.pangolin.routing.acceptor.AcceptorFactory;
+import com.github.pangolin.routing.acceptor.mixin.MixinAcceptorFactory;
 import com.github.pangolin.routing.support.AliasRegistry;
+import com.github.pangolin.routing.upstream.DirectUpstream;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URL;
@@ -27,7 +28,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
     }
 
     @Override
-    public RouteContext createContext(final URL url, final RouteContext parent) throws Exception {
+    public RouteContext create(final URL url, final RouteContext parent) throws Exception {
         return load(url, parent);
     }
 
@@ -35,16 +36,17 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
         final Ini ini = new Ini();
         ini.load(configLocation.openStream());
 
-        final Ini.Section external = ini.getSection("External");
 
+        final Ini.Section external = ini.getSection("External");
         RouteContext externalCtx = parent;
         if (null != external) {
             for (String urlToUse : external.values()) {
                 externalCtx = loadExternal(urlToUse, externalCtx);
             }
+//            return externalCtx;
         }
 
-        final InMemoryRouteContext registry = new InMemoryRouteContext(externalCtx);
+        final InheritableRouteContext registry = new InheritableRouteContext(externalCtx);
         final AliasRegistry aliasRegistry = registry;
 
         final Ini.Section proxy = ini.getSection("Proxy");
@@ -65,7 +67,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
                 proxies.remove("DIRECT");
 
                 if (proxies.isEmpty()) {
-                    aliasRegistry.registerAlias("DIRECT", name);
+                    aliasRegistry.registerAlias(DirectUpstream.INSTANCE.name(), name);
                 } else if (1 == proxies.size()) {
                     aliasRegistry.registerAlias(proxies.iterator().next(), name);
                 } else {
@@ -79,12 +81,10 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
             rule.keySet().stream().map(route -> apply(route, configLocation, aliasRegistry)).forEach(registry::addRoute);
         }
 
-
         // TODO
         Ini.Section listen = ini.getSection("Listen");
         if (null == listen) {
             listen = ini.addSection("Listen");
-//            listen.put("1080", "DEFAULT, SOCKS5, SOCKS4, HTTP");
         }
 
         for (final Map.Entry<String, String> entry : listen.entrySet()) {
@@ -101,6 +101,17 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
                 registry.addAcceptors(acceptor);
             }
         }
+
+        /*
+        final Ini.Section external = ini.getSection("External");
+        if (null != external) {
+            RouteContext externalCtx = registry;
+            for (String urlToUse : external.values()) {
+                externalCtx = loadExternal(urlToUse, externalCtx);
+            }
+            return externalCtx;
+        }
+        */
 
         return registry;
     }

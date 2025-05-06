@@ -4,6 +4,6 @@ import java.net.URL;
 
 public interface RouteContextFactory {
 
-    RouteContext createContext(final URL url, final RouteContext parent) throws Exception;
+    RouteContext create(final URL url, final RouteContext parent) throws Exception;
 
 }

@@ -12,8 +12,9 @@ import java.net.SocketAddress;
 
 @Slf4j
 public class RejectUpstream extends AbstractUpstream {
+    public static final RejectUpstream INSTANCE = new RejectUpstream();
 
-    public RejectUpstream() {
+    private RejectUpstream() {
         super("REJECT");
     }
 

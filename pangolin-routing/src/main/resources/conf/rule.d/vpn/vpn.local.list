@@ -1,20 +1,38 @@
 # Office Area Network
 
 # Hosts Network
-DOMAIN-KEYWORD,doris.cloud
-IP-CIDR,10.41.8.0/23
-DOMAIN-SUFFIX,doris.cloud.bz
+# IP-CIDR,10.41.8.0/16
+
+# DOMAIN-KEYWORD,doris.cloud
+# DOMAIN-SUFFIX,doris.cloud.bz
+
+# MM-PROD MYSQL
+DOMAIN-SUFFIX,w-3308-ecs-iosp-mm-prod.service.consul
+
+# OCTOPUS MYSQL
+DOMAIN-SUFFIX,w-3306-octopus-prod.service.consul
+
+# HUB MONGO
+DOMAIN-SUFFIX,mongodb-prod-hub3-rshub3-01.cloud.bz
+DOMAIN-SUFFIX,mongodb-prod-hub3-rshub3-02.cloud.bz
+DOMAIN-SUFFIX,mongodb-prod-hub3-rshub3-03.cloud.bz
+IP-CIDR,10.41.26.0/24
+
+# LM
+DOMAIN-SUFFIX,oms4-lm-service.cloud.bz
+DOMAIN-SUFFIX,w-bzrds-cmqu23d67ce99ee0954.service.consul
+
+# OFA
 DOMAIN-SUFFIX,mongodb-prod-oms4-ofa-01.cloud.bz
 DOMAIN-SUFFIX,mongodb-prod-oms4-ofa-02.cloud.bz
 DOMAIN-SUFFIX,mongodb-prod-oms4-ofa-03.cloud.bz
 DOMAIN-SUFFIX,mongodb-prod-oms4-ofa-04.cloud.bz
 
+# OA GATEWAY MONGO
 DOMAIN-SUFFIX,mongodb-prod-oms4-som-01.cloud.bz
 DOMAIN-SUFFIX,mongodb-prod-oms4-som-02.cloud.bz
 DOMAIN-SUFFIX,mongodb-prod-oms4-som-03.cloud.bz
 DOMAIN-SUFFIX,mongodb-prod-oms4-som-04.cloud.bz
 
-DOMAIN-SUFFIX,service.testdb
-DOMAIN-SUFFIX,service.testdb
-DOMAIN-SUFFIX,service.consul
-
+# REPORT 
+DOMAIN-SUFFIX,w-bzrds-i7qo52aefbbc9e24050.service.consul

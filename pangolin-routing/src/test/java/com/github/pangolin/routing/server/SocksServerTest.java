@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.server;
 
-import com.github.pangolin.routing.handler.server.Socks5ProxyServerHandler;
-import com.github.pangolin.routing.handler.server.Socks5ServerDatagramDemultiplexer;
+import com.github.pangolin.routing.support.handler.server.Socks5ProxyServerHandler;
+import com.github.pangolin.routing.support.handler.server.Socks5ServerDatagramDemultiplexer;
 import com.github.pangolin.routing.support.DatagramChannelFactory;
 import com.github.pangolin.routing.support.StandardDatagramChannelFactory;
 import com.github.pangolin.server.NettyServer;

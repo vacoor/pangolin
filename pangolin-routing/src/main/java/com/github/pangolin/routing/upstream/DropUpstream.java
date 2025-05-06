@@ -11,8 +11,9 @@ import java.net.SocketAddress;
 
 @Slf4j
 public class DropUpstream extends AbstractUpstream {
+    public static final DropUpstream INSTANCE = new DropUpstream();
 
-    public DropUpstream() {
+    private DropUpstream() {
         super("DROP");
     }
 

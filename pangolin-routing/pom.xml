@@ -198,7 +198,7 @@
                 </executions>
                 <configuration>
                     <!--<mainClass>${start-class}</mainClass>-->
-                    <mainClass>com.github.pangolin.routing.RouteApplication</mainClass>
+                    <mainClass>com.github.pangolin.routing.Application</mainClass>
                 </configuration>
             </plugin>
         </plugins>

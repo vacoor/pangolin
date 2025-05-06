@@ -6,8 +6,9 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 
 public class DirectUpstream extends AbstractUpstream {
+    public static final DirectUpstream INSTANCE = new DirectUpstream();
 
-    public DirectUpstream() {
+    private DirectUpstream() {
         super("DIRECT");
     }
 
