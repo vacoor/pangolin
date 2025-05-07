@@ -55,7 +55,7 @@ public abstract class AbstractRouteContextFactory implements RouteContextFactory
         throw new IllegalArgumentException(String.format("Unable to find UpstreamFactory with name: %s, url: %s ", name, url));
     }
 
-    protected Upstream apply(final String name, final String type, final Iterable<String> names, final UpstreamRegistry registry) {
+    protected Upstream combine(final String name, final String type, final Iterable<String> names, final UpstreamRegistry registry) {
         final UpstreamCombiner combiner = upstreamCombiners.get(type);
         if (null == combiner) {
             throw new IllegalArgumentException("Unable to find UpstreamCombiner with name " + type);

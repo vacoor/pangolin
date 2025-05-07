@@ -73,7 +73,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
                 } else if (1 == proxies.size()) {
                     aliasRegistry.registerAlias(proxies.iterator().next(), name);
                 } else {
-                    registry.addUpstream(name, apply(name, type, proxies, registry));
+                    registry.addUpstream(name, combine(name, type, proxies, registry));
                 }
             }
         }

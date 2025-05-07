@@ -6,10 +6,11 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 
 public class DirectUpstream extends AbstractUpstream {
+    public static final String NAME = "DIRECT";
     public static final DirectUpstream INSTANCE = new DirectUpstream();
 
     private DirectUpstream() {
-        super("DIRECT");
+        super(NAME);
     }
 
     @Override
