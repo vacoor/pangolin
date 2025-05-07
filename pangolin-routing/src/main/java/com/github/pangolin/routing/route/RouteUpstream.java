@@ -16,7 +16,7 @@ public class RouteUpstream extends AbstractUpstream {
     private final RouteRegistry<InetSocketAddress> routes;
 
     public RouteUpstream(final RouteRegistry<InetSocketAddress> routes, final UpstreamRegistry upstreams) {
-        super("ROUTE");
+        super("DEFAULT");
         this.routes = routes;
         this.upstreams = upstreams;
     }

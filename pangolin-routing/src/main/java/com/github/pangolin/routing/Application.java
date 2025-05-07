@@ -2,6 +2,7 @@ package com.github.pangolin.routing;
 
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
+import com.github.pangolin.routing.acceptor.extra.RuleExporterAcceptor;
 import com.github.pangolin.routing.context.InheritableRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.context.RouteContextFactory;
@@ -181,36 +182,7 @@ public class Application {
     }
 
     private Acceptor createRouteExporterAcceptor(final int proxyPort) {
-        return (new Acceptor() {
-            @Override
-            public ChannelFuture start(final RouteContext context) throws Exception {
-                return new NettyServer(9090).start(true, new ChannelInitializer<SocketChannel>() {
-                    @Override
-                    protected void initChannel(final SocketChannel ch) throws Exception {
-                        ch.pipeline().addLast(
-                                new SwitchyRuleConfigurationServerHandler((RouteRegistry) context),
-                                new ProxyAutoConfigurationServerHandler((RouteRegistry) context, proxyPort)
-                        );
-                        ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
-                            @Override
-                            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-                                ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.NOT_FOUND)).addListener(ChannelFutureListener.CLOSE);
-                            }
-                        });
-                    }
-                }).addListener(new ChannelFutureListener() {
-                    @Override
-                    public void operationComplete(final ChannelFuture future) throws Exception {
-                        if (future.isSuccess()) {
-                            final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
-                            log.info("Web interface started on port: {} ({})", localAddress.getPort(), localAddress);
-                        } else {
-                            future.cause().printStackTrace();
-                        }
-                    }
-                });
-            }
-        });
+        return new RuleExporterAcceptor(proxyPort);
     }
 
     public static void main(String[] args) throws Exception {
