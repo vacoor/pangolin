@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.Map;
 
 public class InheritableRouteContext extends SimpleAliasRegistry implements RouteContext, RouteRegistry<InetSocketAddress>, UpstreamRegistry, AcceptorProvider {
-    private final RouteContext parent;
+    private RouteContext parent;
     private final List<Route<InetSocketAddress>> routes = Lists.newLinkedList();
     private final Map<String, Upstream> upstreams = Maps.newLinkedHashMap();
     private final Map<String, Object> attributes = Maps.newLinkedHashMap();
@@ -41,6 +41,10 @@ public class InheritableRouteContext extends SimpleAliasRegistry implements Rout
     @Override
     public RouteContext parent() {
         return parent;
+    }
+
+    public void setParent(final RouteContext parent) {
+        this.parent = parent;
     }
 
     @Override

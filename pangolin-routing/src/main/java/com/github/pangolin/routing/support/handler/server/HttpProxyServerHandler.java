@@ -171,7 +171,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                     log.info("[HTTP] bad CONNECT request => {}", httpRequest.uri());
                     ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.BAD_REQUEST)).addListener(ChannelFutureListener.CLOSE);
                 }
-            } else if (httpRequest.headers().contains("Proxy-Connection")) {
+            } else if (httpRequest.uri().contains("://")) /* if (httpRequest.headers().contains("Proxy-Connection"))*/ {
                 if (!this.authenticate(httpRequest)) {
                     log.warn("[HTTP] Respond not permitted to {}", clientAddress);
                     ctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.UNAUTHORIZED)).addListener(ChannelFutureListener.CLOSE);
@@ -186,6 +186,7 @@ public class HttpProxyServerHandler extends ChannelInboundHandlerAdapter {
                 final InetSocketAddress targetAddress = getHttpRequestAddress(httpRequest);
                 final int port = targetAddress.getPort();
                 final String address = targetAddress.getHostString();
+
                 forward(ctx, httpRequest).addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
