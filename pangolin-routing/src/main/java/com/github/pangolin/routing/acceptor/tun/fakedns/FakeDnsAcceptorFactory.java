@@ -12,7 +12,9 @@ public class FakeDnsAcceptorFactory implements AcceptorFactory {
         if (!TYPE.equalsIgnoreCase(type)) {
             return null;
         }
-        return new FakeDnsAcceptor();
+        final String inet4Subnet = "198.18.0.1/24";
+        final String inet6Subnet = "2001:2::/48";
+        return new FakeDnsAcceptor(inet4Subnet, inet6Subnet, 60);
     }
 
 }

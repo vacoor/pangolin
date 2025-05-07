@@ -77,6 +77,7 @@ public class MixinAcceptor implements Acceptor {
                     log.info("Mixed server started on port {}, bound to {} -> {}", localAddress.getPort(), localAddress, upstream);
                 } else {
                     future.cause().printStackTrace();
+                    log.info("Mixed server started failed: {} for {}", future.cause().getMessage(), upstream, future.cause());
                 }
             }
         });

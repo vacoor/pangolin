@@ -12,14 +12,22 @@ import java.util.function.Predicate;
 /**
  */
 public class FakeDnsAcceptor implements Acceptor {
+    private final String inet4Subnet;
+    private final String inet6Subnet;
+    private int leaseTime;
+
+    public FakeDnsAcceptor(final String inet4Subnet, final String inet6Subnet, final int leaseTime) {
+        this.inet4Subnet = inet4Subnet;
+        this.inet6Subnet = inet6Subnet;
+        this.leaseTime = leaseTime;
+    }
+
 
     @Override
     public ChannelFuture start(final RouteContext context) throws Exception {
-        final String fake4Subnet = "198.18.0.1/24";
-        final String fake6Subnet = "2001:2::/48";
         DnsEngine fakeDns = null;
         if (null == context.attr(DnsEngine.class.getName())) {
-            fakeDns = FakeNameService.create(fake4Subnet, fake6Subnet, 60);
+            fakeDns = FakeNameService.create(inet4Subnet, inet6Subnet, leaseTime);
             context.attr(DnsEngine.class.getName(), fakeDns);
         }
 

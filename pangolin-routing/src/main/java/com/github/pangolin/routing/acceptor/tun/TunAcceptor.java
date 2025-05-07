@@ -54,12 +54,12 @@ public class TunAcceptor implements Acceptor {
     @Override
     public ChannelFuture start(final RouteContext context) throws Exception {
         final DnsEngine dnsEngine = context.attr(DnsEngine.class.getName());
-        return startTun(ifname, dnsEngine, context.newSocketChannelFactory());
+        final SocketChannelFactory factory = context.newSocketChannelFactory();
+        return startTun(ifname, dnsEngine, factory);
     }
 
     public ChannelFuture startTun(final String ifname, final DnsEngine dnsEngine, final SocketChannelFactory factory) throws Exception {
         final EventLoopGroup group = new DefaultEventLoopGroup();
-
 
         final Bootstrap b = new Bootstrap()
                 .group(group)
@@ -106,8 +106,6 @@ public class TunAcceptor implements Acceptor {
                     final InetAddress dst = SocketUtils.addressByName("10.188.71.3", true);
                     final InetAddress gw = SocketUtils.addressByName("198.18.0.1", true);
                     NetworkRoutingTable.get().add(dst, (byte) 24, gw, adapter.name(), 0);
-                    /*
-                     */
                 } else {
                     log.error("Tun adapter bound error: {}", future.cause().getMessage(), future.cause());
                 }

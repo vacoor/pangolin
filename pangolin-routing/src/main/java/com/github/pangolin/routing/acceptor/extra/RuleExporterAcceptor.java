@@ -1,22 +1,18 @@
 package com.github.pangolin.routing.acceptor.extra;
 
-import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
-
 import com.github.pangolin.routing.acceptor.Acceptor;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.route.RouteRegistry;
 import com.github.pangolin.server.NettyServer;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
+import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
+
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 /**
  *
@@ -35,6 +31,9 @@ public class RuleExporterAcceptor implements Acceptor {
         this.pacProxyPort = pacProxyPort;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public ChannelFuture start(final RouteContext context) throws Exception {
         return new NettyServer(listenPort).start(true, new ChannelInitializer<SocketChannel>() {
