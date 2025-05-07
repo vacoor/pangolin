@@ -52,7 +52,7 @@ public abstract class AbstractRouteContextFactory implements RouteContextFactory
                 return factory.apply(name, url);
             }
         }
-        throw new IllegalArgumentException("Unable to find UpstreamFactory with url " + name);
+        throw new IllegalArgumentException(String.format("Unable to find UpstreamFactory with name: %s, url: %s ", name, url));
     }
 
     protected Upstream apply(final String name, final String type, final Iterable<String> names, final UpstreamRegistry registry) {

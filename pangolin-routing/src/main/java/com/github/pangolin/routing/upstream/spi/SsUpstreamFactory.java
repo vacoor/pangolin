@@ -13,6 +13,7 @@ import io.netty.channel.ChannelHandler;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
+import java.security.NoSuchAlgorithmException;
 
 public class SsUpstreamFactory extends AbstractUpstreamFactory {
     private static final int DEFAULT_SS_PORT = 8388;
@@ -44,8 +45,12 @@ public class SsUpstreamFactory extends AbstractUpstreamFactory {
             throw new IllegalArgumentException("SS method & password must not be null");
         }
 
-        final CipherAlgorithm cipher = CipherAlgorithmSpi.getInstance(userInfo[0]);
-        return new SsUpstream(nameToUse, address, cipher, userInfo[1]);
+        try {
+            final CipherAlgorithm cipher = CipherAlgorithmSpi.getInstance(userInfo[0]);
+            return new SsUpstream(nameToUse, address, cipher, userInfo[1]);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private int determinePort(final int port) {

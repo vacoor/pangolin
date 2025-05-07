@@ -1,6 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 public interface TcpConstants {
+    int HZ = 1000;
+
     byte FIN = 0x0001;
     byte SYN = 0x0002;
     byte RST = 0x0004;
@@ -18,5 +20,4 @@ public interface TcpConstants {
     int TCPF_LAST_ACK = 1 << TcpConnection.State.TCP_LAST_ACK.ordinal();
     int TCPF_CLOSING = 1 << TcpConnection.State.TCP_CLOSING.ordinal();
 
-    int HZ = 1000;
 }

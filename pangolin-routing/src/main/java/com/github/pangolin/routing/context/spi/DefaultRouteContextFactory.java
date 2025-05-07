@@ -34,6 +34,8 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
 
     public RouteContext load(final URL configLocation, final RouteContext parent) throws Exception {
         final Ini ini = new Ini();
+
+        log.info("Load config: {}", configLocation);
         ini.load(configLocation.openStream());
 
 

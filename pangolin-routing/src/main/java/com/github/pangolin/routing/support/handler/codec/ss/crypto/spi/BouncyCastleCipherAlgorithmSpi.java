@@ -236,7 +236,7 @@ public class BouncyCastleCipherAlgorithmSpi extends CipherAlgorithmSpi {
     }
 
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         final CipherAlgorithm instance = CipherAlgorithmSpi.getInstance("chacha20-ietf-poly1305");
         System.out.println(instance);
     }
