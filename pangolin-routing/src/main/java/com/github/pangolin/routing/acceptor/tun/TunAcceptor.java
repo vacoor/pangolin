@@ -42,7 +42,7 @@ import java.util.Arrays;
  */
 @Slf4j
 public class TunAcceptor implements Acceptor {
-    private static final String DEFAULT_WINTUN_TYPE = "Proxies Host-Only";
+    private static final String DEFAULT_WINTUN_TYPE = "Pangolin Proxies Host-Only";
 
     private final String ifname;
     private final InterfaceAddressEx[] bindings;
