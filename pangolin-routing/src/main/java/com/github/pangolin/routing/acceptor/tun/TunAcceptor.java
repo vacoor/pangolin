@@ -16,8 +16,12 @@ import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelOption;
 import com.github.pangolin.routing.acceptor.tun.net.handler.IpPacketCodec;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.Tcp4PacketHandler;
 import com.github.pangolin.routing.context.RouteContext;
+import com.github.pangolin.routing.support.DatagramChannelFactory;
 import com.github.pangolin.routing.support.SocketChannelFactory;
+import com.github.pangolin.routing.upstream.DynamicUpstream;
+import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.util.SocketUtils;
+import freework.crypto.digest.Hash;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -25,9 +29,13 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.DefaultEventLoopGroup;
 import io.netty.channel.EventLoopGroup;
+import io.netty.handler.codec.dns.DatagramDnsQuery;
+import io.netty.handler.codec.dns.DatagramDnsResponse;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.util.Arrays;
 
 /**
  *
@@ -35,32 +43,69 @@ import java.net.InetAddress;
 @Slf4j
 public class TunAcceptor implements Acceptor {
     private static final String DEFAULT_WINTUN_TYPE = "Proxies Host-Only";
-    private static final String DEFAULT_WINTUN_UUID = "{2B54EB73-2CF2-4C1A-B900-E193C9E16966}";
 
     private final String ifname;
+    private final InterfaceAddressEx[] bindings;
+
     private final String wintunType;
     private final String wintunUuid;
 
-    public TunAcceptor(final String ifname) {
-        this(ifname, DEFAULT_WINTUN_TYPE, DEFAULT_WINTUN_UUID);
+    private String upstream;
+
+    public TunAcceptor(final String ifname, final InterfaceAddressEx[] bindings, final String upstream) {
+        this.ifname = ifname;
+        this.bindings = bindings;
+        this.wintunType = DEFAULT_WINTUN_TYPE;
+        this.wintunUuid = determineUuid(bindings);
+        this.upstream = upstream;
     }
 
-    public TunAcceptor(final String ifname, final String wintunType, final String wintunUuid) {
-        this.ifname = ifname;
-        this.wintunType = wintunType;
-        this.wintunUuid = wintunUuid;
+    public String getUpstream() {
+        return upstream;
+    }
+
+    public void setUpstream(final String upstream) {
+        this.upstream = upstream;
     }
 
     @Override
     public ChannelFuture start(final RouteContext context) throws Exception {
-        final DnsEngine dnsEngine = context.attr(DnsEngine.class.getName());
-        final SocketChannelFactory factory = context.newSocketChannelFactory();
-        return startTun(ifname, dnsEngine, factory);
+        final SocketChannelFactory socketFactory = getSocketChannelFactory(context);
+        final DatagramChannelFactory datagramFactory = getDatagramChannelFactory(context);
+
+        DnsEngine lazyDns = new DnsEngine() {
+
+            @Override
+            public boolean isFakeAddress(final byte[] address) {
+                final DnsEngine dns = engine();
+                return null != dns && dns.isFakeAddress(address);
+            }
+
+            @Override
+            public String getHostByAddress(final byte[] address) {
+                final DnsEngine dns = engine();
+                return null != dns ? dns.getHostByAddress(address) : null;
+            }
+
+            @Override
+            public DatagramDnsResponse lookup(final DatagramDnsQuery query) {
+                final DnsEngine dns = engine();
+                return null != dns ? dns.lookup(query) : null;
+            }
+
+            private DnsEngine engine() {
+                return context.attr(DnsEngine.class.getName());
+            }
+        };
+
+        return start0(ifname, bindings, wintunType, wintunUuid, lazyDns, socketFactory, datagramFactory);
     }
 
-    public ChannelFuture startTun(final String ifname, final DnsEngine dnsEngine, final SocketChannelFactory factory) throws Exception {
+    private ChannelFuture start0(final String ifname, final InterfaceAddressEx[] bindings,
+                                 final String wintunType, final String wintunUuid,
+                                 final DnsEngine dnsEngine,
+                                 final SocketChannelFactory socketFactory, final DatagramChannelFactory datagramFactory) throws Exception {
         final EventLoopGroup group = new DefaultEventLoopGroup();
-
         final Bootstrap b = new Bootstrap()
                 .group(group)
                 .channel(TunChannel.class)
@@ -70,46 +115,83 @@ public class TunAcceptor implements Acceptor {
                     @Override
                     protected void initChannel(final Channel ch) throws Exception {
                         ch.pipeline().addLast(new IpPacketCodec());
-                        ch.pipeline().addLast(new Tcp4PacketHandler(dnsEngine, factory));
+                        ch.pipeline().addLast(new Tcp4PacketHandler(dnsEngine, socketFactory));
                     }
                 });
-        final InterfaceAddressEx[] bindings = {
-                InterfaceAddressEx.of("198.18.0.1", 24),
-//                InterfaceAddressEx.of("198.18.0.254", 24),
-//                InterfaceAddressEx.of("2001:2::", 48)
-        };
         return b.bind(new TunAddress(ifname, bindings)).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     final TunAdapter adapter = ((TunChannel) future.channel()).device();
-                    log.info("TUN adapter started on: {}", adapter.name());
+                    log.info("TUN adapter({}) started on: {}", wintunUuid, adapter.name());
 
+                    final String[] dnsServers = {"127.0.0.1", "::1"};
                     if (adapter instanceof WindowsTunAdapter) {
-                        // log.info("ipconfig /flushdns");
-                        final WindowsNetworkInterface nix = WindowsNetworkInterface.getByLuid(((WindowsTunAdapter) adapter).luid());
-                        nix.setInterfaceDns(new InetAddress[]{InetAddress.getByName("127.0.0.1")});
-                        WindowsNetworkInterface.flushDnsCache();
-                    } else if (adapter instanceof DarwinTunAdapter) {
-                        // log.info("networksetup -setdnsservers \"Wi-Fi\" 127.0.0.1(empty)");
-                        // log.info("sudo killall -HUP mDNSResponder;");
-                        DarwinDns.addDns(new String[]{"::1", "127.0.0.1"});
-                        DarwinDns.flushDnsCache();
-                    } else if (adapter instanceof LinuxTunAdapter) {
-                        // ip route add 192.168.2.0/24 via 192.168.1.1 dev eth0
-//                        Inet4Address addr = (Inet4Address) InetAddress.getByName("198.18.2.0");
-//                        Inet4Address gw = (Inet4Address) InetAddress.getByName("198.18.0.1");
-//                        LinuxNetworkRoutingTable.add("tun8", addr, 24, gw, false);
+                        final long luid = ((WindowsTunAdapter) adapter).luid();
+                        WindowsNetworkInterface.getByLuid(luid).setInterfaceDns(
+                                Arrays.stream(dnsServers).map(SocketUtils::addressByName).toArray(InetAddress[]::new)
+                        );
+                        log.info("Set DNS server to: {} for {}", Arrays.toString(dnsServers), adapter.name());
 
+                        WindowsNetworkInterface.flushDnsCache();
+                        log.info("Flush DNS cache");
+                    } else if (adapter instanceof DarwinTunAdapter) {
+                        // networksetup -setdnsservers "Wi-Fi" 127.0.0.1 or "empty"
+                        // sudo killall -HUP mDNSResponder;
+                        DarwinDns.addDns(dnsServers);
+                        log.info("Set DNS server to: {}", Arrays.toString(dnsServers));
+
+                        DarwinDns.flushDnsCache();
+                        log.info("Flush DNS cache");
+                    } else if (adapter instanceof LinuxTunAdapter) {
+                        log.warn("Can't set DNS server to: {}", Arrays.toString(dnsServers));
+                        log.warn("Can't flush DNS cache");
                     }
 
-                    final InetAddress dst = SocketUtils.addressByName("10.188.71.3", true);
-                    final InetAddress gw = SocketUtils.addressByName("198.18.0.1", true);
-                    NetworkRoutingTable.get().add(dst, (byte) 24, gw, adapter.name(), 0);
+                    // TODO add route
+                     final InetAddress dst = SocketUtils.addressByName("10.188.71.3");
+                     final InetAddress gw = SocketUtils.addressByName("198.18.0.1");
+                     NetworkRoutingTable.get().add(dst, (byte) 24, gw, adapter.name(), 0);
                 } else {
                     log.error("Tun adapter bound error: {}", future.cause().getMessage(), future.cause());
                 }
             }
         });
     }
+
+    private SocketChannelFactory getSocketChannelFactory(final RouteContext context) {
+        final Upstream upstreamToUse = new DynamicUpstream("tun-socket-upstream") {
+
+            @Override
+            protected Upstream choose(final InetSocketAddress destination) {
+                return context.getUpstream(upstream);
+            }
+
+        };
+        return context.newSocketChannelFactory(upstreamToUse);
+    }
+
+    private DatagramChannelFactory getDatagramChannelFactory(final RouteContext context) {
+        final Upstream upstreamToUse = new DynamicUpstream("tun-datagram-upstream") {
+
+            @Override
+            protected Upstream choose(final InetSocketAddress destination) {
+                return context.getUpstream(upstream);
+            }
+
+        };
+        return context.newDatagramChannelFactory(upstreamToUse);
+    }
+
+    private static String determineUuid(final InterfaceAddressEx... bindings) {
+        final StringBuilder buff = new StringBuilder();
+        for (final InterfaceAddressEx binding : bindings) {
+            buff.append(binding.getAddress().getHostName()).append(binding.getNetworkPrefixLength()).append(";");
+        }
+        final String hash = new Hash.MD5(buff.toString()).toHex().toUpperCase();
+        buff.setLength(0);
+        buff.append(hash).insert(8, "-").insert(13, "-").insert(18, "-").insert(23, "-").insert(0, "{").append("}");
+        return buff.toString();
+    }
+
 }

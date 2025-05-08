@@ -32,4 +32,7 @@ public interface RouteContext {
 
     DatagramChannelFactory newDatagramChannelFactory(final String upstream);
 
+    SocketChannelFactory newSocketChannelFactory(Upstream upstream);
+
+    DatagramChannelFactory newDatagramChannelFactory(Upstream upstream);
 }

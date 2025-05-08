@@ -165,7 +165,7 @@ public class WindowsNetworkInterface implements NetworkInterfaceEx {
 
     public void setInterfaceDns(final InetAddress[] nameServers) {
         final Inet4Address[] v4 = Arrays.stream(nameServers).filter(a -> a instanceof Inet4Address).toArray(Inet4Address[]::new);
-        final Inet4Address[] v6 = Arrays.stream(nameServers).filter(a -> a instanceof Inet6Address).toArray(Inet4Address[]::new);
+        final Inet6Address[] v6 = Arrays.stream(nameServers).filter(a -> a instanceof Inet6Address).toArray(Inet6Address[]::new);
 
         final GUID interfaceGuid = interfaceLuidToGuid(interfaceLuid);
         setInterfaceDns0(interfaceGuid, AF_INET, v4, new String[0]);

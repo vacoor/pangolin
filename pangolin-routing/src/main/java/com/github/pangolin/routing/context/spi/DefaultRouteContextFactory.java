@@ -1,31 +1,25 @@
 package com.github.pangolin.routing.context.spi;
 
+import com.github.pangolin.routing.acceptor.mixin.MixinAcceptor;
+import com.github.pangolin.routing.acceptor.tun.TunAcceptor;
+import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
+import com.github.pangolin.routing.acceptor.tun.fakedns.FakeDnsAcceptor;
 import com.github.pangolin.routing.context.InheritableRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
-import com.github.pangolin.routing.acceptor.Acceptor;
-import com.github.pangolin.routing.acceptor.AcceptorFactory;
-import com.github.pangolin.routing.acceptor.mixin.MixinAcceptorFactory;
 import com.github.pangolin.routing.support.AliasRegistry;
 import com.github.pangolin.routing.upstream.DirectUpstream;
+import com.sun.jna.Platform;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.util.StringUtils;
 
 import java.net.URL;
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.ServiceLoader;
 import java.util.stream.Collectors;
 
 @Slf4j
 public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
-    private final AcceptorFactory acceptorFactory = createAcceptorFactory();
-
-    protected AcceptorFactory createAcceptorFactory() {
-        final Iterable<AcceptorFactory> factories = ServiceLoader.load(AcceptorFactory.class);
-        final Iterator<AcceptorFactory> it = factories.iterator();
-        return it.hasNext() ? it.next() : new MixinAcceptorFactory();
-    }
 
     @Override
     public RouteContext create(final URL url, final RouteContext parent) throws Exception {
@@ -85,35 +79,61 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
 
         // TODO
         Ini.Section listen = ini.getSection("Listen");
-        if (null == listen) {
-            listen = ini.addSection("Listen");
-        }
-
-        for (final Map.Entry<String, String> entry : listen.entrySet()) {
-            final String port = entry.getKey();
-            final String definition = entry.getValue();
-            final int listenPort = Integer.parseInt(port);
-            final String[] segments = definition.split("\\s*,\\s*");
-            if (segments.length < 2) {
-                throw new IllegalArgumentException("Unable to create Acceptor with definition " + definition);
-            }
-
-            final Acceptor acceptor = acceptorFactory.apply(listenPort, segments);
-            if (null != acceptor) {
-                registry.addAcceptors(acceptor);
+        if (null != listen) {
+            /*-
+             * [Listen]
+             * listen-port = upstream, protocol1, protocol2, ...
+             */
+            for (final Map.Entry<String, String> entry : listen.entrySet()) {
+                final String port = entry.getKey();
+                final String definition = entry.getValue();
+                final int listenPort = Integer.parseInt(port);
+                final String[] segments = definition.split("\\s*,\\s*");
+                if (segments.length < 2) {
+                    throw new IllegalArgumentException("Unable to create Acceptor with definition " + definition);
+                }
+                registry.addAcceptors(new MixinAcceptor(listenPort, segments[0], Arrays.copyOfRange(segments, 1, segments.length)));
             }
         }
 
-        /*
-        final Ini.Section external = ini.getSection("External");
-        if (null != external) {
-            RouteContext externalCtx = registry;
-            for (String urlToUse : external.values()) {
-                externalCtx = loadExternal(urlToUse, externalCtx);
+
+        final Ini.Section fakeDns = ini.getSection("Fake DNS");
+        if (null != fakeDns) {
+            /*-
+             * [Fake DNS]
+             * INET4 = 198.18.0.1/24
+             * INET6 = 2001:2::/48
+             * LEASE-TIME = 60
+             */
+            final String inet4 = fakeDns.get("INET4");
+            final String inet6 = fakeDns.get("INET6");
+            if (StringUtils.hasText(inet4) || StringUtils.hasText(inet6)) {
+                final String inet4subnet = StringUtils.hasText(inet4) ? inet4 : "198.18.0.1/24";
+                final String inet6subnet = StringUtils.hasText(inet6) ? inet6 : "2001:2::/48";
+
+                final String leaseTime = fakeDns.get("LEASE-TIME");
+                final int leaseTimeSeconds = StringUtils.hasText(leaseTime) ? Integer.parseInt(leaseTime) : 60;
+
+                registry.addAcceptors(new FakeDnsAcceptor(inet4subnet, inet6subnet, leaseTimeSeconds));
             }
-            return externalCtx;
         }
-        */
+
+        Ini.Section tun = ini.getSection("Tun");
+        if (null != tun) {
+            /*-
+             * [Tun]
+             * 198.18.0.1/24 = upstream
+             */
+            Map.Entry<String, String> entry = tun.entrySet().iterator().next();
+            final String binding = entry.getKey();
+            final String[] segments = binding.split("/");
+            final String addr = segments[0];
+            final int len = segments.length > 1 ? Integer.parseInt(segments[1]) : 32;
+            final InterfaceAddressEx bindingToUse = InterfaceAddressEx.of(addr, len);
+
+            final String ifname = Platform.isWindows() ? "Pangolin" : null;
+            registry.addAcceptors(new TunAcceptor(ifname, new InterfaceAddressEx[]{bindingToUse}, entry.getValue()));
+        }
 
         return registry;
     }

@@ -92,15 +92,6 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
                             }
                         }
                     }
-                    /*
-                    final Map<RoutePredicate, String> rules = routeRegistry.getRoutes();
-                    for (Map.Entry<RoutePredicate, String> entry : rules.entrySet()) {
-                        final RoutePredicate predicate = entry.getKey();
-                        if (!"DIRECT".equalsIgnoreCase(entry.getValue())) {
-                            buff.append(toSwitchyRule(predicate)).append("\r\n");
-                        }
-                    }
-                    */
 
                     final ByteBuf body = Unpooled.copiedBuffer(buff.toString(), StandardCharsets.UTF_8);
                     final DefaultFullHttpResponse httpResponse = new DefaultFullHttpResponse(httpRequest.protocolVersion(), HttpResponseStatus.OK, body);
@@ -142,15 +133,6 @@ public class SwitchyRuleConfigurationServerHandler extends ChannelInboundHandler
             final int prefixLength = p.getCidrPrefix();
             final InetAddress sa = p.getNetworkAddress();
             return String.format("Ip: %s/%s", sa.getHostAddress(), prefixLength);
-            /*
-            RoutePredicate delegate = p.getDelegate();
-            if (delegate instanceof SubnetRoutePredicate.Inet4SubnetPattern) {
-                SubnetRoutePredicate.Inet4SubnetPattern i4sn = (SubnetRoutePredicate.Inet4SubnetPattern) delegate;
-                String networkAddress = i4sn.getNetworkAddress();
-                String subnetMask = i4sn.getSubnetMask();
-                return String.format("%s/%s", networkAddress, subnetMask);
-            }
-            */
         }
         return String.format("! NOT SUPPORTED: %s", pattern);
     }

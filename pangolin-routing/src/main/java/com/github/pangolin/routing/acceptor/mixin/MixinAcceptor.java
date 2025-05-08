@@ -8,6 +8,8 @@ import com.github.pangolin.routing.support.DatagramChannelFactory;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.support.handler.server.Socks5ProxyServerHandler;
 import com.github.pangolin.routing.support.handler.server.Socks5ServerDatagramDemultiplexer;
+import com.github.pangolin.routing.upstream.DynamicUpstream;
+import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.server.NettyServer;
 import com.google.common.collect.Maps;
 import io.netty.bootstrap.Bootstrap;
@@ -39,9 +41,10 @@ import java.util.stream.Collectors;
 public class MixinAcceptor implements Acceptor {
     private static final Map<String, MixinAcceptorHandshakerFactory> HANDSHAKERS = initHandshakerFactories();
 
-    private final int listenPort;
-    private final String upstream;
     private final List<MixinAcceptorHandshakerFactory> factories;
+
+    private final int listenPort;
+    private String upstream;
 
     public MixinAcceptor(final int listenPort, final String upstream, final String... factories) {
         this(listenPort, upstream, resolve(factories));
@@ -52,6 +55,15 @@ public class MixinAcceptor implements Acceptor {
         this.upstream = upstream;
         this.factories = factories;
     }
+
+    public String getUpstream() {
+        return upstream;
+    }
+
+    public void setUpstream(final String upstream) {
+        this.upstream = upstream;
+    }
+
 
     @Override
     public ChannelFuture start(final RouteContext context) throws Exception {
@@ -131,11 +143,27 @@ public class MixinAcceptor implements Acceptor {
     }
 
     private SocketChannelFactory getSocketChannelFactory(final RouteContext context) {
-        return null == upstream || "DEFAULT".equals(upstream) ? context.newSocketChannelFactory() : context.newSocketChannelFactory(upstream);
+        final Upstream upstreamToUse = new DynamicUpstream("mixin-socket-upstream") {
+
+            @Override
+            protected Upstream choose(final InetSocketAddress destination) {
+                return context.getUpstream(upstream);
+            }
+
+        };
+        return context.newSocketChannelFactory(upstreamToUse);
     }
 
     private DatagramChannelFactory getDatagramChannelFactory(final RouteContext context) {
-        return null == upstream || "DEFAULT".equals(upstream) ? context.newDatagramChannelFactory() : context.newDatagramChannelFactory(upstream);
+        final Upstream upstreamToUse = new DynamicUpstream("mixin-datagram-upstream") {
+
+            @Override
+            protected Upstream choose(final InetSocketAddress destination) {
+                return context.getUpstream(upstream);
+            }
+
+        };
+        return context.newDatagramChannelFactory(upstreamToUse);
     }
 
 

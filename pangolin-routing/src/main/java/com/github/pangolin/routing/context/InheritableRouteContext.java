@@ -36,6 +36,7 @@ public class InheritableRouteContext extends SimpleAliasRegistry implements Rout
 
     public InheritableRouteContext(final RouteContext parent) {
         this.parent = parent;
+        this.addUpstream(RouteUpstream.NAME, self);
     }
 
     @Override
@@ -166,11 +167,13 @@ public class InheritableRouteContext extends SimpleAliasRegistry implements Rout
         return newDatagramChannelFactory(getUpstream(upstream));
     }
 
-    private SocketChannelFactory newSocketChannelFactory(final Upstream upstream) {
+    @Override
+    public SocketChannelFactory newSocketChannelFactory(final Upstream upstream) {
         return null != upstream ? new ProxySocketChannelFactory(upstream, bypass(), null) : new StandardSocketChannelFactory(null);
     }
 
-    private DatagramChannelFactory newDatagramChannelFactory(final Upstream upstream) {
+    @Override
+    public DatagramChannelFactory newDatagramChannelFactory(final Upstream upstream) {
         return null != upstream ? new ProxyDatagramChannelFactory(upstream, bypass()) : new StandardDatagramChannelFactory();
     }
 

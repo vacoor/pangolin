@@ -10,6 +10,10 @@ public abstract class SocketUtils {
     private SocketUtils() {
     }
 
+    public static InetAddress addressByName(final String host) {
+        return addressByName(host, true);
+    }
+
     public static InetAddress addressByName(final String host, final boolean resolve) {
         try {
             if (resolve) {
