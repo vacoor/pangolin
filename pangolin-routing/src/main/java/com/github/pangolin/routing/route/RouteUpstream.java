@@ -21,6 +21,10 @@ public class RouteUpstream extends DynamicUpstream {
         this.upstreams = upstreams;
     }
 
+    public RouteRegistry<InetSocketAddress> routes() {
+        return routes;
+    }
+
     @Override
     protected Upstream choose(final InetSocketAddress destination) {
         final Route route = getRoute(destination);
@@ -28,7 +32,7 @@ public class RouteUpstream extends DynamicUpstream {
     }
 
     private Route getRoute(final InetSocketAddress destination) {
-        return routes.getRoute(destination);
+        return routes().getRoute(destination);
     }
 
     private Upstream getUpstream(final String upstream) {
