@@ -9,9 +9,11 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.ssl.SslContext;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
+import java.net.InetSocketAddress;
 import java.security.cert.CertificateException;
 
 /**
@@ -45,6 +47,7 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
     private final String endpointPath;
 
     private final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine;
+    @Getter
     private final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder;
 
 
@@ -100,7 +103,6 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
                         */
                         new WebSocketServerProtocolHandler(endpointPath, "*", false, 65536, true, true),
                         new WebSocketBackhaulTunnelServerHandler(webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder)
-//                        new WebSocketBackhaulTunnelServerHandler2(endpointPath, "*", webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder)
                 );
             }
         }).sync().channel();
@@ -108,6 +110,7 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
 
     public static void main(String[] args) throws Exception {
         final WebSocketBackhaulTunnelServer server = new WebSocketBackhaulTunnelServer(2345, "/tunnel", false);
+
         final Channel channel = server.start();
         System.out.println("Start on " + channel.localAddress());
 

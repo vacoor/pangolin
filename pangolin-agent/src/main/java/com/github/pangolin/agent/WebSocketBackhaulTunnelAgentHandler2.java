@@ -1,51 +1,60 @@
 package com.github.pangolin.agent;
 
+import com.github.pangolin.handler.TcpInboundRedirectHandler;
+import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
+import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
+import com.github.pangolin.util.Channels;
 import com.github.pangolin.util.Channels2;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpHeaders;
-import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
-import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
-import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
-import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.flow.FlowControlHandler;
 import io.netty.handler.timeout.IdleStateEvent;
+import io.netty.util.CharsetUtil;
+import io.netty.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.InetSocketAddress;
-import java.net.URI;
+import java.net.*;
+import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Pattern;
 
 /**
  * WebSocket 回传通道代理.
  */
 @Slf4j
 public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHandler<WebSocketFrame> {
-    private static final String AGENT_VERSION = "1.0";
+    private static final String AGENT_VERSION = "1.1";
     private static final String BACKHAUL_PROTOCOL = "PASSIVE";
 
-    /**
-     * ws://...
-     */
-    @Deprecated
-    private static final String WS_PROTOCOL = "ws";
+    private static final byte IPv4_ADDR_SIZE = 4;
+    private static final byte IPv6_ADDR_SIZE = 16;
 
-    /**
-     * wss://...
-     */
-    @Deprecated
-    private static final String WSS_PROTOCOL = "wss";
+    private static final byte VER_1_1 = 0x01;
 
-    /**
-     * tcp://...
-     */
-    private static final String TCP_OVER_WS_PROTOCOL = "tcp";
+    private static final byte CMD_CONNECT = 0x01;
+
+    private static final byte ATYPE_IPv4 = 0x01;
+    private static final byte ATYPE_DOMAIN = 0x03;
+    private static final byte ATYPE_IPv6 = 0x04;
+
+    private static final byte REPLY_SUCCESS = 0x00;
+    private static final byte REPLY_FAILURE = 0x01;
+    private static final byte REPLY_FORBIDDEN = 0x02;
+    private static final byte REPLY_NETWORK_UNREACHABLE = 0x03;
+    private static final byte REPLY_HOST_UNREACHABLE = 0x04;
+    private static final byte REPLY_CONNECTION_REFUSED = 0x05;
+    private static final byte REPLY_TTL_EXPIRED = 0x06;
+    private static final byte REPLY_COMMAND_UNSUPPORTED = 0x07;
+    private static final byte REPLY_ADDRESS_UNSUPPORTED = 0x08;
+
 
     private enum State {SUSPENDED, INITIALIZING, INITIALIZED}
 
@@ -109,36 +118,118 @@ public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHa
 
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame frame) throws Exception {
-        if (frame instanceof TextWebSocketFrame) {
-            /*-
-             * v1.0:
-             * tcp:8080->tcp://172.16.0.12:7788
-             * id->target_protocol://target_host:target_port
-             */
-            final String text = ((TextWebSocketFrame) frame).text();
-            final String[] segments = text.split(Pattern.quote("->"), 2);
-            final String id = segments[0];
-            final URI target = URI.create(segments[1]);
-
-            final WebSocketClientHandshaker backhaulHandshaker = newBackhaulHandshaker(id);
-            if (TCP_OVER_WS_PROTOCOL.equalsIgnoreCase(target.getScheme())) {
-                /*-
-                 * TCP over WebSocket.
-                 */
-                final InetSocketAddress socketAddress = new InetSocketAddress(target.getHost(), target.getPort());
-                Channels2.pipe(socketAddress, backhaulHandshaker, ctx.channel().eventLoop()).addListener(new ChannelFutureListener() {
-                    @Override
-                    public void operationComplete(final ChannelFuture future) throws Exception {
-                        if (!future.isSuccess()) {
-                            //
-                        }
-                    }
-                });
-            } else if (WS_PROTOCOL.equalsIgnoreCase(target.getScheme()) || WSS_PROTOCOL.equalsIgnoreCase(target.getScheme())) {
-                final WebSocketClientHandshaker upstreamHandshaker = newHandshaker(target, null);
-                Channels2.pipe(upstreamHandshaker, backhaulHandshaker, ctx.channel().eventLoop());
-            }
+        if (!(frame instanceof BinaryWebSocketFrame)) {
+            ctx.fireChannelRead(frame.retain());
+            return;
         }
+
+        /*-
+         * TCP connect request is a SOCKS5-like request:
+         *
+         * +----------+-----+-----+-------+------+----------+----------+
+         * | ID       | VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
+         * +----------+-----+-----+-------+------+----------+----------+
+         * | Variable |  1  |  1  | X'00' |  1   | Variable |    2     |
+         * +----------+-----+-----+-------+------+----------+----------+
+         *
+         * Where:
+         * o  ID request id
+         * o  VER protocol version: X'01'
+         * o  CMD
+         *    o  CONNECT X'01'
+         *    o  UDP ASSOCIATE X'03'
+         * o  RSV
+         *    o websocket frame: X'00'
+         *    o TCP frame: X'01'
+         * o  ATYP address type of following address
+         *    o  IP V4 address: X'01'
+         *    o  DOMAINNAME: X'03'
+         *    o  IP V6 address: X'04'
+         * o  DST.ADDR desired destination address
+         * o  DST.PORT desired destination port in network octet order
+         *
+         * In an address field (DST.ADDR, BND.ADDR), the ATYP field specifies
+         * the type of address contained within the field:
+         *
+         *        o  X'01'
+         *
+         * the address is a version-4 IP address, with a length of 4 octets
+         *
+         *        o  X'03'
+         *
+         * the address field contains a fully-qualified domain name.  The first
+         * octet of the address field contains the number of octets of name that
+         * follow, there is no terminating NUL octet.
+         *
+         *        o  X'04'
+         *
+         * the address is a version-6 IP address, with a length of 16 octets.
+         */
+        final ByteBuf in = frame.content();
+        final String id = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
+        final byte version = in.readByte();
+        final byte command = in.readByte();
+        final byte rsv = in.readByte();
+
+        final InetAddress address = parseAddress(in);
+        final int port = in.readUnsignedShort();
+        final InetSocketAddress destination = new InetSocketAddress(address, port);
+
+        final WebSocketClientHandshaker backhaulHandshaker = newBackhaulHandshaker(id);
+        final ChannelPromise backhaulPromise = ctx.newPromise().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (!future.isSuccess()) {
+                    ctx.writeAndFlush(new BinaryWebSocketFrame(
+                            newReply(ctx, id, rsv, REPLY_HOST_UNREACHABLE)
+                    ));
+
+                }
+            }
+        });
+
+        if (CMD_CONNECT == command) {
+            pipe(destination, backhaulHandshaker, ctx.channel().eventLoop(), backhaulPromise, 0 != rsv);
+        }
+    }
+
+    private InetAddress parseAddress(final ByteBuf in) throws UnknownHostException {
+        final byte addressType = in.readByte();
+        if (ATYPE_IPv4 == addressType) {
+            final byte[] addr = ByteBufUtil.getBytes(in.readBytes(IPv4_ADDR_SIZE));
+            return InetAddress.getByAddress(addr);
+        } else if (ATYPE_DOMAIN == addressType) {
+            final String domain = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
+            return InetAddress.getByName(domain);
+        } else if (ATYPE_IPv6 == addressType) {
+            final byte[] addr = ByteBufUtil.getBytes(in.readBytes(IPv6_ADDR_SIZE));
+            return InetAddress.getByAddress(addr);
+        }
+        throw new UnknownHostException("address type: " + addressType);
+    }
+
+    private ByteBuf newReply(final ChannelHandlerContext ctx,
+                             final String id, final byte rsv, final byte status) {
+        /*-
+         * The reply is a SOCKS5-like reply:
+         *
+         * +----------+----+-----+-------+------+----------+----------+
+         * | ID       |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
+         * +----------+----+-----+-------+------+----------+----------+
+         * | Variable | 1  |  1  | X'00' |  1   | Variable |    2     |
+         * +----------+----+-----+-------+------+----------+----------+
+         */
+        final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(id);
+        final ByteBuf reply = ctx.alloc().buffer(1 + idBytes.remaining() + 4 + IPv4_ADDR_SIZE + 2);
+        reply.writeByte(idBytes.remaining());
+        reply.writeBytes(idBytes);
+        reply.writeByte(VER_1_1);
+        reply.writeByte(status);
+        reply.writeByte(rsv);
+        reply.writeByte(ATYPE_IPv4);
+        reply.writeInt(0);
+        reply.writeShort(0);
+        return reply;
     }
 
     private WebSocketClientHandshaker newBackhaulHandshaker(final String id) {
@@ -159,5 +250,128 @@ public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHa
     public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) throws Exception {
         log.warn("Software caused connection abort: {}", cause.getMessage(), cause);
         webSocketContext.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
+    }
+
+
+    /*
+     * server <--ws--> agent <--socket--> target
+     * or degrade to:
+     * server <--socket--> agent <--socket--> target
+     */
+    public static ChannelFuture pipe(final SocketAddress destination,
+                                     final WebSocketClientHandshaker backhaulHandhaker,
+                                     final EventLoopGroup brGroup, final ChannelPromise promise,
+                                     final boolean degrade) throws InterruptedException {
+        final ChannelFutureListener propagationOnFailure = propagationOnFailure(promise);
+        return Channels.open(destination, false, brGroup, new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelActive(final ChannelHandlerContext destinationCtx) throws Exception {
+                Channels2.openWs(backhaulHandhaker, brGroup, new ChannelInboundHandlerAdapter() {
+                    @Override
+                    public void handlerAdded(final ChannelHandlerContext backhaulCtx) throws Exception {
+                        final ChannelPipeline cp = backhaulCtx.pipeline();
+                        if (null == cp.get(FlowControlHandler.class)) {
+                            final ChannelHandlerContext wsCtx = cp.context(WebSocketClientProtocolHandler.class);
+                            cp.addBefore(wsCtx.name(), FlowControlHandler.class.getName(), new FlowControlHandler());
+                        }
+                    }
+
+                    @Override
+                    public void userEventTriggered(final ChannelHandlerContext backhaulCtx, final Object evt) throws Exception {
+                        if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+                            backhaulCtx.channel().config().setAutoRead(false);
+
+                            if (!degrade) {
+                                /*-
+                                 * server <--ws--> agent <--socket--> target
+                                 */
+                                destinationCtx.pipeline().replace(destinationCtx.name(), "destination-br", new TcpOverWebSocketEncodeHandler(backhaulCtx));
+                                backhaulCtx.pipeline().replace(backhaulCtx.name(), "backhaul-br", new TcpOverWebSocketDecodeHandler(destinationCtx));
+                            } else {
+                                /*-
+                                 * server <--ws--> agent <--socket--> target
+                                 * degrade to:
+                                 * server <--socket--> agent <--socket--> target
+                                 */
+                                destinationCtx.pipeline().replace(destinationCtx.name(), null, new TcpInboundRedirectHandler(backhaulCtx));
+                                backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new TcpInboundRedirectHandler(destinationCtx));
+                            }
+
+                            backhaulCtx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(new ChannelFutureListener() {
+                                @Override
+                                public void operationComplete(final ChannelFuture future) throws Exception {
+                                    if (future.isSuccess()) {
+                                        if (degrade) {
+                                            /*-
+                                             * remove websocket codec.
+                                             */
+                                            // backhaulCtx.pipeline().remove(WebSocketServerHandshakeNegotiationHandler.WebSocketCtrlFrameHandler.class);
+                                            backhaulCtx.pipeline().remove(Utf8FrameValidator.class);
+                                            backhaulCtx.pipeline().remove("wsencoder");
+                                            backhaulCtx.pipeline().remove("wsdecoder");
+                                        }
+
+                                        destinationCtx.channel().config().setAutoRead(true);
+                                        backhaulCtx.channel().config().setAutoRead(true);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }).addListener(propagationOnFailure).addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(final ChannelFuture future) throws Exception {
+                        if (!future.isSuccess()) {
+                            // can't open backhaul connection.
+                            future.channel().close();
+                            destinationCtx.channel().close();
+                        }
+                    }
+                });
+            }
+        }).addListener(propagationOnFailure).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
+    }
+
+    private static ChannelFutureListener propagationOnFailure(final Promise<?> promise) {
+        return new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (!future.isSuccess()) {
+                    promise.tryFailure(future.cause());
+                }
+            }
+        };
+    }
+
+    private static final int MAX_HTTP_CONTENT_LENGTH = 1024 * 1024 * 8;
+
+    public static void main(String[] args) throws InterruptedException {
+        final WebSocketClientHandshaker handshaker = WebSocketClientHandshakerFactory.newHandshaker(
+                URI.create("ws://localhost:8888"), WebSocketVersion.V13, "x", true, new DefaultHttpHeaders()
+        );
+
+        Channels.listen(
+                null, 9999, true, new NioEventLoopGroup(), new NioEventLoopGroup(),
+                new ChannelInitializer<SocketChannel>() {
+                    @Override
+                    protected void initChannel(final SocketChannel ch) throws Exception {
+                        final ChannelPipeline pipeline = ch.pipeline();
+//                if (null != sslContext) {
+//                    pipeline.addLast(sslContext.newHandler(ch.alloc()));
+//                }
+                        pipeline.addLast(
+                                new HttpServerCodec(),
+                                new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH),
+                        /*- 浏览器似乎处理压缩有问题(permessage-deflate).
+                        new WebSocketServerCompressionHandler(),
+                        new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
+                        */
+                                new WebSocketServerProtocolHandler("/ws", "*", false, 65536, true, true),
+                                new WebSocketBackhaulTunnelAgentHandler2("xx", handshaker, new DefaultHttpHeaders())
+//                        new WebSocketBackhaulTunnelServerHandler(webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder)
+//                        new WebSocketBackhaulTunnelServerHandler2(endpointPath, "*", webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder)
+                        );
+                    }
+                }).sync().channel().closeFuture().sync();
     }
 }

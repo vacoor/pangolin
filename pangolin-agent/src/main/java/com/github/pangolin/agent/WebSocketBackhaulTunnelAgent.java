@@ -55,6 +55,7 @@ public class WebSocketBackhaulTunnelAgent {
                 handshaker, workerGroup,
                 new IdleStateHandler(600, 600, 600),
                 new WebSocketBackhaulTunnelAgentHandler(name, handshaker, customHttpHeaders)
+                 , new WebSocketBackhaulTunnelAgentHandler2(name, handshaker, customHttpHeaders)
         );
     }
 

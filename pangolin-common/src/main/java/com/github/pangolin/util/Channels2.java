@@ -25,38 +25,11 @@ public class Channels2 {
 
 
     /**
-     * socket-1 <-- br -> socket-2.
-     */
-    public static ChannelFuture pipe(final SocketAddress upstream, final SocketAddress downstream, final EventLoopGroup brGroup) throws InterruptedException {
-        return Channels.open(upstream, false, brGroup, new ChannelInboundHandlerAdapter() {
-            @Override
-            public void channelActive(final ChannelHandlerContext upstreamCtx) throws Exception {
-                Channels.open(downstream, false, brGroup, new ChannelInboundHandlerAdapter() {
-                    @Override
-                    public void channelActive(final ChannelHandlerContext downstreamCtx) throws Exception {
-                        upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", new TcpInboundRedirectHandler(downstreamCtx));
-                        downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", new TcpInboundRedirectHandler(upstreamCtx));
-
-                        upstreamCtx.channel().config().setAutoRead(true);
-                        downstreamCtx.channel().config().setAutoRead(true);
-                    }
-                }).addListener(new ChannelFutureListener() {
-                    @Override
-                    public void operationComplete(final ChannelFuture future) throws Exception {
-                        if (!future.isSuccess()) {
-                            // upstreamCtx.fireExceptionCaught(future.cause());
-                            future.channel().close();
-                            upstreamCtx.channel().close();
-                        }
-                    }
-                });
-            }
-        }).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
-    }
-
-    /*
      * client -> websocket server(downstream) <-- backhaul connection -- br --> destination socket(upstream)
+     *
+     * @deprecated 1.2.2
      */
+    @Deprecated
     public static ChannelFuture pipe(final SocketAddress upstream, final WebSocketClientHandshaker downstream, final EventLoopGroup brGroup) throws InterruptedException {
         return Channels.open(upstream, false, brGroup, new ChannelInboundHandlerAdapter() {
             @Override
@@ -93,59 +66,6 @@ public class Channels2 {
                         }
                     }
                 });
-            }
-        }).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
-    }
-
-    @Deprecated
-    public static ChannelFuture pipe(final WebSocketClientHandshaker upstream, final WebSocketClientHandshaker downstream, final EventLoopGroup brGroup) throws InterruptedException, SSLException {
-        return openWs(upstream, brGroup, new ChannelInboundHandlerAdapter() {
-
-            @Override
-            public void handlerAdded(final ChannelHandlerContext upstreamCtx) throws Exception {
-                final ChannelPipeline cp = upstreamCtx.pipeline();
-                if (null == cp.get(FlowControlHandler.class)) {
-                    final ChannelHandlerContext wsCtx = cp.context(WebSocketClientProtocolHandler.class);
-                    cp.addBefore(wsCtx.name(), FlowControlHandler.class.getName(), new FlowControlHandler());
-                }
-            }
-
-            @Override
-            public void userEventTriggered(final ChannelHandlerContext upstreamCtx, final Object evt) throws Exception {
-                if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
-                    upstreamCtx.channel().config().setAutoRead(false);
-                    openWs(downstream, brGroup, new ChannelInboundHandlerAdapter() {
-                        @Override
-                        public void handlerAdded(final ChannelHandlerContext downstreamCtx) throws Exception {
-                            final ChannelPipeline cp = downstreamCtx.pipeline();
-                            if (null == cp.get(FlowControlHandler.class)) {
-                                final ChannelHandlerContext wsCtx = cp.context(WebSocketClientProtocolHandler.class);
-                                cp.addBefore(wsCtx.name(), FlowControlHandler.class.getName(), new FlowControlHandler());
-                            }
-                        }
-
-                        @Override
-                        public void userEventTriggered(final ChannelHandlerContext downstreamCtx, final Object evt) throws Exception {
-                            if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
-                                downstreamCtx.channel().config().setAutoRead(false);
-
-                                upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", new WebSocketInboundRedirectHandler(downstreamCtx));
-                                downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", new WebSocketInboundRedirectHandler(upstreamCtx));
-
-                                upstreamCtx.channel().config().setAutoRead(true);
-                                downstreamCtx.channel().config().setAutoRead(true);
-                            }
-                        }
-                    }).addListener(new ChannelFutureListener() {
-                        @Override
-                        public void operationComplete(final ChannelFuture future) throws Exception {
-                            if (!future.isSuccess()) {
-                                future.channel().close();
-                                upstreamCtx.channel().close();
-                            }
-                        }
-                    });
-                }
             }
         }).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
     }

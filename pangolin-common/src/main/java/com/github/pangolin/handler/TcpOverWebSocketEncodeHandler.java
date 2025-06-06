@@ -28,7 +28,7 @@ public class TcpOverWebSocketEncodeHandler extends ChannelInboundHandlerAdapter 
     @Override
     public void channelInactive(final ChannelHandlerContext inCtx) {
         if (outCtx.channel().isActive()) {
-            log.info("[tun@tcp/ws {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
+            log.debug("[tun@tcp/ws {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
             outCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.NORMAL_CLOSURE)).addListener(ChannelFutureListener.CLOSE);
         }
     }
@@ -48,7 +48,7 @@ public class TcpOverWebSocketEncodeHandler extends ChannelInboundHandlerAdapter 
             }
         } else {
             ReferenceCountUtil.release(msg);
-            log.error("[tun@tcp/ws {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
+            log.warn("[tun@tcp/ws {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
             inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }

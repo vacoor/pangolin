@@ -6,14 +6,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.MessageToMessageDecoder;
-import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
-import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
-import io.netty.handler.codec.http.websocketx.WebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
+import io.netty.handler.codec.http.websocketx.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -46,7 +39,7 @@ public class WebSocketInboundRedirectHandler extends ChannelInboundHandlerAdapte
     @Override
     public void channelInactive(final ChannelHandlerContext inCtx) {
         if (outCtx.channel().isActive()) {
-            log.error("[tun@ws {}(!) => {}] Connection lost: The input closed the connection, the output will be closed", stringify(inCtx), stringify(outCtx));
+            log.debug("[tun@ws {}(!) => {}] Connection closed", stringify(inCtx), stringify(outCtx));
             outCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.NORMAL_CLOSURE)).addListener(ChannelFutureListener.CLOSE);
         }
     }
@@ -84,7 +77,7 @@ public class WebSocketInboundRedirectHandler extends ChannelInboundHandlerAdapte
             }
         } else {
             ReferenceCountUtil.release(msg);
-            log.error("[tun@ws {} => {}(!)] Output has been closed, input will be closed", stringify(inCtx), stringify(outCtx));
+            log.warn("[tun@ws {} => {}(!)] Output has been closed, input will be closed", stringify(inCtx), stringify(outCtx));
             inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.NORMAL_CLOSURE)).addListener(ChannelFutureListener.CLOSE);
         }
     }

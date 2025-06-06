@@ -41,7 +41,7 @@ public class TcpInboundRedirectHandler extends ChannelInboundHandlerAdapter {
             outCtx.writeAndFlush(msg);
         } else {
             ReferenceCountUtil.release(msg);
-            log.error("[tun@tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
+            log.warn("[tun@tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
             outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }

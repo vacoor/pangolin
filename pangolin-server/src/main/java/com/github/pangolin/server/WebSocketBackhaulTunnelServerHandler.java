@@ -9,17 +9,14 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.QueryStringDecoder;
-import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
-import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
-import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
+import io.netty.handler.codec.http.websocketx.*;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
+import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
-import io.netty.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.URI;
+import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Map;
 
@@ -28,37 +25,114 @@ import java.util.Map;
  */
 @Slf4j
 public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerAdapter {
-    private static final String PROTOCOL_AGENT_REGISTER = "PASSIVE-REG";
-    private static final String PROTOCOL_WS_TUNNEL_REQUEST = "";
-    private static final String PROTOCOL_TCP_TUNNEL_REQUEST = "CONNECT";
-    private static final String PROTOCOL_TUNNEL_BACKHAUL = "PASSIVE";
-    private static final String PROTOCOL_MGR_CONSOLE = "CONSOLE";
+    /**
+     * @see #PROTO_AGENT_SERVICE
+     * @deprecated
+     */
+    @Deprecated
+    private static final String PROTO_AGENT_REGISTER = "PASSIVE-REG";
+
+    /**
+     * @see #PROTO_CONN_BACKHAUL
+     * @deprecated
+     */
+    @Deprecated
+    private static final String PROTO_CONN_BACKHAUL_LEGACY = "PASSIVE";
+
+    /**
+     * Agent register.
+     */
+    private static final String PROTO_AGENT_SERVICE = "SERVICE";
+
+    /**
+     * Client TCP over WebSocket connect.
+     */
+    private static final String PROTO_WS_CONNECT = "";
+
+    /**
+     * Client WebSocket degrade to TCP socket connect.
+     */
+    private static final String PROTO_TCP_CONNECT = "CONNECT";
+
+    /**
+     * Agent backhaul connection.
+     */
+    private static final String PROTO_CONN_BACKHAUL = "BACKHAUL";
+
+    /**
+     * WebSocket management console.
+     */
+    private static final String PROTO_MGR_CONSOLE = "CONSOLE";
+
+    private static final String PARAM_AGENT = "agent";
+    private static final String PARAM_TARGET = "target";
+    private static final String PARAM_BACKHAUL_ID = "id";
 
     private final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine;
     private final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder;
 
-    public WebSocketBackhaulTunnelServerHandler(final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine, final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder) {
+    public WebSocketBackhaulTunnelServerHandler(final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine,
+                                                final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder) {
         this.webSocketBackhaulTunnelServerEngine = webSocketBackhaulTunnelServerEngine;
         this.webSocketBackhaulTunnelServerForwarder = webSocketBackhaulTunnelServerForwarder;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
         if (evt instanceof HandshakeComplete) {
             final HandshakeComplete handshake = (HandshakeComplete) evt;
-            String subprotocol = handshake.selectedSubprotocol();
-            subprotocol = null != subprotocol ? subprotocol : PROTOCOL_WS_TUNNEL_REQUEST;
+            final String rawProtocol = handshake.selectedSubprotocol();
+            final String protocolToUse = null != rawProtocol ? rawProtocol : PROTO_WS_CONNECT;
 
-            if (PROTOCOL_AGENT_REGISTER.equals(subprotocol)) {
-                webSocketBackhaulTunnelServerEngine.agentRegistered(handshake, ctx);
-            } else if (PROTOCOL_TUNNEL_BACKHAUL.equals(subprotocol)) {
-                webSocketBackhaulTunnelServerEngine.tunnelResponded(handshake, ctx);
-            } else if (PROTOCOL_WS_TUNNEL_REQUEST.equals(subprotocol)) {
-                wsTunnelRequested(handshake, ctx);
-            } else if (PROTOCOL_TCP_TUNNEL_REQUEST.equals(subprotocol)) {
-                tcpTunnelRequested(handshake, ctx);
-            } else if (PROTOCOL_MGR_CONSOLE.equals(subprotocol)) {
-                ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelServerConsoleHandler(webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder));
+            if (PROTO_AGENT_REGISTER.equals(protocolToUse) || PROTO_AGENT_SERVICE.equals(protocolToUse)) {
+                // XXX authorize.
+                if (!webSocketBackhaulTunnelServerEngine.agentRegistered(handshake, ctx)) {
+                    ctx.writeAndFlush(new CloseWebSocketFrame(
+                            WebSocketCloseStatus.INVALID_PAYLOAD_DATA
+                    )).addListener(ChannelFutureListener.CLOSE);
+                } else {
+                    ctx.pipeline().replace(ctx.name(), null, new ChannelInboundHandlerAdapter() {
+                        /**
+                         * {@inheritDoc}
+                         */
+                        @Override
+                        public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+                            if (msg instanceof BinaryWebSocketFrame) {
+                                try {
+                                    webSocketBackhaulTunnelServerEngine.agentResponded((BinaryWebSocketFrame) msg, ctx);
+                                } finally {
+                                    ReferenceCountUtil.release(msg);
+                                }
+                            } else {
+                                ctx.fireChannelRead(msg);
+                            }
+                        }
+                    });
+                }
+            } else if (PROTO_WS_CONNECT.equals(protocolToUse)) {
+                // XXX authorize.
+                handshake(handshake, ctx, false);
+            } else if (PROTO_TCP_CONNECT.equals(protocolToUse)) {
+                // XXX authorize.
+                handshake(handshake, ctx, true);
+            } else if (PROTO_CONN_BACKHAUL_LEGACY.equals(protocolToUse) || PROTO_CONN_BACKHAUL.equals(protocolToUse)) {
+                final Map<String, List<String>> params = new QueryStringDecoder(handshake.requestUri()).parameters();
+                final String id = Util.last(params, PARAM_BACKHAUL_ID);
+                if (null != id && !id.isEmpty()) {
+                    webSocketBackhaulTunnelServerEngine.finishHandshake(id, ctx);
+                } else {
+                    ctx.writeAndFlush(new CloseWebSocketFrame(
+                            WebSocketCloseStatus.INVALID_PAYLOAD_DATA
+                    )).addListener(ChannelFutureListener.CLOSE);
+                }
+            } else if (PROTO_MGR_CONSOLE.equals(protocolToUse)) {
+                // XXX authorize.
+                ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelServerConsoleHandler(
+                        webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder
+                ));
             } else {
                 ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.PROTOCOL_ERROR)).addListener(ChannelFutureListener.CLOSE);
             }
@@ -66,114 +140,98 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
         ctx.fireUserEventTriggered(evt);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
         log.error("Connection abort: {}", cause.getMessage(), cause);
-        ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
+        ctx.writeAndFlush(new CloseWebSocketFrame(
+                WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage()
+        )).addListener(ChannelFutureListener.CLOSE);
     }
 
     /**
-     * tcp over websocket or websocket frame through.
+     * TCP over websocket or websocket degrade to TCP.
+     *
+     * @param degrade websocket degrade to TCP socket
      */
-    private Promise<ChannelHandlerContext> wsTunnelRequested(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
-        final Promise<ChannelHandlerContext> backhaulPromise = accessCtx.executor().newPromise();
-        final Map<String, List<String>> params = parseParams(handshake.requestUri());
-        final String target = getTarget(params);
-        final String agent = getAgent(params);
-        if (null == target || target.isEmpty()) {
-            return backhaulPromise.setFailure(new IllegalArgumentException("missing target"));
-        }
-        if (null == agent || agent.isEmpty()) {
-            return backhaulPromise.setFailure(new IllegalArgumentException("missing agent"));
-        }
-
-        /*-
-         * tcp://hostname:port:      ws-client --ws--> server --tcp over ws--> agent --> tcp target
-         * ws://hostname:port/path:  ws-client --ws--> server -------ws------> agent --> ws target
-         */
-        final String targetToUse = target.contains("://") ? target : "tcp://" + target;
-        final URI uri = URI.create(targetToUse);
-        final String id = accessCtx.channel().id().toString();
-        return webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agent, uri, accessCtx, backhaulPromise).addListener(new FutureListener<ChannelHandlerContext>() {
-            @Override
-            public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
-                if (backhaulFuture.isSuccess()) {
-                    log.info("Connection established: {}:{}", uri.getHost(), uri.getPort());
-                    final ChannelHandlerContext backhaulCtx = backhaulFuture.getNow();
-                    backhaulCtx.channel().config().setAutoRead(false);
-
-                    accessCtx.pipeline().replace(accessCtx.name(), null, new WebSocketInboundRedirectHandler(backhaulCtx));
-                    backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new WebSocketInboundRedirectHandler(accessCtx));
-
-                    accessCtx.channel().config().setAutoRead(true);
-                    backhaulCtx.channel().config().setAutoRead(true);
-                } else {
-                    accessCtx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, backhaulFuture.cause().getMessage()));
-                }
-            }
-        });
-    }
-
-    /**
-     * tcp through or websocket frame data by tcp.
-     */
-    private Promise<ChannelHandlerContext> tcpTunnelRequested(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
-        final Promise<ChannelHandlerContext> backhaulPromise = accessCtx.executor().newPromise();
-        final Map<String, List<String>> params = parseParams(handshake.requestUri());
-        final String target = getTarget(params);
-        final String agent = getAgent(params);
-        if (null == target || target.isEmpty()) {
-            return backhaulPromise.setFailure(new IllegalArgumentException("missing target"));
-        }
-        if (null == agent || agent.isEmpty()) {
-            return backhaulPromise.setFailure(new IllegalArgumentException("missing agent"));
+    private void handshake(final HandshakeComplete handshake,
+                           final ChannelHandlerContext accessCtx, final boolean degrade) {
+        final Map<String, List<String>> params = new QueryStringDecoder(handshake.requestUri()).parameters();
+        final String agentKey = Util.last(params, PARAM_AGENT);
+        final InetSocketAddress target = parseTarget(Util.last(params, PARAM_TARGET));
+        if (null == agentKey || agentKey.isEmpty() || null == target) {
+            accessCtx.writeAndFlush(new CloseWebSocketFrame(
+                    WebSocketCloseStatus.INVALID_PAYLOAD_DATA
+            )).addListener(ChannelFutureListener.CLOSE);
+            return;
         }
 
-        /*-
-         * tcp:tcp://hostname:port:      client --tcp--> server -----tcp over ws--------> agent --> tcp target
-         * tcp:ws://hostname:port/path:  client --tcp--> server --websocket data frame--> agent --> ws target
-         */
-        final URI uri = URI.create(target);
-        final String id = accessCtx.channel().id().toString();
-        return webSocketBackhaulTunnelServerEngine.tunnelRequested(id, agent, uri, accessCtx, backhaulPromise).addListener(new FutureListener<ChannelHandlerContext>() {
+        log.info("[{}] Establishing WebSocket connection to {} via {}", accessCtx.channel().id(), target, agentKey);
+
+        accessCtx.channel().config().setAutoRead(false);
+        webSocketBackhaulTunnelServerEngine.handshake(
+                accessCtx, agentKey, target, accessCtx.executor().newPromise()
+        ).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
                     final ChannelHandlerContext backhaulCtx = backhaulFuture.getNow();
                     backhaulCtx.channel().config().setAutoRead(false);
 
-                    accessCtx.pipeline().replace(accessCtx.name(), null, new TcpOverWebSocketEncodeHandler(backhaulCtx));
-                    backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new TcpOverWebSocketDecodeHandler(accessCtx));
+                    log.info("[{}] WebSocket connection established to {} via {}", accessCtx.channel().id(), target, agentKey);
 
-                    // remove websocket codec.
-                    accessCtx.pipeline().remove("wsencoder");
-                    accessCtx.pipeline().remove("wsdecoder");
-                    accessCtx.pipeline().remove(Utf8FrameValidator.class);
-                    accessCtx.pipeline().remove(WebSocketServerProtocolHandler.class);
+                    if (!degrade) {
+                        /*-
+                         * client <--ws--> server <--ws--> agent
+                         */
+                        accessCtx.pipeline().replace(accessCtx.name(), null, new WebSocketInboundRedirectHandler(backhaulCtx));
+                        backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new WebSocketInboundRedirectHandler(accessCtx));
+                    } else {
+                        /*-
+                         * client <--ws--> server <--ws--> agent
+                         * degrade to:
+                         * client <--socket--> server <--ws--> agent
+                         */
+                        accessCtx.pipeline().replace(accessCtx.name(), null, new TcpOverWebSocketEncodeHandler(backhaulCtx));
+                        backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new TcpOverWebSocketDecodeHandler(accessCtx));
+
+                        /*-
+                         * remove websocket codec.
+                         *
+                         * @see io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker#handshake
+                         */
+                        accessCtx.pipeline().remove("wsencoder");
+                        accessCtx.pipeline().remove("wsdecoder");
+                        accessCtx.pipeline().remove("WS403Responder");
+                        accessCtx.pipeline().remove(Utf8FrameValidator.class);
+                        accessCtx.pipeline().remove(WebSocketServerProtocolHandler.class);
+                    }
 
                     accessCtx.channel().config().setAutoRead(true);
                     backhaulCtx.channel().config().setAutoRead(true);
                 } else {
-                    accessCtx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, backhaulFuture.cause().getMessage()));
+                    final Throwable cause = backhaulFuture.cause();
+
+                    log.warn("[{}] WebSocket connection to {} via {} failed: {}", accessCtx.channel().id(), target, agentKey, cause.getMessage());
+
+                    accessCtx.writeAndFlush(
+                            new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, cause.getMessage())
+                    ).addListener(ChannelFutureListener.CLOSE);
                 }
             }
         });
     }
 
-    private Map<String, List<String>> parseParams(final String uri) {
-        return new QueryStringDecoder(uri).parameters();
-    }
-
-    private String getTarget(final Map<String, List<String>> params) {
-        return Util.last(params, "target");
-    }
-
-    private String getAgent(final Map<String, List<String>> params) {
-        return Util.last(params, "agent");
-    }
-
-    private String getAuthorization(final Map<String, List<String>> params) {
-        return Util.last(params, "authorization");
+    private InetSocketAddress parseTarget(final String target) {
+        if (null == target || (target.contains("://") && !target.startsWith("tcp://"))) {
+            return null;
+        }
+        final String hostAndPort = target.startsWith("tcp://") ? target.substring(6) : target;
+        // resolve ?
+        final String[] split = hostAndPort.split(":", 2);
+        return InetSocketAddress.createUnresolved(split[0], Integer.parseInt(split[1]));
     }
 
 }

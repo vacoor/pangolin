@@ -3,6 +3,7 @@ package com.github.pangolin.server;
 import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.util.Channels;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.logging.LoggingHandler;
@@ -14,7 +15,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.net.URI;
 import java.util.Collection;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -32,8 +32,71 @@ public class WebSocketBackhaulTunnelServerForwarder {
         this.workerGroup = workerGroup;
     }
 
-    public Collection<Forwarding> getForwardings() {
-        return registeredForwardingMap.values();
+    public WebSocketBackhaulTunnelServerForwarder addForwarding(final int localPort,
+                                                                final String agentKey,
+                                                                final InetSocketAddress remoteAddr) throws InterruptedException {
+        return addForwarding(new InetSocketAddress(localPort), agentKey, remoteAddr);
+    }
+
+    public WebSocketBackhaulTunnelServerForwarder addForwarding(final SocketAddress localAddr,
+                                                                final String agentKey,
+                                                                final InetSocketAddress target) throws InterruptedException {
+        Channels.listen(localAddr, false, bossGroup, workerGroup, new ChannelInitializer<SocketChannel>() {
+            @Override
+            protected void initChannel(SocketChannel ch) throws Exception {
+                ch.pipeline().addLast(new LoggingHandler());
+                ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
+                    @Override
+                    public void channelActive(final ChannelHandlerContext accessCtx) throws Exception {
+                        log.info("[{}] Establishing Connection to {} via {}", accessCtx.channel().id(), target, agentKey);
+
+                        engine.handshake(
+                                accessCtx, agentKey, target, accessCtx.executor().newPromise()
+                        ).addListener(new FutureListener<ChannelHandlerContext>() {
+                            @Override
+                            public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {
+                                if (future.isSuccess()) {
+                                    final ChannelHandlerContext backhaulCtx = future.getNow();
+                                    backhaulCtx.channel().config().setAutoRead(false);
+
+                                    log.info("[{}] Connection established to {} via {}", accessCtx.channel().id(), target, agentKey);
+
+                                    /*-
+                                     * client <--socket--> server <--ws--> agent
+                                     */
+                                    accessCtx.pipeline().replace(accessCtx.name(), null, new TcpOverWebSocketEncodeHandler(backhaulCtx));
+                                    backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new TcpOverWebSocketDecodeHandler(accessCtx));
+
+                                    accessCtx.channel().config().setAutoRead(true);
+                                    backhaulCtx.channel().config().setAutoRead(true);
+                                } else {
+                                    final Throwable cause = future.cause();
+                                    log.warn("[{}] Connection to {} via {} failed: {}", accessCtx.channel().id(), target, agentKey, cause.getMessage());
+
+                                    accessCtx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                                }
+                            }
+                        });
+                        accessCtx.fireChannelActive();
+                    }
+                });
+            }
+        }).addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (future.isSuccess()) {
+                    log.info("Local connections to {} forwarded to remote address {} via {}", localAddr, target, agentKey);
+                    final Forwarding forwarding = new Forwarding(localAddr, agentKey, target, future.channel());
+                    registeredForwardingMap.put(localAddr, forwarding);
+                }
+            }
+        }).sync().channel().closeFuture().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture future) throws Exception {
+                registeredForwardingMap.remove(localAddr);
+            }
+        });
+        return this;
     }
 
     public boolean removeForwarding(final int localPort) {
@@ -49,56 +112,8 @@ public class WebSocketBackhaulTunnelServerForwarder {
         return null != forwarding;
     }
 
-    public WebSocketBackhaulTunnelServerForwarder addForwarding(final int localPort, final String agent, final InetSocketAddress remoteAddr) throws InterruptedException {
-        return addForwarding(new InetSocketAddress(localPort), agent, remoteAddr);
-    }
-
-    public WebSocketBackhaulTunnelServerForwarder addForwarding(final SocketAddress localAddr, final String agent, final InetSocketAddress remoteAddr) throws InterruptedException {
-        final ChannelFuture boundChannelFuture = Channels.listen(localAddr, false, bossGroup, workerGroup, new ChannelInitializer<SocketChannel>() {
-            @Override
-            protected void initChannel(SocketChannel ch) throws Exception {
-                ch.pipeline().addLast(new LoggingHandler());
-                ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
-                    @Override
-                    public void channelActive(final ChannelHandlerContext accessCtx) throws Exception {
-                        final String id = "F:" + accessCtx.channel().id().toString();
-                        final URI target = URI.create("tcp://" + remoteAddr.getHostString() + ":" + remoteAddr.getPort());
-                        engine.tunnelRequested(id, agent, target, accessCtx, accessCtx.executor().newPromise()).addListener(new FutureListener<ChannelHandlerContext>() {
-                            @Override
-                            public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {
-                                if (future.isSuccess()) {
-                                    final ChannelHandlerContext backhaulCtx = future.getNow();
-                                    backhaulCtx.channel().config().setAutoRead(false);
-
-                                    // tcp over websocket.
-                                    accessCtx.pipeline().replace(accessCtx.name(), null, new TcpOverWebSocketEncodeHandler(backhaulCtx));
-                                    backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new TcpOverWebSocketDecodeHandler(accessCtx));
-
-                                    accessCtx.channel().config().setAutoRead(true);
-                                    backhaulCtx.channel().config().setAutoRead(true);
-                                } else {
-                                    accessCtx.fireExceptionCaught(future.cause());
-                                }
-                            }
-                        });
-                        accessCtx.fireChannelActive();
-                    }
-                });
-            }
-        });
-
-        log.info("Local forwarding {} = {} => {} added", localAddr, agent, remoteAddr);
-
-        registeredForwardingMap.put(localAddr, new Forwarding(localAddr, agent, remoteAddr, boundChannelFuture.channel()));
-        boundChannelFuture.channel().closeFuture().addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture future) throws Exception {
-                registeredForwardingMap.remove(localAddr);
-            }
-        });
-        boundChannelFuture.sync();
-
-        return this;
+    public Collection<Forwarding> getForwardings() {
+        return registeredForwardingMap.values();
     }
 
     @Getter

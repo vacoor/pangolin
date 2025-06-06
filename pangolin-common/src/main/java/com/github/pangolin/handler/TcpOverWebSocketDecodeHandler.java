@@ -4,11 +4,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
-import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -29,7 +25,7 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
     @Override
     public void channelInactive(final ChannelHandlerContext inCtx) {
         if (outCtx.channel().isActive()) {
-            log.error("[tun@ws/tcp {}(!) => {} Connection lost: The input closed the connection, the output will be closed", stringify(inCtx), stringify(outCtx));
+            log.debug("[tun@ws/tcp {}(!) => {} Connection closed", stringify(inCtx), stringify(outCtx));
             outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }
@@ -62,13 +58,13 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
                 ReferenceCountUtil.release(msg);
 
                 // XXX
-                log.error("Unexpect websocket message: {}, will be closed", msg);
+                log.warn("Unexpect websocket message: {}, will be closed", msg);
                 outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                 inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INVALID_PAYLOAD_DATA)).addListener(ChannelFutureListener.CLOSE);
             }
         } else {
             ReferenceCountUtil.release(msg);
-            log.error("[tun@ws/tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
+            log.warn("[tun@ws/tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
             inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, "Connection lost")).addListener(ChannelFutureListener.CLOSE);
         }
     }

@@ -45,4 +45,9 @@ public class WebSocketBackhaulTunnelAgentLauncher {
 
     }
 
+    public static void main(String[] args) throws IOException, InterruptedException {
+        WebSocketBackhaulTunnelAgentLauncher launcher = new WebSocketBackhaulTunnelAgentLauncher();
+        launcher.launchIfNecessary("Local", "ws://localhost:2345/tunnel");
+    }
+
 }

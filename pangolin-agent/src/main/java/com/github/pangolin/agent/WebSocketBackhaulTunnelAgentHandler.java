@@ -16,26 +16,20 @@ import java.util.regex.Pattern;
 
 /**
  * WebSocket 回传通道代理.
+ *
+ * @see WebSocketBackhaulTunnelAgentHandler2
+ * @deprecated 1.2.2
  */
 @Slf4j
+@Deprecated
 public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
     private static final String AGENT_VERSION = "1.0";
     private static final String BACKHAUL_PROTOCOL = "PASSIVE";
 
     /**
-     * ws://...
-     */
-    private static final String WS_PROTOCOL = "ws";
-
-    /**
-     * wss://...
-     */
-    private static final String WSS_PROTOCOL = "wss";
-
-    /**
      * tcp://...
      */
-    private static final String TCP_PROTOCOL = "tcp";
+    private static final String TARGET_TYPE_TCP = "tcp";
 
     private enum State {SUSPENDED, INITIALIZING, INITIALIZED}
 
@@ -111,13 +105,12 @@ public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHan
             final URI target = URI.create(segments[1]);
 
             final WebSocketClientHandshaker backhaulHandshaker = newBackhaulHandshaker(id);
-            if (TCP_PROTOCOL.equalsIgnoreCase(target.getScheme())) {
-                final InetSocketAddress socketAddress = new InetSocketAddress(target.getHost(), target.getPort());
-                Channels2.pipe(socketAddress, backhaulHandshaker, ctx.channel().eventLoop());
-            } else if (WS_PROTOCOL.equalsIgnoreCase(target.getScheme()) || WSS_PROTOCOL.equalsIgnoreCase(target.getScheme())) {
-                final WebSocketClientHandshaker upstreamHandshaker = newHandshaker(target, null);
-                Channels2.pipe(upstreamHandshaker, backhaulHandshaker, ctx.channel().eventLoop());
+            if (TARGET_TYPE_TCP.equalsIgnoreCase(target.getScheme())) {
+                final InetSocketAddress targetAddress = new InetSocketAddress(target.getHost(), target.getPort());
+                Channels2.pipe(targetAddress, backhaulHandshaker, ctx.channel().eventLoop());
             }
+        } else {
+            ctx.fireChannelRead(frame.retain());
         }
     }
 

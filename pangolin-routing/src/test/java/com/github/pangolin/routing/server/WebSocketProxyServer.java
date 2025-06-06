@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.server;
 
-import com.github.pangolin.routing.support.handler.server.HttpProxyServerHandler;
+import com.github.pangolin.routing.support.handler.server.WebSocketProxyServerHandler;
 import com.github.pangolin.server.NettyServer;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -40,12 +40,12 @@ public class WebSocketProxyServer extends NettyServer {
                     cp.addLast(createServerSslContext().newHandler(ch.alloc()));
                 }
                 cp.addLast(new HttpServerCodec(), new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
-                /*
                 cp.addLast(new WebSocketProxyServerHandler(
                         true, 65536, true
                 ));
+                /*
                 */
-                cp.addLast(new HttpProxyServerHandler());
+//                cp.addLast(new HttpProxyServerHandler());
             }
         });
     }

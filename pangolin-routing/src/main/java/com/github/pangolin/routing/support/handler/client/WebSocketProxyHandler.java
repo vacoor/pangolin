@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.support.handler.client;
 
 import com.github.pangolin.routing.util.SocketUtils;
+import freework.net.Http;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
@@ -33,18 +34,27 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
     private final int maxFramePayloadLength;
     private final boolean performMasking;
     private final boolean allowMaskMismatch;
+    private final String accessToken;
 
-    public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint, final String webSocketProxyServerProtocol) {
-        this(webSocketProxyServerEndpoint, WebSocketVersion.V13, webSocketProxyServerProtocol, true, 65536, true, true);
+    public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
+                                 final String webSocketProxyServerProtocol) {
+        this(webSocketProxyServerEndpoint, webSocketProxyServerProtocol, null);
+    }
+
+    public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
+                                 final String webSocketProxyServerProtocol,
+                                 final String accessToken) {
+        this(webSocketProxyServerEndpoint, WebSocketVersion.V13, webSocketProxyServerProtocol, true, 65536, true, true, accessToken);
     }
 
     public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
                                  final WebSocketVersion webSocketVersion,
                                  final String webSocketProxyServerProtocol,
                                  final boolean allowExtensions, final int maxFramePayloadLength,
-                                 final boolean performMasking, final boolean allowMaskMismatch) {
+                                 final boolean performMasking, final boolean allowMaskMismatch,
+                                 final String accessToken) {
         this(webSocketProxyServerEndpoint, webSocketVersion, webSocketProxyServerProtocol,
-                EmptyHttpHeaders.INSTANCE, allowExtensions, maxFramePayloadLength, performMasking, allowMaskMismatch);
+                EmptyHttpHeaders.INSTANCE, allowExtensions, maxFramePayloadLength, performMasking, allowMaskMismatch, accessToken);
     }
 
     public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
@@ -52,7 +62,7 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
                                  final String webSocketProxyServerProtocol,
                                  final HttpHeaders customHandshakeHttpHeaders,
                                  final boolean allowExtensions, final int maxFramePayloadLength,
-                                 final boolean performMasking, final boolean allowMaskMismatch) {
+                                 final boolean performMasking, final boolean allowMaskMismatch, final String accessToken) {
         super(SocketUtils.toSocketAddress(webSocketProxyServerEndpoint.getHost(), webSocketProxyServerEndpoint.getPort()));
         this.webSocketProxyServerEndpoint = webSocketProxyServerEndpoint;
         this.webSocketVersion = webSocketVersion;
@@ -62,6 +72,7 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
         this.maxFramePayloadLength = maxFramePayloadLength;
         this.performMasking = performMasking;
         this.allowMaskMismatch = allowMaskMismatch;
+        this.accessToken = accessToken;
     }
 
     @Override
@@ -102,7 +113,7 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
         customHandshakeHttpHeadersToUse.set("X-TARGET-ADDRESS", address.getHostString());
         customHandshakeHttpHeadersToUse.setInt("X-TARGET-PORT", address.getPort());
 
-        final String target = "target=tcp://" + address.getHostString() + ":" + address.getPort();
+        final String target = "target=" + Http.urlEncode("tcp://" + address.getHostString() + ":" + address.getPort(), "UTF-8");
         String s = webSocketProxyServerEndpoint.toString();
 
         final URI uri = URI.create(s + (s.contains("?") ? "&" + target : "?" + target));
@@ -137,6 +148,8 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
         if (HttpMethod.CONNECT.name().equals(webSocketProxyServerProtocol)) {
             ctx.pipeline().remove("ws-encoder");
             ctx.pipeline().remove("ws-decoder");
+            // auto remove when handshake completed.
+            // ctx.pipeline().remove(HttpClientCodec.class);
         }
         return true;
     }

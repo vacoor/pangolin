@@ -61,6 +61,14 @@ public class SshProxyHandler extends ChannelDuplexHandler {
     static {
         DEFAULT_SSH_CLIENT.setIoServiceFactoryFactory(new NettyIoServiceFactoryFactory());
         DEFAULT_SSH_CLIENT.start();
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            @Override
+            public void run() {
+                if (DEFAULT_SSH_CLIENT.isStarted()) {
+                    DEFAULT_SSH_CLIENT.stop();
+                }
+            }
+        });
     }
 
     private final String hostname;

@@ -29,6 +29,14 @@ public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
 
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
+        handshakePromise = ctx.newPromise().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture f) throws Exception {
+                if (!f.isSuccess()) {
+                    setHandshakeFailure(ctx, f.cause());
+                }
+            }
+        });
         if (ctx.channel().isActive()) {
             startHandshakeProcessing(ctx);
         }
@@ -39,11 +47,10 @@ public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
         if (null != destinationAddress) {
             promise.setFailure(new ConnectionPendingException());
         } else {
-            handshakePromise = ctx.newPromise().addListener(new ChannelFutureListener() {
+            handshakePromise.addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(final ChannelFuture f) throws Exception {
                     if (!f.isSuccess()) {
-                        setHandshakeFailure(ctx, f.cause());
                         promise.tryFailure(f.cause());
                     } else {
                         promise.trySuccess();
@@ -109,14 +116,6 @@ public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
 
     private void startHandshakeProcessing(final ChannelHandlerContext ctx) throws Exception {
         handshake(ctx, handshakePromise);
-        handshakePromise.addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(final ChannelFuture f) throws Exception {
-                if (!f.isSuccess()) {
-                    setHandshakeFailure(ctx, f.cause());
-                }
-            }
-        });
         applyHandshakeTimeout(ctx, handshakePromise, ctx.channel().config().getConnectTimeoutMillis());
 
         readIfNeeded(ctx);
