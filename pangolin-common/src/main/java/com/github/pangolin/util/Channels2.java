@@ -55,7 +55,7 @@ public class Channels2 {
     }
 
     /*
-     * websocket <-- br --> socket
+     * client -> websocket server(downstream) <-- backhaul connection -- br --> destination socket(upstream)
      */
     public static ChannelFuture pipe(final SocketAddress upstream, final WebSocketClientHandshaker downstream, final EventLoopGroup brGroup) throws InterruptedException {
         return Channels.open(upstream, false, brGroup, new ChannelInboundHandlerAdapter() {
@@ -87,6 +87,7 @@ public class Channels2 {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
                         if (!future.isSuccess()) {
+                            // can't open backhaul connection.
                             future.channel().close();
                             upstreamCtx.channel().close();
                         }
@@ -96,6 +97,7 @@ public class Channels2 {
         }).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
     }
 
+    @Deprecated
     public static ChannelFuture pipe(final WebSocketClientHandshaker upstream, final WebSocketClientHandshaker downstream, final EventLoopGroup brGroup) throws InterruptedException, SSLException {
         return openWs(upstream, brGroup, new ChannelInboundHandlerAdapter() {
 

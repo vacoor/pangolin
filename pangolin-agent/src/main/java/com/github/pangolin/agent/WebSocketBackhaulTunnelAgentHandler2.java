@@ -1,0 +1,163 @@
+package com.github.pangolin.agent;
+
+import com.github.pangolin.util.Channels2;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.timeout.IdleStateEvent;
+import lombok.extern.slf4j.Slf4j;
+
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
+
+/**
+ * WebSocket 回传通道代理.
+ */
+@Slf4j
+public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHandler<WebSocketFrame> {
+    private static final String AGENT_VERSION = "1.0";
+    private static final String BACKHAUL_PROTOCOL = "PASSIVE";
+
+    /**
+     * ws://...
+     */
+    @Deprecated
+    private static final String WS_PROTOCOL = "ws";
+
+    /**
+     * wss://...
+     */
+    @Deprecated
+    private static final String WSS_PROTOCOL = "wss";
+
+    /**
+     * tcp://...
+     */
+    private static final String TCP_OVER_WS_PROTOCOL = "tcp";
+
+    private enum State {SUSPENDED, INITIALIZING, INITIALIZED}
+
+    /**
+     * Agent name.
+     */
+    private final String name;
+
+    /**
+     * WebSocket agent handshaker.
+     */
+    private final WebSocketClientHandshaker handshaker;
+
+    /**
+     * WebSocket agent handshake http headers.
+     */
+    private final HttpHeaders customHttpHeaders;
+
+    /**
+     * WebSocket agent state.
+     */
+    private final AtomicReference<State> state = new AtomicReference<>(State.SUSPENDED);
+
+    public WebSocketBackhaulTunnelAgentHandler2(final String name, final WebSocketClientHandshaker handshaker, final HttpHeaders customHttpHeaders) {
+        this.name = name;
+        this.handshaker = handshaker;
+        this.customHttpHeaders = customHttpHeaders;
+    }
+
+    @Override
+    public void channelActive(final ChannelHandlerContext ctx) throws Exception {
+        if (null != customHttpHeaders) {
+            final InetSocketAddress localAddress = (InetSocketAddress) ctx.channel().localAddress();
+            customHttpHeaders.set("X-Node-Name", name);
+            customHttpHeaders.set("X-Node-Version", AGENT_VERSION);
+            customHttpHeaders.set("X-Node-Intranet", localAddress.getHostString());
+        }
+        super.channelActive(ctx);
+    }
+
+    @Override
+    public void channelInactive(final ChannelHandlerContext ctx) throws Exception {
+        state.set(State.SUSPENDED);
+        super.channelInactive(ctx);
+    }
+
+    @Override
+    public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
+        if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
+            state.compareAndSet(State.SUSPENDED, State.INITIALIZING);
+        } else if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+            state.compareAndSet(State.INITIALIZING, State.INITIALIZED);
+        } else if (evt instanceof IdleStateEvent) {
+            if (ctx.channel().isActive() && State.INITIALIZED.equals(state.get())) {
+                ctx.writeAndFlush(new PingWebSocketFrame());
+            }
+        } else {
+            super.userEventTriggered(ctx, evt);
+        }
+    }
+
+    @Override
+    protected void channelRead0(final ChannelHandlerContext ctx, final WebSocketFrame frame) throws Exception {
+        if (frame instanceof TextWebSocketFrame) {
+            /*-
+             * v1.0:
+             * tcp:8080->tcp://172.16.0.12:7788
+             * id->target_protocol://target_host:target_port
+             */
+            final String text = ((TextWebSocketFrame) frame).text();
+            final String[] segments = text.split(Pattern.quote("->"), 2);
+            final String id = segments[0];
+            final URI target = URI.create(segments[1]);
+
+            final WebSocketClientHandshaker backhaulHandshaker = newBackhaulHandshaker(id);
+            if (TCP_OVER_WS_PROTOCOL.equalsIgnoreCase(target.getScheme())) {
+                /*-
+                 * TCP over WebSocket.
+                 */
+                final InetSocketAddress socketAddress = new InetSocketAddress(target.getHost(), target.getPort());
+                Channels2.pipe(socketAddress, backhaulHandshaker, ctx.channel().eventLoop()).addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(final ChannelFuture future) throws Exception {
+                        if (!future.isSuccess()) {
+                            //
+                        }
+                    }
+                });
+            } else if (WS_PROTOCOL.equalsIgnoreCase(target.getScheme()) || WSS_PROTOCOL.equalsIgnoreCase(target.getScheme())) {
+                final WebSocketClientHandshaker upstreamHandshaker = newHandshaker(target, null);
+                Channels2.pipe(upstreamHandshaker, backhaulHandshaker, ctx.channel().eventLoop());
+            }
+        }
+    }
+
+    private WebSocketClientHandshaker newBackhaulHandshaker(final String id) {
+        final URI uri = handshaker.uri();
+        final String endpoint = uri.getScheme() + "://" + uri.getHost() + ":" + uri.getPort() + uri.getPath();
+        final URI backhaulWebSocketUri = URI.create(endpoint + "?id=" + id);
+        return newHandshaker(backhaulWebSocketUri, BACKHAUL_PROTOCOL);
+    }
+
+    private WebSocketClientHandshaker newHandshaker(final URI webSocketEndpoint, final String subprotocol) {
+        return WebSocketClientHandshakerFactory.newHandshaker(
+                webSocketEndpoint, handshaker.version(), subprotocol,
+                false, customHttpHeaders, handshaker.maxFramePayloadLength()
+        );
+    }
+
+    @Override
+    public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) throws Exception {
+        log.warn("Software caused connection abort: {}", cause.getMessage(), cause);
+        webSocketContext.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
+    }
+}
