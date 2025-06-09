@@ -291,7 +291,7 @@ public class WebSocketBridgeServerShell {
     }
 
     public static void main(String[] args) throws IOException {
-        final WebSocketBridgeServerEngine webSocketBridgeServerEngine = new WebSocketBridgeServerEngine(handshakeTimeoutMs);
+        final WebSocketBridgeServerEngine webSocketBridgeServerEngine = new WebSocketBridgeServerEngine();
         final NioEventLoopGroup bossGroup = new NioEventLoopGroup(2);
         final NioEventLoopGroup workerGroup = new NioEventLoopGroup();
         final WebSocketBridgeServerForwarder forwarder = new WebSocketBridgeServerForwarder(webSocketBridgeServerEngine, bossGroup, workerGroup);
