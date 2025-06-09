@@ -7,9 +7,9 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class WebSocketBackhaulTunnelAgentLauncher {
+public class WebSocketBridgeAgentLauncher {
     private final AtomicBoolean running = new AtomicBoolean(false);
-    private volatile WebSocketBackhaulTunnelAgent agent;
+    private volatile WebSocketBridgeAgent agent;
 
     public void launchIfNecessary(final String name, final String uri) throws IOException, InterruptedException {
         if (null == uri || uri.isEmpty()) {
@@ -24,7 +24,7 @@ public class WebSocketBackhaulTunnelAgentLauncher {
         }
 
         if (running.compareAndSet(false, true)) {
-            agent = new WebSocketBackhaulTunnelAgent(name, URI.create(uri));
+            agent = new WebSocketBridgeAgent(name, URI.create(uri));
             try {
 
                 agent.start().channel().closeFuture().addListener(new ChannelFutureListener() {
@@ -46,7 +46,7 @@ public class WebSocketBackhaulTunnelAgentLauncher {
     }
 
     public static void main(String[] args) throws IOException, InterruptedException {
-        WebSocketBackhaulTunnelAgentLauncher launcher = new WebSocketBackhaulTunnelAgentLauncher();
+        WebSocketBridgeAgentLauncher launcher = new WebSocketBridgeAgentLauncher();
         launcher.launchIfNecessary("Local", "ws://localhost:2345/tunnel");
     }
 

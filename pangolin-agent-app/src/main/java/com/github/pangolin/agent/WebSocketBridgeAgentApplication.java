@@ -1,17 +1,13 @@
 package com.github.pangolin.agent;
 
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
-import java.net.URI;
-
 @SpringBootApplication
-public class WebSocketBackhaulTunnelAgentApplication {
+public class WebSocketBridgeAgentApplication {
 
     public static void main(String[] args) throws Exception {
-        SpringApplication.run(WebSocketBackhaulTunnelAgentApplication.class, args);
+        SpringApplication.run(WebSocketBridgeAgentApplication.class, args);
         /*
         final String agentName = System.getProperty("agent.name");
         final String agentServer = System.getProperty("agent.server");

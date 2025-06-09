@@ -4,23 +4,14 @@ import com.github.pangolin.util.Channels;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.codec.base64.Base64;
 import io.netty.handler.codec.base64.Base64Dialect;
 import io.netty.util.CharsetUtil;
 import io.netty.util.ReferenceCountUtil;
 
-import javax.websocket.CloseReason;
-import javax.websocket.HandshakeResponse;
-import javax.websocket.OnClose;
-import javax.websocket.OnMessage;
-import javax.websocket.OnOpen;
-import javax.websocket.Session;
+import javax.websocket.*;
 import javax.websocket.server.HandshakeRequest;
 import javax.websocket.server.ServerEndpoint;
 import javax.websocket.server.ServerEndpointConfig;
@@ -41,19 +32,38 @@ public class WebSocketBridgeEndpoint {
         final List<String> accessToken = params.get("access_token");
         final String accessTokenToUse = null != accessToken && accessToken.size() > 0 ? accessToken.get(accessToken.size() - 1) : null;
         if (null == accessTokenToUse) {
-            session.close(new CloseReason(CloseReason.CloseCodes.CANNOT_ACCEPT, ""));
+            session.close(new CloseReason(CloseReason.CloseCodes.NOT_CONSISTENT, ""));
             return;
         }
 
         final ByteBuf in = Base64.decode(Unpooled.wrappedBuffer(accessTokenToUse.getBytes()), Base64Dialect.URL_SAFE);
         final byte version = in.readByte();
+        if (VER_1 != version) {
+            session.close(new CloseReason(
+                    CloseReason.CloseCodes.NOT_CONSISTENT,
+                    String.format("unsupported version: %s, (expected: %s)", version, VER_1)
+            ));
+        }
         final String accessKey = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
         final byte cmd = in.readByte();
+        if (CMD_CONNECT != cmd) {
+            session.close(new CloseReason(
+                    CloseReason.CloseCodes.NOT_CONSISTENT,
+                    String.format("unsupported command type: %s, (expected: %s)", version, VER_1)
+            ));
+        }
+
         final byte rsv = in.readByte();
+        if (0 != rsv) {
+            session.close(new CloseReason(
+                    CloseReason.CloseCodes.NOT_CONSISTENT,
+                    String.format("unsupported rsv: %s, (expected: %s)", rsv, 0)
+            ));
+        }
         final InetSocketAddress target = parseSocketAddress(in);
 
         if (null == target || !authenticate(accessKey)) {
-            session.close(new CloseReason(CloseReason.CloseCodes.CANNOT_ACCEPT, ""));
+            session.close(new CloseReason(CloseReason.CloseCodes.NOT_CONSISTENT, ""));
             return;
         }
 

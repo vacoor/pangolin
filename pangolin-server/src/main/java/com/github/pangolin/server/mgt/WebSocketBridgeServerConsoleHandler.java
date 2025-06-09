@@ -1,9 +1,9 @@
 package com.github.pangolin.server.mgt;
 
-import com.github.pangolin.server.WebSocketBackhaulTunnelServerEngine;
-import com.github.pangolin.server.WebSocketBackhaulTunnelServerForwarder;
+import com.github.pangolin.server.WebSocketBridgeServerEngine;
+import com.github.pangolin.server.WebSocketBridgeServerForwarder;
 import com.github.pangolin.server.mgt.shell.ConsoleReaderFactory;
-import com.github.pangolin.server.mgt.shell.WebSocketBackhaulTunnelServerShell;
+import com.github.pangolin.server.mgt.shell.WebSocketBridgeServerShell;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
@@ -29,16 +29,16 @@ import java.util.stream.Collectors;
  * 管理控制台 Handler.
  */
 @Slf4j
-public class WebSocketBackhaulTunnelServerConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
+public class WebSocketBridgeServerConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
     private static final Pattern RESIZE_PATTERN = Pattern.compile("^\\u001B\\[8;([0-9]+);([0-9])+t$");
 
-    private final WebSocketBackhaulTunnelServerEngine engine;
-    private final WebSocketBackhaulTunnelServerForwarder forwarder;
+    private final WebSocketBridgeServerEngine engine;
+    private final WebSocketBridgeServerForwarder forwarder;
 
     private HeadlessTerminal terminal;
     private OutputStream toConsoleIn;
 
-    public WebSocketBackhaulTunnelServerConsoleHandler(final WebSocketBackhaulTunnelServerEngine engine, final WebSocketBackhaulTunnelServerForwarder forwarder) {
+    public WebSocketBridgeServerConsoleHandler(final WebSocketBridgeServerEngine engine, final WebSocketBridgeServerForwarder forwarder) {
         this.engine = engine;
         this.forwarder = forwarder;
     }
@@ -52,12 +52,12 @@ public class WebSocketBackhaulTunnelServerConsoleHandler extends SimpleChannelIn
                     new PipedInputStream(toConsoleIn),
                     new WebSocketBinaryOutput(ctx),
                     terminal,
-                    () -> engine.getAgents().stream().map(WebSocketBackhaulTunnelServerEngine.Agent::getId).collect(Collectors.toList())
+                    () -> engine.getAgents().stream().map(WebSocketBridgeServerEngine.Agent::getId).collect(Collectors.toList())
             );
 
             this.terminal = terminal;
             this.toConsoleIn = toConsoleIn;
-            WebSocketBackhaulTunnelServerShell.create(console, true, engine, forwarder).start();
+            WebSocketBridgeServerShell.create(console, true, engine, forwarder).start();
         }
     }
 

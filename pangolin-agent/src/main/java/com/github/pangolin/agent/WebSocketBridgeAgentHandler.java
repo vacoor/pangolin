@@ -17,12 +17,12 @@ import java.util.regex.Pattern;
 /**
  * WebSocket 回传通道代理.
  *
- * @see WebSocketBackhaulTunnelAgentHandler2
+ * @see WebSocketBridgeAgentHandler2
  * @deprecated 1.2.2
  */
 @Slf4j
 @Deprecated
-public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
+public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
     private static final String AGENT_VERSION = "1.0";
     private static final String BACKHAUL_PROTOCOL = "PASSIVE";
 
@@ -53,7 +53,7 @@ public class WebSocketBackhaulTunnelAgentHandler extends SimpleChannelInboundHan
      */
     private final AtomicReference<State> state = new AtomicReference<>(State.SUSPENDED);
 
-    public WebSocketBackhaulTunnelAgentHandler(final String name, final WebSocketClientHandshaker handshaker, final HttpHeaders customHttpHeaders) {
+    public WebSocketBridgeAgentHandler(final String name, final WebSocketClientHandshaker handshaker, final HttpHeaders customHttpHeaders) {
         this.name = name;
         this.handshaker = handshaker;
         this.customHttpHeaders = customHttpHeaders;

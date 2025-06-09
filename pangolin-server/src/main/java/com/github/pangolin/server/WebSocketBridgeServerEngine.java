@@ -1,16 +1,10 @@
 package com.github.pangolin.server;
 
-import static io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
-
 import com.google.common.base.Preconditions;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ConnectTimeoutException;
+import io.netty.channel.*;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
@@ -25,12 +19,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.net.ConnectException;
-import java.net.Inet4Address;
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
+import java.net.*;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -40,11 +29,13 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
+import static io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
+
 /**
  *
  */
 @Slf4j
-public class WebSocketBackhaulTunnelServerEngine {
+public class WebSocketBridgeServerEngine {
     private static final String AGENT_NAME = "X-Node-Name";
     private static final String AGENT_VERSION = "X-Node-Version";
     private static final String AGENT_INTRANET = "X-Node-Intranet";
@@ -79,6 +70,16 @@ public class WebSocketBackhaulTunnelServerEngine {
      * Requested connections.
      */
     private final ConcurrentMap<String, Connection> connections = new ConcurrentHashMap<>();
+
+    private final long handshakeTimeoutMs;
+
+    public WebSocketBridgeServerEngine() {
+        this(10 * 1000);
+    }
+
+    public WebSocketBridgeServerEngine(final long handshakeTimeoutMs) {
+        this.handshakeTimeoutMs = handshakeTimeoutMs;
+    }
 
     /**
      * Agent registered.
@@ -133,16 +134,16 @@ public class WebSocketBackhaulTunnelServerEngine {
     /**
      * Initiating a handshake with the agent for the given target address.
      *
-     * @param accessCtx       the access channel context
-     * @param agentKey        the connection agent key
-     * @param target          the connection target address
-     * @param backhaulPromise the handshake promise
+     * @param accessCtx        the access channel context
+     * @param agentKey         the connection agent key
+     * @param target           the connection target address
+     * @param handshakePromise the handshake promise
      * @return the handshake promise
      */
     public Promise<ChannelHandlerContext> handshake(final ChannelHandlerContext accessCtx,
                                                     final String agentKey, final InetSocketAddress target,
-                                                    final Promise<ChannelHandlerContext> backhaulPromise) {
-        return handshake(accessCtx, agentKey, target, 10, TimeUnit.SECONDS, backhaulPromise);
+                                                    final Promise<ChannelHandlerContext> handshakePromise) {
+        return handshake(accessCtx, agentKey, target, handshakeTimeoutMs, TimeUnit.MILLISECONDS, handshakePromise);
     }
 
     /**
@@ -167,6 +168,7 @@ public class WebSocketBackhaulTunnelServerEngine {
         }
 
         final String id = accessCtx.channel().id().toString();
+        final SocketAddress accessAddr = accessCtx.channel().remoteAddress();
         final Connection connection = new Connection(id, agent, target, accessCtx, handshakePromise);
         if (null != connections.putIfAbsent(id, connection)) {
             handshakePromise.tryFailure(new ConnectException(String.format("The access context with '%s' is already in use", id)));
@@ -180,7 +182,7 @@ public class WebSocketBackhaulTunnelServerEngine {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 try {
-                    log.info("[{}] Connection closed: {} -> {}", id, stringify(accessCtx.channel().remoteAddress()), simplify(agent));
+                    log.info("[{}] Connection closed: {} -> {}", id, stringify(accessAddr), simplify(agent));
 
                     if (!handshakePromise.isDone()) {
                         handshakePromise.tryFailure(new IOException("Connection closed"));
@@ -369,7 +371,7 @@ public class WebSocketBackhaulTunnelServerEngine {
         if (REPLY_SUCCESS != status) {
             final Connection connection = connections.get(id);
             if (null != connection) {
-                connection.backhaulPromise.tryFailure(new ConnectException("host unreachable: " + status));
+                connection.handshakePromise.tryFailure(new ConnectException("host unreachable: " + status));
             }
         }
     }
@@ -386,15 +388,16 @@ public class WebSocketBackhaulTunnelServerEngine {
 
         final Connection connection = null != id ? connections.get(id) : null;
         if (null == connection) {
-            log.info("[{}] Pending handshake context not found", id);
+            log.info("[{}] Pending handshake context not found for {}", id, id);
             // backhaulCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             return false;
         }
 
         final Agent agent = connection.agent;
         final ChannelHandlerContext accessCtx = connection.accessCtx;
-        if (!connection.backhaulPromise.isDone() && connection.backhaulPromise.trySuccess(backhaulCtx)) {
-            log.info("[{}] Handshake completed: {} -{}-> {}", id, stringify(accessCtx.channel().remoteAddress()), simplify(agent), connection.target);
+        final SocketAddress accessAddr = accessCtx.channel().remoteAddress();
+        if (!connection.handshakePromise.isDone() && connection.handshakePromise.trySuccess(backhaulCtx)) {
+            log.info("[{}] Handshake completed: {} -{}-> {}", id, stringify(accessAddr), simplify(agent), connection.target);
 
             backhaulCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
                 @Override
@@ -410,7 +413,7 @@ public class WebSocketBackhaulTunnelServerEngine {
             });
             return true;
         } else {
-            log.warn("[{}] Connection already established: {} -{}-> {}", id, stringify(accessCtx.channel().remoteAddress()), simplify(agent), connection.target);
+            log.warn("[{}] Connection already established: {} -{}-> {}", id, stringify(accessAddr), simplify(agent), connection.target);
             // backhaulCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             return false;
         }
@@ -424,8 +427,8 @@ public class WebSocketBackhaulTunnelServerEngine {
         return connections.values();
     }
 
-    public boolean kill(final String connectionId) throws InterruptedException {
-        final Connection connection = connections.get(connectionId);
+    public boolean kill(final String id) throws InterruptedException {
+        final Connection connection = connections.get(id);
         if (null != connection) {
             connection.accessCtx.close().sync();
         }
@@ -449,7 +452,7 @@ public class WebSocketBackhaulTunnelServerEngine {
         private final Agent agent;
         private final InetSocketAddress target;
         private final ChannelHandlerContext accessCtx;
-        private final Promise<ChannelHandlerContext> backhaulPromise;
+        private final Promise<ChannelHandlerContext> handshakePromise;
     }
 
     private String stringify(final SocketAddress address) {

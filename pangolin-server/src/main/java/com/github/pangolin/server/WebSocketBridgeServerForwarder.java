@@ -20,27 +20,28 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 @Slf4j
-public class WebSocketBackhaulTunnelServerForwarder {
-    private final WebSocketBackhaulTunnelServerEngine engine;
+public class WebSocketBridgeServerForwarder {
+    private final WebSocketBridgeServerEngine engine;
     private final EventLoopGroup bossGroup;
     private final EventLoopGroup workerGroup;
     private final ConcurrentMap<SocketAddress, Forwarding> registeredForwardingMap = new ConcurrentHashMap<>();
 
-    public WebSocketBackhaulTunnelServerForwarder(final WebSocketBackhaulTunnelServerEngine engine, final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
+    public WebSocketBridgeServerForwarder(final WebSocketBridgeServerEngine engine,
+                                          final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
         this.engine = engine;
         this.bossGroup = bossGroup;
         this.workerGroup = workerGroup;
     }
 
-    public WebSocketBackhaulTunnelServerForwarder addForwarding(final int localPort,
-                                                                final String agentKey,
-                                                                final InetSocketAddress remoteAddr) throws InterruptedException {
+    public WebSocketBridgeServerForwarder addForwarding(final int localPort,
+                                                        final String agentKey,
+                                                        final InetSocketAddress remoteAddr) throws InterruptedException {
         return addForwarding(new InetSocketAddress(localPort), agentKey, remoteAddr);
     }
 
-    public WebSocketBackhaulTunnelServerForwarder addForwarding(final SocketAddress localAddr,
-                                                                final String agentKey,
-                                                                final InetSocketAddress target) throws InterruptedException {
+    public WebSocketBridgeServerForwarder addForwarding(final SocketAddress localAddr,
+                                                        final String agentKey,
+                                                        final InetSocketAddress target) throws InterruptedException {
         Channels.listen(localAddr, false, bossGroup, workerGroup, new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(SocketChannel ch) throws Exception {

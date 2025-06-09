@@ -19,21 +19,11 @@ import java.security.cert.CertificateException;
  *
  */
 @Slf4j
-public class WebSocketBackhaulTunnelServer extends NettyServer {
+public class WebSocketBridgeServer extends NettyServer {
     /**
      * 最大 HTTP 内容长度.
      */
     private static final int MAX_HTTP_CONTENT_LENGTH = 1024 * 1024 * 8;
-
-    /**
-     * 默认通道响应超时时间.
-     */
-    private static final long DEFAULT_BACKHAUL_LINK_TIMEOUT_MS = 20 * 1000L;
-
-    /**
-     * 回程链路超时时间.
-     */
-    private final long backhaulTimeoutMs = DEFAULT_BACKHAUL_LINK_TIMEOUT_MS;
 
     /**
      * 是否使用 SSL.
@@ -45,9 +35,9 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
      */
     private final String endpointPath;
 
-    private final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine;
+    private final WebSocketBridgeServerEngine webSocketBridgeServerEngine;
     @Getter
-    private final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder;
+    private final WebSocketBridgeServerForwarder webSocketBridgeServerForwarder;
 
 
     private Channel boundChannel;
@@ -59,7 +49,7 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
      * @param endpointPath 接入点路径
      * @param useSsl       是否使用 SSL
      */
-    public WebSocketBackhaulTunnelServer(final int listenPort, final String endpointPath, final boolean useSsl) {
+    public WebSocketBridgeServer(final int listenPort, final String endpointPath, final boolean useSsl) {
         this(null, listenPort, endpointPath, useSsl);
     }
 
@@ -71,12 +61,12 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
      * @param endpointPath 接入点路径
      * @param useSsl       是否使用 SSL
      */
-    public WebSocketBackhaulTunnelServer(final String listenHost, final int listenPort, final String endpointPath, final boolean useSsl) {
+    public WebSocketBridgeServer(final String listenHost, final int listenPort, final String endpointPath, final boolean useSsl) {
         super(listenHost, listenPort);
         this.endpointPath = endpointPath;
         this.useSsl = useSsl;
-        this.webSocketBackhaulTunnelServerEngine = new WebSocketBackhaulTunnelServerEngine();
-        this.webSocketBackhaulTunnelServerForwarder = new WebSocketBackhaulTunnelServerForwarder(webSocketBackhaulTunnelServerEngine, new NioEventLoopGroup(2), new NioEventLoopGroup());
+        this.webSocketBridgeServerEngine = new WebSocketBridgeServerEngine();
+        this.webSocketBridgeServerForwarder = new WebSocketBridgeServerForwarder(webSocketBridgeServerEngine, new NioEventLoopGroup(2), new NioEventLoopGroup());
     }
 
     /**
@@ -101,30 +91,17 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
                         */
                         new WebSocketServerProtocolHandler(endpointPath, "*", false, 65536, true, true),
-                        new WebSocketBackhaulTunnelServerHandler(endpointPath, webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder)
+                        new WebSocketBridgeServerHandler(endpointPath, webSocketBridgeServerEngine, webSocketBridgeServerForwarder)
                 );
             }
         }).sync().channel();
     }
 
     public static void main(String[] args) throws Exception {
-        final WebSocketBackhaulTunnelServer server = new WebSocketBackhaulTunnelServer(2345, "/tunnel", false);
+        final WebSocketBridgeServer server = new WebSocketBridgeServer(2345, "/tunnel", false);
 
         final Channel channel = server.start();
-        System.out.println("Start on " + channel.localAddress());
-
-        /*
-        server.webSocketBackhaulTunnelServerForwarder.addForwarding(
-                3389, "BZ",
-                InetSocketAddress.createUnresolved("127.0.0.1", 3389)
-        );
-        */
-
-        /*
-        final Terminal terminal = TerminalFactory.create();
-        final ConsoleReader console = ConsoleReaderFactory.newConsoleReader(System.in, System.out, terminal, () -> server.webSocketBackhaulTunnelServerEngine.getAgents().stream().map(WebSocketBackhaulTunnelServerEngine.Agent::getId).collect(Collectors.toSet()));
-        WebSocketBackhaulTunnelServerShell.create(console, true, server.webSocketBackhaulTunnelServerEngine, server.webSocketBackhaulTunnelServerForwarder).start();
-        */
+        log.info("WebSocket bridge server start on " + channel.localAddress());
 
         channel.closeFuture().sync();
     }

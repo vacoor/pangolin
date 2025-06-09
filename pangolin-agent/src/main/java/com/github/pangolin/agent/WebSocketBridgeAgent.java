@@ -18,7 +18,7 @@ import java.net.URI;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 
-public class WebSocketBackhaulTunnelAgent {
+public class WebSocketBridgeAgent {
     private static final String AGENT_REGISTER_PROTOCOL = "PASSIVE-REG";
 
     private final String name;
@@ -29,7 +29,7 @@ public class WebSocketBackhaulTunnelAgent {
 
     private volatile ChannelFuture channelFuture;
 
-    public WebSocketBackhaulTunnelAgent(final String name, final URI endpoint) {
+    public WebSocketBridgeAgent(final String name, final URI endpoint) {
         this.name = name;
         this.webSocketServerEndpoint = endpoint;
     }
@@ -54,8 +54,8 @@ public class WebSocketBackhaulTunnelAgent {
         return Channels2.openWs(
                 handshaker, workerGroup,
                 new IdleStateHandler(600, 600, 600),
-                new WebSocketBackhaulTunnelAgentHandler(name, handshaker, customHttpHeaders)
-                 , new WebSocketBackhaulTunnelAgentHandler2(name, handshaker, customHttpHeaders)
+                new WebSocketBridgeAgentHandler(name, handshaker, customHttpHeaders)
+                 , new WebSocketBridgeAgentHandler2(name, handshaker, customHttpHeaders)
         );
     }
 

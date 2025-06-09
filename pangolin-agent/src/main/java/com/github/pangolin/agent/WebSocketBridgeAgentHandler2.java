@@ -52,7 +52,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * WebSocket 回传通道代理.
  */
 @Slf4j
-public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHandler<WebSocketFrame> {
+public class WebSocketBridgeAgentHandler2 extends SimpleChannelInboundHandler<WebSocketFrame> {
     private static final String AGENT_VERSION = "1.1";
     private static final String BACKHAUL_PROTOCOL = "PASSIVE";
 
@@ -100,7 +100,7 @@ public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHa
      */
     private final AtomicReference<State> state = new AtomicReference<>(State.SUSPENDED);
 
-    public WebSocketBackhaulTunnelAgentHandler2(final String name, final WebSocketClientHandshaker handshaker, final HttpHeaders customHttpHeaders) {
+    public WebSocketBridgeAgentHandler2(final String name, final WebSocketClientHandshaker handshaker, final HttpHeaders customHttpHeaders) {
         this.name = name;
         this.handshaker = handshaker;
         this.customHttpHeaders = customHttpHeaders;
@@ -226,13 +226,13 @@ public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHa
 
     /*
      * server <--ws--> agent <--socket--> target
-     * or degrade to:
+     * or downgrade to:
      * server <--socket--> agent <--socket--> target
      */
     public static ChannelFuture pipe(final SocketAddress destination,
                                      final WebSocketClientHandshaker backhaulHandhaker,
                                      final EventLoopGroup brGroup, final ChannelPromise promise,
-                                     final boolean degrade) throws InterruptedException {
+                                     final boolean downgrade) throws InterruptedException {
         final ChannelFutureListener propagationOnFailure = propagationOnFailure(promise);
         return Channels.open(destination, false, brGroup, new ChannelInboundHandlerAdapter() {
             @Override
@@ -252,7 +252,7 @@ public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHa
                         if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
                             backhaulCtx.channel().config().setAutoRead(false);
 
-                            if (!degrade) {
+                            if (!downgrade) {
                                 /*-
                                  * server <--ws--> agent <--socket--> target
                                  */
@@ -261,7 +261,7 @@ public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHa
                             } else {
                                 /*-
                                  * server <--ws--> agent <--socket--> target
-                                 * degrade to:
+                                 * downgrade to:
                                  * server <--socket--> agent <--socket--> target
                                  */
                                 destinationCtx.pipeline().replace(destinationCtx.name(), null, new TcpInboundRedirectHandler(backhaulCtx));
@@ -272,7 +272,7 @@ public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHa
                                 @Override
                                 public void operationComplete(final ChannelFuture future) throws Exception {
                                     if (future.isSuccess()) {
-                                        if (degrade) {
+                                        if (downgrade) {
                                             /*-
                                              * remove websocket codec.
                                              */
@@ -338,7 +338,7 @@ public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHa
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
                         */
                                 new WebSocketServerProtocolHandler("/ws", "*", false, 65536, true, true),
-                                new WebSocketBackhaulTunnelAgentHandler2("xx", handshaker, new DefaultHttpHeaders())
+                                new WebSocketBridgeAgentHandler2("xx", handshaker, new DefaultHttpHeaders())
 //                        new WebSocketBackhaulTunnelServerHandler(webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder)
 //                        new WebSocketBackhaulTunnelServerHandler2(endpointPath, "*", webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder)
                         );

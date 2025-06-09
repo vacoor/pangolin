@@ -178,7 +178,7 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
     }
 
     private String createAccessTokenNew(final ByteBufAllocator alloc, final InetSocketAddress target) {
-        final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(accessKey);
+        final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(null != accessKey ? accessKey : "");
         final ByteBuf buffer = alloc.buffer();
         buffer.writeByte(0x01);
         buffer.writeByte(idBytes.remaining());

@@ -47,15 +47,15 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
                                       final WebSocketServerHandshaker handshaker,
                                       final ChannelPromise promise) throws Exception {
         final String protocol = handshakeRequest.headers().get(HttpHeaderNames.SEC_WEBSOCKET_PROTOCOL);
-        final boolean degrade = CONNECT.name().equalsIgnoreCase(protocol);
-        return handshake0(handshakeCtx, handshakeRequest, handshaker, degrade, promise);
+        final boolean downgrade = CONNECT.name().equalsIgnoreCase(protocol);
+        return handshake0(handshakeCtx, handshakeRequest, handshaker, downgrade, promise);
     }
 
 
     protected ChannelFuture handshake0(final ChannelHandlerContext handshakeCtx,
                                        final FullHttpRequest handshakeRequest,
                                        final WebSocketServerHandshaker handshaker,
-                                       final boolean degrade,
+                                       final boolean downgrade,
                                        final ChannelPromise handshakePromise) throws Exception {
         final Map<String, List<String>> params = new QueryStringDecoder(handshakeRequest.uri()).parameters();
         final InetSocketAddress target = parseTarget(Util.last(params, "target"));
@@ -87,7 +87,7 @@ public class WebSocketProxyServerHandler extends WebSocketServerHandshakeNegotia
                         }
 
                         final ChannelHandlerContext targetCtx = future.channel().pipeline().lastContext();
-                        if (!degrade) {
+                        if (!downgrade) {
                             targetCtx.pipeline().addLast("Socket->WebSocket", new TcpOverWebSocketEncodeHandler(handshakeCtx));
                             handshakeCtx.pipeline().addLast("WebSocket->Socket", new TcpOverWebSocketDecodeHandler(targetCtx));
                         } else {

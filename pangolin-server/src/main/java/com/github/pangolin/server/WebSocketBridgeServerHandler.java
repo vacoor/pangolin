@@ -3,7 +3,7 @@ package com.github.pangolin.server;
 import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.handler.WebSocketInboundRedirectHandler;
-import com.github.pangolin.server.mgt.WebSocketBackhaulTunnelServerConsoleHandler;
+import com.github.pangolin.server.mgt.WebSocketBridgeServerConsoleHandler;
 import com.github.pangolin.util.Util;
 import com.google.common.base.Preconditions;
 import io.netty.buffer.ByteBuf;
@@ -15,11 +15,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.base64.Base64;
 import io.netty.handler.codec.base64.Base64Dialect;
 import io.netty.handler.codec.http.QueryStringDecoder;
-import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
-import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
-import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
+import io.netty.handler.codec.http.websocketx.*;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
 import io.netty.util.CharsetUtil;
 import io.netty.util.ReferenceCountUtil;
@@ -36,7 +32,7 @@ import java.net.UnknownHostException;
  *
  */
 @Slf4j
-public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerAdapter {
+public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
     /**
      * @see #PROTO_AGENT_SERVICE
      * @deprecated
@@ -62,12 +58,12 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
     private static final String PROTO_AGENT_BACKHAUL = "BACKHAUL";
 
     /**
-     * Client TCP over WebSocket connect.
+     * TCP over WebSocket connection.
      */
     private static final String PROTO_WS_CONNECT = "";
 
     /**
-     * Client WebSocket degrade to TCP socket connect.
+     * WebSocket downgrade to TCP socket connection.
      */
     private static final String PROTO_TCP_CONNECT = "CONNECT";
 
@@ -82,15 +78,15 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
     private static final String PARAM_BACKHAUL_ID = "id";
 
     private final String endpointPath;
-    private final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine;
-    private final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder;
+    private final WebSocketBridgeServerEngine webSocketBridgeServerEngine;
+    private final WebSocketBridgeServerForwarder webSocketBridgeServerForwarder;
 
-    public WebSocketBackhaulTunnelServerHandler(final String endpointPath,
-                                                final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine,
-                                                final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder) {
+    public WebSocketBridgeServerHandler(final String endpointPath,
+                                        final WebSocketBridgeServerEngine webSocketBridgeServerEngine,
+                                        final WebSocketBridgeServerForwarder webSocketBridgeServerForwarder) {
         this.endpointPath = endpointPath;
-        this.webSocketBackhaulTunnelServerEngine = webSocketBackhaulTunnelServerEngine;
-        this.webSocketBackhaulTunnelServerForwarder = webSocketBackhaulTunnelServerForwarder;
+        this.webSocketBridgeServerEngine = webSocketBridgeServerEngine;
+        this.webSocketBridgeServerForwarder = webSocketBridgeServerForwarder;
     }
 
     /**
@@ -104,7 +100,7 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
             final String subprotocol = null != rawSubprotocol ? rawSubprotocol : PROTO_WS_CONNECT;
 
             if (PROTO_AGENT_REGISTER.equals(subprotocol) || PROTO_AGENT_SERVICE.equals(subprotocol)) {
-                if (!webSocketBackhaulTunnelServerEngine.agentRegistered(handshake, ctx)) {
+                if (!webSocketBridgeServerEngine.agentRegistered(handshake, ctx)) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(
                             WebSocketCloseStatus.INVALID_PAYLOAD_DATA
                     )).addListener(ChannelFutureListener.CLOSE);
@@ -117,7 +113,7 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
                         public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                             if (msg instanceof BinaryWebSocketFrame) {
                                 try {
-                                    webSocketBackhaulTunnelServerEngine.agentResponded((BinaryWebSocketFrame) msg, ctx);
+                                    webSocketBridgeServerEngine.agentResponded((BinaryWebSocketFrame) msg, ctx);
                                 } finally {
                                     ReferenceCountUtil.release(msg);
                                 }
@@ -128,27 +124,28 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
                     });
                 }
             } else if (PROTO_WS_CONNECT.equals(subprotocol) || PROTO_TCP_CONNECT.equals(subprotocol)) {
+                final boolean downgrade = PROTO_TCP_CONNECT.equals(subprotocol);
                 final URI endpointPathUri = URI.create(new QueryStringDecoder(endpointPath).path());
                 final URI handshakePathUri = URI.create(new QueryStringDecoder(handshake.requestUri()).path());
                 final String agentKey = endpointPathUri.relativize(handshakePathUri).getPath();
                 final String accessToken = getAccessToken(handshake);
-                final boolean degrade = PROTO_TCP_CONNECT.equals(subprotocol);
-                if (null == agentKey || null == accessToken || handshake(ctx, agentKey, accessToken, degrade)) {
+
+                if (null == agentKey || null == accessToken || !handshake(ctx, agentKey, accessToken, downgrade)) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(
                             WebSocketCloseStatus.INVALID_PAYLOAD_DATA
                     )).addListener(ChannelFutureListener.CLOSE);
                 }
             } else if (PROTO_AGENT_BACKHAUL_LEGACY.equals(subprotocol) || PROTO_AGENT_BACKHAUL.equals(subprotocol)) {
                 final String id = Util.last(new QueryStringDecoder(handshake.requestUri()).parameters(), PARAM_BACKHAUL_ID);
-                if (null == id || id.isEmpty() || !webSocketBackhaulTunnelServerEngine.finishHandshake(id, ctx)) {
+                if (null == id || id.isEmpty() || !webSocketBridgeServerEngine.finishHandshake(id, ctx)) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(
                             WebSocketCloseStatus.INVALID_PAYLOAD_DATA
                     )).addListener(ChannelFutureListener.CLOSE);
                 }
             } else if (PROTO_MGR_CONSOLE.equals(subprotocol)) {
                 // XXX authorize.
-                ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelServerConsoleHandler(
-                        webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder
+                ctx.pipeline().replace(ctx.name(), null, new WebSocketBridgeServerConsoleHandler(
+                        webSocketBridgeServerEngine, webSocketBridgeServerForwarder
                 ));
             } else {
                 ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.PROTOCOL_ERROR)).addListener(ChannelFutureListener.CLOSE);
@@ -176,7 +173,9 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
         )).addListener(ChannelFutureListener.CLOSE);
     }
 
-    private boolean handshake(final ChannelHandlerContext accessCtx, final String agentKey, final String accessToken, final boolean degrade) throws UnknownHostException {
+    private boolean handshake(final ChannelHandlerContext accessCtx,
+                              final String agentKey, final String accessToken,
+                              final boolean downgrade) throws UnknownHostException {
         final ByteBuf in = Base64.decode(Unpooled.wrappedBuffer(accessToken.getBytes()), Base64Dialect.URL_SAFE);
         /*-
          * TCP connect request is a SOCKS5-like request:
@@ -203,12 +202,12 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
             return false;
         }
         // ..
-        handshake0(accessCtx, agentKey, target, degrade);
+        handshake0(accessCtx, agentKey, target, downgrade);
         return true;
     }
 
     private boolean authenticate(final String accessKey) {
-        final String accessTokenInSys = System.getProperty("websocket.bridge.access_key");
+        final String accessTokenInSys = System.getProperty("websocket.bridge.access_key", "c254dacd0cde3be75ac2988f691ec105");
         if (null == accessTokenInSys || accessTokenInSys.isEmpty()) {
             return true;
         }
@@ -243,15 +242,20 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
     }
 
     /**
-     * TCP over websocket or websocket degrade to TCP.
+     * Initiate a handshake with the agent for target address to establish
+     * a WebSocket connection or downgrade the WebSocket to a TCP socket.
      *
-     * @param degrade websocket degrade to TCP socket
+     * @param accessCtx the access channel context
+     * @param agentKey  the connection agent key
+     * @param target    the connection target address
+     * @param downgrade the WebSocket downgrade to a TCP socket
      */
-    private void handshake0(final ChannelHandlerContext accessCtx, final String agentKey, final InetSocketAddress target, final boolean degrade) {
+    private void handshake0(final ChannelHandlerContext accessCtx,
+                            final String agentKey, final InetSocketAddress target, final boolean downgrade) {
         log.info("[{}] Establishing WebSocket connection to {} via {}", accessCtx.channel().id(), target, agentKey);
 
         accessCtx.channel().config().setAutoRead(false);
-        webSocketBackhaulTunnelServerEngine.handshake(
+        webSocketBridgeServerEngine.handshake(
                 accessCtx, agentKey, target, accessCtx.executor().newPromise()
         ).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
@@ -262,7 +266,7 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
 
                     log.info("[{}] WebSocket connection established to {} via {}", accessCtx.channel().id(), target, agentKey);
 
-                    if (!degrade) {
+                    if (!downgrade) {
                         /*-
                          * client <--ws--> server <--ws--> agent
                          */

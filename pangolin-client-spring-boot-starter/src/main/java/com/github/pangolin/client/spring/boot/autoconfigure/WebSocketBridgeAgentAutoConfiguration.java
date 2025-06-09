@@ -1,6 +1,6 @@
 package com.github.pangolin.client.spring.boot.autoconfigure;
 
-import com.github.pangolin.agent.WebSocketBackhaulTunnelAgentLauncher;
+import com.github.pangolin.agent.WebSocketBridgeAgentLauncher;
 import com.github.pangolin.agent.servlet.WebSocketEndpointLoaderListener;
 import org.springframework.boot.web.servlet.ServletComponentScan;
 import org.springframework.context.EnvironmentAware;
@@ -20,11 +20,11 @@ import java.util.concurrent.TimeUnit;
  */
 @Configuration
 @ServletComponentScan(basePackageClasses = {WebSocketEndpointLoaderListener.class})
-public class WebSocketBackhaulTunnelAutoConfiguration implements EnvironmentAware {
+public class WebSocketBridgeAgentAutoConfiguration implements EnvironmentAware {
     private static final String WS_SERVER_URL_PROPERTY = "spring.management.tunnel";
 
     private Environment env;
-    private final WebSocketBackhaulTunnelAgentLauncher launcher = new WebSocketBackhaulTunnelAgentLauncher();
+    private final WebSocketBridgeAgentLauncher launcher = new WebSocketBridgeAgentLauncher();
 
     @Bean(destroyMethod = "stop")
     public DebugTunnelInitializer tunnel() {
