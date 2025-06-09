@@ -9,7 +9,11 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.QueryStringDecoder;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
+import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Future;
@@ -114,10 +118,22 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
                 }
             } else if (PROTO_WS_CONNECT.equals(protocolToUse)) {
                 // XXX authorize.
-                handshake(handshake, ctx, false);
+                if (!authenticate(handshake, ctx)) {
+                    ctx.writeAndFlush(new CloseWebSocketFrame(
+                            WebSocketCloseStatus.INVALID_PAYLOAD_DATA
+                    )).addListener(ChannelFutureListener.CLOSE);
+                } else {
+                    handshake(handshake, ctx, false);
+                }
             } else if (PROTO_TCP_CONNECT.equals(protocolToUse)) {
                 // XXX authorize.
-                handshake(handshake, ctx, true);
+                if (!authenticate(handshake, ctx)) {
+                    ctx.writeAndFlush(new CloseWebSocketFrame(
+                            WebSocketCloseStatus.INVALID_PAYLOAD_DATA
+                    )).addListener(ChannelFutureListener.CLOSE);
+                } else {
+                    handshake(handshake, ctx, true);
+                }
             } else if (PROTO_CONN_BACKHAUL_LEGACY.equals(protocolToUse) || PROTO_CONN_BACKHAUL.equals(protocolToUse)) {
                 final Map<String, List<String>> params = new QueryStringDecoder(handshake.requestUri()).parameters();
                 final String id = Util.last(params, PARAM_BACKHAUL_ID);
@@ -151,6 +167,22 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
         )).addListener(ChannelFutureListener.CLOSE);
     }
 
+    private boolean authenticate(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
+        final String accessTokenInSys = System.getProperty("websocket.bridge.access_token");
+        if (null == accessTokenInSys || accessTokenInSys.isEmpty()) {
+            return true;
+        }
+        final String authorization = handshake.requestHeaders().get("Authorization");
+        if (null != authorization && authorization.startsWith("Bearer ")) {
+            if (accessTokenInSys.equals(authorization.substring(7))) {
+                return true;
+            }
+        }
+
+        final Map<String, List<String>> params = new QueryStringDecoder(handshake.requestUri()).parameters();
+        return accessTokenInSys.equals(Util.last(params, "access_token"));
+    }
+
     /**
      * TCP over websocket or websocket degrade to TCP.
      *
@@ -161,6 +193,7 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
         final Map<String, List<String>> params = new QueryStringDecoder(handshake.requestUri()).parameters();
         final String agentKey = Util.last(params, PARAM_AGENT);
         final InetSocketAddress target = parseTarget(Util.last(params, PARAM_TARGET));
+
         if (null == agentKey || agentKey.isEmpty() || null == target) {
             accessCtx.writeAndFlush(new CloseWebSocketFrame(
                     WebSocketCloseStatus.INVALID_PAYLOAD_DATA

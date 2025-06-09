@@ -10,7 +10,7 @@ import java.util.concurrent.locks.LockSupport;
 public class WebSocketServer {
     public static void main(String[] args) throws DeploymentException {
         final Server server = new Server(
-                null, 8899,
+                null, 7777,
                 "/",
                 Collections.emptyMap(),
                 WebSocketBridgeEndpoint.class

@@ -1,14 +1,41 @@
 package com.github.pangolin.routing.support.handler.client;
 
 import com.github.pangolin.routing.util.SocketUtils;
-import freework.net.Http;
+import com.google.common.collect.Maps;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelConfig;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelId;
+import io.netty.channel.ChannelMetadata;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ChannelProgressivePromise;
+import io.netty.channel.ChannelPromise;
+import io.netty.channel.EventLoop;
 import io.netty.handler.codec.MessageToMessageCodec;
-import io.netty.handler.codec.http.*;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.DefaultHttpHeaders;
+import io.netty.handler.codec.http.EmptyHttpHeaders;
+import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.HttpMethod;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpResponseDecoder;
+import io.netty.handler.codec.http.QueryStringDecoder;
+import io.netty.handler.codec.http.QueryStringEncoder;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
 import io.netty.util.ReferenceCountUtil;
@@ -17,7 +44,9 @@ import lombok.extern.slf4j.Slf4j;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @see io.netty.resolver.NoopAddressResolverGroup#INSTANCE
@@ -108,20 +137,27 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
     @Override
     protected ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise handshakePromise) throws Exception {
         final InetSocketAddress address = destinationAddress();
-        final DefaultHttpHeaders customHandshakeHttpHeadersToUse = new DefaultHttpHeaders();
-        customHandshakeHttpHeadersToUse.add(customHandshakeHttpHeaders);
-        customHandshakeHttpHeadersToUse.set("X-TARGET-ADDRESS", address.getHostString());
-        customHandshakeHttpHeadersToUse.setInt("X-TARGET-PORT", address.getPort());
 
-        final String target = "target=" + Http.urlEncode("tcp://" + address.getHostString() + ":" + address.getPort(), "UTF-8");
-        String s = webSocketProxyServerEndpoint.toString();
+        final Map<String, String> handshakeUrlParams = Maps.newHashMap();
+        final DefaultHttpHeaders handshakeHeaders = new DefaultHttpHeaders();
 
-        final URI uri = URI.create(s + (s.contains("?") ? "&" + target : "?" + target));
+        handshakeUrlParams.put("target", "tcp://" + address.getHostString() + ":" + address.getPort());
+
+        handshakeHeaders.add(customHandshakeHttpHeaders);
+        handshakeHeaders.set("X-TARGET-ADDRESS", address.getHostString());
+        handshakeHeaders.setInt("X-TARGET-PORT", address.getPort());
+
+        if (null != accessToken && !accessToken.isEmpty()) {
+            handshakeUrlParams.put("access_token", accessToken);
+            handshakeHeaders.add("Authorization", "Bearer " + accessToken);
+        }
+
+        final URI handshakeUri = createUri(webSocketProxyServerEndpoint, handshakeUrlParams);
+
         final WebSocketClientHandshaker handshaker = WebSocketClientHandshakerFactory.newHandshaker(
-                uri, webSocketVersion, webSocketProxyServerProtocol,
-                allowExtensions, customHandshakeHttpHeadersToUse, maxFramePayloadLength, performMasking, allowMaskMismatch
+                handshakeUri, webSocketVersion, webSocketProxyServerProtocol,
+                allowExtensions, handshakeHeaders, maxFramePayloadLength, performMasking, allowMaskMismatch
         );
-
         handshaker.handshake(new CtxWriteDelegatingChannel(ctx)).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
@@ -407,6 +443,24 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
             return delegate.compareTo(o);
         }
 
+    }
+
+    private static URI createUri(final URI endpoint, final Map<String, String> urlParams) {
+        final QueryStringDecoder decoder = new QueryStringDecoder(endpoint.toASCIIString());
+        final QueryStringEncoder encoder = new QueryStringEncoder(decoder.path());
+        for (final Map.Entry<String, List<String>> parameter : decoder.parameters().entrySet()) {
+            for (final String value : parameter.getValue()) {
+                encoder.addParam(parameter.getKey(), value);
+            }
+        }
+        for (final Map.Entry<String, String> urlParam : urlParams.entrySet()) {
+            encoder.addParam(urlParam.getKey(), urlParam.getValue());
+        }
+        try {
+            return endpoint.resolve(encoder.toUri());
+        } catch (final URISyntaxException e) {
+            throw new IllegalArgumentException(e);
+        }
     }
 
 }
