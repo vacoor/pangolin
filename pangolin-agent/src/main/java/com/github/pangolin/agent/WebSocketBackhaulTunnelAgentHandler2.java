@@ -8,21 +8,43 @@ import com.github.pangolin.util.Channels2;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ChannelPromise;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
-import io.netty.handler.codec.http.websocketx.*;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
+import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.flow.FlowControlHandler;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.CharsetUtil;
 import io.netty.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.*;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.net.URI;
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -123,51 +145,9 @@ public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHa
             return;
         }
 
-        /*-
-         * TCP connect request is a SOCKS5-like request:
-         *
-         * +----------+-----+-----+-------+------+----------+----------+
-         * | ID       | VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
-         * +----------+-----+-----+-------+------+----------+----------+
-         * | Variable |  1  |  1  | X'00' |  1   | Variable |    2     |
-         * +----------+-----+-----+-------+------+----------+----------+
-         *
-         * Where:
-         * o  ID request id
-         * o  VER protocol version: X'01'
-         * o  CMD
-         *    o  CONNECT X'01'
-         *    o  UDP ASSOCIATE X'03'
-         * o  RSV
-         *    o websocket frame: X'00'
-         *    o TCP frame: X'01'
-         * o  ATYP address type of following address
-         *    o  IP V4 address: X'01'
-         *    o  DOMAINNAME: X'03'
-         *    o  IP V6 address: X'04'
-         * o  DST.ADDR desired destination address
-         * o  DST.PORT desired destination port in network octet order
-         *
-         * In an address field (DST.ADDR, BND.ADDR), the ATYP field specifies
-         * the type of address contained within the field:
-         *
-         *        o  X'01'
-         *
-         * the address is a version-4 IP address, with a length of 4 octets
-         *
-         *        o  X'03'
-         *
-         * the address field contains a fully-qualified domain name.  The first
-         * octet of the address field contains the number of octets of name that
-         * follow, there is no terminating NUL octet.
-         *
-         *        o  X'04'
-         *
-         * the address is a version-6 IP address, with a length of 16 octets.
-         */
         final ByteBuf in = frame.content();
-        final String id = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
         final byte version = in.readByte();
+        final String id = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
         final byte command = in.readByte();
         final byte rsv = in.readByte();
 
@@ -210,20 +190,11 @@ public class WebSocketBackhaulTunnelAgentHandler2 extends SimpleChannelInboundHa
 
     private ByteBuf newReply(final ChannelHandlerContext ctx,
                              final String id, final byte rsv, final byte status) {
-        /*-
-         * The reply is a SOCKS5-like reply:
-         *
-         * +----------+----+-----+-------+------+----------+----------+
-         * | ID       |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
-         * +----------+----+-----+-------+------+----------+----------+
-         * | Variable | 1  |  1  | X'00' |  1   | Variable |    2     |
-         * +----------+----+-----+-------+------+----------+----------+
-         */
         final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(id);
         final ByteBuf reply = ctx.alloc().buffer(1 + idBytes.remaining() + 4 + IPv4_ADDR_SIZE + 2);
+        reply.writeByte(VER_1_1);
         reply.writeByte(idBytes.remaining());
         reply.writeBytes(idBytes);
-        reply.writeByte(VER_1_1);
         reply.writeByte(status);
         reply.writeByte(rsv);
         reply.writeByte(ATYPE_IPv4);

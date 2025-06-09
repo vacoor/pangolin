@@ -2,6 +2,7 @@ package com.github.pangolin.agent.servlet;
 
 import com.github.pangolin.util.Channels;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -9,6 +10,9 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.handler.codec.base64.Base64;
+import io.netty.handler.codec.base64.Base64Dialect;
+import io.netty.util.CharsetUtil;
 import io.netty.util.ReferenceCountUtil;
 
 import javax.websocket.CloseReason;
@@ -21,7 +25,9 @@ import javax.websocket.server.HandshakeRequest;
 import javax.websocket.server.ServerEndpoint;
 import javax.websocket.server.ServerEndpointConfig;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Map;
 
@@ -32,22 +38,27 @@ public class WebSocketBridgeEndpoint {
     @OnOpen
     public void onOpen(final Session session) throws InterruptedException, IOException {
         final Map<String, List<String>> params = session.getRequestParameterMap();
-        final List<String> target = params.get("target");
-        final String targetToUse = null != target && target.size() > 0 ? target.get(target.size() - 1) : null;
-
-        if (!authenticate(session)) {
+        final List<String> accessToken = params.get("access_token");
+        final String accessTokenToUse = null != accessToken && accessToken.size() > 0 ? accessToken.get(accessToken.size() - 1) : null;
+        if (null == accessTokenToUse) {
             session.close(new CloseReason(CloseReason.CloseCodes.CANNOT_ACCEPT, ""));
             return;
         }
 
-        final InetSocketAddress destination = parseTarget(targetToUse);
-        if (null == destination) {
+        final ByteBuf in = Base64.decode(Unpooled.wrappedBuffer(accessTokenToUse.getBytes()), Base64Dialect.URL_SAFE);
+        final byte version = in.readByte();
+        final String accessKey = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
+        final byte cmd = in.readByte();
+        final byte rsv = in.readByte();
+        final InetSocketAddress target = parseSocketAddress(in);
+
+        if (null == target || !authenticate(accessKey)) {
             session.close(new CloseReason(CloseReason.CloseCodes.CANNOT_ACCEPT, ""));
             return;
         }
 
         final NioEventLoopGroup brGroup = new NioEventLoopGroup(1);
-        channel = Channels.open(destination, true, brGroup, new ChannelInboundHandlerAdapter() {
+        channel = Channels.open(target, true, brGroup, new ChannelInboundHandlerAdapter() {
 
             @Override
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
@@ -73,7 +84,7 @@ public class WebSocketBridgeEndpoint {
                     }
                 }
             }
-        }).channel().closeFuture().addListener(new ChannelFutureListener() {
+        }).sync().channel().closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 try {
@@ -101,23 +112,17 @@ public class WebSocketBridgeEndpoint {
         }
     }
 
-    private boolean authenticate(final Session session) {
-        final Map<String, List<String>> params = session.getRequestParameterMap();
-        final List<String> accessToken = params.get("access_token");
-        final String accessTokenToUse = null != accessToken && accessToken.size() > 0 ? accessToken.get(accessToken.size() - 1) : null;
-        return System.getProperty("websocket.bridge.access_token", "c254dacd0cde3be75ac2988f691ec105").equals(accessTokenToUse);
+    private boolean authenticate(final String accessKey) {
+        return System.getProperty("websocket.bridge.access_key", "c254dacd0cde3be75ac2988f691ec105").equals(accessKey);
     }
 
     private InetSocketAddress parseTarget(final String target) {
-        if (null == target || (target.contains("://") && !target.startsWith("tcp://"))) {
+        if (null == target) {
             return null;
         }
-        final String hostAndPort = target.startsWith("tcp://") ? target.substring(6) : target;
-        // resolve ?
-        final String[] split = hostAndPort.split(":", 2);
+        final String[] split = target.split(":", 2);
         return InetSocketAddress.createUnresolved(split[0], Integer.parseInt(split[1]));
     }
-
 
 
     public static class AuthenticationConfigurator extends ServerEndpointConfig.Configurator {
@@ -129,6 +134,31 @@ public class WebSocketBridgeEndpoint {
 //            response.getHeaders().clear();
 //            throw new IllegalArgumentException("xx");
         }
+    }
 
+    private static final byte IPv4_ADDR_SIZE = 4;
+    private static final byte IPv6_ADDR_SIZE = 16;
+
+    private static final byte VER_1 = 0x01;
+
+    private static final byte CMD_CONNECT = 0x01;
+
+    private static final byte ATYPE_IPv4 = 0x01;
+    private static final byte ATYPE_DOMAIN = 0x03;
+    private static final byte ATYPE_IPv6 = 0x04;
+
+    private static InetSocketAddress parseSocketAddress(final ByteBuf in) throws UnknownHostException {
+        final byte addressType = in.readByte();
+        if (ATYPE_IPv4 == addressType) {
+            final byte[] addr = ByteBufUtil.getBytes(in.readBytes(IPv4_ADDR_SIZE));
+            return new InetSocketAddress(InetAddress.getByAddress(addr), in.readUnsignedShort());
+        } else if (ATYPE_DOMAIN == addressType) {
+            final String domain = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
+            return InetSocketAddress.createUnresolved(domain, in.readUnsignedShort());
+        } else if (ATYPE_IPv6 == addressType) {
+            final byte[] addr = ByteBufUtil.getBytes(in.readBytes(IPv6_ADDR_SIZE));
+            return new InetSocketAddress(InetAddress.getByAddress(addr), in.readUnsignedShort());
+        }
+        throw new UnknownHostException("address type: " + addressType);
     }
 }

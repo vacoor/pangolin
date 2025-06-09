@@ -5,9 +5,15 @@ import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.handler.WebSocketInboundRedirectHandler;
 import com.github.pangolin.server.mgt.WebSocketBackhaulTunnelServerConsoleHandler;
 import com.github.pangolin.util.Util;
+import com.google.common.base.Preconditions;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.handler.codec.base64.Base64;
+import io.netty.handler.codec.base64.Base64Dialect;
 import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
@@ -15,14 +21,16 @@ import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
 import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
+import io.netty.util.CharsetUtil;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.List;
-import java.util.Map;
+import java.net.URI;
+import java.net.UnknownHostException;
 
 /**
  *
@@ -37,16 +45,21 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
     private static final String PROTO_AGENT_REGISTER = "PASSIVE-REG";
 
     /**
-     * @see #PROTO_CONN_BACKHAUL
+     * @see #PROTO_AGENT_BACKHAUL
      * @deprecated
      */
     @Deprecated
-    private static final String PROTO_CONN_BACKHAUL_LEGACY = "PASSIVE";
+    private static final String PROTO_AGENT_BACKHAUL_LEGACY = "PASSIVE";
 
     /**
      * Agent register.
      */
     private static final String PROTO_AGENT_SERVICE = "SERVICE";
+
+    /**
+     * Agent backhaul connection.
+     */
+    private static final String PROTO_AGENT_BACKHAUL = "BACKHAUL";
 
     /**
      * Client TCP over WebSocket connect.
@@ -59,24 +72,23 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
     private static final String PROTO_TCP_CONNECT = "CONNECT";
 
     /**
-     * Agent backhaul connection.
-     */
-    private static final String PROTO_CONN_BACKHAUL = "BACKHAUL";
-
-    /**
      * WebSocket management console.
      */
     private static final String PROTO_MGR_CONSOLE = "CONSOLE";
 
-    private static final String PARAM_AGENT = "agent";
-    private static final String PARAM_TARGET = "target";
+    /**
+     * .
+     */
     private static final String PARAM_BACKHAUL_ID = "id";
 
+    private final String endpointPath;
     private final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine;
     private final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder;
 
-    public WebSocketBackhaulTunnelServerHandler(final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine,
+    public WebSocketBackhaulTunnelServerHandler(final String endpointPath,
+                                                final WebSocketBackhaulTunnelServerEngine webSocketBackhaulTunnelServerEngine,
                                                 final WebSocketBackhaulTunnelServerForwarder webSocketBackhaulTunnelServerForwarder) {
+        this.endpointPath = endpointPath;
         this.webSocketBackhaulTunnelServerEngine = webSocketBackhaulTunnelServerEngine;
         this.webSocketBackhaulTunnelServerForwarder = webSocketBackhaulTunnelServerForwarder;
     }
@@ -88,11 +100,10 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
     public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
         if (evt instanceof HandshakeComplete) {
             final HandshakeComplete handshake = (HandshakeComplete) evt;
-            final String rawProtocol = handshake.selectedSubprotocol();
-            final String protocolToUse = null != rawProtocol ? rawProtocol : PROTO_WS_CONNECT;
+            final String rawSubprotocol = handshake.selectedSubprotocol();
+            final String subprotocol = null != rawSubprotocol ? rawSubprotocol : PROTO_WS_CONNECT;
 
-            if (PROTO_AGENT_REGISTER.equals(protocolToUse) || PROTO_AGENT_SERVICE.equals(protocolToUse)) {
-                // XXX authorize.
+            if (PROTO_AGENT_REGISTER.equals(subprotocol) || PROTO_AGENT_SERVICE.equals(subprotocol)) {
                 if (!webSocketBackhaulTunnelServerEngine.agentRegistered(handshake, ctx)) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(
                             WebSocketCloseStatus.INVALID_PAYLOAD_DATA
@@ -116,35 +127,25 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
                         }
                     });
                 }
-            } else if (PROTO_WS_CONNECT.equals(protocolToUse)) {
-                // XXX authorize.
-                if (!authenticate(handshake, ctx)) {
-                    ctx.writeAndFlush(new CloseWebSocketFrame(
-                            WebSocketCloseStatus.INVALID_PAYLOAD_DATA
-                    )).addListener(ChannelFutureListener.CLOSE);
-                } else {
-                    handshake(handshake, ctx, false);
-                }
-            } else if (PROTO_TCP_CONNECT.equals(protocolToUse)) {
-                // XXX authorize.
-                if (!authenticate(handshake, ctx)) {
-                    ctx.writeAndFlush(new CloseWebSocketFrame(
-                            WebSocketCloseStatus.INVALID_PAYLOAD_DATA
-                    )).addListener(ChannelFutureListener.CLOSE);
-                } else {
-                    handshake(handshake, ctx, true);
-                }
-            } else if (PROTO_CONN_BACKHAUL_LEGACY.equals(protocolToUse) || PROTO_CONN_BACKHAUL.equals(protocolToUse)) {
-                final Map<String, List<String>> params = new QueryStringDecoder(handshake.requestUri()).parameters();
-                final String id = Util.last(params, PARAM_BACKHAUL_ID);
-                if (null != id && !id.isEmpty()) {
-                    webSocketBackhaulTunnelServerEngine.finishHandshake(id, ctx);
-                } else {
+            } else if (PROTO_WS_CONNECT.equals(subprotocol) || PROTO_TCP_CONNECT.equals(subprotocol)) {
+                final URI endpointPathUri = URI.create(new QueryStringDecoder(endpointPath).path());
+                final URI handshakePathUri = URI.create(new QueryStringDecoder(handshake.requestUri()).path());
+                final String agentKey = endpointPathUri.relativize(handshakePathUri).getPath();
+                final String accessToken = getAccessToken(handshake);
+                final boolean degrade = PROTO_TCP_CONNECT.equals(subprotocol);
+                if (null == agentKey || null == accessToken || handshake(ctx, agentKey, accessToken, degrade)) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(
                             WebSocketCloseStatus.INVALID_PAYLOAD_DATA
                     )).addListener(ChannelFutureListener.CLOSE);
                 }
-            } else if (PROTO_MGR_CONSOLE.equals(protocolToUse)) {
+            } else if (PROTO_AGENT_BACKHAUL_LEGACY.equals(subprotocol) || PROTO_AGENT_BACKHAUL.equals(subprotocol)) {
+                final String id = Util.last(new QueryStringDecoder(handshake.requestUri()).parameters(), PARAM_BACKHAUL_ID);
+                if (null == id || id.isEmpty() || !webSocketBackhaulTunnelServerEngine.finishHandshake(id, ctx)) {
+                    ctx.writeAndFlush(new CloseWebSocketFrame(
+                            WebSocketCloseStatus.INVALID_PAYLOAD_DATA
+                    )).addListener(ChannelFutureListener.CLOSE);
+                }
+            } else if (PROTO_MGR_CONSOLE.equals(subprotocol)) {
                 // XXX authorize.
                 ctx.pipeline().replace(ctx.name(), null, new WebSocketBackhaulTunnelServerConsoleHandler(
                         webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder
@@ -154,6 +155,14 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
             }
         }
         ctx.fireUserEventTriggered(evt);
+    }
+
+    private String getAccessToken(final HandshakeComplete handshake) {
+        final String authorization = handshake.requestHeaders().get("Authorization");
+        if (null != authorization) {
+            return authorization.startsWith("Bearer ") ? authorization.substring(7) : null;
+        }
+        return Util.last(new QueryStringDecoder(handshake.requestUri()).parameters(), "access_token");
     }
 
     /**
@@ -167,20 +176,70 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
         )).addListener(ChannelFutureListener.CLOSE);
     }
 
-    private boolean authenticate(final HandshakeComplete handshake, final ChannelHandlerContext accessCtx) {
-        final String accessTokenInSys = System.getProperty("websocket.bridge.access_token");
+    private boolean handshake(final ChannelHandlerContext accessCtx, final String agentKey, final String accessToken, final boolean degrade) throws UnknownHostException {
+        final ByteBuf in = Base64.decode(Unpooled.wrappedBuffer(accessToken.getBytes()), Base64Dialect.URL_SAFE);
+        /*-
+         * TCP connect request is a SOCKS5-like request:
+         *
+         * +-----+----------+-----+-------+------+----------+----------+
+         * | VER |AccessKey | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
+         * +-----+----------+-----+-------+------+----------+----------+
+         * |  1  | Variable |  1  | X'00' |  1   | Variable |    2     |
+         * +-----+----------+-----+-------+------+----------+----------+
+         */
+        final byte version = in.readByte();
+        Preconditions.checkState(VER_1 == version, "unsupported version: %s, (expected: %s)", version, VER_1);
+
+        final String accessKey = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
+
+        final byte cmd = in.readByte();
+        Preconditions.checkState(CMD_CONNECT == cmd, "unsupported command type: %s, (expected: %s)", cmd, CMD_CONNECT);
+
+        final byte rsv = in.readByte();
+        Preconditions.checkState(0 == rsv, "unsupported rsv: %s, (expected: %s)", rsv, 0);
+
+        final InetSocketAddress target = parseSocketAddress(in);
+        if (!authenticate(accessKey)) {
+            return false;
+        }
+        // ..
+        handshake0(accessCtx, agentKey, target, degrade);
+        return true;
+    }
+
+    private boolean authenticate(final String accessKey) {
+        final String accessTokenInSys = System.getProperty("websocket.bridge.access_key");
         if (null == accessTokenInSys || accessTokenInSys.isEmpty()) {
             return true;
         }
-        final String authorization = handshake.requestHeaders().get("Authorization");
-        if (null != authorization && authorization.startsWith("Bearer ")) {
-            if (accessTokenInSys.equals(authorization.substring(7))) {
-                return true;
-            }
-        }
+        return accessTokenInSys.equals(accessKey);
+    }
 
-        final Map<String, List<String>> params = new QueryStringDecoder(handshake.requestUri()).parameters();
-        return accessTokenInSys.equals(Util.last(params, "access_token"));
+
+    private static final byte IPv4_ADDR_SIZE = 4;
+    private static final byte IPv6_ADDR_SIZE = 16;
+
+    private static final byte VER_1 = 0x01;
+
+    private static final byte CMD_CONNECT = 0x01;
+
+    private static final byte ATYPE_IPv4 = 0x01;
+    private static final byte ATYPE_DOMAIN = 0x03;
+    private static final byte ATYPE_IPv6 = 0x04;
+
+    private static InetSocketAddress parseSocketAddress(final ByteBuf in) throws UnknownHostException {
+        final byte addressType = in.readByte();
+        if (ATYPE_IPv4 == addressType) {
+            final byte[] addr = ByteBufUtil.getBytes(in.readBytes(IPv4_ADDR_SIZE));
+            return new InetSocketAddress(InetAddress.getByAddress(addr), in.readUnsignedShort());
+        } else if (ATYPE_DOMAIN == addressType) {
+            final String domain = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
+            return InetSocketAddress.createUnresolved(domain, in.readUnsignedShort());
+        } else if (ATYPE_IPv6 == addressType) {
+            final byte[] addr = ByteBufUtil.getBytes(in.readBytes(IPv6_ADDR_SIZE));
+            return new InetSocketAddress(InetAddress.getByAddress(addr), in.readUnsignedShort());
+        }
+        throw new UnknownHostException("address type: " + addressType);
     }
 
     /**
@@ -188,19 +247,7 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
      *
      * @param degrade websocket degrade to TCP socket
      */
-    private void handshake(final HandshakeComplete handshake,
-                           final ChannelHandlerContext accessCtx, final boolean degrade) {
-        final Map<String, List<String>> params = new QueryStringDecoder(handshake.requestUri()).parameters();
-        final String agentKey = Util.last(params, PARAM_AGENT);
-        final InetSocketAddress target = parseTarget(Util.last(params, PARAM_TARGET));
-
-        if (null == agentKey || agentKey.isEmpty() || null == target) {
-            accessCtx.writeAndFlush(new CloseWebSocketFrame(
-                    WebSocketCloseStatus.INVALID_PAYLOAD_DATA
-            )).addListener(ChannelFutureListener.CLOSE);
-            return;
-        }
-
+    private void handshake0(final ChannelHandlerContext accessCtx, final String agentKey, final InetSocketAddress target, final boolean degrade) {
         log.info("[{}] Establishing WebSocket connection to {} via {}", accessCtx.channel().id(), target, agentKey);
 
         accessCtx.channel().config().setAutoRead(false);
@@ -255,16 +302,6 @@ public class WebSocketBackhaulTunnelServerHandler extends ChannelInboundHandlerA
                 }
             }
         });
-    }
-
-    private InetSocketAddress parseTarget(final String target) {
-        if (null == target || (target.contains("://") && !target.startsWith("tcp://"))) {
-            return null;
-        }
-        final String hostAndPort = target.startsWith("tcp://") ? target.substring(6) : target;
-        // resolve ?
-        final String[] split = hostAndPort.split(":", 2);
-        return InetSocketAddress.createUnresolved(split[0], Integer.parseInt(split[1]));
     }
 
 }

@@ -30,7 +30,7 @@ public class ForwarderTest {
             @Override
             public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
 //                return new WebSocketProxyHandler(URI.create("ws://127.0.0.1:2345/tunnel?agent=Local"), null);
-                return new WebSocketProxyHandler(URI.create("ws://127.0.0.1:808"), "CONNECT");
+                return new WebSocketProxyHandler(URI.create("ws://127.0.0.1:7777/ws/bridge/Local"), null, "c254dacd0cde3be75ac2988f691ec105");
             }
 
             @Override

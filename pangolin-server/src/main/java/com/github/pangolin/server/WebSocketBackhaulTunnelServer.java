@@ -13,7 +13,6 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.net.ssl.SSLException;
-import java.net.InetSocketAddress;
 import java.security.cert.CertificateException;
 
 /**
@@ -102,7 +101,7 @@ public class WebSocketBackhaulTunnelServer extends NettyServer {
                         new WebSocketServerProtocolHandler(endpointPath, ALL_PROTOCOLS, true, 65536, true, true),
                         */
                         new WebSocketServerProtocolHandler(endpointPath, "*", false, 65536, true, true),
-                        new WebSocketBackhaulTunnelServerHandler(webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder)
+                        new WebSocketBackhaulTunnelServerHandler(endpointPath, webSocketBackhaulTunnelServerEngine, webSocketBackhaulTunnelServerForwarder)
                 );
             }
         }).sync().channel();

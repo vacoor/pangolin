@@ -1,9 +1,16 @@
 package com.github.pangolin.server;
 
+import static io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
+
+import com.google.common.base.Preconditions;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ConnectTimeoutException;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
@@ -18,7 +25,12 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.net.*;
+import java.net.ConnectException;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -27,8 +39,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-
-import static io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
 
 /**
  *
@@ -42,7 +52,7 @@ public class WebSocketBackhaulTunnelServerEngine {
     private static final byte IPv4_ADDR_SIZE = 4;
     private static final byte IPv6_ADDR_SIZE = 16;
 
-    private static final byte VER_1_1 = 0x01;
+    private static final byte VER_1 = 0x01;
 
     private static final byte CMD_CONNECT = 0x01;
 
@@ -262,11 +272,51 @@ public class WebSocketBackhaulTunnelServerEngine {
             return;
         }
 
+        /*-
+         * TCP connect request is a SOCKS5-like request:
+         *
+         * +-----+----------+-----+-------+------+----------+----------+
+         * | VER | ID       | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
+         * +-----+----------+-----+-------+------+----------+----------+
+         * |  1  | Variable |  1  | X'00' |  1   | Variable |    2     |
+         * +-----+----------+-----+-------+------+----------+----------+
+         *
+         * Where:
+         * o  VER protocol version: X'01'
+         * o  ID request id
+         * o  CMD
+         *    o  CONNECT X'01'
+         *    o  UDP ASSOCIATE X'03'
+         * o  RSV X'00'
+         * o  ATYP address type of following address
+         *    o  IP V4 address: X'01'
+         *    o  DOMAINNAME: X'03'
+         *    o  IP V6 address: X'04'
+         * o  DST.ADDR desired destination address
+         * o  DST.PORT desired destination port in network octet order
+         *
+         * In an address field (DST.ADDR, BND.ADDR), the ATYP field specifies
+         * the type of address contained within the field:
+         *
+         *        o  X'01'
+         *
+         * the address is a version-4 IP address, with a length of 4 octets
+         *
+         *        o  X'03'
+         *
+         * the address field contains a fully-qualified domain name.  The first
+         * octet of the address field contains the number of octets of name that
+         * follow, there is no terminating NUL octet.
+         *
+         *        o  X'04'
+         *
+         * the address is a version-6 IP address, with a length of 16 octets.
+         */
         final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(id);
         final ByteBuf buffer = accessCtx.alloc().buffer();
+        buffer.writeByte(VER_1);
         buffer.writeByte(idBytes.remaining());
         buffer.writeBytes(idBytes);
-        buffer.writeByte(VER_1_1);
         buffer.writeByte(CMD_CONNECT);
         buffer.writeByte(0);
 
@@ -302,21 +352,24 @@ public class WebSocketBackhaulTunnelServerEngine {
         /*-
          * The reply is a SOCKS5-like reply:
          *
-         * +----------+----+-----+-------+------+----------+----------+
-         * | ID       |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
-         * +----------+----+-----+-------+------+----------+----------+
-         * | Variable | 1  |  1  | X'00' |  1   | Variable |    2     |
-         * +----------+----+-----+-------+------+----------+----------+
+         * +----+----------+-----+-------+------+----------+----------+
+         * |VER | ID       | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
+         * +----+----------+-----+-------+------+----------+----------+
+         * | 1  | Variable |  1  | X'00' |  1   | Variable |    2     |
+         * +----+----------+-----+-------+------+----------+----------+
          */
         final ByteBuf in = message.content();
-        final String id = in.readCharSequence(in.readByte(), CharsetUtil.UTF_8).toString();
         final byte version = in.readByte();
+        Preconditions.checkState(VER_1 == version, "unsupported version: %s, (expected: %s)", version, VER_1);
+
+        final String id = in.readCharSequence(in.readByte(), CharsetUtil.UTF_8).toString();
         final byte status = in.readByte();
+        in.skipBytes(1);
 
         if (REPLY_SUCCESS != status) {
             final Connection connection = connections.get(id);
             if (null != connection) {
-                connection.backhaulPromise.tryFailure(new ConnectException("HOST_UNREACHABLE"));
+                connection.backhaulPromise.tryFailure(new ConnectException("host unreachable: " + status));
             }
         }
     }
@@ -326,15 +379,16 @@ public class WebSocketBackhaulTunnelServerEngine {
      *
      * @param id          the id of handshake request
      * @param backhaulCtx the backhaul channel
+     * @return true if handshake completed otherwise false
      */
-    public void finishHandshake(final String id, final ChannelHandlerContext backhaulCtx) {
+    public boolean finishHandshake(final String id, final ChannelHandlerContext backhaulCtx) {
         backhaulCtx.channel().config().setAutoRead(false);
 
         final Connection connection = null != id ? connections.get(id) : null;
         if (null == connection) {
             log.info("[{}] Pending handshake context not found", id);
-            backhaulCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-            return;
+            // backhaulCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            return false;
         }
 
         final Agent agent = connection.agent;
@@ -354,9 +408,11 @@ public class WebSocketBackhaulTunnelServerEngine {
                     }
                 }
             });
+            return true;
         } else {
             log.warn("[{}] Connection already established: {} -{}-> {}", id, stringify(accessCtx.channel().remoteAddress()), simplify(agent), connection.target);
-            backhaulCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            // backhaulCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            return false;
         }
     }
 

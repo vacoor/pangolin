@@ -17,6 +17,8 @@ import io.netty.channel.ChannelProgressivePromise;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoop;
 import io.netty.handler.codec.MessageToMessageCodec;
+import io.netty.handler.codec.base64.Base64;
+import io.netty.handler.codec.base64.Base64Dialect;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.EmptyHttpHeaders;
 import io.netty.handler.codec.http.FullHttpResponse;
@@ -38,13 +40,18 @@ import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
+import io.netty.util.CharsetUtil;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
 
@@ -63,7 +70,7 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
     private final int maxFramePayloadLength;
     private final boolean performMasking;
     private final boolean allowMaskMismatch;
-    private final String accessToken;
+    private final String accessKey;
 
     public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
                                  final String webSocketProxyServerProtocol) {
@@ -72,8 +79,8 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
 
     public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
                                  final String webSocketProxyServerProtocol,
-                                 final String accessToken) {
-        this(webSocketProxyServerEndpoint, WebSocketVersion.V13, webSocketProxyServerProtocol, true, 65536, true, true, accessToken);
+                                 final String accessKey) {
+        this(webSocketProxyServerEndpoint, WebSocketVersion.V13, webSocketProxyServerProtocol, true, 65536, true, true, accessKey);
     }
 
     public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
@@ -81,9 +88,9 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
                                  final String webSocketProxyServerProtocol,
                                  final boolean allowExtensions, final int maxFramePayloadLength,
                                  final boolean performMasking, final boolean allowMaskMismatch,
-                                 final String accessToken) {
+                                 final String accessKey) {
         this(webSocketProxyServerEndpoint, webSocketVersion, webSocketProxyServerProtocol,
-                EmptyHttpHeaders.INSTANCE, allowExtensions, maxFramePayloadLength, performMasking, allowMaskMismatch, accessToken);
+                EmptyHttpHeaders.INSTANCE, allowExtensions, maxFramePayloadLength, performMasking, allowMaskMismatch, accessKey);
     }
 
     public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
@@ -91,7 +98,7 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
                                  final String webSocketProxyServerProtocol,
                                  final HttpHeaders customHandshakeHttpHeaders,
                                  final boolean allowExtensions, final int maxFramePayloadLength,
-                                 final boolean performMasking, final boolean allowMaskMismatch, final String accessToken) {
+                                 final boolean performMasking, final boolean allowMaskMismatch, final String accessKey) {
         super(SocketUtils.toSocketAddress(webSocketProxyServerEndpoint.getHost(), webSocketProxyServerEndpoint.getPort()));
         this.webSocketProxyServerEndpoint = webSocketProxyServerEndpoint;
         this.webSocketVersion = webSocketVersion;
@@ -101,7 +108,7 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
         this.maxFramePayloadLength = maxFramePayloadLength;
         this.performMasking = performMasking;
         this.allowMaskMismatch = allowMaskMismatch;
-        this.accessToken = accessToken;
+        this.accessKey = accessKey;
     }
 
     @Override
@@ -137,20 +144,20 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
     @Override
     protected ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise handshakePromise) throws Exception {
         final InetSocketAddress address = destinationAddress();
+        final String accessToken = createAccessTokenNew(ctx.alloc(), address);
 
         final Map<String, String> handshakeUrlParams = Maps.newHashMap();
         final DefaultHttpHeaders handshakeHeaders = new DefaultHttpHeaders();
 
-        handshakeUrlParams.put("target", "tcp://" + address.getHostString() + ":" + address.getPort());
+        // keeping legacy.
+        // handshakeUrlParams.put("target", address.getHostString() + ":" + address.getPort());
 
         handshakeHeaders.add(customHandshakeHttpHeaders);
-        handshakeHeaders.set("X-TARGET-ADDRESS", address.getHostString());
-        handshakeHeaders.setInt("X-TARGET-PORT", address.getPort());
+//        handshakeHeaders.set("X-TARGET-ADDRESS", address.getHostString());
+//        handshakeHeaders.setInt("X-TARGET-PORT", address.getPort());
 
-        if (null != accessToken && !accessToken.isEmpty()) {
-            handshakeUrlParams.put("access_token", accessToken);
-            handshakeHeaders.add("Authorization", "Bearer " + accessToken);
-        }
+        handshakeUrlParams.put("access_token", accessToken);
+        handshakeHeaders.add("Authorization", "Bearer " + accessToken);
 
         final URI handshakeUri = createUri(webSocketProxyServerEndpoint, handshakeUrlParams);
 
@@ -168,6 +175,36 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
         });
         ctx.channel().attr(HANDSHAKER_ATTR_KEY).set(handshaker);
         return handshakePromise;
+    }
+
+    private String createAccessTokenNew(final ByteBufAllocator alloc, final InetSocketAddress target) {
+        final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(accessKey);
+        final ByteBuf buffer = alloc.buffer();
+        buffer.writeByte(0x01);
+        buffer.writeByte(idBytes.remaining());
+        buffer.writeBytes(idBytes);
+        buffer.writeByte(0x01);
+        buffer.writeByte(0);
+
+        if (target.isUnresolved()) {
+            final String hostname = target.getHostString();
+            final byte[] bytes = hostname.getBytes(CharsetUtil.UTF_8);
+            buffer.writeByte(0x03);
+            buffer.writeByte(bytes.length);
+            buffer.writeBytes(bytes);
+        } else {
+            final InetAddress address = target.getAddress();
+            if (address instanceof Inet4Address) {
+                buffer.writeByte(0x01);
+            } else if (address instanceof Inet6Address) {
+                buffer.writeByte(0x04);
+            } else {
+                throw new UnsupportedOperationException(address.toString());
+            }
+            buffer.writeBytes(address.getAddress());
+        }
+        buffer.writeShort(target.getPort());
+        return Base64.encode(buffer, Base64Dialect.URL_SAFE).toString(CharsetUtil.UTF_8);
     }
 
     @Override
