@@ -24,8 +24,9 @@ public class TcpInboundRedirectHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelInactive(final ChannelHandlerContext inCtx) throws Exception {
+        log.debug("[tun@tcp {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
+
         if (outCtx.channel().isActive()) {
-            log.debug("[tun@tcp {} => {}] Connection closed", stringify(inCtx), stringify(outCtx));
             outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }
@@ -41,8 +42,8 @@ public class TcpInboundRedirectHandler extends ChannelInboundHandlerAdapter {
             outCtx.writeAndFlush(msg);
         } else {
             ReferenceCountUtil.release(msg);
-            log.warn("[tun@tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
-            outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            log.warn("[tun@tcp {} => {}] Connection lost", stringify(inCtx), stringify(outCtx));
+            inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }
 
@@ -53,8 +54,12 @@ public class TcpInboundRedirectHandler extends ChannelInboundHandlerAdapter {
         }
         log.warn("[tun@tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage());
 
-        inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-        outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        if (inCtx.channel().isActive()) {
+            inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        }
+        if (outCtx.channel().isActive()) {
+            outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        }
     }
 
     private String stringify(final ChannelHandlerContext ctx) {

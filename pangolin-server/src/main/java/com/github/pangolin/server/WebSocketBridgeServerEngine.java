@@ -168,8 +168,8 @@ public class WebSocketBridgeServerEngine {
         }
 
         final String id = accessCtx.channel().id().toString();
-        final SocketAddress accessAddr = accessCtx.channel().remoteAddress();
-        final Connection connection = new Connection(id, agent, target, accessCtx, handshakePromise);
+        final SocketAddress source = accessCtx.channel().remoteAddress();
+        final Connection connection = new Connection(id, agent, source, target, accessCtx, handshakePromise);
         if (null != connections.putIfAbsent(id, connection)) {
             handshakePromise.tryFailure(new ConnectException(String.format("The access context with '%s' is already in use", id)));
             return handshakePromise;
@@ -178,30 +178,6 @@ public class WebSocketBridgeServerEngine {
         log.info("[{}] Initiating handshake with {} for {}", id, simplify(agent), target);
 
         accessCtx.channel().config().setAutoRead(false);
-        accessCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture future) throws Exception {
-                try {
-                    log.info("[{}] Connection closed: {} -> {}", id, stringify(accessAddr), simplify(agent));
-
-                    if (!handshakePromise.isDone()) {
-                        handshakePromise.tryFailure(new IOException("Connection closed"));
-                    } else if (handshakePromise.isSuccess()) {
-                        /*-
-                         * Close the backhaul connection upon access connection closed.
-                         *
-                         * @see #finishHandshake
-                         */
-                        final Channel backhaul = handshakePromise.getNow().channel();
-                        if (backhaul.isActive()) {
-                            backhaul.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                        }
-                    }
-                } finally {
-                    connections.remove(id, connection);
-                }
-            }
-        });
 
         /*-
          * Handshake timeout.
@@ -226,6 +202,56 @@ public class WebSocketBridgeServerEngine {
                 // clear handshake timeout
                 if (!handshakeTimeoutFuture.isDone()) {
                     handshakeTimeoutFuture.cancel(false);
+                }
+                if (!future.isSuccess()) {
+                    log.warn("[{}] Handshake failed width {} for {}: {}", id, simplify(agent), target, future.cause().getMessage());
+                    return;
+                }
+
+                final ChannelHandlerContext backhaulCtx = future.getNow();
+                backhaulCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(final ChannelFuture future) throws Exception {
+                        /*-
+                         * Close the access connection upon backhaul connection closed.
+                         */
+                        if (accessCtx.channel().isActive()) {
+                            log.info("[{}] Connection closed by agent: {} -> {}", id, simplify(agent), connection.target);
+
+                            accessCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                        } else {
+                            log.info("[{}] Connection closed: {} -> {}", id, simplify(agent), connection.target);
+                        }
+                    }
+                });
+            }
+        });
+
+        accessCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture future) throws Exception {
+                try {
+                    if (!handshakePromise.isDone()) {
+                        log.warn("[{}] Handshake aborted by client: {} -> {}", id, stringify(source), simplify(agent));
+
+                        handshakePromise.tryFailure(new IOException("Connection closed"));
+                    } else if (handshakePromise.isSuccess()) {
+                        /*-
+                         * Close the backhaul connection upon access connection closed.
+                         *
+                         * @see #finishHandshake
+                         */
+                        final Channel backhaul = handshakePromise.getNow().channel();
+                        if (backhaul.isActive()) {
+                            log.info("[{}] Connection closed by client: {} -> {}", id, stringify(source), simplify(agent));
+
+                            backhaul.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                        } else {
+                            log.info("[{}] Connection closed: {} -> {}", id, stringify(source), simplify(agent));
+                        }
+                    }
+                } finally {
+                    connections.remove(id, connection);
                 }
             }
         });
@@ -268,7 +294,7 @@ public class WebSocketBridgeServerEngine {
         if ("1.0".equals(agent.version)) {
             final String command = id + "->" + "tcp://" + target.getHostString() + ":" + target.getPort();
 
-            log.info("[{}] Sending {} handshake to {} for {}", id, command, simplify(agent), target);
+            log.info("[{}] Sending {} handshake to {}", id, command, simplify(agent));
 
             agent.bus.writeAndFlush(new TextWebSocketFrame(command));
             return;
@@ -344,7 +370,7 @@ public class WebSocketBridgeServerEngine {
 
         if (log.isInfoEnabled()) {
             final String hex = ByteBufUtil.hexDump(buffer);
-            log.info("[{}] Sending {} handshake to {} for {}", id, hex, simplify(agent), target);
+            log.info("[{}] Sending {} handshake to {}", id, hex, simplify(agent));
         }
 
         agent.bus.writeAndFlush(new BinaryWebSocketFrame(buffer));
@@ -362,7 +388,7 @@ public class WebSocketBridgeServerEngine {
          */
         final ByteBuf in = message.content();
         final byte version = in.readByte();
-        Preconditions.checkState(VER_1 == version, "unsupported version: %s, (expected: %s)", version, VER_1);
+        Preconditions.checkState(VER_1 == version, "Unsupported version: %s, (expected: %s)", version, VER_1);
 
         final String id = in.readCharSequence(in.readByte(), CharsetUtil.UTF_8).toString();
         final byte status = in.readByte();
@@ -371,7 +397,7 @@ public class WebSocketBridgeServerEngine {
         if (REPLY_SUCCESS != status) {
             final Connection connection = connections.get(id);
             if (null != connection) {
-                connection.handshakePromise.tryFailure(new ConnectException("host unreachable: " + status));
+                connection.handshakePromise.tryFailure(new ConnectException("Host unreachable: " + status));
             }
         }
     }
@@ -398,19 +424,6 @@ public class WebSocketBridgeServerEngine {
         final SocketAddress accessAddr = accessCtx.channel().remoteAddress();
         if (!connection.handshakePromise.isDone() && connection.handshakePromise.trySuccess(backhaulCtx)) {
             log.info("[{}] Handshake completed: {} -{}-> {}", id, stringify(accessAddr), simplify(agent), connection.target);
-
-            backhaulCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(final ChannelFuture future) throws Exception {
-                    /*-
-                     * Close the access connection upon backhaul connection closed.
-                     */
-                    log.info("[{}] Connection closed: {} -> {}", id, simplify(agent), connection.target);
-                    if (accessCtx.channel().isActive()) {
-                        accessCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-                    }
-                }
-            });
             return true;
         } else {
             log.warn("[{}] Connection already established: {} -{}-> {}", id, stringify(accessAddr), simplify(agent), connection.target);
@@ -446,11 +459,13 @@ public class WebSocketBridgeServerEngine {
         private final ChannelHandlerContext bus;
     }
 
+    @Getter
     @AllArgsConstructor
     public class Connection {
         private final String id;
         private final Agent agent;
-        private final InetSocketAddress target;
+        private final SocketAddress source;
+        private final SocketAddress target;
         private final ChannelHandlerContext accessCtx;
         private final Promise<ChannelHandlerContext> handshakePromise;
     }

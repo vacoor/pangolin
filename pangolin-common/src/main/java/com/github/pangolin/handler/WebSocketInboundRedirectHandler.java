@@ -1,15 +1,13 @@
 package com.github.pangolin.handler;
 
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelPipeline;
+import io.netty.channel.*;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.http.websocketx.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -38,8 +36,9 @@ public class WebSocketInboundRedirectHandler extends ChannelInboundHandlerAdapte
 
     @Override
     public void channelInactive(final ChannelHandlerContext inCtx) {
+        log.debug("[tun@ws {}(!) => {}] Connection closed", stringify(inCtx), stringify(outCtx));
+
         if (outCtx.channel().isActive()) {
-            log.debug("[tun@ws {}(!) => {}] Connection closed", stringify(inCtx), stringify(outCtx));
             outCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.NORMAL_CLOSURE)).addListener(ChannelFutureListener.CLOSE);
         }
     }
@@ -77,19 +76,22 @@ public class WebSocketInboundRedirectHandler extends ChannelInboundHandlerAdapte
             }
         } else {
             ReferenceCountUtil.release(msg);
-            log.warn("[tun@ws {} => {}(!)] Output has been closed, input will be closed", stringify(inCtx), stringify(outCtx));
+            log.warn("[tun@ws {} => {}(!)] Connection lost", stringify(inCtx), stringify(outCtx));
+
             inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.NORMAL_CLOSURE)).addListener(ChannelFutureListener.CLOSE);
         }
     }
 
     private void closeGracefully(final CloseWebSocketFrame c, final ChannelHandlerContext inCtx, final ChannelHandlerContext outCtx) {
-        log.info("[tun@ws {}(!) => {}] Connection closed by {}/{}", stringify(inCtx), stringify(outCtx), c.statusCode(), c.reasonText());
+        log.info("[tun@ws {}(!) => {}] Connection closed by peer: {}({})", stringify(inCtx), stringify(outCtx), c.reasonText(), c.statusCode());
         if (outCtx.channel().isActive()) {
             outCtx.writeAndFlush(c.retain()).addListener(ChannelFutureListener.CLOSE);
         } else {
             c.release();
         }
-        inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        if (inCtx.channel().isActive()) {
+            inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        }
     }
 
     @Override
@@ -99,11 +101,16 @@ public class WebSocketInboundRedirectHandler extends ChannelInboundHandlerAdapte
         }
         log.warn("[tun@ws {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx));
 
-        inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
-        outCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
+        if (inCtx.channel().isActive()) {
+            inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
+        }
+        if (outCtx.channel().isActive()) {
+            outCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
+        }
     }
 
     private static String stringify(final ChannelHandlerContext ctx) {
-        return ctx.channel().remoteAddress().toString();
+        final SocketAddress ra = ctx.channel().remoteAddress();
+        return null != ra ? ra.toString() : "?";
     }
 }

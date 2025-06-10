@@ -1,6 +1,6 @@
 package com.github.pangolin.agent;
 
-import com.github.pangolin.util.Channels2;
+import com.github.pangolin.agent.util.Channels2;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;

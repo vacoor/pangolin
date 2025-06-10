@@ -49,7 +49,8 @@ public class WebSocketBridgeServer extends NettyServer {
      * @param endpointPath 接入点路径
      * @param useSsl       是否使用 SSL
      */
-    public WebSocketBridgeServer(final int listenPort, final String endpointPath, final boolean useSsl) {
+    public WebSocketBridgeServer(final int listenPort,
+                                 final String endpointPath, final boolean useSsl) {
         this(null, listenPort, endpointPath, useSsl);
     }
 
@@ -61,7 +62,8 @@ public class WebSocketBridgeServer extends NettyServer {
      * @param endpointPath 接入点路径
      * @param useSsl       是否使用 SSL
      */
-    public WebSocketBridgeServer(final String listenHost, final int listenPort, final String endpointPath, final boolean useSsl) {
+    public WebSocketBridgeServer(final String listenHost, final int listenPort,
+                                 final String endpointPath, final boolean useSsl) {
         super(listenHost, listenPort);
         this.endpointPath = endpointPath;
         this.useSsl = useSsl;

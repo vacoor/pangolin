@@ -4,7 +4,7 @@ import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.util.Channels;
-import com.github.pangolin.util.Channels2;
+import com.github.pangolin.agent.util.Channels2;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;

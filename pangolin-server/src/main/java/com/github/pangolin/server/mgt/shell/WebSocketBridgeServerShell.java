@@ -12,11 +12,7 @@ import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -104,6 +100,10 @@ public class WebSocketBridgeServerShell {
             doExecuteForwardCommand(args, out);
             return;
         }
+        if ("connection".equals(command)) {
+            doExecuteConnectionCommand(args, out);
+            return;
+        }
         if ("exit".equals(command) || "quit".equals(command)) {
             started.set(false);
             out.println("Bye");
@@ -165,12 +165,16 @@ public class WebSocketBridgeServerShell {
         }
 
         if ("add".equals(safeGet(args, 0))) {
-            final String localPortStr = safeGet(args, 1);
-            final String agentKey = safeGet(args, 2);
-            final String destination = safeGet(args, 3);
-            if (null != localPortStr && null != agentKey && null != destination) {
+            final String rule = safeGet(args, 1);
+            final String[] segments = null != rule ? rule.split(":") : null;
+            if (null != segments && segments.length == 4) {
+                final String localPortStr = segments[0];
+                final String agentKey = segments[1];
+                final String remoteAddr = segments[2];
+                final String remotePortStr = segments[3];
                 final int localPort = Integer.parseInt(localPortStr);
-                addForwarding(localPort, agentKey, destination);
+                final int remotePort = Integer.parseInt(remotePortStr);
+                addForwarding(localPort, agentKey, remoteAddr, remotePort);
                 out.println("OK");
                 return;
             }
@@ -188,10 +192,49 @@ public class WebSocketBridgeServerShell {
 
         out.println("Usage: forward COMMAND [OPTION]");
         out.println("  list                                  List information about forward rule");
-        out.println("  add    L_PORT AGENT R_HOST:R_PORT     Add the forward rule, mapping local L_PORT to remote host R_HOST and port R_PORT by AGENT");
-        out.println("  remove L_PORT                         Remove the forward rule");
-        out.println("  kill   LINK_ID                        Kill the forward link");
+        out.println("  add    local_port:agent_key:remote_host:remote_port\r\n" +
+                "         Add the forward rule, mapping local L_PORT to remote host R_HOST and port R_PORT by AGENT");
+        out.println("  remove local_port                     Remove the forward rule");
         out.println("  alias                                 List alias for forward target hostname");
+        out.println();
+    }
+
+    private void doExecuteConnectionCommand(final List<String> args, final ConsoleReader out) throws IOException {
+        if ("list".equals(safeGet(args, 0))) {
+            final Collection<WebSocketBridgeServerEngine.Connection> connections = webSocketBridgeServerEngine.getConnections();
+            final String[][] table = new String[connections.size() + 1][];
+            int i = 0;
+            table[i++] = new String[]{"ID", "CONNECTION", "STATE"};
+            for (final WebSocketBridgeServerEngine.Connection conn : connections) {
+                final WebSocketBridgeServerEngine.Agent a = conn.getAgent();
+                final String desc = conn.getSource() + " -" + a.getName() + "(" + a.getExtranet() + "/" + a.getIntranet() + ")" + "-> " + conn.getTarget();
+                table[i++] = new String[]{conn.getId(), desc, conn.getHandshakePromise().isSuccess() ? "ESTABLISHED" : "HANDSHAKING"};
+            }
+            printTable(table, out);
+            return;
+        }
+
+        if ("kill".equals(safeGet(args, 0)) && null != safeGet(args, 1)) {
+            final List<String[]> table = Lists.newArrayList();
+            table.add(new String[]{"CONNECTION", "RESULT"});
+            for (final String connectionId : args.subList(1, args.size())) {
+                try {
+                    if (webSocketBridgeServerEngine.kill(connectionId)) {
+                        table.add(new String[]{connectionId, "Killed"});
+                    } else {
+                        table.add(new String[]{connectionId, "Not found"});
+                    }
+                } catch (final Exception e) {
+                    table.add(new String[]{connectionId, "Error: " + e.getMessage()});
+                }
+            }
+            printTable(table.toArray(new String[table.size()][]), out);
+            return;
+        }
+
+        out.println("Usage: connection COMMAND [args..]");
+        out.println("  list                 List information about connections");
+        out.println("  kill connection_id   Kill the connection");
         out.println();
     }
 
@@ -217,14 +260,9 @@ public class WebSocketBridgeServerShell {
         return forwarder.getForwardings();
     }
 
-    private void addForwarding(final int port, final String agentKey, final String destination) throws InterruptedException {
-        final String[] segments = destination.split(":");
-        if (2 == segments.length) {
-            final int rport = Integer.parseInt(segments[1]);
-            forwarder.addForwarding(port, agentKey, InetSocketAddress.createUnresolved(segments[0], rport));
-            return;
-        }
-        throw new IllegalArgumentException(String.format("Bad local forwarding specification: '%s'", destination));
+    private void addForwarding(final int localPort, final String agentKey,
+                               final String remoteAddr, final int remotePort) throws InterruptedException {
+        forwarder.addForwarding(localPort, agentKey, InetSocketAddress.createUnresolved(remoteAddr, remotePort));
     }
 
     private void removeForwarding(final int port) {
@@ -298,7 +336,8 @@ public class WebSocketBridgeServerShell {
         final ConsoleReader console = ConsoleReaderFactory.newConsoleReader(
                 new FileInputStream(FileDescriptor.in), System.out,
                 new UnsupportedTerminal(false, false),
-                () -> webSocketBridgeServerEngine.getAgents().stream().map(WebSocketBridgeServerEngine.Agent::getName).collect(Collectors.toSet())
+                () -> webSocketBridgeServerEngine.getAgents().stream().map(WebSocketBridgeServerEngine.Agent::getName).collect(Collectors.toSet()),
+                () -> webSocketBridgeServerEngine.getConnections().stream().map(WebSocketBridgeServerEngine.Connection::getId).collect(Collectors.toSet())
         );
         WebSocketBridgeServerShell.create(console, true, webSocketBridgeServerEngine, forwarder).start();
     }

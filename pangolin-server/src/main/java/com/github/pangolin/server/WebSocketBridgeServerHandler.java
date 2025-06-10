@@ -9,6 +9,7 @@ import com.google.common.base.Preconditions;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -23,10 +24,7 @@ import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.URI;
-import java.net.UnknownHostException;
+import java.net.*;
 
 /**
  *
@@ -167,7 +165,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
      */
     @Override
     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-        log.error("Connection abort: {}", cause.getMessage(), cause);
+        log.error("Connection aborted: {}", cause.getMessage(), cause);
         ctx.writeAndFlush(new CloseWebSocketFrame(
                 WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage()
         )).addListener(ChannelFutureListener.CLOSE);
@@ -252,7 +250,9 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
      */
     private void handshake0(final ChannelHandlerContext accessCtx,
                             final String agentKey, final InetSocketAddress target, final boolean downgrade) {
-        log.info("[{}] Establishing WebSocket connection to {} via {}", accessCtx.channel().id(), target, agentKey);
+        final String id = accessCtx.channel().id().toString();
+        final SocketAddress source = accessCtx.channel().remoteAddress();
+        log.info("[{}] Establishing WebSocket connection from {} to {} via {}", id, source, target, agentKey);
 
         accessCtx.channel().config().setAutoRead(false);
         webSocketBridgeServerEngine.handshake(
@@ -263,8 +263,18 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                 if (backhaulFuture.isSuccess()) {
                     final ChannelHandlerContext backhaulCtx = backhaulFuture.getNow();
                     backhaulCtx.channel().config().setAutoRead(false);
+                    backhaulCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(final ChannelFuture future) throws Exception {
+                            if (accessCtx.channel().isActive()) {
+                                log.info("[{}] WebSocket connection closed by agent: from {} to {} via {}", id, source, target, agentKey);
+                            } else {
+                                log.info("[{}] WebSocket connection closed by client: from {} to {} via {}", id, source, target, agentKey);
+                            }
+                        }
+                    });
 
-                    log.info("[{}] WebSocket connection established to {} via {}", accessCtx.channel().id(), target, agentKey);
+                    log.info("[{}] WebSocket connection established from {} to {} via {}", id, source, target, agentKey);
 
                     if (!downgrade) {
                         /*-
@@ -298,7 +308,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                 } else {
                     final Throwable cause = backhaulFuture.cause();
 
-                    log.warn("[{}] WebSocket connection to {} via {} failed: {}", accessCtx.channel().id(), target, agentKey, cause.getMessage());
+                    log.warn("[{}] WebSocket connection from {} to {} via {} failed: {}", id, source, target, agentKey, cause.getMessage());
 
                     accessCtx.writeAndFlush(
                             new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, cause.getMessage())

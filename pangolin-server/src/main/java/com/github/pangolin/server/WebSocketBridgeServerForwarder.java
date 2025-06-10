@@ -49,7 +49,9 @@ public class WebSocketBridgeServerForwarder {
                 ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
                     @Override
                     public void channelActive(final ChannelHandlerContext accessCtx) throws Exception {
-                        log.info("[{}] Establishing Connection to {} via {}", accessCtx.channel().id(), target, agentKey);
+                        final String id = accessCtx.channel().id().toString();
+                        final SocketAddress source = accessCtx.channel().remoteAddress();
+                        log.info("[{}] Establishing Connection from {} to {} via {}", id, source, target, agentKey);
 
                         engine.handshake(
                                 accessCtx, agentKey, target, accessCtx.executor().newPromise()
@@ -59,8 +61,18 @@ public class WebSocketBridgeServerForwarder {
                                 if (future.isSuccess()) {
                                     final ChannelHandlerContext backhaulCtx = future.getNow();
                                     backhaulCtx.channel().config().setAutoRead(false);
+                                    backhaulCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
+                                        @Override
+                                        public void operationComplete(final ChannelFuture future) throws Exception {
+                                            if (accessCtx.channel().isActive()) {
+                                                log.info("[{}] Connection closed by agent: from {} to {} via {}", id, source, target, agentKey);
+                                            } else {
+                                                log.info("[{}] Connection closed by client: from {} to {} via {}", id, source, target, agentKey);
+                                            }
+                                        }
+                                    });
 
-                                    log.info("[{}] Connection established to {} via {}", accessCtx.channel().id(), target, agentKey);
+                                    log.info("[{}] Connection established from {} to {} via {}", id, source, target, agentKey);
 
                                     /*-
                                      * client <--socket--> server <--ws--> agent
@@ -72,7 +84,7 @@ public class WebSocketBridgeServerForwarder {
                                     backhaulCtx.channel().config().setAutoRead(true);
                                 } else {
                                     final Throwable cause = future.cause();
-                                    log.warn("[{}] Connection to {} via {} failed: {}", accessCtx.channel().id(), target, agentKey, cause.getMessage());
+                                    log.warn("[{}] Connection from {} to {} via {} failed: {}", id, source, target, agentKey, cause.getMessage());
 
                                     accessCtx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                                 }
@@ -87,6 +99,7 @@ public class WebSocketBridgeServerForwarder {
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
                     log.info("Local connections to {} forwarded to remote address {} via {}", localAddr, target, agentKey);
+
                     final Forwarding forwarding = new Forwarding(localAddr, agentKey, target, future.channel());
                     registeredForwardingMap.put(localAddr, forwarding);
                 }
@@ -107,7 +120,8 @@ public class WebSocketBridgeServerForwarder {
     public boolean removeForwarding(final SocketAddress localAddr) {
         final Forwarding forwarding = registeredForwardingMap.remove(localAddr);
         if (null != forwarding) {
-            log.info("Local forwarding '{}' removed", localAddr);
+            log.info("Closed local forwarding: {} to {} via {}", localAddr, forwarding.remoteAddr, forwarding.agentKey);
+
             forwarding.boundChannel.close();
         }
         return null != forwarding;

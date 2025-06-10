@@ -2,13 +2,7 @@ package com.github.pangolin.server.mgt.shell;
 
 import jline.Terminal;
 import jline.console.ConsoleReader;
-import jline.console.completer.AggregateCompleter;
-import jline.console.completer.ArgumentCompleter;
-import jline.console.completer.CandidateListCompletionHandler;
-import jline.console.completer.Completer;
-import jline.console.completer.CompletionHandler;
-import jline.console.completer.NullCompleter;
-import jline.console.completer.StringsCompleter;
+import jline.console.completer.*;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -28,15 +22,18 @@ public abstract class ConsoleReaderFactory {
     private ConsoleReaderFactory() {
     }
 
-    public static ConsoleReader newConsoleReader(final InputStream consoleIn, final OutputStream consoleOut,
-                                                 final Terminal terminal, final Supplier<Collection<String>> agentNames) throws IOException {
+    public static ConsoleReader newConsoleReader(final InputStream consoleIn,
+                                                 final OutputStream consoleOut,
+                                                 final Terminal terminal,
+                                                 final Supplier<Collection<String>> agentNames,
+                                                 final Supplier<Collection<String>> connectionIds) throws IOException {
         final ConsoleReader console = new ConsoleReader(consoleIn, consoleOut, terminal) {
             @Override
             public void println() throws IOException {
                 super.print("\r\n");
             }
         };
-        console.addCompleter(createCompleter(agentNames));
+        console.addCompleter(createCompleter(agentNames, connectionIds));
         console.setCompletionHandler(createCompletionHandler());
         return console;
     }
@@ -48,15 +45,16 @@ public abstract class ConsoleReaderFactory {
         return completion;
     }
 
-    private static Completer createCompleter(final Supplier<Collection<String>> agentNames) {
+    private static Completer createCompleter(final Supplier<Collection<String>> agentNames, final Supplier<Collection<String>> connectionIds) {
         return new AggregateCompleter(
                 new StringsCompleter("exit"),
                 new ArgumentCompleter(new StringsCompleter("agent"), new StringsCompleter("list"), NullCompleter.INSTANCE),
                 new ArgumentCompleter(new StringsCompleter("agent"), new StringsCompleter("remove"), new LazyStringsCompleter(agentNames), NullCompleter.INSTANCE),
                 new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("list"), NullCompleter.INSTANCE),
-                new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("add"), NullCompleter.INSTANCE, new LazyStringsCompleter(agentNames), NullCompleter.INSTANCE),
+                new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("add"), new LazyStringsCompleter(agentNames), NullCompleter.INSTANCE),
                 new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("remove"), NullCompleter.INSTANCE),
-                new ArgumentCompleter(new StringsCompleter("forward"), new StringsCompleter("kill"), NullCompleter.INSTANCE)
+                new ArgumentCompleter(new StringsCompleter("connection"), new StringsCompleter("list"), NullCompleter.INSTANCE),
+                new ArgumentCompleter(new StringsCompleter("connection"), new StringsCompleter("kill"), new LazyStringsCompleter(connectionIds), NullCompleter.INSTANCE)
         );
     }
 

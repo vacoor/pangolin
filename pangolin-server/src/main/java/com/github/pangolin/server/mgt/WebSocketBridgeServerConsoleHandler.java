@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 public class WebSocketBridgeServerConsoleHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
-    private static final Pattern RESIZE_PATTERN = Pattern.compile("^\\u001B\\[8;([0-9]+);([0-9])+t$");
+    private static final Pattern RESIZE_PATTERN = Pattern.compile("^\\u001B\\[8;([0-9]+);([0-9]+)t$");
 
     private final WebSocketBridgeServerEngine engine;
     private final WebSocketBridgeServerForwarder forwarder;
@@ -52,7 +52,8 @@ public class WebSocketBridgeServerConsoleHandler extends SimpleChannelInboundHan
                     new PipedInputStream(toConsoleIn),
                     new WebSocketBinaryOutput(ctx),
                     terminal,
-                    () -> engine.getAgents().stream().map(WebSocketBridgeServerEngine.Agent::getId).collect(Collectors.toList())
+                    () -> engine.getAgents().stream().map(WebSocketBridgeServerEngine.Agent::getId).collect(Collectors.toSet()),
+                    () -> engine.getConnections().stream().map(WebSocketBridgeServerEngine.Connection::getId).collect(Collectors.toSet())
             );
 
             this.terminal = terminal;

@@ -24,8 +24,9 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
 
     @Override
     public void channelInactive(final ChannelHandlerContext inCtx) {
+        log.debug("[tun@ws/tcp {}(!) => {} Connection closed", stringify(inCtx), stringify(outCtx));
+
         if (outCtx.channel().isActive()) {
-            log.debug("[tun@ws/tcp {}(!) => {} Connection closed", stringify(inCtx), stringify(outCtx));
             outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
         }
     }
@@ -36,7 +37,7 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
             if (msg instanceof CloseWebSocketFrame) {
                 final CloseWebSocketFrame c = (CloseWebSocketFrame) msg;
 
-                log.info("[tun@ws/tcp {}(!) => {}] Connection closed by {}/{}", stringify(inCtx), stringify(outCtx), c.statusCode(), c.reasonText());
+                log.info("[tun@ws/tcp {}(!) => {}] Connection closed by peer: {}({})", stringify(inCtx), stringify(outCtx), c.reasonText(), c.statusCode());
 
                 ReferenceCountUtil.release(msg);
                 outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
@@ -44,6 +45,7 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
             } else if (msg instanceof PingWebSocketFrame) {
                 log.debug("[tun@ws/tcp {} => {}] Ping <==", stringify(inCtx), stringify(outCtx));
 
+                // ReferenceCountUtil.release(msg);
                 outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER);
                 inCtx.channel().writeAndFlush(new PongWebSocketFrame(((WebSocketFrame) msg).content()));
             } else if (msg instanceof PongWebSocketFrame) {
@@ -64,7 +66,7 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
             }
         } else {
             ReferenceCountUtil.release(msg);
-            log.warn("[tun@ws/tcp {} => {}] Connection lost: The Output closed the connection, the input will be closed", stringify(inCtx), stringify(outCtx));
+            log.warn("[tun@ws/tcp {} => {}] Connection lost", stringify(inCtx), stringify(outCtx));
             inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, "Connection lost")).addListener(ChannelFutureListener.CLOSE);
         }
     }
@@ -76,8 +78,12 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
         }
         log.warn("[tun@ws/tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx));
 
-        outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
-        inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
+        if (outCtx.channel().isActive()) {
+            outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        }
+        if (inCtx.channel().isActive()) {
+            inCtx.channel().writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
+        }
     }
 
     private String stringify(final ChannelHandlerContext ctx) {
