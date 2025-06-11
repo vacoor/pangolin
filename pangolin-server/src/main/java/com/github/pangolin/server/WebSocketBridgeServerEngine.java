@@ -61,6 +61,8 @@ public class WebSocketBridgeServerEngine {
     private static final byte REPLY_COMMAND_UNSUPPORTED = 0x07;
     private static final byte REPLY_ADDRESS_UNSUPPORTED = 0x08;
 
+    private static final long DEFAULT_HANDSHAKE_TIMEOUT_MILLIS = 10 * 1000;
+
     /**
      * Registered agents.
      */
@@ -74,7 +76,7 @@ public class WebSocketBridgeServerEngine {
     private final long handshakeTimeoutMs;
 
     public WebSocketBridgeServerEngine() {
-        this(10 * 1000);
+        this(DEFAULT_HANDSHAKE_TIMEOUT_MILLIS);
     }
 
     public WebSocketBridgeServerEngine(final long handshakeTimeoutMs) {
@@ -152,15 +154,15 @@ public class WebSocketBridgeServerEngine {
      * @param accessCtx        the access channel context
      * @param agentKey         the connection agent key
      * @param target           the connection target address
-     * @param timeout          the maximum time to wait
-     * @param unit             the time unit of the {@code timeout} argument
+     * @param handshakeTimeout the maximum time to wait
+     * @param unit             the time unit of the {@code handshakeTimeout} argument
      * @param handshakePromise the handshake promise
      * @return the handshake promise
      */
-    public Promise<ChannelHandlerContext> handshake(final ChannelHandlerContext accessCtx,
-                                                    final String agentKey, final InetSocketAddress target,
-                                                    final long timeout, final TimeUnit unit,
-                                                    final Promise<ChannelHandlerContext> handshakePromise) {
+    private Promise<ChannelHandlerContext> handshake(final ChannelHandlerContext accessCtx,
+                                                     final String agentKey, final InetSocketAddress target,
+                                                     final long handshakeTimeout, final TimeUnit unit,
+                                                     final Promise<ChannelHandlerContext> handshakePromise) {
         final Agent agent = this.choose(agentKey);
         if (null == agent) {
             handshakePromise.tryFailure(new ConnectException(String.format("The agent not found: '%s'", agentKey)));
@@ -180,28 +182,32 @@ public class WebSocketBridgeServerEngine {
         accessCtx.channel().config().setAutoRead(false);
 
         /*-
-         * Handshake timeout.
+         * Apply handshake timeout.
          */
-        final ScheduledFuture<?> handshakeTimeoutFuture = accessCtx.executor().schedule(new Runnable() {
-            @Override
-            public void run() {
-                if (!handshakePromise.isDone()) {
-                    final long timeoutMs = unit.toMillis(timeout);
-                    log.warn(
-                            "[{}] Handshake timeout ({}ms) with {} for {}",
-                            id, timeoutMs, simplify(agent), target
-                    );
-                    handshakePromise.tryFailure(new ConnectTimeoutException("Handshake timeout"));
+        ScheduledFuture<?> handshakeTimeoutFuture = null;
+        if (handshakeTimeout > 0) {
+            handshakeTimeoutFuture = accessCtx.executor().schedule(new Runnable() {
+                @Override
+                public void run() {
+                    if (!handshakePromise.isDone()) {
+                        final long timeoutMs = unit.toMillis(handshakeTimeout);
+                        log.warn(
+                                "[{}] Handshake timeout ({}ms) with {} for {}",
+                                id, timeoutMs, simplify(agent), target
+                        );
+                        handshakePromise.tryFailure(new ConnectTimeoutException("Handshake timeout"));
+                    }
                 }
-            }
-        }, timeout, unit);
+            }, handshakeTimeout, unit);
+        }
 
+        final ScheduledFuture<?> handshakeTimeoutFutureToUse = handshakeTimeoutFuture;
         handshakePromise.addListener(new GenericFutureListener<Future<ChannelHandlerContext>>() {
             @Override
             public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {
                 // clear handshake timeout
-                if (!handshakeTimeoutFuture.isDone()) {
-                    handshakeTimeoutFuture.cancel(false);
+                if (null != handshakeTimeoutFutureToUse && !handshakeTimeoutFutureToUse.isDone()) {
+                    handshakeTimeoutFutureToUse.cancel(false);
                 }
                 if (!future.isSuccess()) {
                     log.warn("[{}] Handshake failed width {} for {}: {}", id, simplify(agent), target, future.cause().getMessage());
@@ -256,7 +262,7 @@ public class WebSocketBridgeServerEngine {
             }
         });
 
-        handshake0(id, accessCtx, agent, target);
+        handshake0(id, accessCtx, agent, target, handshakePromise);
 
         return handshakePromise;
     }
@@ -290,13 +296,21 @@ public class WebSocketBridgeServerEngine {
      */
     private void handshake0(final String id,
                             final ChannelHandlerContext accessCtx,
-                            final Agent agent, final InetSocketAddress target) {
+                            final Agent agent, final InetSocketAddress target,
+                            final Promise<?> handshakePromise) {
         if ("1.0".equals(agent.version)) {
             final String command = id + "->" + "tcp://" + target.getHostString() + ":" + target.getPort();
 
             log.info("[{}] Sending {} handshake to {}", id, command, simplify(agent));
 
-            agent.bus.writeAndFlush(new TextWebSocketFrame(command));
+            agent.bus.writeAndFlush(new TextWebSocketFrame(command)).addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(final ChannelFuture future) throws Exception {
+                    if (!future.isSuccess()) {
+                        handshakePromise.tryFailure(future.cause());
+                    }
+                }
+            });
             return;
         }
 
@@ -373,7 +387,14 @@ public class WebSocketBridgeServerEngine {
             log.info("[{}] Sending {} handshake to {}", id, hex, simplify(agent));
         }
 
-        agent.bus.writeAndFlush(new BinaryWebSocketFrame(buffer));
+        agent.bus.writeAndFlush(new BinaryWebSocketFrame(buffer)).addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture future) throws Exception {
+                if (!future.isSuccess()) {
+                    handshakePromise.tryFailure(future.cause());
+                }
+            }
+        });
     }
 
     void agentResponded(final BinaryWebSocketFrame message, final ChannelHandlerContext agentCtx) {

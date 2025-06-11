@@ -15,61 +15,73 @@ import java.util.concurrent.TimeUnit;
  * 客户端代理处理器.
  */
 public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
-    private final SocketAddress proxyAddress;
 
+    private final SocketAddress proxyAddress;
     private volatile SocketAddress destinationAddress;
+
     private PendingWriteQueue pendingWrites;
     private boolean suppressChannelReadComplete;
-    private boolean flushedBeforeHandshake;
+    private boolean flushedPrematurely;
     private ChannelPromise handshakePromise;
 
     public AbstractProxyHandler(final SocketAddress proxyAddress) {
         this.proxyAddress = ObjectUtil.checkNotNull(proxyAddress, "proxyAddress");
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         handshakePromise = ctx.newPromise().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture f) throws Exception {
                 if (!f.isSuccess()) {
-                    setHandshakeFailure(ctx, f.cause());
+//                    setHandshakeFailure(ctx, f.cause());
                 }
             }
         });
+
         if (ctx.channel().isActive()) {
             startHandshakeProcessing(ctx);
         }
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void connect(final ChannelHandlerContext ctx, final SocketAddress remoteAddress, final SocketAddress localAddress, ChannelPromise promise) throws Exception {
         if (null != destinationAddress) {
             promise.setFailure(new ConnectionPendingException());
-        } else {
-            handshakePromise.addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(final ChannelFuture f) throws Exception {
-                    if (!f.isSuccess()) {
-                        promise.tryFailure(f.cause());
-                    } else {
-                        promise.trySuccess();
-                    }
-                }
-            });
-            destinationAddress = remoteAddress;
-
-            final ChannelPromise delegate = ctx.newPromise().addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(final ChannelFuture channelFuture) throws Exception {
-                    if (!channelFuture.isSuccess()) {
-                        handshakePromise.tryFailure(channelFuture.cause());
-                    }
-                }
-            });
-
-            ctx.connect(proxyAddress, localAddress, delegate);
+            return;
         }
+
+        destinationAddress = remoteAddress;
+        /*
+        handshakePromise.addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture f) throws Exception {
+                if (!f.isSuccess()) {
+                    promise.tryFailure(f.cause());
+                } else {
+                    promise.trySuccess();
+                }
+            }
+        });
+
+        final ChannelPromise delegate = ctx.newPromise().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(final ChannelFuture channelFuture) throws Exception {
+                if (!channelFuture.isSuccess()) {
+                    handshakePromise.tryFailure(channelFuture.cause());
+                }
+            }
+        });
+
+        ctx.connect(proxyAddress, localAddress, delegate);
+        */
+        ctx.connect(proxyAddress, localAddress, promise);
     }
 
     @Override
@@ -82,16 +94,18 @@ public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         if (!handshakePromise.isDone()) {
             setHandshakeFailure(ctx, new ClosedChannelException());
+        } else {
+            ctx.fireChannelInactive();
         }
-        ctx.fireChannelInactive();
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         if (!handshakePromise.isDone()) {
             setHandshakeFailure(ctx, cause);
+        } else {
+            ctx.fireExceptionCaught(cause);
         }
-        ctx.fireExceptionCaught(cause);
     }
 
     @Override
@@ -128,7 +142,7 @@ public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
     protected void setHandshakeSuccess(final ChannelHandlerContext ctx) throws Exception {
         if (!handshakePromise.isDone()) {
             writePendingWrites();
-            if (flushedBeforeHandshake) {
+            if (flushedPrematurely) {
                 ctx.flush();
             }
             handshakePromise.trySuccess();
@@ -174,7 +188,7 @@ public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
             writePendingWrites();
             ctx.flush();
         } else {
-            flushedBeforeHandshake = true;
+            flushedPrematurely = true;
         }
     }
 
