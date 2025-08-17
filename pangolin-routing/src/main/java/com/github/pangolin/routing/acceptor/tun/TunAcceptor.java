@@ -149,7 +149,7 @@ public class TunAcceptor implements Acceptor {
                     }
 
                     // TODO add route
-                     final InetAddress dst = SocketUtils.addressByName("10.188.71.3");
+                     final InetAddress dst = SocketUtils.addressByName("10.188.70.45");
                      final InetAddress gw = SocketUtils.addressByName("198.18.0.1");
                      NetworkRoutingTable.get().add(dst, (byte) 24, gw, adapter.name(), 0);
                 } else {

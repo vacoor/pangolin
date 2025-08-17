@@ -3,8 +3,10 @@ package com.github.pangolin.routing.context.spi;
 import com.github.pangolin.routing.context.InheritableRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.upstream.DirectUpstream;
+import com.github.pangolin.routing.upstream.Upstream;
 import com.google.common.base.Preconditions;
 import freework.net.Http;
+import freework.util.Throwables;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -15,10 +17,12 @@ import org.yaml.snakeyaml.introspector.BeanAccess;
 import org.yaml.snakeyaml.introspector.PropertySubstitute;
 import org.yaml.snakeyaml.representer.Representer;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
@@ -45,7 +49,8 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
 
         proxyDefinitions.stream()
                 .filter(d -> !"0.0.0.0".equals(d.getServer()))
-                .map(d -> apply(d.getName(), asServerUrl(d)))
+                .map(d -> applyQuiet(d.getName(), asServerUrl(d)))
+                .filter(Objects::nonNull)
                 .forEach(d -> context.addUpstream(d.name(), d));
 
         for (ProxyGroupDefinition group : proxyGroupDefinitions) {
@@ -70,6 +75,17 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
         return context;
     }
 
+    private Upstream applyQuiet(final String name, final String url) {
+        try {
+            return apply(name, url);
+        } catch (final IllegalStateException ex) {
+            if (Throwables.causedBy(ex, UnknownHostException.class)) {
+                log.warn("UnknownHost: {}", url, ex);
+                return null;
+            }
+            throw ex;
+        }
+    }
 
     private String asServerUrl(final ProxyDefinition definition) {
         final String cipher = definition.getCipher();
@@ -96,7 +112,9 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
             httpUrlConnection.setRequestProperty("User-Agent", "ClashforWindows/0.19.25");
             final int responseCode = httpUrlConnection.getResponseCode();
             Preconditions.checkState(HttpURLConnection.HTTP_OK == responseCode, "responseCode = %s", responseCode);
-            return load(httpUrlConnection.getInputStream());
+
+            final String responseBody = Http.getResponseBodyAsString(httpUrlConnection);
+            return load(new ByteArrayInputStream(responseBody.getBytes(StandardCharsets.UTF_8)));
         } finally {
             Http.close(httpUrlConnection);
             log.info("Load configuration from URL: '{}' completed", subscribeUrl);
@@ -148,4 +166,9 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
         private List<String> proxies;
     }
 
+    public static void main(String[] args) throws IOException {
+        String url = "https://api.eehk.net/api/v1/client/subscribe?token=7516167358ce5c1c313a9c30cc202ac4";
+        Configuration load = load(new URL(url));
+        System.out.println(load);
+    }
 }
