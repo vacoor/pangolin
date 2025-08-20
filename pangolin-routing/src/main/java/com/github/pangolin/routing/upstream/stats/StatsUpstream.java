@@ -14,6 +14,8 @@ public class StatsUpstream extends Server implements Upstream {
     private final Upstream delegate;
     private final LoadBalancerStats stats;
 
+    public volatile long avgResponseTime;
+
     public StatsUpstream(final Upstream delegate, final LoadBalancerStats stats) {
         super(delegate.name().replace(":", "："));
         this.delegate = delegate;
@@ -63,10 +65,17 @@ public class StatsUpstream extends Server implements Upstream {
 
             @Override
             public void connect(final ChannelHandlerContext ctx, final SocketAddress remoteAddress, final SocketAddress localAddress, final ChannelPromise promise) throws Exception {
+                final long s = System.currentTimeMillis();
                 promise.addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
                         if (!future.isSuccess()) {
+                            long elapsed = System.currentTimeMillis() - s;
+                            if (0 < avgResponseTime) {
+                                avgResponseTime = (long) (0.2 * elapsed + 0.8 * avgResponseTime);
+                            } else {
+                                avgResponseTime = elapsed;
+                            }
                             serverStats.incrementSuccessiveConnectionFailureCount();
                         } else {
                             serverStats.clearSuccessiveConnectionFailureCount();
@@ -107,6 +116,30 @@ public class StatsUpstream extends Server implements Upstream {
                 super.channelReadComplete(ctx);
                 serverStats.decrementActiveRequestsCount();
                 serverStats.noteResponseTime(System.nanoTime() - requestTime / 1000D);
+            }
+
+            private volatile long since;
+
+            @Override
+            public void write(final ChannelHandlerContext ctx, final Object msg, final ChannelPromise promise) throws Exception {
+                if (0 >= since) {
+                    since = System.currentTimeMillis();
+                }
+                super.write(ctx, msg, promise);
+            }
+
+            @Override
+            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+                if (0 < since) {
+                    long elapsed = System.currentTimeMillis() - since;
+                    since = -1;
+                    if (0 >= avgResponseTime) {
+                        avgResponseTime = elapsed;
+                    } else {
+                        avgResponseTime = (long) (0.2 * elapsed + 0.8 * avgResponseTime);
+                    }
+                }
+                super.channelRead(ctx, msg);
             }
 
             @Override

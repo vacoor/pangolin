@@ -6,7 +6,6 @@ import com.github.pangolin.routing.upstream.UpstreamCombiner;
 import com.github.pangolin.routing.upstream.UpstreamRegistry;
 import com.github.pangolin.routing.upstream.stats.StatsAware;
 import com.github.pangolin.routing.upstream.stats.StatsUpstream;
-import com.netflix.client.config.IClientConfig;
 import com.netflix.client.config.PropertyResolver;
 import com.netflix.client.config.ReloadableClientConfig;
 import com.netflix.loadbalancer.*;
@@ -16,13 +15,10 @@ import org.apache.hadoop.util.Lists;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 @Slf4j
@@ -77,11 +73,31 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
 
             @Override
             public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
-                final Upstream upstream = (Upstream) lb.chooseServer();
+                Upstream upstream = choose();
                 if (null != upstream) {
                     log.info("[SELECT] [{}]: [{}] => {}", name, upstream.name(), stringify(destination));
                 }
                 return null != upstream ? upstream.newSocketProxyHandler(destination) : null;
+            }
+
+            protected Upstream choose() {
+//                return (Upstream) lb.chooseServer();
+                List<StatsUpstream> collect = StreamSupport.stream(names.spliterator(), false)
+                        .map(n -> (StatsUpstream) registry.getUpstream(n))
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList());
+                final List<StatsUpstream> notInitialized = collect.stream().filter(s -> 0 >= s.avgResponseTime).collect(Collectors.toList());
+                if (!notInitialized.isEmpty()) {
+                    return notInitialized.get(ThreadLocalRandom.current().nextInt(notInitialized.size()));
+                }
+
+                return collect.stream()
+                        .min(new Comparator<StatsUpstream>() {
+                            @Override
+                            public int compare(final StatsUpstream o1, final StatsUpstream o2) {
+                                return Long.compare(o2.avgResponseTime, o1.avgResponseTime);
+                            }
+                        }).orElse(null);
             }
 
             @Override
