@@ -24,11 +24,7 @@ public interface RouteContext {
 
     void attr(final String key, final Object value);
 
-    SocketChannelFactory newSocketChannelFactory();
-
     SocketChannelFactory newSocketChannelFactory(final String upstream);
-
-    DatagramChannelFactory newDatagramChannelFactory();
 
     DatagramChannelFactory newDatagramChannelFactory(final String upstream);
 

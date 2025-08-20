@@ -4,8 +4,10 @@ import com.github.pangolin.routing.context.InheritableRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.upstream.DirectUpstream;
 import com.github.pangolin.routing.upstream.Upstream;
+import com.github.pangolin.routing.upstream.UpstreamFactory;
 import com.google.common.base.Preconditions;
 import freework.net.Http;
+import freework.util.StringUtils2;
 import freework.util.Throwables;
 import lombok.Getter;
 import lombok.Setter;
@@ -24,9 +26,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -39,6 +39,12 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
     }
 
     public RouteContext load(final URL url, final RouteContext parent) throws IOException {
+        final Map<String, String> params = Http.splitQuery(url.getQuery(), StandardCharsets.UTF_8.name());
+        final String excludeProxiesStr = params.get("exclude-proxies");
+        final List<String> excludeProxies = StringUtils2.hasText(excludeProxiesStr)
+                ? Arrays.asList(excludeProxiesStr.split("\\s*[,;]\\s*"))
+                : Collections.emptyList();
+
         final Configuration conf = load(url);
 
         final List<ProxyDefinition> proxyDefinitions = nvl(conf.getProxies(), Collections.emptyList());
@@ -49,12 +55,16 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
 
         proxyDefinitions.stream()
                 .filter(d -> !"0.0.0.0".equals(d.getServer()))
+                .filter(d -> !excludeProxies.contains(d.getName()))
                 .map(d -> applyQuiet(d.getName(), asServerUrl(d)))
                 .filter(Objects::nonNull)
                 .forEach(d -> context.addUpstream(d.name(), d));
 
         for (ProxyGroupDefinition group : proxyGroupDefinitions) {
-            List<String> proxiesInGroup = group.getProxies().stream()
+            if (excludeProxies.contains(group.getName())) {
+                continue;
+            }
+            final List<String> proxiesInGroup = group.getProxies().stream()
                     .map(context::canonicalName)
                     .collect(Collectors.toList());
 
@@ -166,9 +176,13 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
         private List<String> proxies;
     }
 
-    public static void main(String[] args) throws IOException {
-        String url = "https://api.eehk.net/api/v1/client/subscribe?token=7516167358ce5c1c313a9c30cc202ac4";
-        Configuration load = load(new URL(url));
-        System.out.println(load);
+    public static void main(String[] args) throws Exception {
+
+        String url = "https://api.eehk.net/api/v1/client/subscribe?token=7516167358ce5c1c313a9c30cc202ac4&exclude-proxies=%F0%9F%8F%B7%E5%AE%98%E7%BD%91%EF%BC%9Aeevpn.com,%F0%9F%8F%B7%E5%9B%BD%E5%86%85%E5%85%8D%E7%BF%BB%EF%BC%9A55jiasu.com,%F0%9F%8F%B7%E9%82%80%E8%AF%B7%E6%9C%8B%E5%8F%8B%E8%8E%B7%E5%BE%9720%25%E4%BD%A3%E9%87%91%E5%A5%96%E5%8A%B1";
+
+        ExternalRouteContextFactory factory = new ExternalRouteContextFactory();
+        factory.setUpstreamFactories(ServiceLoader.load(UpstreamFactory.class));
+        RouteContext routeContext = factory.create(new URL(url), null);
+        System.out.println(routeContext);
     }
 }

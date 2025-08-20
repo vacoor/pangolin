@@ -4,9 +4,7 @@ import com.github.pangolin.routing.upstream.Upstream;
 import com.netflix.loadbalancer.LoadBalancerStats;
 import com.netflix.loadbalancer.Server;
 import com.netflix.loadbalancer.ServerStats;
-import io.netty.channel.ChannelDuplexHandler;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.*;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -62,6 +60,21 @@ public class StatsUpstream extends Server implements Upstream {
         final ServerStats serverStats = stats.getSingleServerStat(this);
         return new ChannelDuplexHandler() {
             private volatile long requestTime;
+
+            @Override
+            public void connect(final ChannelHandlerContext ctx, final SocketAddress remoteAddress, final SocketAddress localAddress, final ChannelPromise promise) throws Exception {
+                promise.addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(final ChannelFuture future) throws Exception {
+                        if (!future.isSuccess()) {
+                            serverStats.incrementSuccessiveConnectionFailureCount();
+                        } else {
+                            serverStats.clearSuccessiveConnectionFailureCount();
+                        }
+                    }
+                });
+                super.connect(ctx, remoteAddress, localAddress, promise);
+            }
 
             @Override
             public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {

@@ -9,20 +9,10 @@ import com.github.pangolin.routing.upstream.stats.StatsUpstream;
 import com.netflix.client.config.IClientConfig;
 import com.netflix.client.config.PropertyResolver;
 import com.netflix.client.config.ReloadableClientConfig;
-import com.netflix.loadbalancer.DummyPing;
-import com.netflix.loadbalancer.IPing;
-import com.netflix.loadbalancer.IRule;
-import com.netflix.loadbalancer.LoadBalancerStats;
-import com.netflix.loadbalancer.PollingServerListUpdater;
-import com.netflix.loadbalancer.Server;
-import com.netflix.loadbalancer.ServerList;
-import com.netflix.loadbalancer.ServerListFilter;
-import com.netflix.loadbalancer.ServerListUpdater;
-import com.netflix.loadbalancer.WeightedResponseTimeRule;
-import com.netflix.loadbalancer.ZoneAffinityServerListFilter;
-import com.netflix.loadbalancer.ZoneAwareLoadBalancer;
+import com.netflix.loadbalancer.*;
 import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.hadoop.util.Lists;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -32,6 +22,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 @Slf4j
@@ -45,15 +36,32 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
 
     @Override
     public Upstream combine(final String name, final Iterable<String> names, final UpstreamRegistry registry) {
+        /*
         final IClientConfig config = new DefaultClientConfig();
         final IRule rule = new WeightedResponseTimeRule();
         final IPing ping = new DummyPing();
         final ServerList<? extends Server> serverList = new Servers(registry, names);
         final ServerListFilter<? extends Server> serverListFilter = new ZoneAffinityServerListFilter<>(config);
         final ServerListUpdater serverListUpdater = new PollingServerListUpdater(config);
-
         final ZoneAwareLoadBalancer<? extends Server> lb = new ZoneAwareLoadBalancer(config, rule, ping, serverList, serverListFilter, serverListUpdater);
         lb.setLoadBalancerStats(stats);
+        */
+
+        final IRule rule = new WeightedResponseTimeRule();
+        final IPing ping = new AbstractLoadBalancerPing() {
+            @Override
+            public boolean isAlive(final Server server) {
+                final ServerStats theStats = stats.getSingleServerStat(server);
+                return theStats.getSuccessiveConnectionFailureCount() < 3;
+            }
+        };
+        final BaseLoadBalancer lb = new BaseLoadBalancer("base", rule, stats, ping);
+        final List<Upstream> servers = StreamSupport.stream(names.spliterator(), false)
+                .map(registry::getUpstream)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        lb.setServersList(servers);
+
 
         return new AbstractUpstream(name) {
 
@@ -78,8 +86,9 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
 
             @Override
             public ChannelHandler[] newSocketProxyHandlers(final InetSocketAddress destination) {
-                return StreamSupport.stream(names.spliterator(), false)
-                        .map(registry::getUpstream)
+                final List<Server> allServers = lb.getAllServers();
+                return allServers.stream()
+                        .map(s -> (Upstream) s)
                         .filter(Objects::nonNull)
                         .map(upstream -> upstream.newSocketProxyHandlers(destination))
                         .flatMap(Arrays::stream)
@@ -113,22 +122,26 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
 
     private class Servers implements ServerList<StatsUpstream> {
         private final UpstreamRegistry registry;
-        private final Iterable<String> names;
+        private final List<String> allServers;
 
         private Servers(final UpstreamRegistry registry, final Iterable<String> names) {
             this.registry = registry;
-            this.names = names;
+            this.allServers = Lists.newArrayList(names);
         }
 
         @Override
         public List<StatsUpstream> getInitialListOfServers() {
-            return getUpdatedListOfServers();
+            return toUpStream(allServers);
+        }
+
+        private List<StatsUpstream> toUpStream(final Iterable<String> names) {
+            // FIXME 为什么为null
+            return StreamSupport.stream(names.spliterator(), false).map(name -> (StatsUpstream) registry.getUpstream(name)).filter(Objects::nonNull).collect(Collectors.toList());
         }
 
         @Override
         public List<StatsUpstream> getUpdatedListOfServers() {
-            // FIXME 为什么为null
-            return StreamSupport.stream(names.spliterator(), false).map(name -> (StatsUpstream) registry.getUpstream(name)).filter(Objects::nonNull).collect(Collectors.toList());
+            return toUpStream(allServers);
         }
     }
 

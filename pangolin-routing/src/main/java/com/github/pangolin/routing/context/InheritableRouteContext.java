@@ -148,18 +148,8 @@ public class InheritableRouteContext extends SimpleAliasRegistry implements Rout
     }
 
     @Override
-    public SocketChannelFactory newSocketChannelFactory() {
-        return newSocketChannelFactory(self);
-    }
-
-    @Override
     public SocketChannelFactory newSocketChannelFactory(final String upstream) {
         return newSocketChannelFactory(getUpstream(upstream));
-    }
-
-    @Override
-    public DatagramChannelFactory newDatagramChannelFactory() {
-        return newDatagramChannelFactory(self);
     }
 
     @Override
