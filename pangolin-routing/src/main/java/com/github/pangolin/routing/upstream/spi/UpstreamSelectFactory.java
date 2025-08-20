@@ -85,19 +85,20 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
                 List<StatsUpstream> collect = StreamSupport.stream(names.spliterator(), false)
                         .map(n -> (StatsUpstream) registry.getUpstream(n))
                         .filter(Objects::nonNull)
+                        .sorted(new Comparator<StatsUpstream>() {
+                            @Override
+                            public int compare(final StatsUpstream o1, final StatsUpstream o2) {
+                                return Long.compare(o2.avgResponseTime, o1.avgResponseTime);
+                            }
+                        })
                         .collect(Collectors.toList());
                 final List<StatsUpstream> notInitialized = collect.stream().filter(s -> 0 >= s.avgResponseTime).collect(Collectors.toList());
                 if (!notInitialized.isEmpty()) {
                     return notInitialized.get(ThreadLocalRandom.current().nextInt(notInitialized.size()));
                 }
 
-                return collect.stream()
-                        .min(new Comparator<StatsUpstream>() {
-                            @Override
-                            public int compare(final StatsUpstream o1, final StatsUpstream o2) {
-                                return Long.compare(o2.avgResponseTime, o1.avgResponseTime);
-                            }
-                        }).orElse(null);
+                int max = Math.min(collect.size(), 5);
+                return collect.get(ThreadLocalRandom.current().nextInt(max));
             }
 
             @Override
