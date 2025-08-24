@@ -8,8 +8,7 @@ import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -48,13 +47,55 @@ public final class DarwinDns {
     }
 
     /**
-     * Adds the network service dns addresses.
+     * Adds the network global dns addresses (when macOS >= 15.x).
      *
      * @param dns the dns addresses to add
      * @return true if add dns addresses is successful or unnecessary, otherwise false
      */
-    public static boolean addDns(final String[] dns) {
-        return addDns(dns, true);
+    public static boolean addGlobalDns(final String[] dns, final boolean cleanupOnShutdown) {
+        final String name = DarwinDns.class.getSimpleName();
+        final AtomicBoolean shutdownHolder = new AtomicBoolean();
+        final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR(name), null, null);
+        try {
+            if (!addDns(store, dns)) {
+                return false;
+            }
+
+            watchInBackground(name, new String[]{GLOBAL_IPV4_KEY}, new SCDynamicStoreCallBack() {
+                @Override
+                public void invoke(final SCDynamicStoreRef store, final CFArrayRef changedKeys, final Pointer info) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        return;
+                    }
+
+                    final Set<String> currentDns = new HashSet<>(getDns0(store));
+                    if (!currentDns.containsAll(Arrays.asList(dns))) {
+                        log.warn("• Network Refresh before DNS: {}", currentDns);
+                        if (addDns(store, dns)) {
+                            Collections.addAll(currentDns, dns);
+                            log.warn("• Network Refresh after DNS: {}", currentDns);
+                        }
+                    }
+                }
+            }).start();
+
+            if (cleanupOnShutdown) {
+                Runtime.getRuntime().addShutdownHook(cleaner(name, shutdownHolder, dns));
+            }
+            return true;
+        } finally {
+            CF.CFRelease(store);
+        }
+    }
+
+    /**
+     * Adds the network service dns addresses (when macOS < 15.x).
+     *
+     * @param dns the dns addresses to add
+     * @return true if add dns addresses is successful or unnecessary, otherwise false
+     */
+    public static boolean addPrimaryInterfaceDns(final String[] dns) {
+        return addPrimaryInterfaceDns(dns, true);
     }
 
     /**
@@ -63,7 +104,7 @@ public final class DarwinDns {
      * @param dns the dns addresses to add
      * @return true if add dns addresses is successful or unnecessary, otherwise false
      */
-    public static boolean addDns(final String[] dns, final boolean cleanupOnShutdown) {
+    public static boolean addPrimaryInterfaceDns(final String[] dns, final boolean cleanupOnShutdown) {
         final String name = DarwinDns.class.getSimpleName();
         final AtomicBoolean shutdownHolder = new AtomicBoolean();
         final AtomicReference<String> serviceIdHolder = new AtomicReference<>();
@@ -123,6 +164,29 @@ public final class DarwinDns {
     }
 
     private static Thread cleaner(final String name,
+                                  final AtomicBoolean shutdownHolder, final String[] dns) {
+        final String dnsAddresses = Arrays.toString(dns);
+        return new Thread() {
+            @Override
+            public void run() {
+                shutdownHolder.set(true);
+                final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(
+                        null, CFSTR(name + "-CLEANER@" + dnsAddresses), null, null
+                );
+                try {
+                    if (removeDns(store, dns)) {
+                        log.info("• Cleanup Global DNS -> {}: OK", dnsAddresses);
+                    } else {
+                        log.info("• Cleanup Global DNS -> {}: FAIL", dnsAddresses);
+                    }
+                } finally {
+                    CF.CFRelease(store);
+                }
+            }
+        };
+    }
+
+    private static Thread cleaner(final String name,
                                   final AtomicReference<String> serviceIdHolder,
                                   final AtomicBoolean shutdownHolder, final String[] dns) {
         final String dnsAddresses = Arrays.toString(dns);
@@ -169,6 +233,26 @@ public final class DarwinDns {
     /* ******* ********* */
 
     /**
+     * Adds the network global dns addresses.
+     *
+     * @param store the dynamic store session
+     * @param dns   the dns addresses to add
+     * @return true if add dns addresses is successful or unnecessary, otherwise false
+     */
+    private static boolean addDns(final SCDynamicStoreRef store, final String[] dns) {
+        final List<String> dnsToUse = Lists.newArrayList();
+        final List<String> snapshot = getDns0(store);
+        log.info("• Current DNS: {}", snapshot);
+        for (final String dnsAddress : dns) {
+            if (!snapshot.contains(dnsAddress)) {
+                dnsToUse.add(dnsAddress);
+            }
+        }
+        dnsToUse.addAll(snapshot);
+        return setDns0(store, dnsToUse);
+    }
+
+    /**
      * Adds the network service dns addresses.
      *
      * @param store     the dynamic store session
@@ -186,6 +270,26 @@ public final class DarwinDns {
         }
         dnsToUse.addAll(snapshot);
         return setDns0(store, serviceId, dnsToUse);
+    }
+
+    /**
+     * Removes the network global dns addresses.
+     *
+     * @param store the dynamic store session
+     * @param dns   the dns addresses to remove
+     * @return true if remove dns addresses is successful or unnecessary, otherwise false
+     */
+    private static boolean removeDns(final SCDynamicStoreRef store, final String[] dns) {
+        final List<String> snapshot = getDns0(store);
+        final List<String> dnsToUse = Lists.newArrayList(snapshot);
+
+        boolean found = false;
+        for (final String dnsAddress : dns) {
+            while (dnsToUse.remove(dnsAddress)) {
+                found = true;
+            }
+        }
+        return found && setDns0(store, dnsToUse);
     }
 
     /**
@@ -265,6 +369,16 @@ public final class DarwinDns {
     }
 
     /**
+     * Sets the global dns addresses.
+     *
+     * @param store the dynamic store session
+     * @param dns   the global dns addresses
+     */
+    private static boolean setDns0(final SCDynamicStoreRef store, final List<String> dns) {
+        return setDns0(store, CFSTR(GLOBAL_DNS_KEY), dns);
+    }
+
+    /**
      * Sets the network service dns addresses.
      *
      * @param store     the dynamic store session
@@ -285,17 +399,24 @@ public final class DarwinDns {
      * @return true if apply dns addresses successful, otherwise false
      */
     private static boolean setDns0(final SCDynamicStoreRef store, final CFStringRef dnsDictionaryKey, final List<String> dns) {
-        try (final Memory memory = new Memory(Native.POINTER_SIZE * dns.size())) {
+        try (final Memory memory = !dns.isEmpty() ? new Memory((long) Native.POINTER_SIZE * dns.size()) : null) {
             // create dns addresses array.
             for (int i = 0; i < dns.size(); i++) {
-                memory.setPointer(i * Native.POINTER_SIZE, CFSTR(dns.get(i)).getPointer());
+                memory.setPointer((long) i * Native.POINTER_SIZE, CFSTR(dns.get(i)).getPointer());
             }
             final CFArrayRef dnsAddresses = CF.CFArrayCreate(null, memory, new CFIndex(dns.size()), null);
 
             // create dns configure dictionary
+            /*
             final CFMutableDictionaryRef dnsDictionary = CF.CFDictionaryCreateMutable(
                     null, new CFIndex(0), null, null
             );
+            */
+            final CFDictionaryRef rawDnsDictionary = SC.SCDynamicStoreCopyValue(store, dnsDictionaryKey);
+            final CFMutableDictionaryRef dnsDictionary = CF.CFDictionaryCreateMutableCopy(
+                    null, new CFIndex(0), rawDnsDictionary
+            );
+
             CF.CFDictionarySetValue(dnsDictionary, CFSTR("ServerAddresses"), dnsAddresses);
 
             try {

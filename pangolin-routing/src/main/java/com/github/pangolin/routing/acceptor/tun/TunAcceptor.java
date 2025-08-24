@@ -138,7 +138,14 @@ public class TunAcceptor implements Acceptor {
                     } else if (adapter instanceof DarwinTunAdapter) {
                         // networksetup -setdnsservers "Wi-Fi" 127.0.0.1 or "empty"
                         // sudo killall -HUP mDNSResponder;
-                        DarwinDns.addDns(dnsServers);
+
+                            /*
+                            192.168.1.202
+                            255.255.255.0
+                            192.168.1.1
+                         */
+                        DarwinDns.addPrimaryInterfaceDns(dnsServers);
+//                        DarwinDns.addGlobalDns(dnsServers, true);
                         log.info("Set DNS server to: {}", Arrays.toString(dnsServers));
 
                         DarwinDns.flushDnsCache();
