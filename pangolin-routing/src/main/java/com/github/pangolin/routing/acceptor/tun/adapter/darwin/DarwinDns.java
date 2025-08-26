@@ -81,15 +81,15 @@ public final class DarwinDns {
             final String primaryServiceId = getPrimaryServiceId(store);
             if (null != primaryServiceId) {
                 /*-
+                 * Using "Setup:/Network/Service/{ServiceId}/DNS" when manually (high priority).
                  * Using "State:/Network/Service/{ServiceId}/DNS" when automatic.
-                 * Using "Setup:/Network/Service/{ServiceId}/DNS" when manually.
                  */
-                final List<String> automaticServiceDns = getServiceDns(store, primaryServiceId, true);
-                if (null != automaticServiceDns && !addServiceDns(store, primaryServiceId, true, dns)) {
+                final List<String> manuallyServiceDns = getServiceDns(store, primaryServiceId, true);
+                if (null != manuallyServiceDns && !addServiceDns(store, primaryServiceId, true, dns)) {
                     return false;
-                } else if (null == automaticServiceDns) {
-                  final List<String> manuallyServiceDns = getServiceDns(store, primaryServiceId, false);
-                  if (null == manuallyServiceDns || !addServiceDns(store, primaryServiceId, false, dns)) {
+                } else if (null == manuallyServiceDns) {
+                  final List<String> automaticServiceDns = getServiceDns(store, primaryServiceId, false);
+                  if (null == automaticServiceDns || !addServiceDns(store, primaryServiceId, false, dns)) {
                     return false;
                   }
                 }
@@ -112,21 +112,21 @@ public final class DarwinDns {
                     /*-
                      * Clean up the DNS of the previous service when the service changed.
                      */
-                    final boolean changed = Objects.equals(prevServiceId, nextServiceId);
+                    final boolean changed = !Objects.equals(prevServiceId, nextServiceId);
                     if (null != prevServiceId && changed && removeServiceDns(store, prevServiceId, true, dns)) {
-                        log.info("• Cleanup Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, prevServiceId), Arrays.asList(dns));
+                        log.info("• Cleanup Network Service DNS: {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, prevServiceId), Arrays.asList(dns));
                     }
                     if (null != prevServiceId && changed && removeServiceDns(store, prevServiceId, false, dns)) {
-                        log.info("• Cleanup Network Service DNS: {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, prevServiceId), Arrays.asList(dns));
+                        log.info("• Cleanup Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, prevServiceId), Arrays.asList(dns));
                     }
 
                     /*-
                      * add dns to the current service.
                      */
                     if (null != nextServiceId && addServiceDns(store, nextServiceId, true, dns)) {
-                        log.info("• Add Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(dns));
-                    } else if (null != nextServiceId && addServiceDns(store, nextServiceId, false, dns)) {
                         log.info("• Add Network Service DNS: {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(dns));
+                    } else if (null != nextServiceId && addServiceDns(store, nextServiceId, false, dns)) {
+                        log.info("• Add Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(dns));
                     }
                 }
             }).start();
@@ -175,10 +175,10 @@ public final class DarwinDns {
                      * Clean up the DNS of the previous service when the service changed.
                      */
                     if (null != serviceId && removeServiceDns(store, serviceId, true, dns)) {
-                        log.info("• Cleanup Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, serviceId), Arrays.asList(dns));
+                        log.info("• Cleanup Network Service DNS: {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, serviceId), Arrays.asList(dns));
                     }
                     if (null != serviceId && removeServiceDns(store, serviceId, false, dns)) {
-                        log.info("• Cleanup Network Service DNS: {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, serviceId), Arrays.asList(dns));
+                        log.info("• Cleanup Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, serviceId), Arrays.asList(dns));
                     }
                 } finally {
                     CF.CFRelease(store);
@@ -219,13 +219,13 @@ public final class DarwinDns {
      *
      * @param store     the dynamic store session
      * @param serviceId the network service id
-     * @param state     State:/Network/Service/{ServiceId}/DNS or Setup:/Network/Service/{ServiceId}/DNS
+     * @param setup     Setup:/Network/Service/{ServiceId}/DNS or State:/Network/Service/{ServiceId}/DNS
      * @param dns       the dns addresses to add
      * @return true if add dns addresses is successful or unnecessary, otherwise false
      */
     private static boolean addServiceDns(final SCDynamicStoreRef store,
-                                         final String serviceId, final boolean state, final String[] dns) {
-        final String dnsDirectoryKeyFmt = state ? STATE_SERVICE_ID_DNS_KEY_FMT : SETUP_SERVICE_ID_DNS_KEY_FMT;
+                                         final String serviceId, final boolean setup, final String[] dns) {
+        final String dnsDirectoryKeyFmt = setup ? SETUP_SERVICE_ID_DNS_KEY_FMT : STATE_SERVICE_ID_DNS_KEY_FMT;
         return addDns0(store, CFSTR(String.format(dnsDirectoryKeyFmt, serviceId)), dns);
     }
 
@@ -250,6 +250,9 @@ public final class DarwinDns {
                 dnsToUse.add(dnsAddress);
             }
         }
+        if (dnsToUse.isEmpty()) {
+            return true;
+        }
         dnsToUse.addAll(snapshot);
         return setDns0(store, dnsDirectoryKey, dnsToUse);
     }
@@ -270,13 +273,13 @@ public final class DarwinDns {
      *
      * @param store     the dynamic store session
      * @param serviceId the network service id
-     * @param state     State:/Network/Service/{ServiceId}/DNS or Setup:/Network/Service/{ServiceId}/DNS
+     * @param setup     Setup:/Network/Service/{ServiceId}/DNS or State:/Network/Service/{ServiceId}/DNS
      * @param dns       the dns addresses to remove
      * @return true if remove dns addresses is successful or unnecessary, otherwise false
      */
     private static boolean removeServiceDns(final SCDynamicStoreRef store,
-                                            final String serviceId, final boolean state, final String[] dns) {
-        final String dnsDirectoryKeyFmt = state ? STATE_SERVICE_ID_DNS_KEY_FMT : SETUP_SERVICE_ID_DNS_KEY_FMT;
+                                            final String serviceId, final boolean setup, final String[] dns) {
+        final String dnsDirectoryKeyFmt = setup ? SETUP_SERVICE_ID_DNS_KEY_FMT : STATE_SERVICE_ID_DNS_KEY_FMT;
         return removeDns0(store, CFSTR(String.format(dnsDirectoryKeyFmt, serviceId)), dns);
     }
 
@@ -320,11 +323,11 @@ public final class DarwinDns {
      *
      * @param store     the dynamic store session
      * @param serviceId the network service id
-     * @param state     State:/Network/Service/{ServiceId}/DNS or Setup:/Network/Service/{ServiceId}/DNS
+     * @param setup     Setup:/Network/Service/{ServiceId}/DNS or State:/Network/Service/{ServiceId}/DNS
      * @return dns addresses if the network service dns exists, otherwise null
      */
-    private static List<String> getServiceDns(final SCDynamicStoreRef store, final String serviceId, final boolean state) {
-      final String dnsDirectoryKeyFmt = state ? STATE_SERVICE_ID_DNS_KEY_FMT : SETUP_SERVICE_ID_DNS_KEY_FMT;
+    private static List<String> getServiceDns(final SCDynamicStoreRef store, final String serviceId, final boolean setup) {
+      final String dnsDirectoryKeyFmt = setup ? SETUP_SERVICE_ID_DNS_KEY_FMT : STATE_SERVICE_ID_DNS_KEY_FMT;
         return getDns0(store, CFSTR(String.format(dnsDirectoryKeyFmt, serviceId)));
     }
 
@@ -379,12 +382,12 @@ public final class DarwinDns {
      *
      * @param store     the dynamic store session
      * @param serviceId the network service id
-     * @param state     State:/Network/Service/{ServiceId}/DNS or Setup:/Network/Service/{ServiceId}/DNS
+     * @param setup     Setup:/Network/Service/{ServiceId}/DNS or State:/Network/Service/{ServiceId}/DNS
      * @param dns       the dns addresses to apply
      * @return true if apply dns addresses successful, otherwise false
      */
-    private static boolean setServiceDns(final SCDynamicStoreRef store, final String serviceId, final boolean state, final List<String> dns) {
-      final String dnsDirectoryKeyFmt = state ? STATE_SERVICE_ID_DNS_KEY_FMT : SETUP_SERVICE_ID_DNS_KEY_FMT;
+    private static boolean setServiceDns(final SCDynamicStoreRef store, final String serviceId, final boolean setup, final List<String> dns) {
+      final String dnsDirectoryKeyFmt = setup ? SETUP_SERVICE_ID_DNS_KEY_FMT : STATE_SERVICE_ID_DNS_KEY_FMT;
         return setDns0(store, CFSTR(String.format(dnsDirectoryKeyFmt, serviceId)), dns);
     }
 

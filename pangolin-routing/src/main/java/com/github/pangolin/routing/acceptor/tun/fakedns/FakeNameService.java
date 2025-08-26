@@ -66,8 +66,8 @@ public class FakeNameService implements DnsEngine {
         InetAddress address = null;
         if (DnsRecordType.A.equals(type)) {
             address = lookupHostAddress4(hostname);
-        } else if (DnsRecordType.AAAA.equals(type)) {
-            address = lookupHostAddress6(hostname);
+//        } else if (DnsRecordType.AAAA.equals(type)) {
+//            address = lookupHostAddress6(hostname);
         }
 
         if (null != address) {

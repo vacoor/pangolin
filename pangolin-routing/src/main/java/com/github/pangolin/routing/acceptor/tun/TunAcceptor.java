@@ -125,7 +125,8 @@ public class TunAcceptor implements Acceptor {
                     final TunAdapter adapter = ((TunChannel) future.channel()).device();
                     log.info("TUN adapter({}) started on: {}", wintunUuid, adapter.name());
 
-                    final String[] dnsServers = {"127.0.0.1", "::1"};
+//                    final String[] dnsServers = {"127.0.0.1", "::1"};
+                    final String[] dnsServers = {"127.0.0.1"};
                     if (adapter instanceof WindowsTunAdapter) {
                         final long luid = ((WindowsTunAdapter) adapter).luid();
                         WindowsNetworkInterface.getByLuid(luid).setInterfaceDns(
