@@ -204,5 +204,6 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
         debug(ipPacket.getHeader(), buf.build(), false);
 //        parent.writeAndFlush(ipPacket).syncUninterruptibly();
         parent.writeAndFlush(ipPacket);
+        logInfo("[TCP] Write");
     }
 }

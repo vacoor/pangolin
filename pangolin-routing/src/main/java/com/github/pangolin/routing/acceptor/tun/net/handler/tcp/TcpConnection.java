@@ -489,11 +489,14 @@ public abstract class TcpConnection<T extends IpPacket> {
             // no socket.
             return false;
         }
-        logInfo("Connecting: {}", resolved);
+
+        final long sinceMs = System.currentTimeMillis();
+        logInfo("ESTABLISHING -> {}", resolved);
         final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, true, childGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                 try {
+                    logInfo("[TCP] Read from Upstream");
                     final ByteBuf buf = (ByteBuf) msg;
                     final byte[] payload = ByteBufUtil.getBytes(buf);
 
@@ -532,14 +535,15 @@ public abstract class TcpConnection<T extends IpPacket> {
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                logError("{}", cause.getMessage(), cause);
+                logError("Exception caught: {}", cause.getMessage(), cause);
                 input.tcp_done_with_error(TcpConnection.this, -1);
             }
         });
 
         try {
             child = cf.sync().channel();
-            logInfo("ESTABLISHED: {}", resolved);
+            final long elapsedMs = System.currentTimeMillis() - sinceMs;
+            logInfo("ESTABLISHED: {}, elapsed: {}ms", resolved, elapsedMs);
             child.closeFuture().addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(final ChannelFuture future) throws Exception {
@@ -1249,6 +1253,7 @@ public abstract class TcpConnection<T extends IpPacket> {
             final int offset = rcv_nxt - hdr.getSequenceNumber();
             final int length = Math.min(output.tcp_receive_window(this), bytes.length - offset);
             child.writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
+            logInfo("[TCP] Write to Upstream");
         }
     }
 
@@ -1686,6 +1691,9 @@ public abstract class TcpConnection<T extends IpPacket> {
                     return discard(skb, SKB_DROP_REASON_TCP_RESET);
                 }
 
+                /*-
+                 * 第一次握手.
+                 */
                 if (th.getSyn()) {
                     /*-
                      * SYN-FIN 应该被忽略.
@@ -1695,7 +1703,8 @@ public abstract class TcpConnection<T extends IpPacket> {
                     }
 
                     /*-
-                     * 创建状态为TCP_NEW_SYN_RECV的请求套接字(request_sock)放入半连接队列.
+                     * Linux此处为创建状态为TCP_NEW_SYN_RECV的请求套接字(request_sock)放入半连接队列即可结束,
+                     * 此处调整为直接创建连接.
                      */
                     final boolean accept = conn_request(ipPacket, skb);
                     if (!accept) {
@@ -1703,7 +1712,9 @@ public abstract class TcpConnection<T extends IpPacket> {
                     }
 
                     /*-
-                     * 收到ACK请求后，查找半连接队列, 如果查找到状态为 , 调用 tcp_check_req, 转换为 TCP_SYN_RECV, 完成握手, 迁移到全连接队列.
+                     * 原本应该是收到第三次握手的ACK请求后，查找半连接队列, 如果查找到状态为 TCP_NEW_SYN_RECV 的请求套接字,
+                     * 调用 tcp_check_req, 转换为 TCP_SYN_RECV 的子套接字, 并完成握手后迁移到全连接队列.
+                     * 这里暂时没有采用父子关系, 上面直接建立了连接所以直接转换为 TCP_SYNC_RECV.
                      */
                     tcp_check_req(skb);
 
@@ -1718,9 +1729,9 @@ public abstract class TcpConnection<T extends IpPacket> {
                 return discard(skb, SKB_DROP_REASON_TCP_FLAGS);
             case TCP_SYN_SENT:
                 /*-
-                 * not-supported FIXME.
+                 * XXX client mode not supported.
                  */
-                return SKB_DROP_REASON_TCP_FLAGS;
+                return SKB_DROP_REASON_NOT_SPECIFIED;
         }
 
         /*-

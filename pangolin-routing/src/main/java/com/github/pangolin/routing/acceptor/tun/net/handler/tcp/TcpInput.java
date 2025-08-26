@@ -637,8 +637,7 @@ class TcpInput<T extends IpPacket> {
             if (before(ack, prior_snd_una - max_window)) {
                 // TODO
             }
-
-            log.warn("{}: {} < {}", tp.state.get(), ack, prior_snd_una);
+            log.warn("{}: {} < {}, {}", tp.state.get(), ack, prior_snd_una, tcpHdr);
             return 0;
         }
 
