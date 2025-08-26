@@ -71,7 +71,8 @@ public class FakeNameService implements DnsEngine {
         }
 
         if (null != address) {
-            log.info("Assign IP Address {} to {}, TTL={}", address.getHostAddress(), hostname, ttl);
+            // log.info("Assign IP Address {} to {}, TTL={}", address.getHostAddress(), hostname, ttl);
+            log.info("[DNS] {} {} {} {} {}s", dnsQuery.sender().getHostString(), hostname, type.name(), address.getHostAddress(), ttl);
 
             final DefaultDnsRawRecord dnsAnswer = new DefaultDnsRawRecord(
                     dnsQuestion.name(), type, ttl,

@@ -12,6 +12,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpConnec
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpTimer.ICSK_ACK_NOW;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpTimer.ICSK_TIME_PROBE0;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpUtils.*;
 
 @Slf4j
 class TcpInput<T extends IpPacket> {
@@ -137,7 +138,7 @@ class TcpInput<T extends IpPacket> {
 
     private void tcp_queue_rcv(final TcpConnection<T> tp, final TcpPacket skb) {
         // https://www.cnblogs.com/wanpengcoder/p/11752122.html
-        tcp_rcv_nxt_update(tp, TcpUtils.determineEndSeq(skb));
+        tcp_rcv_nxt_update(tp, determineEndSeq(skb));
     }
 
 
@@ -183,7 +184,7 @@ class TcpInput<T extends IpPacket> {
         tp.tcp_measure_rcv_mss(skb);
         tp.tcp_rcv_rtt_measure();
 
-        long now = TcpUtils.tcp_jiffies32();
+        long now = tcp_jiffies32();
         if (0 == tp.icsk_ack_ato) {
             /*
              * The _first_ data packet received, initialize
@@ -233,7 +234,7 @@ class TcpInput<T extends IpPacket> {
     void tcp_data_queue(final TcpConnection<T> tp, final TcpPacket skb) throws IOException {
         final TcpPacket.TcpHeader hdr = skb.getHeader();
         final int seq = hdr.getSequenceNumber();
-        final int endSeq = TcpUtils.determineEndSeq(skb);
+        final int endSeq = determineEndSeq(skb);
 
         if (seq == endSeq) {
             return;
@@ -250,14 +251,14 @@ class TcpInput<T extends IpPacket> {
 
             /* Ok. In sequence. In window. */
             queue_and_out(tp, skb);
-        } else if (!TcpUtils.after(endSeq, tp.rcv_nxt)) {
+        } else if (!after(endSeq, tp.rcv_nxt)) {
             tcp_rcv_spurious_retrans(skb);
             /* A retransmit, 2nd most common case.  Force an immediate ack. */
             out_of_window(tp, skb, SKB_DROP_REASON_TCP_OLD_DATA);
-        } else if (!TcpUtils.before(seq, tp.rcv_nxt + output.tcp_receive_window(tp))) {
+        } else if (!before(seq, tp.rcv_nxt + output.tcp_receive_window(tp))) {
             /* Out of window. F.e. zero window probe. */
             out_of_window(tp, skb, SKB_DROP_REASON_TCP_OVERWINDOW);
-        } else if (TcpUtils.before(seq, tp.rcv_nxt)) {
+        } else if (before(seq, tp.rcv_nxt)) {
             /* Partial packet, seq < rcv_next < end_seq */
             if (output.tcp_receive_window(tp) == 0) {
                 out_of_window(tp, skb, SKB_DROP_REASON_TCP_ZEROWINDOW);
@@ -368,13 +369,13 @@ class TcpInput<T extends IpPacket> {
         TcpBuffer skb;
         while (null != (skb = tp.tcp_rtx_queue.peek())) {
             final int seq = skb.sequenceNumber();
-            final int end_seq = TcpUtils.determineEndSeq(skb);
+            final int end_seq = determineEndSeq(skb);
             int acked_pcount = 1;
             int sacked = skb.sacked;
 
             /* Determine how many packets and what bytes were acked, tso and else */
-            if (TcpUtils.after(end_seq, tp.snd_una)) {
-                if (tp.tcp_skb_pcount(skb) == 1 || !TcpUtils.after(tp.snd_una, seq)) {
+            if (after(end_seq, tp.snd_una)) {
+                if (tp.tcp_skb_pcount(skb) == 1 || !after(tp.snd_una, seq)) {
                     break;
                 }
 
@@ -427,7 +428,7 @@ class TcpInput<T extends IpPacket> {
             tp.tcp_ack_tstamp();
         }
 
-        if (TcpUtils.between(tp.snd_up, prior_snd_una, tp.snd_una)) {
+        if (between(tp.snd_up, prior_snd_una, tp.snd_una)) {
             tp.snd_up = tp.snd_una;
         }
 
@@ -461,7 +462,7 @@ class TcpInput<T extends IpPacket> {
         if (null == head) {
             return;
         }
-        if (!TcpUtils.after(TcpUtils.determineEndSeq(head), tp.tcp_wnd_end())) {
+        if (!after(determineEndSeq(head), tp.tcp_wnd_end())) {
             tp.icsk_backoff = 0;
             tp.icsk_probes_tstamp = 0;
             tp.inet_csk_clear_xmit_timer(ICSK_TIME_PROBE0);
@@ -629,15 +630,15 @@ class TcpInput<T extends IpPacket> {
         /*-
          * If the ack is older than previous acks then we can probably ignore it.
          */
-        if (TcpUtils.before(ack, prior_snd_una)) {
+        if (before(ack, prior_snd_una)) {
             /* do not accept ACK for bytes we never sent. */
             int max_window = Math.min(tp.max_window, tp.bytes_acked);
             /* RFC 5961 5.2 [Blind Data Injection Attack].[Mitigation] */
-            if (TcpUtils.before(ack, prior_snd_una - max_window)) {
+            if (before(ack, prior_snd_una - max_window)) {
                 // TODO
             }
 
-            log.warn("{} < {}", ack, prior_snd_una);
+            log.warn("{}: {} < {}", tp.state.get(), ack, prior_snd_una);
             return 0;
         }
 
@@ -645,11 +646,11 @@ class TcpInput<T extends IpPacket> {
          * If the ack includes data we haven't sent yet,
          * discard this segment (RFC793 Section 3.9).
          */
-        if (TcpUtils.after(ack, tp.snd_nxt)) {
+        if (after(ack, tp.snd_nxt)) {
             return -SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
         }
 
-        if (TcpUtils.after(ack, prior_snd_una)) {
+        if (after(ack, prior_snd_una)) {
             flag |= FLAG_SND_UNA_ADVANCED;
             tp.icsk_retransmits = 0;
         }
@@ -667,7 +668,7 @@ class TcpInput<T extends IpPacket> {
             tcp_in_ack_event(CA_ACK_WIN_UPDATE);
         } else {
             int ack_ev_flags = CA_ACK_SLOWPATH;
-            if (ack_seq != TcpUtils.determineEndSeq(skb)) {
+            if (ack_seq != determineEndSeq(skb)) {
                 flag |= FLAG_DATA;
             }
 
@@ -682,7 +683,7 @@ class TcpInput<T extends IpPacket> {
 
         tp.sk_err_soft = 0;
         tp.icsk_probes_out = 0;
-        tp.rcv_tstamp = TcpUtils.tcp_jiffies32();
+        tp.rcv_tstamp = tcp_jiffies32();
 
         if (prior_packets_out == 0) {
             // no_queue.

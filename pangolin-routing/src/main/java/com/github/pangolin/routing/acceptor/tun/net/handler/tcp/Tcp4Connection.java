@@ -75,6 +75,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
         }
     }
 
+
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
     void tcp_v4_send_reset(IpV4Header ih, TcpPacket skb, int err) {
         log.warn("SEND-RST: {}", err);

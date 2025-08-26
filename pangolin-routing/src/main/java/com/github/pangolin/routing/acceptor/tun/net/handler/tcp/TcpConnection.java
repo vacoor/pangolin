@@ -529,6 +529,12 @@ public abstract class TcpConnection<T extends IpPacket> {
                     ReferenceCountUtil.release(msg);
                 }
             }
+
+            @Override
+            public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
+                logError("{}", cause.getMessage(), cause);
+                input.tcp_done_with_error(TcpConnection.this, -1);
+            }
         });
 
         try {
@@ -547,7 +553,6 @@ public abstract class TcpConnection<T extends IpPacket> {
             return false;
         }
     }
-
 
     /**
      * @param skb
@@ -1208,6 +1213,7 @@ public abstract class TcpConnection<T extends IpPacket> {
          */
         if (null != dnsEngine && dnsEngine.isFakeAddress(dst.getAddress())) {
             final String hostname = dnsEngine.getHostByAddress(dst.getAddress());
+            log.info("[TCP] {} -> {}", dst, hostname);
             return null != hostname ? InetSocketAddress.createUnresolved(hostname, port) : null;
         }
         return new InetSocketAddress(dst, port);
@@ -1869,9 +1875,9 @@ public abstract class TcpConnection<T extends IpPacket> {
         final String srcHostAddr = srcAddr.getHostAddress();
         final String dstHostAddr = dstAddr.getHostAddress();
 
-        final StringBuilder buff = new StringBuilder();
+        final StringBuilder buff = new StringBuilder("[TCP] ");
         buff.append(srcHostAddr).append(":").append(srcPort)
-                .append(" => ")
+                .append(" -> ")
                 .append(dstHostAddr).append(":").append(dstPort);
         if (null != child) {
             buff.append(" [").append(child.id()).append("]");

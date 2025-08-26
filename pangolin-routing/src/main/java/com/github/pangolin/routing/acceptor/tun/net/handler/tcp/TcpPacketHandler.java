@@ -52,7 +52,7 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
         final String sockKey = srcAddr.toString() + ":" + tcpSrcPort + " => " + dstAddr + ":" + tcpDstPort;
         if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
             sessionMap.putIfAbsent(sockKey, create(ctx.channel(), childGroup, dnsEngine, socketChannelFactory, () -> {
-                    log.info("Destroy: {}", sockKey);
+                    log.info("[TCP] Destroy: {}", sockKey);
                     sessionMap.remove(sockKey);
             }));
         }
@@ -65,4 +65,9 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
     protected abstract TcpConnection<T> create(Channel parent, EventLoopGroup childGroup,
                                                DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory,
                                                Runnable destroyCallback);
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        super.exceptionCaught(ctx, cause);
+    }
 }

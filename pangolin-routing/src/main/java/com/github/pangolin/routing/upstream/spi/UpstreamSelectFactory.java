@@ -6,12 +6,12 @@ import com.github.pangolin.routing.upstream.UpstreamCombiner;
 import com.github.pangolin.routing.upstream.UpstreamRegistry;
 import com.github.pangolin.routing.upstream.stats.StatsAware;
 import com.github.pangolin.routing.upstream.stats.StatsUpstream;
+import com.google.common.collect.Lists;
 import com.netflix.client.config.PropertyResolver;
 import com.netflix.client.config.ReloadableClientConfig;
 import com.netflix.loadbalancer.*;
 import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.hadoop.util.Lists;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -20,6 +20,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Slf4j
 public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
@@ -60,6 +62,7 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
 
 
         return new AbstractUpstream(name) {
+            private final Logger log = LoggerFactory.getLogger(name);
 
             @Override
             public SocketAddress address() {
