@@ -542,6 +542,7 @@ public abstract class TcpConnection<T extends IpPacket> {
 
         try {
             child = cf.sync().channel();
+            state.set(State.TCP_SYN_RECV);
             final long elapsedMs = System.currentTimeMillis() - sinceMs;
             logInfo("ESTABLISHED: {}, elapsed: {}ms", resolved, elapsedMs);
             child.closeFuture().addListener(new ChannelFutureListener() {
@@ -1706,6 +1707,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                      * Linux此处为创建状态为TCP_NEW_SYN_RECV的请求套接字(request_sock)放入半连接队列即可结束,
                      * 此处调整为直接创建连接.
                      */
+                    state.set(State.TCP_NEW_SYN_RECV);
                     final boolean accept = conn_request(ipPacket, skb);
                     if (!accept) {
                         return SKB_DROP_REASON_NO_SOCKET;
@@ -1719,7 +1721,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                     tcp_check_req(skb);
 
                     // FIXME 移动到连接打开时
-                    state.set(State.TCP_SYN_RECV);
+//                    state.set(State.TCP_SYN_RECV);
                     return SKB_DROP_REASON_NOT_SPECIFIED;
                 }
 
@@ -1732,6 +1734,9 @@ public abstract class TcpConnection<T extends IpPacket> {
                  * XXX client mode not supported.
                  */
                 return SKB_DROP_REASON_NOT_SPECIFIED;
+            // 临时处理.
+            case TCP_NEW_SYN_RECV:
+                return discard(skb, SKB_DROP_REASON_NOT_SPECIFIED);
         }
 
         /*-
