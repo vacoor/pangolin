@@ -17,17 +17,20 @@ import java.net.SocketAddress;
 public class Socks4ProxyHandler extends AbstractProxyHandler {
     private static final String NONE = "";
 
-    private String username;
+    private String uid;
 
     public Socks4ProxyHandler(final SocketAddress proxyAddress) {
-        this(proxyAddress, null);
+        this(proxyAddress, NONE);
     }
 
-    public Socks4ProxyHandler(final SocketAddress proxyAddress, final String username) {
+    public Socks4ProxyHandler(final SocketAddress proxyAddress, final String uid) {
         super(proxyAddress);
-        this.username = username;
+        this.uid = uid;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void handlerAdded(final ChannelHandlerContext ctx) throws Exception {
         final ChannelPipeline cp = ctx.pipeline();
@@ -40,26 +43,22 @@ public class Socks4ProxyHandler extends AbstractProxyHandler {
         super.handlerAdded(ctx);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     protected ChannelPromise handshake(final ChannelHandlerContext ctx, final ChannelPromise handshakePromise) throws Exception {
         final InetSocketAddress destination = destinationAddress();
-        final String address = destination.isUnresolved() ? destination.getHostString() : destination.getAddress().getHostAddress();
-        /*
-        ctx.writeAndFlush(new DefaultSocks4CommandRequest(
-                Socks4CommandType.CONNECT,
-                address, destination.getPort(),
-                null != username ? username : NONE
-        ), promise);
-        */
-        // FIXME if write fail -> promise fail
-        ctx.writeAndFlush(new DefaultSocks4CommandRequest(
-                Socks4CommandType.CONNECT,
-                address, destination.getPort(),
-                null != username ? username : NONE
-        ));
+        final String addressToUse = destination.isUnresolved() ? destination.getHostString() : destination.getAddress().getHostAddress();
+        final String usernameToUse = null != uid ? uid : NONE;
+
+        ctx.writeAndFlush(new DefaultSocks4CommandRequest(Socks4CommandType.CONNECT, addressToUse, destination.getPort(), usernameToUse));
         return handshakePromise;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     protected boolean handshakeRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
         if (msg instanceof Socks4CommandResponse) {

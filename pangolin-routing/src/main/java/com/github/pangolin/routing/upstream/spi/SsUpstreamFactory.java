@@ -70,11 +70,11 @@ public class SsUpstreamFactory extends AbstractUpstreamFactory {
     }
 
     private class SsUpstream extends AbstractUpstream {
-        private final SocketAddress address;
+        private final InetSocketAddress address;
         private final CipherAlgorithm algorithm;
         private final String password;
 
-        SsUpstream(final String name, final SocketAddress address, final CipherAlgorithm algorithm, final String password) {
+        SsUpstream(final String name, final InetSocketAddress address, final CipherAlgorithm algorithm, final String password) {
             super(name);
             this.address = address;
             this.algorithm = algorithm;
@@ -89,6 +89,11 @@ public class SsUpstreamFactory extends AbstractUpstreamFactory {
         @Override
         public boolean isVirtual() {
             return false;
+        }
+
+        @Override
+        public boolean isAvailable() {
+            return !address.isUnresolved();
         }
 
         @Override

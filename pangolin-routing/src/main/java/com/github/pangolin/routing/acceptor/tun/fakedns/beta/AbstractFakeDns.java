@@ -48,13 +48,20 @@ public abstract class AbstractFakeDns<T> {
 
     private T doAcquire(final String hostname) {
         final T address = idles.acquire();
-        hostnames.put(address, hostname);
+        hostnames.put(address, normalize(hostname));
         return address;
+    }
+
+    private String normalize(final String hostname) {
+        return '.' == hostname.charAt(hostname.length() - 1)
+            ? hostname.substring(0, hostname.length() - 1)
+            : hostname;
     }
 
     public T doResolve(final String hostname) {
         try {
-            return leases.get(hostname, () -> doAcquire(hostname));
+            final String hostnameToUse = normalize(hostname);
+            return leases.get(hostnameToUse, () -> doAcquire(hostnameToUse));
         } catch (final ExecutionException e) {
             throw new IllegalStateException(e.getCause());
         }

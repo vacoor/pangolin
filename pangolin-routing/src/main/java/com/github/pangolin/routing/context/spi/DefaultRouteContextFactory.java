@@ -8,6 +8,7 @@ import com.github.pangolin.routing.context.InheritableRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.support.AliasRegistry;
 import com.github.pangolin.routing.upstream.DirectUpstream;
+import com.github.pangolin.routing.upstream.Upstream;
 import com.sun.jna.Platform;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
@@ -67,7 +68,12 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
                 } else if (1 == proxies.size()) {
                     aliasRegistry.registerAlias(proxies.iterator().next(), name);
                 } else {
-                    registry.addUpstream(name, combine(name, type, proxies, registry));
+                    final Upstream combine = combine(name, type, proxies, registry);
+                    if (null != combine) {
+                        registry.addUpstream(name, combine);
+                    } else {
+                        log.warn("Unable upstream combine type {}", type);
+                    }
                 }
             }
         }

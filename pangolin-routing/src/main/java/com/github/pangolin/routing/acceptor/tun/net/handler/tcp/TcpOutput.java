@@ -13,6 +13,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpConnec
 import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
 import static com.sun.jna.platform.linux.ErrNo.EINVAL;
 import static org.pcap4j.packet.TcpPacket.TcpOption;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpUtils.*;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_output.c</a>
@@ -52,7 +53,7 @@ class TcpOutput<T extends IpPacket> {
     private void tcp_event_new_data_sent(final TcpConnection<T> tp, TcpBuffer skb) {
         final int prior_packets = tp.packets_out;
 
-        tp.snd_nxt = TcpUtils.determineEndSeq(skb);
+        tp.snd_nxt = determineEndSeq(skb);
 
         // XXX unlink skb from sk_write_queue and append to tcp_rtx_queue.
         // __skb_unlink(skb, &sk->sk_write_queue);
@@ -82,7 +83,7 @@ class TcpOutput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L97">tcp_acceptable_seq</a>
      */
     private int tcp_acceptable_seq(final TcpConnection<T> tp) {
-        if (!TcpUtils.before(tp.tcp_wnd_end(), tp.snd_nxt)
+        if (!before(tp.tcp_wnd_end(), tp.snd_nxt)
                 || (tp.wscale_ok && tp.snd_nxt - tp.tcp_wnd_end() < (1 << tp.rcv_wscale))) {
             return tp.snd_nxt;
         }
@@ -95,7 +96,7 @@ class TcpOutput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L163">tcp_event_data_sent</a>
      */
     void tcp_event_data_sent(final TcpConnection<T> tp) {
-        long now = TcpUtils.tcp_jiffies32();
+        long now = tcp_jiffies32();
 
         tp.lsndtime = now;
 
@@ -156,7 +157,7 @@ class TcpOutput<T extends IpPacket> {
 
         /* Quantize space offering to a multiple of mss if possible. */
         if (space > mss) {
-            space = TcpUtils.rounddown(space, mss);
+            space = rounddown(space, mss);
         }
 
         /*-
@@ -184,7 +185,7 @@ class TcpOutput<T extends IpPacket> {
             space = Math.max(space, ipv4_sysctl_tcp_rmem_2);
             space = Math.max(space, sysctl_rmem_max);
             space = Math.min(space, window_clamp);
-            rcv_wscale.set(TcpUtils.clamp(TcpUtils.ilog2(space) - 15, 0, TCP_MAX_WSCALE));
+            rcv_wscale.set(clamp(ilog2(space) - 15, 0, TCP_MAX_WSCALE));
         }
         /* Set the clamp no higher than max representable value */
         __window_clamp.set(Math.min(U16_MAX << rcv_wscale.get(), window_clamp));
@@ -221,7 +222,7 @@ class TcpOutput<T extends IpPacket> {
              */
             if (!ipv4_sysctl_tcp_shrink_window || 0 != tp.rcv_wscale) {
                 /* Never shrink the offered window */
-                new_win = TcpUtils.align(cur_win, 1 << tp.rcv_wscale);
+                new_win = align(cur_win, 1 << tp.rcv_wscale);
             }
         }
 
@@ -418,7 +419,7 @@ class TcpOutput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498">tcp_queue_skb</a>
      */
     private void tcp_queue_skb(final TcpConnection<T> tp, TcpBuffer skb) {
-        tp.write_seq = TcpUtils.determineEndSeq(skb);
+        tp.write_seq = determineEndSeq(skb);
         tp.sk_write_queue.offer(skb);
     }
 
@@ -620,7 +621,7 @@ class TcpOutput<T extends IpPacket> {
              * We do not want to send a pure-ack packet and have
              * a strange looking rtx queue with empty packet(s).
              */
-            if (skb.sequenceNumber() == TcpUtils.determineEndSeq(skb)) {
+            if (skb.sequenceNumber() == determineEndSeq(skb)) {
                 break;
             }
 
@@ -740,7 +741,7 @@ class TcpOutput<T extends IpPacket> {
              * Import case: prevent zero window announcement if
              * 1<<rcv_wscale > mss.
              */
-            window = TcpUtils.align(window, (1 << tp.rcv_wscale));
+            window = align(window, (1 << tp.rcv_wscale));
         } else {
             window = tp.rcv_wnd;
             /* Get the largest window that is a nice multiple of mss.
@@ -752,7 +753,7 @@ class TcpOutput<T extends IpPacket> {
              * is too small.
              */
             if (window <= free_space - mss || window > free_space) {
-                window = TcpUtils.rounddown(free_space, mss);
+                window = rounddown(free_space, mss);
             } else if (mss == full_space && free_space > window + (full_space >> 1)) {
                 window = free_space;
             }
@@ -874,14 +875,14 @@ class TcpOutput<T extends IpPacket> {
         // start
         int seq = skb.sequenceNumber();
 
-        if (TcpUtils.before(seq, tp.snd_una) && skb.syn()) {
+        if (before(seq, tp.snd_una) && skb.syn()) {
             skb.syn(false);
             skb.sequenceNumber(++seq);
         }
 
-        if (TcpUtils.before(seq, tp.snd_una)) {
-            int end_seq = TcpUtils.determineEndSeq(skb);
-            if (TcpUtils.before(end_seq, tp.snd_una)) {
+        if (before(seq, tp.snd_una)) {
+            int end_seq = determineEndSeq(skb);
+            if (before(end_seq, tp.snd_una)) {
                 return -EINVAL;
             }
             // ...
@@ -905,7 +906,7 @@ class TcpOutput<T extends IpPacket> {
 
         int len = cur_mss * segs;
         if (len > avail_wnd) {
-            len = TcpUtils.rounddown(avail_wnd, cur_mss);
+            len = rounddown(avail_wnd, cur_mss);
             if (0 == len) {
                 len = avail_wnd;
             }
@@ -1037,7 +1038,7 @@ class TcpOutput<T extends IpPacket> {
              * Note: 为了避免浮点运算 srtt_us 是实际 SRTT 8 倍.
              */
             if (tp.srtt_us != 0) {
-                int rtt = (int) Math.max(TcpUtils.usecs_to_jiffies(tp.srtt_us >> 3), TcpTimer.TCP_DELACK_MIN);
+                int rtt = (int) Math.max(usecs_to_jiffies(tp.srtt_us >> 3), TcpTimer.TCP_DELACK_MIN);
                 if (rtt < max_ato) {
                     max_ato = rtt;
                     tp.logTrace("Delay ACK timeout = RTT({}ms)", rtt);
@@ -1049,19 +1050,19 @@ class TcpOutput<T extends IpPacket> {
         ato = Math.min(ato, tcp_delack_max(tp));
 
         /* Stay within the limit we were given */
-        long timeout = TcpUtils.jiffies() + ato;
+        long timeout = jiffies() + ato;
 
         /* Use new timeout only if there wasn't a older one earlier. */
         if ((tp.icsk_ack_pending & TcpTimer.ICSK_ACK_TIMER) != 0) {
 
             /* If delack timer is about to expire, send ACK now. */
-            if (TcpUtils.time_before_eq(tp.icsk_ack_timeout, TcpUtils.jiffies() + (ato >> 2))) {
+            if (time_before_eq(tp.icsk_ack_timeout, jiffies() + (ato >> 2))) {
                 // send now.
                 tcp_send_ack(tp);
                 return;
             }
 
-            if (!TcpUtils.time_before(timeout, tp.icsk_ack_timeout)) {
+            if (!time_before(timeout, tp.icsk_ack_timeout)) {
                 timeout = tp.icsk_ack_timeout;
             }
         }
@@ -1132,8 +1133,8 @@ class TcpOutput<T extends IpPacket> {
             final int mss = tcp_current_mss(tp);
             int seg_size = tp.tcp_wnd_end() - seq;
 
-            int end_seq = TcpUtils.determineEndSeq(skb);
-            if (TcpUtils.before(tp.pushed_seq, end_seq)) {
+            int end_seq = determineEndSeq(skb);
+            if (before(tp.pushed_seq, end_seq)) {
                 // XXX ???
                 tp.pushed_seq = end_seq;
             }

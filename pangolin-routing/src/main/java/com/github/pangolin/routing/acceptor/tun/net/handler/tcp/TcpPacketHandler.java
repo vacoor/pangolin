@@ -10,6 +10,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
+import java.net.UnknownHostException;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
@@ -39,7 +40,8 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
     }
 
     @Override
-    protected void channelRead0(final ChannelHandlerContext ctx, final T ipPacket) throws Exception {
+    protected void channelRead0(final ChannelHandlerContext ctx, final T rawIpPacket) throws Exception {
+        final T ipPacket = prepare(rawIpPacket);
         final IpHeader ipHeader = ipPacket.getHeader();
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
@@ -49,7 +51,7 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
         final TcpPort tcpSrcPort = tcpHeader.getSrcPort();
         final TcpPort tcpDstPort = tcpHeader.getDstPort();
 
-        final String sockKey = srcAddr.toString() + ":" + tcpSrcPort + " => " + dstAddr + ":" + tcpDstPort;
+        final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
         if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
             sessionMap.putIfAbsent(sockKey, create(ctx.channel(), childGroup, dnsEngine, socketChannelFactory, () -> {
                     log.info("[TCP] Destroy: {}", sockKey);
@@ -62,9 +64,23 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
         }
     }
 
-    protected abstract TcpConnection<T> create(Channel parent, EventLoopGroup childGroup,
-                                               DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory,
-                                               Runnable destroyCallback);
+    protected T prepare(final T ipPacket) throws UnknownHostException {
+        return ipPacket;
+    }
+
+    protected InetAddress resolveDstAddress(final InetAddress address) throws UnknownHostException {
+        final byte[] addr = address.getAddress();
+        if (dnsEngine.isFakeAddress(addr)) {
+            final String hostname = dnsEngine.getHostByAddress(addr);
+            if (null != hostname && !hostname.isEmpty()) {
+                return InetAddress.getByAddress(hostname, addr);
+            }
+            throw new UnknownHostException(String.format("Can't resolve hostname for fake IP: %s", address.getHostAddress()));
+        }
+        return address;
+    }
+
+    protected abstract TcpConnection<T> create(Channel parent, EventLoopGroup childGroup, DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory, Runnable destroyCallback);
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {

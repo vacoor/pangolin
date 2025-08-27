@@ -74,6 +74,11 @@ public class TrojanUpstreamFactory extends AbstractUpstreamFactory {
         }
 
         @Override
+        public boolean isAvailable() {
+            return !address.isUnresolved();
+        }
+
+        @Override
         public ChannelHandler newSocketProxyHandler(InetSocketAddress destination) {
             return new TrojanProxyHandler(address, password);
         }

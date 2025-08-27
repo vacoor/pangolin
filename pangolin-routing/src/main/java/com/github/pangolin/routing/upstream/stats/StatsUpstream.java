@@ -28,6 +28,11 @@ public class StatsUpstream extends Server implements Upstream {
     }
 
     @Override
+    public boolean isAvailable() {
+        return delegate.isAvailable();
+    }
+
+    @Override
     public SocketAddress address() {
         return delegate.address();
     }

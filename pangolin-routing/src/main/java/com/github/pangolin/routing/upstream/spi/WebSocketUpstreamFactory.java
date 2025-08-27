@@ -53,6 +53,12 @@ public class WebSocketUpstreamFactory extends AbstractUpstreamFactory {
         }
 
         @Override
+        public boolean isAvailable() {
+            // FIXME
+            return true;
+        }
+
+        @Override
         public ChannelHandler newSocketProxyHandler(InetSocketAddress destination) {
             return new WebSocketProxyHandler(uri, null);
         }

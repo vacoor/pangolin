@@ -584,20 +584,37 @@ class TcpInput<T extends IpPacket> {
 
     private boolean tcp_reset_check(TcpConnection<T> tp, final TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5939
-        int seq = skb.getHeader().getSequenceNumber();
+        final int seq = skb.getHeader().getSequenceNumber();
         return seq == tp.rcv_nxt - 1 && 0 != ((1 << tp.state.get().ordinal()) | (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5957
     boolean tcp_validate_incoming(TcpConnection<T> tp, final TcpPacket skb) {
         final TcpPacket.TcpHeader hdr = skb.getHeader();
+
+        /*-
+         * Step 2: check RST bit.
+         */
         if (hdr.getRst()) {
+            /*-
+             * RFC 5961 3.2 (extend to match against (RCV.NXT - 1) after a  FIN and SACK too if available):
+             * If seq num matches RCV.NXT or (RCV.NXT - 1) after a FIN, or the right-most SACK block,
+             * then
+             *     RESET the connection
+             * else
+             *     Send a challenge ACK
+             */
             if (hdr.getSequenceNumber() == tp.rcv_nxt || tcp_reset_check(tp, skb)) {
                 // reset
                 tcp_reset(tp, skb);
                 return false;
             }
         }
+
+        /*-
+         *
+         */
+
         return true;
     }
 
@@ -632,18 +649,24 @@ class TcpInput<T extends IpPacket> {
          */
         if (before(ack, prior_snd_una)) {
             /* do not accept ACK for bytes we never sent. */
-            int max_window = Math.min(tp.max_window, tp.bytes_acked);
+            final int max_window = Math.min(tp.max_window, tp.bytes_acked);
+
             /* RFC 5961 5.2 [Blind Data Injection Attack].[Mitigation] */
             if (before(ack, prior_snd_una - max_window)) {
-                // TODO
+                if (0 == (flag & FLAG_NO_CHALLENGE_ACK)) {
+                    // TODO tcp_send_challenge_ack?
+                }
+                log.warn("TOO OLD ACK on {}: ACK({}) < SND.UNA({}), {}", tp.state.get(), ack, prior_snd_una, tcpHdr);
+                return -SKB_DROP_REASON_TCP_TOO_OLD_ACK;
             }
-            log.warn("{}: {} < {}, {}", tp.state.get(), ack, prior_snd_una, tcpHdr);
+
+            // goto old_ack.
+            log.warn("OLD ACK on {}: ACK({}) < SND.UNA({}), {}", tp.state.get(), ack, prior_snd_una, tcpHdr);
             return 0;
         }
 
         /*-
-         * If the ack includes data we haven't sent yet,
-         * discard this segment (RFC793 Section 3.9).
+         * If the ack includes data we haven't sent yet, discard this segment (RFC793 Section 3.9).
          */
         if (after(ack, tp.snd_nxt)) {
             return -SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
@@ -680,12 +703,17 @@ class TcpInput<T extends IpPacket> {
             tcp_in_ack_event(ack_ev_flags);
         }
 
+        /*-
+         * We passed data and got it acked, remove any soft error log. Something worked...
+         */
         tp.sk_err_soft = 0;
         tp.icsk_probes_out = 0;
         tp.rcv_tstamp = tcp_jiffies32();
 
         if (prior_packets_out == 0) {
-            // no_queue.
+            // goto no_queue.
+            tcp_in_ack_event(flag);
+
             /*-
              * If this ack opens up a zero window, clear backoff.  It was
              * being used to time the probes, and is probably far higher than
@@ -698,6 +726,11 @@ class TcpInput<T extends IpPacket> {
 
         // See if we can take anything off of the retransmit queue.
         flag |= tcp_clean_rtx_queue(tp, prior_snd_una);
+
+        tcp_in_ack_event(flag);
+
+        // tcp_cong_control();
+
         return 1;
     }
 }

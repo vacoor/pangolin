@@ -4,7 +4,10 @@ import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.upstream.UpstreamFactory;
 import com.github.pangolin.routing.util.SocketUtils;
 
+import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.util.Arrays;
 
 public abstract class AbstractUpstreamFactory implements UpstreamFactory {
@@ -27,7 +30,12 @@ public abstract class AbstractUpstreamFactory implements UpstreamFactory {
     protected abstract Upstream apply0(final String name, final String serverUrl);
 
     protected InetSocketAddress toSocketAddress(final String host, final int port) {
-        return SocketUtils.toSocketAddress(host, port);
+        try {
+            final InetAddress addr = InetAddress.getByName(host);
+            return new InetSocketAddress(addr, port);
+        } catch (final UnknownHostException e) {
+            return InetSocketAddress.createUnresolved(host, port);
+        }
     }
 
     protected String[] splitUserInfo(final String userInfo) {

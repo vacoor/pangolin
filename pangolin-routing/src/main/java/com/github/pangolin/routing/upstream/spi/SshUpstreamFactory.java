@@ -59,6 +59,12 @@ public class SshUpstreamFactory extends AbstractUpstreamFactory {
             return false;
         }
 
+        @Override
+        public boolean isAvailable() {
+            // FIXME
+            return true;
+        }
+
         /**
          * {@inheritDoc}
          */

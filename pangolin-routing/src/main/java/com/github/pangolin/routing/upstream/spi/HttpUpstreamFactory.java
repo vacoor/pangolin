@@ -46,11 +46,11 @@ public class HttpUpstreamFactory extends AbstractUpstreamFactory {
     }
 
     private class HttpUpstream extends AbstractUpstream {
-        private final SocketAddress address;
+        private final InetSocketAddress address;
         private final String username;
         private final String password;
 
-        HttpUpstream(final String name, final SocketAddress address, final String username, final String password) {
+        HttpUpstream(final String name, final InetSocketAddress address, final String username, final String password) {
             super(name);
             this.address = address;
             this.username = username;
@@ -65,6 +65,11 @@ public class HttpUpstreamFactory extends AbstractUpstreamFactory {
         @Override
         public boolean isVirtual() {
             return false;
+        }
+
+        @Override
+        public boolean isAvailable() {
+            return !address.isUnresolved();
         }
 
         @Override

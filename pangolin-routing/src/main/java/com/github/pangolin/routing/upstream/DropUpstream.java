@@ -28,6 +28,11 @@ public class DropUpstream extends AbstractUpstream {
     }
 
     @Override
+    public boolean isAvailable() {
+        return true;
+    }
+
+    @Override
     public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
         return new DropChannelHandler(destination);
     }

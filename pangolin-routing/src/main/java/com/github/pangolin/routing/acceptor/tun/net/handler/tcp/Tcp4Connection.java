@@ -97,7 +97,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
             buf.sequenceNumber(th.getAcknowledgmentNumber());
         } else {
             buf.sequenceNumber(1);
-            buf.acknowledgmentNumber(TcpUtils.determineEndSeq(skb));
+            buf.acknowledgmentNumber(determineEndSeq(skb));
         }
 
         buf.dstAddr(ih.getSrcAddr())
@@ -204,6 +204,6 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
         debug(ipPacket.getHeader(), buf.build(), false);
 //        parent.writeAndFlush(ipPacket).syncUninterruptibly();
         parent.writeAndFlush(ipPacket);
-        logInfo("[TCP] Write");
+        logTrace("[TCP] Write to Downstream");
     }
 }

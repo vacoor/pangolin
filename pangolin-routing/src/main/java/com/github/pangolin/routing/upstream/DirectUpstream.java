@@ -24,6 +24,11 @@ public class DirectUpstream extends AbstractUpstream {
     }
 
     @Override
+    public boolean isAvailable() {
+        return true;
+    }
+
+    @Override
     public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
         return null;
     }

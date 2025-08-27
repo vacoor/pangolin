@@ -76,7 +76,12 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
                 // register group name as proxy alias
                 context.registerAlias(proxiesInGroup.iterator().next(), group.getName());
             } else {
-                context.addUpstream(group.getName(), combine(group.getName(), group.getType(), proxiesInGroup, context));
+                final Upstream combine = combine(group.getName(), group.getType(), proxiesInGroup, context);
+                if (null != combine) {
+                    context.addUpstream(group.getName(), combine);
+                } else {
+                    log.warn("Unable upstream combine type {}", group.getType());
+                }
             }
         }
 

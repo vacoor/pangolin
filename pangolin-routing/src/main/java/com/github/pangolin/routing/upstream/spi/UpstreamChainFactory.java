@@ -34,9 +34,17 @@ public class UpstreamChainFactory implements UpstreamCombiner {
             }
 
             @Override
+            public boolean isAvailable() {
+                return StreamSupport.stream(names.spliterator(), false)
+                    .map(name -> lookupRequired(name, registry))
+                    .anyMatch(Upstream::isAvailable);
+            }
+
+            @Override
             public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
                 final ChannelHandler[] handlers = StreamSupport.stream(names.spliterator(), false)
                         .map(name -> lookupRequired(name, registry))
+                        .filter(Upstream::isAvailable)
                         .map(upstream -> upstream.newSocketProxyHandler(destination))
                         .toArray(ChannelHandler[]::new);
                 return createInitializer(handlers);

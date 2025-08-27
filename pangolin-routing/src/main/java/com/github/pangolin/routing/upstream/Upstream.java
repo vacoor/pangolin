@@ -14,6 +14,8 @@ public interface Upstream {
 
     boolean isVirtual();
 
+    boolean isAvailable();
+
     ChannelHandler newSocketProxyHandler(final InetSocketAddress destination);
 
     ChannelHandler[] newSocketProxyHandlers(final InetSocketAddress destination);

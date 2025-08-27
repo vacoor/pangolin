@@ -25,6 +25,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpUtils.*;
+
 @Slf4j
 public abstract class TcpConnection<T extends IpPacket> {
     private static final int DEFAULT_MTU = 1500;
@@ -46,7 +48,16 @@ public abstract class TcpConnection<T extends IpPacket> {
     public static final int SKB_DROP_REASON_NO_SOCKET = 7;
     public static final int SKB_DROP_REASON_TCP_ABORT_ON_DATA = 8;
     public static final int SKB_DROP_REASON_TCP_ACK_UNSENT_DATA = 9;
+
+    /**
+     * TCP ACK is old, but in window.
+     */
     public static final int SKB_DROP_REASON_TCP_OLD_ACK = 10;
+
+    /**
+     * TCP ACK is too old.
+     */
+    public static final int SKB_DROP_REASON_TCP_TOO_OLD_ACK = 11;
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L943
     public static final int TCPCB_SACKED_ACKED = (1 << 0);    /* SKB ACK'd by a SACK block	*/
@@ -484,19 +495,37 @@ public abstract class TcpConnection<T extends IpPacket> {
 
 
     private boolean inet_reqsk_alloc(IpHeader ipHeader, TcpPacket skb) {
-        final InetSocketAddress resolved = resolve(ipHeader.getDstAddr(), skb.getHeader().getDstPort().valueAsInt());
-        if (null == resolved) {
-            // no socket.
-            return false;
+        final InetAddress dstAddr = ipHeader.getDstAddr();
+        final int dstPort = skb.getHeader().getDstPort().valueAsInt();
+
+        final String dstHostname;
+        if (dnsEngine.isFakeAddress(dstAddr.getAddress())) {
+            dstHostname = dnsEngine.getHostByAddress(dstAddr.getAddress());
+            if (null == dstHostname || dstHostname.isEmpty()) {
+                return false;
+            }
+        } else {
+            dstHostname = null;
         }
 
+        final InetSocketAddress resolved = null != dstHostname
+            ? InetSocketAddress.createUnresolved(dstHostname, dstPort)
+            : new InetSocketAddress(dstAddr, dstPort);
+
         final long sinceMs = System.currentTimeMillis();
+
         logInfo("ESTABLISHING -> {}", resolved);
+
+        final AtomicBoolean initialized = new AtomicBoolean(false);
         final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, true, childGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                 try {
-                    logInfo("[TCP] Read from Upstream");
+                    if (initialized.compareAndSet(false, true)) {
+                        logInfo("[TCP] First Response elapsed: {}ms", System.currentTimeMillis() - sinceMs);
+                    }
+
+                    logTrace("[TCP] Read from Upstream");
                     final ByteBuf buf = (ByteBuf) msg;
                     final byte[] payload = ByteBufUtil.getBytes(buf);
 
@@ -627,7 +656,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     /* **************** Open Connection Request [[ *************/
 
     /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv‎</a> TCP_NEW_SYN_RECV
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a> TCP_NEW_SYN_RECV
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L660">tcp_check_req</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
@@ -638,7 +667,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     }
 
     /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv‎</a> TCP_NEW_SYN_RECV
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a> TCP_NEW_SYN_RECV
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L660">tcp_check_req</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
@@ -653,7 +682,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     }
 
     /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv‎</a> TCP_NEW_SYN_RECV
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a> TCP_NEW_SYN_RECV
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L660">tcp_check_req</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
@@ -734,7 +763,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         icsk_rto = TCP_TIMEOUT_INIT;
         icsk_delack_max = TcpTimer.TCP_DELACK_MAX;
 
-        mdev_us = (int) TcpUtils.jiffies_to_usecs(TCP_TIMEOUT_INIT);
+        mdev_us = (int) jiffies_to_usecs(TCP_TIMEOUT_INIT);
 
         tcp_snd_cwnd_set(TCP_INIT_CWND);
 
@@ -903,7 +932,7 @@ public abstract class TcpConnection<T extends IpPacket> {
      */
     void tcp_rcv_rtt_measure() {
         if (rcv_rtt_est_time != 0) {
-            if (TcpUtils.before(rcv_nxt, rcv_rtt_est_seq)) {
+            if (before(rcv_nxt, rcv_rtt_est_seq)) {
                 return;
             }
             int delta_us = tcp_stamp_us_delta(tcp_mstamp, rcv_rtt_est_time);
@@ -979,7 +1008,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                     rttvar_us = mdev_max_us;
                 }
             }
-            if (TcpUtils.after(snd_una, rtt_seq)) {
+            if (after(snd_una, rtt_seq)) {
                 if (mdev_max_us < rttvar_us) {
                     rttvar_us -= (rttvar_us - mdev_max_us) >> 2;
                 }
@@ -1047,7 +1076,7 @@ public abstract class TcpConnection<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L765">__tcp_set_rto</a>
      */
     private long __tcp_set_rto() {
-        return TcpUtils.usecs_to_jiffies((srtt_us >> 3) + rttvar_us);
+        return usecs_to_jiffies((srtt_us >> 3) + rttvar_us);
     }
 
     /**
@@ -1072,7 +1101,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L671
     private boolean forced_push() {
         // ???
-        return TcpUtils.after(write_seq, pushed_seq + (max_window >> 1));
+        return after(write_seq, pushed_seq + (max_window >> 1));
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L676
@@ -1212,18 +1241,6 @@ public abstract class TcpConnection<T extends IpPacket> {
         return 0;
     }
 
-    private InetSocketAddress resolve(InetAddress dst, final int port) {
-        /*-
-         * FakeIP is only resolved through FakeDNS.
-         */
-        if (null != dnsEngine && dnsEngine.isFakeAddress(dst.getAddress())) {
-            final String hostname = dnsEngine.getHostByAddress(dst.getAddress());
-            log.info("[TCP] {} -> {}", dst, hostname);
-            return null != hostname ? InetSocketAddress.createUnresolved(hostname, port) : null;
-        }
-        return new InetSocketAddress(dst, port);
-    }
-
     // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L597
     int tcp_mss_clamp(final int mss) {
         return user_mss > 0 && user_mss < mss ? user_mss : mss;
@@ -1254,7 +1271,7 @@ public abstract class TcpConnection<T extends IpPacket> {
             final int offset = rcv_nxt - hdr.getSequenceNumber();
             final int length = Math.min(output.tcp_receive_window(this), bytes.length - offset);
             child.writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
-            logInfo("[TCP] Write to Upstream");
+            logTrace("[TCP] Write to Upstream");
         }
     }
 
@@ -1619,7 +1636,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                 /* delta_us may not be positive if the socket is locked
                  * when the retrans timer fires and is rescheduled.
                  */
-                rto = TcpUtils.usecs_to_jiffies(Math.max(delta_us, 1));
+                rto = usecs_to_jiffies(Math.max(delta_us, 1));
             }
             tcp_reset_xmit_timer(TcpTimer.ICSK_TIME_RETRANS, rto, TCP_RTO_MAX);
         }
@@ -1652,7 +1669,7 @@ public abstract class TcpConnection<T extends IpPacket> {
 
         tcp_snd_cwnd_set(tcp_init_cwnd());
 
-        snd_cwnd_stamp = TcpUtils.tcp_jiffies32();
+        snd_cwnd_stamp = tcp_jiffies32();
 
         tcp_init_congestion_control();
 
@@ -1754,19 +1771,27 @@ public abstract class TcpConnection<T extends IpPacket> {
 
         if (State.TCP_SYN_RECV.equals(state.get())) {
 //            tcp_check_req(skb);
+
+            // FIXED SYNC retransmit.
+            if (th.getSyn() && !th.getAck()) {
+                return discard(skb, SKB_DROP_REASON_NOT_SPECIFIED);
+            }
         }
 
         /* step 5: check the ACK field */
         int reason = input.tcp_ack(this, skb, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {
             if (State.TCP_SYN_RECV.equals(state.get())) {
+                // send one RST
                 return 0 == reason ? SKB_DROP_REASON_TCP_OLD_ACK : -reason;
             }
+
+            /* accept old ack during closing */
             if (reason < 0) {
+                // TODO tcp_send_challenge_ack
                 reason = -reason;
                 return discard(skb, reason);
             }
-            /* accept old ack during closing */
         }
 
         reason = SKB_DROP_REASON_NOT_SPECIFIED;
@@ -1783,7 +1808,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                 // ...
 
                 /* Prevent spurious tcp_cwnd_restart() on first data packet */
-                lsndtime = TcpUtils.tcp_jiffies32();
+                lsndtime = tcp_jiffies32();
                 tcp_initialize_rcv_mss();
 
                 break;
@@ -1795,8 +1820,8 @@ public abstract class TcpConnection<T extends IpPacket> {
                 sk_shutdown |= SEND_SHUTDOWN;
 
                 int seq = th.getSequenceNumber();
-                int end_seq = TcpUtils.determineEndSeq(skb);
-                if (end_seq != seq && TcpUtils.after(end_seq - (th.getSyn() ? 1 : 0), rcv_nxt)) {
+                int end_seq = determineEndSeq(skb);
+                if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), rcv_nxt)) {
                     /* Receive out of order FIN after close() */
                     tcp_done();
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
@@ -1828,7 +1853,7 @@ public abstract class TcpConnection<T extends IpPacket> {
             case TCP_CLOSE_WAIT:
             case TCP_CLOSING:
             case TCP_LAST_ACK:
-                if (!TcpUtils.before(th.getSequenceNumber(), rcv_nxt)) {
+                if (!before(th.getSequenceNumber(), rcv_nxt)) {
                     break;
                 }
                 // fallthrough
@@ -1891,13 +1916,16 @@ public abstract class TcpConnection<T extends IpPacket> {
         final String srcHostAddr = srcAddr.getHostAddress();
         final String dstHostAddr = dstAddr.getHostAddress();
 
-        final StringBuilder buff = new StringBuilder("[TCP] ");
-        buff.append(srcHostAddr).append(":").append(srcPort)
-                .append(" -> ")
-                .append(dstHostAddr).append(":").append(dstPort);
+        final StringBuilder buff = new StringBuilder("[TCP]");
         if (null != child) {
             buff.append(" [").append(child.id()).append("]");
+        } else {
+            buff.append(" [").append(" ? ").append("]");
         }
+
+        buff.append(" ").append(srcHostAddr).append(":").append(srcPort)
+                .append(" -> ")
+                .append(dstHostAddr).append(":").append(dstPort);
         buff.append(" ");
 
         buff.append(format);
@@ -2022,7 +2050,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     int icsk_ack_pingpong;
 
     long tcp_rto_min_us() {
-        return TcpUtils.jiffies_to_usecs(tcp_rto_min());
+        return jiffies_to_usecs(tcp_rto_min());
     }
 
     int tcp_rto_min() {
@@ -2055,7 +2083,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         if (0 == user_timeout || 0 == icsk_probes_tstamp) {
             return when;
         }
-        long elapsed = TcpUtils.tcp_jiffies32() - icsk_probes_tstamp;
+        long elapsed = tcp_jiffies32() - icsk_probes_tstamp;
         if (elapsed < 0) {
             elapsed = 0;
         }

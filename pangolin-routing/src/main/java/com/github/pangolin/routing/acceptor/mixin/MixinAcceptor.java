@@ -146,6 +146,11 @@ public class MixinAcceptor implements Acceptor {
         final Upstream upstreamToUse = new DynamicUpstream("mixin-socket-upstream") {
 
             @Override
+            public boolean isAvailable() {
+                return context.getUpstream(upstream).isAvailable();
+            }
+
+            @Override
             protected Upstream choose(final InetSocketAddress destination) {
                 return context.getUpstream(upstream);
             }
@@ -156,6 +161,11 @@ public class MixinAcceptor implements Acceptor {
 
     private DatagramChannelFactory getDatagramChannelFactory(final RouteContext context) {
         final Upstream upstreamToUse = new DynamicUpstream("mixin-datagram-upstream") {
+
+            @Override
+            public boolean isAvailable() {
+                return context.getUpstream(upstream).isAvailable();
+            }
 
             @Override
             protected Upstream choose(final InetSocketAddress destination) {

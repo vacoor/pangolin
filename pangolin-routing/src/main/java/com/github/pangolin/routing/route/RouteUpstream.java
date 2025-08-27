@@ -21,6 +21,11 @@ public class RouteUpstream extends DynamicUpstream {
         this.upstreams = upstreams;
     }
 
+    @Override
+    public boolean isAvailable() {
+        return true;
+    }
+
     public RouteRegistry<InetSocketAddress> routes() {
         return routes;
     }

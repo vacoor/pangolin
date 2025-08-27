@@ -75,6 +75,14 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
             }
 
             @Override
+            public boolean isAvailable() {
+                return StreamSupport.stream(names.spliterator(), false)
+                    .map(registry::getUpstream)
+                    .filter(Objects::nonNull)
+                    .anyMatch(Upstream::isAvailable);
+            }
+
+            @Override
             public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
                 Upstream upstream = choose();
                 if (null != upstream) {
@@ -88,6 +96,7 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
                 List<StatsUpstream> collect = StreamSupport.stream(names.spliterator(), false)
                         .map(n -> (StatsUpstream) registry.getUpstream(n))
                         .filter(Objects::nonNull)
+                    .filter(Upstream::isAvailable)
                         .sorted(new Comparator<StatsUpstream>() {
                             @Override
                             public int compare(final StatsUpstream o1, final StatsUpstream o2) {

@@ -28,6 +28,11 @@ public class MockUpstreamFactory extends AbstractUpstreamFactory {
             }
 
             @Override
+            public boolean isAvailable() {
+                return true;
+            }
+
+            @Override
             public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
                 return null;
             }
