@@ -315,6 +315,7 @@ class TcpInput<T extends IpPacket> {
                 if (null != tp.child && tp.child.isOpen()) {
                     tp.child.close();
                 } else {
+                    // if not connected.
                     tp.shutdown(SEND_SHUTDOWN);
                 }
 

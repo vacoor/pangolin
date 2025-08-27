@@ -75,9 +75,17 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
         }
     }
 
+    @Override
+    protected void send_reset(final IpHeader request, final TcpPacket skb, int err) {
+        tcp_v4_send_reset((IpV4Header) request, skb, err);
+    }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
-    void tcp_v4_send_reset(IpV4Header ih, TcpPacket skb, int err) {
+    void tcp_v4_send_reset(final IpV4Header request, TcpPacket skb, int err) {
+        tcp_v4_send_reset(parent, request, skb, err);
+    }
+
+    static void tcp_v4_send_reset(final Channel channel, IpV4Header request, TcpPacket skb, int err) {
         log.warn("SEND-RST: {}", err);
         // FIXME
         // send reset.
@@ -100,30 +108,30 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
             buf.acknowledgmentNumber(determineEndSeq(skb));
         }
 
-        buf.dstAddr(ih.getSrcAddr())
-                .srcAddr(ih.getSrcAddr())
+        buf.dstAddr(request.getSrcAddr())
+                .srcAddr(request.getSrcAddr())
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true);
 
         IpV4Packet.Builder arg = new IpV4Packet.Builder();
-        arg.tos(ih.getTos());
-        arg.identification(ih.getIdentification());
+        arg.tos(request.getTos());
+        arg.identification(request.getIdentification());
 
         arg.version(IpVersion.IPV4)
-                .protocol(ih.getProtocol())
-                .srcAddr(ih.getDstAddr())
-                .dstAddr(ih.getSrcAddr())
-                .ttl(ih.getTtl())
+                .protocol(request.getProtocol())
+                .srcAddr(request.getDstAddr())
+                .dstAddr(request.getSrcAddr())
+                .ttl(request.getTtl())
                 // FIXME
-                .fragmentOffset(ih.getFragmentOffset())
+                .fragmentOffset(request.getFragmentOffset())
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true)
                 .payloadBuilder(buf)
                 .build();
 
-        parent.writeAndFlush(arg.build());
+        channel.writeAndFlush(arg.build());
     }
 
     /**

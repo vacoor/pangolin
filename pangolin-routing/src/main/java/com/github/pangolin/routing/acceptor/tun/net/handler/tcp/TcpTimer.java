@@ -113,7 +113,7 @@ class TcpTimer<T extends IpPacket> {
 //        final ScheduledFuture<?> nf = scheduler.schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
         Future<?> future = timers.put(timer, nf);
         if (null != future && !future.isDone() && !future.isCancelled()) {
-            future.cancel(false);
+            future.cancel(true);
         }
         return 0;
     }

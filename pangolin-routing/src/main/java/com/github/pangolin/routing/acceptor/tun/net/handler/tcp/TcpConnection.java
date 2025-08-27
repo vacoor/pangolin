@@ -8,12 +8,9 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpPacket;
+import org.pcap4j.packet.*;
 import org.pcap4j.packet.IpPacket.IpHeader;
-import org.pcap4j.packet.Packet;
-import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
-import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.io.IOException;
@@ -442,6 +439,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     private final AtomicInteger ireq_snd_wscale_ref = new AtomicInteger();
     final AtomicInteger ireq_rcv_wscale_ref = new AtomicInteger();
 
+
     protected boolean conn_request(final T ih, final TcpPacket skb) {
         return tcp_conn_request(ih, skb);
     }
@@ -565,7 +563,17 @@ public abstract class TcpConnection<T extends IpPacket> {
             @Override
             public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
                 logError("Exception caught: {}", cause.getMessage(), cause);
-                input.tcp_done_with_error(TcpConnection.this, -1);
+                send_reset(ipHeader, new TcpPacket.Builder()
+                        .srcAddr(ipHeader.getSrcAddr())
+                        .dstAddr(ipHeader.getDstAddr())
+                        .srcPort(tcpSrcPort)
+                        .dstPort(tcpDstPort)
+                        .ack(true)
+                        .acknowledgmentNumber(rcv_nxt)
+                        .build(), -1);
+                if (ctx.channel().isOpen()) {
+                    ctx.channel().close();
+                }
             }
         });
 
@@ -587,6 +595,8 @@ public abstract class TcpConnection<T extends IpPacket> {
             return false;
         }
     }
+
+    protected abstract void send_reset(IpHeader request, TcpPacket skb, int err);
 
     /**
      * @param skb
