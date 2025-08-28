@@ -312,14 +312,6 @@ class TcpInput<T extends IpPacket> {
                 tp.state.set(State.TCP_CLOSE_WAIT);
                 tp.inet_csk_enter_pingpong_mode();
 
-                // FIXME
-                if (null != tp.child && tp.child.isOpen()) {
-                    tp.child.close();
-                } else {
-                    // if not connected.
-                    tp.shutdown(SEND_SHUTDOWN);
-                }
-
                 break;
             case TCP_CLOSE_WAIT:
             case TCP_CLOSING:

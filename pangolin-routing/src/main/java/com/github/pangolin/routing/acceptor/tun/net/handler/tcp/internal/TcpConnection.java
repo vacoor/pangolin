@@ -8,9 +8,12 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.*;
+import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
+import org.pcap4j.packet.Packet;
+import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
+import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.io.IOException;
@@ -479,7 +482,7 @@ public abstract class TcpConnection<T extends IpPacket> {
             ts_off = init_ts_off(skb);
         }
 
-        req_snt_isn_ref.set(initSeq(null, skb.getHeader()));
+        req_snt_isn_ref.set(initSeq(ipHdr, skb.getHeader()));
 
         // init rwin
         tcp_openreq_init_rwin(skb);
@@ -499,6 +502,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         if (dnsEngine.isFakeAddress(dstAddr.getAddress())) {
             dstHostname = dnsEngine.getHostByAddress(dstAddr.getAddress());
             if (null == dstHostname || dstHostname.isEmpty()) {
+                logError("[TCP] can't resolve fake IP: {}", dstAddr.getHostAddress());
                 return false;
             }
         } else {
@@ -623,8 +627,11 @@ public abstract class TcpConnection<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/core/secure_seq.c#L136">secure_tcp_seq</a>
      */
     protected int initSeq(final IpHeader ipHdr, final TcpHeader tcpHdr) {
-//        new SecureRandom().nextInt();
-        return tcpHdr.getSequenceNumber();
+        // return tcpHdr.getSequenceNumber();
+        return secureSeq(
+                ipHdr.getSrcAddr().getAddress(), tcpHdr.getSrcPort().value(),
+                ipHdr.getDstAddr().getAddress(), tcpHdr.getDstPort().value()
+        );
     }
 
     private void tcp_openreq_init_rwin(TcpPacket skb) {
@@ -1704,27 +1711,15 @@ public abstract class TcpConnection<T extends IpPacket> {
             case TCP_CLOSE:
                 return discard(skb, SKB_DROP_REASON_TCP_CLOSE);
             case TCP_LISTEN:
-                /*-
-                 * LISTEN 不允许接收 ACK 包.
-                 */
                 if (th.getAck()) {
-                    return SKB_DROP_REASON_NOT_SPECIFIED;
+                    return SKB_DROP_REASON_TCP_FLAGS;
                 }
-
-                /*-
-                 * RST 包应该被忽略.
-                 */
                 if (th.getRst()) {
                     return discard(skb, SKB_DROP_REASON_TCP_RESET);
                 }
 
-                /*-
-                 * 第一次握手.
-                 */
+                /* handshake */
                 if (th.getSyn()) {
-                    /*-
-                     * SYN-FIN 应该被忽略.
-                     */
                     if (th.getFin()) {
                         return discard(skb, SKB_DROP_REASON_TCP_FLAGS);
                     }
@@ -1751,9 +1746,6 @@ public abstract class TcpConnection<T extends IpPacket> {
                     return SKB_DROP_REASON_NOT_SPECIFIED;
                 }
 
-                /*-
-                 * !ACK & !RST & !SYN.
-                 */
                 return discard(skb, SKB_DROP_REASON_TCP_FLAGS);
             case TCP_SYN_SENT:
                 /*-
@@ -1797,12 +1789,13 @@ public abstract class TcpConnection<T extends IpPacket> {
 
             /* accept old ack during closing */
             if (reason < 0) {
-                // TODO tcp_send_challenge_ack
+                tcp_send_challenge_ack();
                 reason = -reason;
                 return discard(skb, reason);
             }
         }
 
+        boolean queued = false;
         reason = SKB_DROP_REASON_NOT_SPECIFIED;
         switch (state.get()) {
             case TCP_SYN_RECV:
@@ -1885,12 +1878,28 @@ public abstract class TcpConnection<T extends IpPacket> {
                 // fallthrough
             case TCP_ESTABLISHED:
                 input.tcp_data_queue(this, skb);
+                queued = true;
                 break;
         }
 
         if (!State.TCP_CLOSE.equals(state.get())) {
             input.tcp_data_snd_check(this);
             input.tcp_ack_snd_check(this);
+
+            if (State.TCP_CLOSE_WAIT.equals(state.get())) {
+                // FIXME
+                if (null != child && child.isOpen()) {
+                    child.close();
+                } else {
+                    // if not connected.
+                    shutdown(SEND_SHUTDOWN);
+                }
+
+            }
+        }
+
+        if (!queued) {
+            tcp_drop_reason(skb, reason);
         }
 
         return SKB_DROP_REASON_NOT_SPECIFIED;
@@ -1898,7 +1907,12 @@ public abstract class TcpConnection<T extends IpPacket> {
 
 
     private int discard(final TcpPacket skb, final int reason) {
+        tcp_drop_reason(skb, reason);
         return 0;
+    }
+
+    private void tcp_drop_reason(final TcpPacket skb, final int reason) {
+
     }
 
     protected abstract void INDIRECT_CALL_INET(final TcpBuffer skb);
@@ -2154,5 +2168,9 @@ public abstract class TcpConnection<T extends IpPacket> {
         }
 
         return fin_timeout;
+    }
+
+    void tcp_send_challenge_ack() {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3649
     }
 }

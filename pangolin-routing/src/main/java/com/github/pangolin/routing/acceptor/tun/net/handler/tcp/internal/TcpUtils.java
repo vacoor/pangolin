@@ -3,12 +3,20 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
 
+import java.nio.ByteBuffer;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  *
  */
 abstract class TcpUtils {
+    private static final AtomicLong TIME_COUNTER = new AtomicLong(System.nanoTime());
+    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final long[] SIP_HASH_KEYS = {RANDOM.nextLong(), RANDOM.nextLong()};
 
     private TcpUtils() {
     }
@@ -136,4 +144,20 @@ abstract class TcpUtils {
         return a - (a % b);
     }
 
+    static int secureSeq(final byte[] srcAddress, final short srcPort,
+                         final byte[] dstAddress, final short dstPort) {
+        final long timeBase = (System.nanoTime() - TIME_COUNTER.getAndIncrement()) >> 6;
+        try {
+            final ByteBuffer buf = ByteBuffer.allocate(
+                    srcAddress.length + 2 + dstAddress.length + 2
+            ).put(srcAddress).putShort(srcPort).put(dstAddress).putShort(dstPort);
+
+            final MessageDigest digest = MessageDigest.getInstance("MD5");
+            final byte[] hash = digest.digest(buf.array());
+            final int hashV = ((hash[0] & 0xFF) << 24) | ((hash[1] & 0xFF) << 16) | ((hash[2] & 0xFF) << 8) | ((hash[3] & 0xFF));
+            return (int) (timeBase + hashV);
+        } catch (final NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
 }
