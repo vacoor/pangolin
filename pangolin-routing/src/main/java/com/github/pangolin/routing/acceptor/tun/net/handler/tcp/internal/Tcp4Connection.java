@@ -1,6 +1,6 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpUtils.determineEndSeq;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.determineEndSeq;
 import static org.pcap4j.packet.IpPacket.IpHeader;
 import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 
@@ -26,7 +26,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
     }
 
     @Override
-    protected synchronized void handler0(final IpV4Packet ip, final TcpPacket tcpPacket) {
+    protected synchronized void tcp_rcv(final IpV4Packet ip, final TcpPacket tcpPacket) {
         tcp_v4_rcv(ip, tcpPacket);
     }
 

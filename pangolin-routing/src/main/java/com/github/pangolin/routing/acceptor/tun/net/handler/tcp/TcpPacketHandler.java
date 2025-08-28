@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.IpPacketHandler;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.google.common.base.Preconditions;
@@ -60,7 +61,9 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
         }
         TcpConnection<T> tcpConnection = sessionMap.get(sockKey);
         if (null != tcpConnection) {
-            tcpConnection.handler(ipPacket, tcpPacket);
+            childGroup.execute(() -> {
+                tcpConnection.handler(ipPacket, tcpPacket);
+            });
         }
     }
 

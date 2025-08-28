@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;

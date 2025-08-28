@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
@@ -8,11 +8,11 @@ import org.pcap4j.packet.TcpWindowScaleOption;
 
 import java.io.IOException;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpConnection.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpConstants.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpTimer.ICSK_ACK_NOW;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpTimer.ICSK_TIME_PROBE0;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpUtils.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_ACK_NOW;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_TIME_PROBE0;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
 class TcpInput<T extends IpPacket> {
@@ -114,11 +114,12 @@ class TcpInput<T extends IpPacket> {
             output.tcp_send_ack(tp);
             return;
         }
-
         output.tcp_send_delayed_ack(tp);
     }
 
     /**
+     * Check if sending an ack is needed.
+     *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5827">tcp_ack_snd_check</a>
      */
     void tcp_ack_snd_check(TcpConnection<T> tp) {
@@ -673,6 +674,9 @@ class TcpInput<T extends IpPacket> {
             return -SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
         }
 
+        /*-
+         * If the ack is newer ack then we should reset retransmit counter.
+         */
         if (after(ack, prior_snd_una)) {
             flag |= FLAG_SND_UNA_ADVANCED;
             tp.icsk_retransmits = 0;

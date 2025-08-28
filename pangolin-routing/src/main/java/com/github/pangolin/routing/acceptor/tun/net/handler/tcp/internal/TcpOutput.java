@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
@@ -9,11 +9,11 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpConnection.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
 import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
 import static com.sun.jna.platform.linux.ErrNo.EINVAL;
 import static org.pcap4j.packet.TcpPacket.TcpOption;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpUtils.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_output.c</a>

@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 public interface TcpConstants {
     int HZ = 1000;

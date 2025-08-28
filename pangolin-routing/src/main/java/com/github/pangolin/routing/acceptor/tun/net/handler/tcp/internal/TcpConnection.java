@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.support.SocketChannelFactory;
@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpUtils.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
 public abstract class TcpConnection<T extends IpPacket> {
@@ -195,16 +195,16 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     /*-
      *              |<------- TCP recv window ------->|
-     *              |            (rcv.wnd)            |
+     *              |            (RCV.WND)            |
      *  --------------------------------------------------------------------
      * | .. | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 |  15  | ...
      *  --------------------------------------------------------------------
      * |  sent and  | sent and not  |                 | can't receive until |
      * |acknowledged| acknowledged  |                 |    window moves     |
      *              ^               ^                 ^
-     *              |-closes->   rcv.nxt    <-shrinks-|-opens->
+     *              |-closes->   RCV.NXT    <-shrinks-|-opens->
      *          left edge                        right edge
-     *          (rcv.wup)                    (rcv.wup + rcv.wnd)
+     *          (RCV.WUP)                    (RCV.WUP + RCV.WND)
      *
      */
 
@@ -229,7 +229,7 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     /*-
      *              |<------- TCP send window ------->|
-     *              |            (snd.wnd)            |
+     *              |            (SND.WND)            |
      *              |               |<-Usable window->|
      *  --------------------------------------------------------------------
      * | .. | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 |  15  | ...
@@ -237,9 +237,9 @@ public abstract class TcpConnection<T extends IpPacket> {
      * |  sent and  | sent and not  |    being sent   |   can't send until  |
      * |acknowledged| acknowledged  |                 |     window moves    |
      *              ^               ^                 ^
-     *              |-closes->    snd.nxt   <-shrinks-|-opens->
+     *              |-closes->    SND.NXT   <-shrinks-|-opens->
      *          left edge                        right edge
-     *          (snd.una)                    (snd.una + snd.wnd)
+     *          (SND.UNA)                    (SND.UNA + SND.WND)
      *
      * Usable window = snd.una + snd.wnd - snd.nxt
      */
@@ -377,14 +377,13 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     public void handler(final T ipHeader, final TcpPacket tcpPacket) {
         if (null != child) {
-            child.eventLoop().execute(() -> handler0(ipHeader, tcpPacket));
+            child.eventLoop().execute(() -> tcp_rcv(ipHeader, tcpPacket));
         } else {
-            handler0(ipHeader, tcpPacket);
+            tcp_rcv(ipHeader, tcpPacket);
         }
     }
 
-    protected abstract void handler0(final T ipHeader, final TcpPacket tcpPacket);
-
+    protected abstract void tcp_rcv(final T ipHeader, final TcpPacket tcpPacket);
 
     /**
      * 发送可用/拥塞窗口大小.
@@ -1837,8 +1836,21 @@ public abstract class TcpConnection<T extends IpPacket> {
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
 
-                // if fin 重置 keepalive timer
-                // else 等待超时切换到 WAIT2 ??
+                final int tmo = tcp_fin_time();
+                if (tmo > TCP_TIMEWAIT_LEN) {
+                    timer.tcp_reset_keepalive_timer(tmo - TCP_TIMEWAIT_LEN);
+                } else if (th.getFin()) {
+                    /* Bad case. We could lose such FIN otherwise.
+                     * It is not a big problem, but it looks confusing
+                     * and not so rare event. We still can lose it now,
+                     * if it spins in bh_lock_sock(), but it is really
+                     * marginal case.
+                     */
+                    timer.tcp_reset_keepalive_timer(tmo);
+                } else {
+                    // FIXME
+                    // tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
+                }
                 break;
             case TCP_CLOSING:
                 if (snd_una == write_seq) {
@@ -1943,9 +1955,6 @@ public abstract class TcpConnection<T extends IpPacket> {
     }
 
     protected void debug(final IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
-//        if (true) {
-//            return;
-//        }
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         final TcpHeader tcpHeader = tcpPacket.getHeader();
@@ -2039,6 +2048,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     */
     static final int TCP_TIMEOUT_INIT = 1 * HZ;
     static final int TCP_TIMEOUT_MIN = 2;
+    static final int TCP_TIMEWAIT_LEN = 60 * HZ;
 
     int icsk_probes_out;
     long icsk_probes_tstamp;
@@ -2134,4 +2144,15 @@ public abstract class TcpConnection<T extends IpPacket> {
         return TCP_RTO_MAX;
     }
 
+    int tcp_fin_time() {
+        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1746
+        // linger2 > 0 ?
+        int fin_timeout = 60 * HZ;
+        int rto = icsk_rto;
+        if (fin_timeout < (rto << 2) - (rto >> 1)) {
+            fin_timeout = (rto << 2) - (rto >> 1);
+        }
+
+        return fin_timeout;
+    }
 }

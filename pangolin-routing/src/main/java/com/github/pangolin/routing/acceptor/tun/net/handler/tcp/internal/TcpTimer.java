@@ -1,13 +1,20 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.TCP_ATO_MIN;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.TCP_RESOURCE_PROBE_INTERVAL;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.TCP_RTO_MAX;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.TCP_RTO_MIN;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.TCP_TIMEOUT_INIT;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.sysctl_tcp_retries1;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.sysctl_tcp_retries2;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.jiffies;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.time_after;
 
 import com.google.common.collect.Maps;
 import io.netty.util.concurrent.Future;
-import org.pcap4j.packet.IpPacket;
-
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
-
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.TcpConnection.*;
+import org.pcap4j.packet.IpPacket;
 
 class TcpTimer<T extends IpPacket> {
     private final TcpConnection<T> tp;
@@ -37,11 +44,7 @@ class TcpTimer<T extends IpPacket> {
 
     void tcp_init_xmit_timers() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L883
-        inet_csk_init_xmit_timers(
-                this::tcp_write_timer,
-                this::tcp_delack_timer,
-                this::tcp_keepalive_timer
-        );
+        inet_csk_init_xmit_timers( this::tcp_write_timer, this::tcp_delack_timer, this::tcp_keepalive_timer);
     }
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L702
@@ -154,7 +157,7 @@ class TcpTimer<T extends IpPacket> {
             return;
         }
 
-        if (TcpUtils.time_after(tp.icsk_ack_timeout, TcpUtils.jiffies())) {
+        if (time_after(tp.icsk_ack_timeout, jiffies())) {
             sk_reset_timer(icsk_delack_timer, tp.icsk_ack_timeout);
             return;
         }
@@ -285,7 +288,7 @@ class TcpTimer<T extends IpPacket> {
             }
 
             if (tp.icsk_retransmits == 0) {
-                // ignore
+                // FIXME ignore
             }
 
             tp.tcp_enter_loss();
@@ -510,9 +513,9 @@ class TcpTimer<T extends IpPacket> {
         }
     }
 
-
-
-
-
     /* *********** ]] ZERO WINDOW PROBE ************** */
+
+    void tcp_reset_keepalive_timer(long len) {
+        sk_reset_timer(sk_timer, jiffies() + len);
+    }
 }
