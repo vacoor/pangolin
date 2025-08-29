@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.after;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.before;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.determineEndSeq;
@@ -1799,7 +1800,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                 if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), rcv_nxt)) {
                     /* Receive out of order FIN after close() */
                     tcp_done();
-                    return TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
+                    return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
 
                 final int tmo = tcp_fin_time();
@@ -1847,7 +1848,18 @@ public abstract class TcpConnection<T extends IpPacket> {
                 // fallthrough
             case TCP_FIN_WAIT1:
             case TCP_FIN_WAIT2:
-                // XXX
+                /* RFC 793 says to queue data in these states,
+                 * RFC 1122 says we MUST send a reset.
+                 * BSD 4.4 also does reset.
+                 */
+                if (0 != (sk_shutdown & RCV_SHUTDOWN)) {
+                    int seq = th.getSequenceNumber();
+                    int end_seq = determineEndSeq(skb);
+                    if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), rcv_nxt)) {
+                        input.tcp_reset(this, skb);
+                        return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
+                    }
+                }
                 // fallthrough
             case TCP_ESTABLISHED:
                 input.tcp_data_queue(this, skb);
