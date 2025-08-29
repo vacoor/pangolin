@@ -86,7 +86,7 @@ class TcpTimer<T extends IpPacket> {
             tp.icsk_pending = what;
             tp.icsk_timeout = TcpUtils.jiffies() + when;
 
-            log.warn("[Retransmit] Delay: {}", when);
+//            log.warn("[Retransmit] Delay: {}", when);
             sk_reset_timer(icsk_retransmit_timer, tp.icsk_timeout);
         } else if (what == ICSK_TIME_DACK) {
             tp.icsk_ack_pending |= ICSK_ACK_TIMER;
