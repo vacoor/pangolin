@@ -86,6 +86,7 @@ class TcpTimer<T extends IpPacket> {
             tp.icsk_pending = what;
             tp.icsk_timeout = TcpUtils.jiffies() + when;
 
+            log.warn("[Retransmit] Delay: {}", when);
             sk_reset_timer(icsk_retransmit_timer, tp.icsk_timeout);
         } else if (what == ICSK_TIME_DACK) {
             tp.icsk_ack_pending |= ICSK_ACK_TIMER;
@@ -116,11 +117,14 @@ class TcpTimer<T extends IpPacket> {
 
     private int __mod_timer(Runnable timer, long expires, int options) {
 //        io.netty.util.concurrent.ScheduledFuture<?> nf = parent.eventLoop().schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
-        io.netty.util.concurrent.ScheduledFuture<?> nf = tp.child.eventLoop().schedule(timer, expires - TcpUtils.jiffies(), TimeUnit.MILLISECONDS);
+        final long delay = expires - jiffies();
+        io.netty.util.concurrent.ScheduledFuture<?> nf = tp.child.eventLoop().schedule(timer, delay, TimeUnit.MILLISECONDS);
 //        final ScheduledFuture<?> nf = scheduler.schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
         Future<?> future = timers.put(timer, nf);
         if (null != future && !future.isDone() && !future.isCancelled()) {
-            future.cancel(true);
+            if (!future.cancel(true)) {
+                log.warn("CANCEL FAILED");
+            }
         }
         return 0;
     }

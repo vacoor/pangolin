@@ -352,9 +352,9 @@ class TcpInput<T extends IpPacket> {
     private int tcp_clean_rtx_queue(TcpConnection<T> tp, int prior_snd_una) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3340
 
-        int first_ackt = 0;
+        long first_ackt = 0;
         int first_ackseq = 0;
-        int last_ackt = 0;
+        long last_ackt = 0;
         int flag = 0;
         boolean fully_acked = true;
         long seq_rtt_us = 0;

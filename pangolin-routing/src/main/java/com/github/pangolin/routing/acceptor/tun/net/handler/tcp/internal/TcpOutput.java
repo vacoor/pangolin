@@ -627,7 +627,6 @@ class TcpOutput<T extends IpPacket> {
             }
 
             // FIXME
-            skb.skb_mstamp_ns = System.nanoTime();
             if (0 != tcp_transmit_skb(tp, skb, true)) {
                 break;
             }
@@ -916,7 +915,7 @@ class TcpOutput<T extends IpPacket> {
         }
 
         // FIXME
-        tp.logWarn("[RETRANSMIT] Seq={}",skb.sequenceNumber());
+//        tp.logWarn("[RETRANSMIT] Seq={}",skb.sequenceNumber());
 
 //        int plen = b.length();
         int skbLen = skb.asBuilder()
@@ -1233,8 +1232,8 @@ class TcpOutput<T extends IpPacket> {
     private TcpBuffer tcp_init_nondata_skb(int seq, int flags) {
         TcpBuffer skb = new TcpBuffer();
         skb.sequenceNumber(seq);
-        skb.fin(0 != (flags & TcpConstants.SYN));
-        skb.fin(0 != (flags & TcpConstants.ACK));
+        skb.syn(0 != (flags & TcpConstants.SYN));
+        skb.ack(0 != (flags & TcpConstants.ACK));
         skb.fin(0 != (flags & TcpConstants.FIN));
         return skb;
     }

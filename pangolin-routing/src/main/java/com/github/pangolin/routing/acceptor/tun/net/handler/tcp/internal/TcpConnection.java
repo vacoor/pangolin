@@ -1247,7 +1247,6 @@ public abstract class TcpConnection<T extends IpPacket> {
             final int offset = rcv_nxt - hdr.getSequenceNumber();
             final int length = Math.min(output.tcp_receive_window(this), bytes.length - offset);
             child.writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
-            logTrace("[TCP] Write to {}", ipHeader.getDstAddr());
         }
     }
 
@@ -1389,17 +1388,18 @@ public abstract class TcpConnection<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L905">tcp_skb_timestamp_us</a>
      * https://github.com/torvalds/linux/blob/v6.13/include/linux/skbuff.h#L867
      */
-    int tcp_skb_timestamp_us(final TcpBuffer skb) {
+    long tcp_skb_timestamp_us(final TcpBuffer skb) {
         // skb_mstamp_ns <==> skb->tstamp
         // return div_u64(skb->skb_mstamp_ns, NSEC_PER_USEC);
         // FIXME
-        return (int) (skb.tstamp / 1000);
+        return (skb.tstamp / 1000);
     }
 
     // https://github.com/torvalds/linux/blob/v6.13/include/linux/skbuff.h#L4322
     void skb_set_delivery_time(TcpBuffer skb, long kt, String tstamp_type) {
         // FIXME
 //        skb.tstamp = kt;
+        skb.skb_mstamp_ns = kt;
         skb.tstamp = kt;
     }
 
@@ -1996,7 +1996,7 @@ public abstract class TcpConnection<T extends IpPacket> {
             buff.replace(buff.length() - 1, buff.length(), "] ").insert(len, " [");
         }
 
-        final boolean useRelative = true;
+        final boolean useRelative = false;
         long sequence = tcpHeader.getSequenceNumberAsLong();
         long acknowledgment = tcpHeader.getAcknowledgmentNumberAsLong();
         if (useRelative) {
