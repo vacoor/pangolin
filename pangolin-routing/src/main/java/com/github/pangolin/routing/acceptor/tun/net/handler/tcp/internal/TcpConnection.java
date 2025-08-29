@@ -1,12 +1,33 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.after;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.before;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.determineEndSeq;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.jiffies_to_usecs;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.secureSeq;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.tcp_jiffies32;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.usecs_to_jiffies;
+
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.EventLoopGroup;
 import io.netty.util.ReferenceCountUtil;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
@@ -16,17 +37,6 @@ import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
 
-import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
-
 @Slf4j
 public abstract class TcpConnection<T extends IpPacket> {
     private static final int DEFAULT_MTU = 1500;
@@ -34,30 +44,6 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     static final short IP_HEADER_SIZE = 20;
     private static final short TCP_HEADER_SIZE = 20;
-
-    /**
-     * https://github.com/torvalds/linux/blob/master/include/net/dropreason-core.h#L127.
-     */
-    public static final int SKB_DROP_REASON_NOT_SPECIFIED = 0;
-    public static final int SKB_DROP_REASON_TCP_FLAGS = 1;
-    public static final int SKB_DROP_REASON_TCP_RESET = 2;
-    public static final int SKB_DROP_REASON_TCP_CLOSE = 6;
-    public static final int SKB_DROP_REASON_TCP_ZEROWINDOW = 3;
-    public static final int SKB_DROP_REASON_TCP_OLD_DATA = 4;
-    public static final int SKB_DROP_REASON_TCP_OVERWINDOW = 5;
-    public static final int SKB_DROP_REASON_NO_SOCKET = 7;
-    public static final int SKB_DROP_REASON_TCP_ABORT_ON_DATA = 8;
-    public static final int SKB_DROP_REASON_TCP_ACK_UNSENT_DATA = 9;
-
-    /**
-     * TCP ACK is old, but in window.
-     */
-    public static final int SKB_DROP_REASON_TCP_OLD_ACK = 10;
-
-    /**
-     * TCP ACK is too old.
-     */
-    public static final int SKB_DROP_REASON_TCP_TOO_OLD_ACK = 11;
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L943
     public static final int TCPCB_SACKED_ACKED = (1 << 0);    /* SKB ACK'd by a SACK block	*/
@@ -69,91 +55,11 @@ public abstract class TcpConnection<T extends IpPacket> {
     public static final int TCPCB_RETRANS = (TCPCB_SACKED_RETRANS | TCPCB_EVER_RETRANS | TCPCB_REPAIRED);
 
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp_states.h">tcp_states.h</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.c">tcp.c</a>
-     */
-    enum State {
-
-        /**
-         * connection established.
-         */
-        TCP_ESTABLISHED,
-
-        /**
-         * sent a connection request, waiting for ack.
-         */
-        TCP_SYN_SENT,
-
-        /**
-         * received a connection request, sent ack,
-         * waiting for final ack in three-way handshake.
-         */
-        TCP_SYN_RECV,
-
-        /**
-         * our side has shutdown, waiting to complete
-         * transmission of remaining buffered data.
-         */
-        TCP_FIN_WAIT1,
-
-        /**
-         * all buffered data sent, waiting for remote
-         * to shutdown.
-         */
-        TCP_FIN_WAIT2,
-
-        /**
-         * timeout to catch resent junk before entering
-         * closed, can only be entered from FIN_WAIT2
-         * or CLOSING.  Required because the other end
-         * may not have gotten our last ACK causing it
-         * to retransmit the data packet (which we ignore).
-         */
-        TCP_TIME_WAIT,
-
-        /**
-         * socket is finished.
-         */
-        TCP_CLOSE,
-
-        /**
-         * remote side has shutdown and is waiting for
-         * us to finish writing our data and to shutdown
-         * (we have to close() to move on to LAST_ACK).
-         */
-        TCP_CLOSE_WAIT,
-
-        /**
-         * out side has shutdown after remote has
-         * shutdown.  There may still be data in our
-         * buffer that we have to finish sending.
-         */
-        TCP_LAST_ACK,
-
-        TCP_LISTEN,
-
-        /**
-         * both sides have shutdown but we still have
-         * data we have to finish sending.
-         */
-        TCP_CLOSING,
-
-
-        TCP_NEW_SYN_RECV,
-
-        TCP_BOUND_INACTIVE,
-
-        TCP_MAX_STATES
-
-    }
-
-
     IpHeader ipHeader;
     TcpPort tcpSrcPort;
     TcpPort tcpDstPort;
 
-    final AtomicReference<State> state = new AtomicReference<>(State.TCP_CLOSE);
+    final AtomicReference<TcpState> state = new AtomicReference<>(TcpState.TCP_CLOSE);
 
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L243
@@ -296,6 +202,9 @@ public abstract class TcpConnection<T extends IpPacket> {
      */
     int packets_out;
 
+    /**
+     *
+     */
     ConcurrentLinkedQueue<TcpBuffer> sk_write_queue = new ConcurrentLinkedQueue<>();
     ConcurrentLinkedQueue<TcpBuffer> tcp_rtx_queue = new ConcurrentLinkedQueue<>();
 
@@ -345,7 +254,7 @@ public abstract class TcpConnection<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L191">__inet_listen_sk</a>
      */
     private int __inet_listen_sk(int backlog) {
-        State s = this.state.get();
+        TcpState s = this.state.get();
         int st = s.ordinal();
         if (0 == ((1 << st) & (TcpConstants.TCPF_CLOSE | TcpConstants.TCPF_LISTEN))) {
             // return -EINVAL;
@@ -355,7 +264,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         /* Really, if the socket is already in listen state
          * we can only allow the backlog to be adjusted.
          */
-        if (!State.TCP_LISTEN.equals(s)) {
+        if (!TcpState.TCP_LISTEN.equals(s)) {
             // ...
             int err = inet_csk_listen_start();
             if (err != 0) {
@@ -374,7 +283,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         // reqsk_queue_alloc(&icsk->icsk_accept_queue);
 
         // inet_csk_delack_init
-        state.compareAndSet(State.TCP_CLOSE, State.TCP_LISTEN);
+        state.compareAndSet(TcpState.TCP_CLOSE, TcpState.TCP_LISTEN);
         return 0;
     }
 
@@ -502,7 +411,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         if (dnsEngine.isFakeAddress(dstAddr.getAddress())) {
             dstHostname = dnsEngine.getHostByAddress(dstAddr.getAddress());
             if (null == dstHostname || dstHostname.isEmpty()) {
-                logError("[TCP] can't resolve fake IP: {}", dstAddr.getHostAddress());
+                logError("Can't resolve fake IP: {}", dstAddr.getHostAddress());
                 return false;
             }
         } else {
@@ -523,10 +432,10 @@ public abstract class TcpConnection<T extends IpPacket> {
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                 try {
                     if (initialized.compareAndSet(false, true)) {
-                        logInfo("[TCP] First Response elapsed: {}ms", System.currentTimeMillis() - sinceMs);
+                        logInfo("First Response elapsed: {}ms", System.currentTimeMillis() - sinceMs);
                     }
 
-                    logTrace("[TCP] Read from Upstream");
+                    logTrace("Read from {}", resolved);
                     final ByteBuf buf = (ByteBuf) msg;
                     final byte[] payload = ByteBufUtil.getBytes(buf);
 
@@ -582,14 +491,17 @@ public abstract class TcpConnection<T extends IpPacket> {
 
         try {
             child = cf.sync().channel();
-            state.set(State.TCP_SYN_RECV);
+            state.set(TcpState.TCP_SYN_RECV);
             final long elapsedMs = System.currentTimeMillis() - sinceMs;
-            logInfo("ESTABLISHED: {}, elapsed: {}ms", resolved, elapsedMs);
+            logInfo("ESTABLISHED: {} elapsed: {}ms", resolved, elapsedMs);
             child.closeFuture().addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(final ChannelFuture future) throws Exception {
                     logInfo("DISCONNECTED: {}", resolved);
-                    shutdown(SEND_SHUTDOWN);
+                    if (tcp_close_state()) {
+                        output.tcp_send_fin(TcpConnection.this);
+                    }
+//                    shutdown(SEND_SHUTDOWN);
                 }
             });
             return true;
@@ -1044,7 +956,7 @@ public abstract class TcpConnection<T extends IpPacket> {
             // tcp_bpf_rtt(sk, mrtt_us, srtt);
         }
         srtt_us = Math.max(1, srtt);
-        logTrace("Compute a smoothed rtt: {}us", srtt_us >> 3);
+        logTrace("[RTT] Compute a smoothed rtt: {}us", srtt_us >> 3);
     }
 
     /**
@@ -1076,7 +988,7 @@ public abstract class TcpConnection<T extends IpPacket> {
          * guarantees that rto is higher.
          */
         tcp_bound_rto();
-        logTrace("Set retransmission timeout: {}ms", icsk_rto);
+        logTrace("[RTO] Set retransmission timeout: {}ms", icsk_rto);
     }
 
     /**
@@ -1151,6 +1063,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         skb.sequenceNumber(write_seq);
         skb.dstPort(tcpSrcPort).srcPort(tcpDstPort);
         tcp_skb_entail(skb);
+
         final Packet.Builder payload = skb.payloadBuilder();
         if (null != payload) {
             write_seq += payload.build().length();
@@ -1161,23 +1074,23 @@ public abstract class TcpConnection<T extends IpPacket> {
     }
 
     private static final int TCP_STATE_MASK = 0xF;
-    private static final int TCP_ACTION_FIN = 1 << (State.TCP_CLOSE.ordinal());
+    private static final int TCP_ACTION_FIN = 1 << (TcpState.TCP_CLOSE.ordinal());
     private static final int[] new_state = new int[16];
 
     {
 //        new_state[0 /* (Invalid) */] = State.TCP_CLOSE.ordinal();
-        new_state[State.TCP_ESTABLISHED.ordinal() + 1] = State.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
-        new_state[State.TCP_SYN_SENT.ordinal() + 1] = State.TCP_CLOSE.ordinal();
-        new_state[State.TCP_SYN_RECV.ordinal() + 1] = State.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
-        new_state[State.TCP_FIN_WAIT1.ordinal() + 1] = State.TCP_FIN_WAIT1.ordinal();
-        new_state[State.TCP_FIN_WAIT2.ordinal() + 1] = State.TCP_FIN_WAIT2.ordinal();
-        new_state[State.TCP_TIME_WAIT.ordinal() + 1] = State.TCP_CLOSE.ordinal();
-        new_state[State.TCP_CLOSE.ordinal() + 1] = State.TCP_CLOSE.ordinal();
-        new_state[State.TCP_CLOSE_WAIT.ordinal() + 1] = State.TCP_LAST_ACK.ordinal() | TCP_ACTION_FIN;
-        new_state[State.TCP_LAST_ACK.ordinal() + 1] = State.TCP_LAST_ACK.ordinal();
-        new_state[State.TCP_LISTEN.ordinal() + 1] = State.TCP_CLOSE.ordinal();
-        new_state[State.TCP_CLOSING.ordinal() + 1] = State.TCP_CLOSING.ordinal();
-        new_state[State.TCP_NEW_SYN_RECV.ordinal() + 1] = State.TCP_CLOSE.ordinal(); /* should not happen ! */
+        new_state[TcpState.TCP_ESTABLISHED.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
+        new_state[TcpState.TCP_SYN_SENT.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
+        new_state[TcpState.TCP_SYN_RECV.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
+        new_state[TcpState.TCP_FIN_WAIT1.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal();
+        new_state[TcpState.TCP_FIN_WAIT2.ordinal() + 1] = TcpState.TCP_FIN_WAIT2.ordinal();
+        new_state[TcpState.TCP_TIME_WAIT.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
+        new_state[TcpState.TCP_CLOSE.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
+        new_state[TcpState.TCP_CLOSE_WAIT.ordinal() + 1] = TcpState.TCP_LAST_ACK.ordinal() | TCP_ACTION_FIN;
+        new_state[TcpState.TCP_LAST_ACK.ordinal() + 1] = TcpState.TCP_LAST_ACK.ordinal();
+        new_state[TcpState.TCP_LISTEN.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
+        new_state[TcpState.TCP_CLOSING.ordinal() + 1] = TcpState.TCP_CLOSING.ordinal();
+        new_state[TcpState.TCP_NEW_SYN_RECV.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal(); /* should not happen ! */
     }
 
     // https://github.com/torvalds/linux/blob/master/include/net/sock.h#L1472
@@ -1188,12 +1101,15 @@ public abstract class TcpConnection<T extends IpPacket> {
     /**
      * Shutdown the sending side of a connection. Much like close except
      * that we don't receive shut down or sock_set_flag(sk, SOCK_DEAD).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L2979">tcp_shutdown</a>
      */
-    void shutdown(final int how) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L2979
+    void tcp_shutdown(final int how) {
         if (0 == (how & SEND_SHUTDOWN)) {
             return;
         }
+
+        /* If we've already sent a FIN, or it's a closed state, skip this. */
         if (0 != ((1 << state.get().ordinal()) & (TcpConstants.TCPF_ESTABLISHED | TcpConstants.TCPF_CLOSE_WAIT))) {
             /* Clear out any half completed packets.  FIN if needed. */
             if (tcp_close_state()) {
@@ -1206,7 +1122,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         int next = new_state[state.get().ordinal() + 1];
         int ns = next & TCP_STATE_MASK;
 
-        state.set(State.values()[ns]);
+        state.set(TcpState.values()[ns]);
         return 0 != (next & TCP_ACTION_FIN);
     }
 
@@ -1214,17 +1130,61 @@ public abstract class TcpConnection<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3240">tcp_close</a>
      */
-    private void tcp_close() {
-        __tcp_close();
+    private void tcp_close(long timeout) {
+        __tcp_close(timeout);
+        // release_sock();
+        // ...
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3066">__tcp_close</a>
      */
-    private void __tcp_close() {
+    private void __tcp_close(long timeout) {
         // FIXME
+        sk_shutdown = SHUTDOWN_MASK;
+
+        TcpState state = this.state.get();
+        if (TcpState.TCP_LISTEN.equals(state)) {
+            this.state.set(TcpState.TCP_CLOSE);
+            adjudge_to_death();
+            return;
+        }
+
+        // ...
+
+        /* If socket has been already reset (e.g. in tcp_reset()) - kill it. */
+        if (TcpState.TCP_CLOSE.equals(state)) {
+            adjudge_to_death();
+            return;
+        }
+
+        if (tcp_close_state()) {
+            output.tcp_send_fin(this);
+        }
+
+        adjudge_to_death();
     }
 
+    private void adjudge_to_death() {
+        final TcpState state = this.state.get();
+        if (TcpState.TCP_FIN_WAIT2.equals(state)) {
+            final int tmo = tcp_fin_time();
+            if (tmo > TCP_TIMEWAIT_LEN) {
+                timer.tcp_reset_keepalive_timer(tmo - TCP_TIMEWAIT_LEN);
+            } else {
+                tcp_time_wait(TcpState.TCP_FIN_WAIT2, tmo);
+                return;
+            }
+        }
+
+        if (!TcpState.TCP_CLOSE.equals(state)) {
+
+        }
+    }
+
+    private void tcp_time_wait(TcpState state, long timeout) {
+
+    }
 
     void tcp_push_pending_frames() {
         // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2102
@@ -1287,7 +1247,7 @@ public abstract class TcpConnection<T extends IpPacket> {
             final int offset = rcv_nxt - hdr.getSequenceNumber();
             final int length = Math.min(output.tcp_receive_window(this), bytes.length - offset);
             child.writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
-            logTrace("[TCP] Write to Upstream");
+            logTrace("[TCP] Write to {}", ipHeader.getDstAddr());
         }
     }
 
@@ -1297,7 +1257,7 @@ public abstract class TcpConnection<T extends IpPacket> {
      */
     void tcp_done() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L4867
-        state.set(State.TCP_CLOSE);
+        state.set(TcpState.TCP_CLOSE);
         timer.tcp_clear_xmit_timers();
 
         sk_shutdown = SHUTDOWN_MASK;
@@ -1352,7 +1312,7 @@ public abstract class TcpConnection<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L329">inet_csk_enter_pingpong_mode</a>
      */
     void inet_csk_enter_pingpong_mode() {
-        logTrace("[PING-PONG] enter PING-PONG mode: PING-PONG threshold = {}", sysctl_tcp_pingpong_thresh);
+        logTrace("[PING-PONG] enter PING-PONG mode, PING-PONG threshold = {}", sysctl_tcp_pingpong_thresh);
         icsk_ack_pingpong = sysctl_tcp_pingpong_thresh;
     }
 
@@ -1396,7 +1356,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                 icsk_ack_quick = 0;
                 /* Leaving quickack mode we deflate ATO. */
                 icsk_ack_ato = TCP_ATO_MIN;
-            } else {
+            } else if (pkts != 0) {
                 logTrace("[QUICK-ACK] decrement QUICK-ARK count: {} -> {}", icsk_ack_quick, icsk_ack_quick - pkts);
                 icsk_ack_quick -= pkts;
             }
@@ -1709,29 +1669,30 @@ public abstract class TcpConnection<T extends IpPacket> {
          */
         switch (state.get()) {
             case TCP_CLOSE:
-                return discard(skb, SKB_DROP_REASON_TCP_CLOSE);
+                return discard(skb, TcpDropReason.SKB_DROP_REASON_TCP_CLOSE);
             case TCP_LISTEN:
                 if (th.getAck()) {
-                    return SKB_DROP_REASON_TCP_FLAGS;
+                    // Send one RST
+                    return TcpDropReason.SKB_DROP_REASON_TCP_FLAGS;
                 }
                 if (th.getRst()) {
-                    return discard(skb, SKB_DROP_REASON_TCP_RESET);
+                    return discard(skb, TcpDropReason.SKB_DROP_REASON_TCP_RESET);
                 }
 
                 /* handshake */
                 if (th.getSyn()) {
                     if (th.getFin()) {
-                        return discard(skb, SKB_DROP_REASON_TCP_FLAGS);
+                        return discard(skb, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
                     }
 
                     /*-
                      * Linux此处为创建状态为TCP_NEW_SYN_RECV的请求套接字(request_sock)放入半连接队列即可结束,
                      * 此处调整为直接创建连接.
                      */
-                    state.set(State.TCP_NEW_SYN_RECV);
+                    state.set(TcpState.TCP_NEW_SYN_RECV);
                     final boolean accept = conn_request(ipPacket, skb);
                     if (!accept) {
-                        return SKB_DROP_REASON_NO_SOCKET;
+                        return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
                     }
 
                     /*-
@@ -1743,18 +1704,18 @@ public abstract class TcpConnection<T extends IpPacket> {
 
                     // FIXME 移动到连接打开时
 //                    state.set(State.TCP_SYN_RECV);
-                    return SKB_DROP_REASON_NOT_SPECIFIED;
+                    return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
 
-                return discard(skb, SKB_DROP_REASON_TCP_FLAGS);
+                return discard(skb, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
             case TCP_SYN_SENT:
                 /*-
                  * XXX client mode not supported.
                  */
-                return SKB_DROP_REASON_NOT_SPECIFIED;
+                return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
             // 临时处理.
             case TCP_NEW_SYN_RECV:
-                return discard(skb, SKB_DROP_REASON_NOT_SPECIFIED);
+                return discard(skb, TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED);
         }
 
         /*-
@@ -1763,28 +1724,28 @@ public abstract class TcpConnection<T extends IpPacket> {
         output.tcp_mstamp_refresh(this);
 
         if (!th.getAck() && !th.getRst() && !th.getSyn()) {
-            return discard(skb, SKB_DROP_REASON_TCP_FLAGS);
+            return discard(skb, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
         }
 
         if (!input.tcp_validate_incoming(this, skb)) {
-            return SKB_DROP_REASON_NOT_SPECIFIED;
+            return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
         }
 
-        if (State.TCP_SYN_RECV.equals(state.get())) {
+        if (TcpState.TCP_SYN_RECV.equals(state.get())) {
 //            tcp_check_req(skb);
 
             // FIXED SYNC retransmit.
             if (th.getSyn() && !th.getAck()) {
-                return discard(skb, SKB_DROP_REASON_NOT_SPECIFIED);
+                return discard(skb, TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED);
             }
         }
 
         /* step 5: check the ACK field */
         int reason = input.tcp_ack(this, skb, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {
-            if (State.TCP_SYN_RECV.equals(state.get())) {
+            if (TcpState.TCP_SYN_RECV.equals(state.get())) {
                 // send one RST
-                return 0 == reason ? SKB_DROP_REASON_TCP_OLD_ACK : -reason;
+                return 0 == reason ? TcpDropReason.SKB_DROP_REASON_TCP_OLD_ACK : -reason;
             }
 
             /* accept old ack during closing */
@@ -1796,12 +1757,12 @@ public abstract class TcpConnection<T extends IpPacket> {
         }
 
         boolean queued = false;
-        reason = SKB_DROP_REASON_NOT_SPECIFIED;
+        reason = TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
         switch (state.get()) {
             case TCP_SYN_RECV:
                 tcp_init_transfer(skb);
 
-                state.set(State.TCP_ESTABLISHED);
+                state.set(TcpState.TCP_ESTABLISHED);
 
                 snd_una = th.getAcknowledgmentNumber();
                 snd_wnd = th.getWindowAsInt() << snd_wscale;
@@ -1818,15 +1779,27 @@ public abstract class TcpConnection<T extends IpPacket> {
                 if (snd_una != write_seq) {
                     break;
                 }
-                state.set(State.TCP_FIN_WAIT2);
+                state.set(TcpState.TCP_FIN_WAIT2);
                 sk_shutdown |= SEND_SHUTDOWN;
+
+                /*
+                if (!sock_flag(sk, SOCK_DEAD) {
+                   break;
+                }
+
+                // TCP_TIMEWAIT2 timeout < 0, SKIP TCP_TIMEWAIT2.
+                if (lingger2 < 0) {
+                    tcp_done();
+                    return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
+                }
+                 */
 
                 int seq = th.getSequenceNumber();
                 int end_seq = determineEndSeq(skb);
                 if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), rcv_nxt)) {
                     /* Receive out of order FIN after close() */
                     tcp_done();
-                    return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
+                    return TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
 
                 final int tmo = tcp_fin_time();
@@ -1848,14 +1821,14 @@ public abstract class TcpConnection<T extends IpPacket> {
             case TCP_CLOSING:
                 if (snd_una == write_seq) {
                     //
-                    state.set(State.TCP_TIME_WAIT);
+                    state.set(TcpState.TCP_TIME_WAIT);
                 }
                 break;
             case TCP_LAST_ACK:
                 if (snd_una == write_seq) {
                     // tcp_update_metrics
                     tcp_done();
-                    return SKB_DROP_REASON_NOT_SPECIFIED;
+                    return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
                 break;
         }
@@ -1882,17 +1855,17 @@ public abstract class TcpConnection<T extends IpPacket> {
                 break;
         }
 
-        if (!State.TCP_CLOSE.equals(state.get())) {
+        if (!TcpState.TCP_CLOSE.equals(state.get())) {
             input.tcp_data_snd_check(this);
             input.tcp_ack_snd_check(this);
 
-            if (State.TCP_CLOSE_WAIT.equals(state.get())) {
+            if (TcpState.TCP_CLOSE_WAIT.equals(state.get())) {
                 // FIXME
                 if (null != child && child.isOpen()) {
                     child.close();
                 } else {
                     // if not connected.
-                    shutdown(SEND_SHUTDOWN);
+                    tcp_shutdown(SEND_SHUTDOWN);
                 }
 
             }
@@ -1902,7 +1875,7 @@ public abstract class TcpConnection<T extends IpPacket> {
             tcp_drop_reason(skb, reason);
         }
 
-        return SKB_DROP_REASON_NOT_SPECIFIED;
+        return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
     }
 
 
@@ -1952,11 +1925,11 @@ public abstract class TcpConnection<T extends IpPacket> {
         final String srcHostAddr = srcAddr.getHostAddress();
         final String dstHostAddr = dstAddr.getHostAddress();
 
-        final StringBuilder buff = new StringBuilder("[TCP]");
+        final StringBuilder buff = new StringBuilder();
         if (null != child) {
-            buff.append(" [").append(child.id()).append("]");
+            buff.append("[").append(child.id()).append("]");
         } else {
-            buff.append(" [").append(" ? ").append("]");
+            buff.append("[").append("????????").append("]");
         }
 
         buff.append(" ").append(srcHostAddr).append(":").append(srcPort)
@@ -1987,9 +1960,16 @@ public abstract class TcpConnection<T extends IpPacket> {
         */
         String dstHostNameToUse = dstHostName;
 
-        final StringBuilder buff = new StringBuilder()
-                .append(srcHostName).append(":").append(srcPort)
-                .append(" => ")
+        final StringBuilder buff = new StringBuilder();
+        if (null != child) {
+            buff.append("[").append(child.id()).append("]");
+        } else {
+            buff.append("[").append("????????").append("]");
+        }
+
+
+        buff.append(" ").append(srcHostName).append(":").append(srcPort)
+                .append(" -> ")
                 .append(dstHostNameToUse).append(":").append(dstPort);
 
         final int len = buff.length();

@@ -8,21 +8,19 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.sysctl_tcp_retries1;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.sysctl_tcp_retries2;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.jiffies;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.msecs_to_jiffies;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.tcp_jiffies32;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.time_after;
 
 import com.google.common.collect.Maps;
 import io.netty.util.concurrent.Future;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 
+@Slf4j
 class TcpTimer<T extends IpPacket> {
-    private final TcpConnection<T> tp;
-
-    TcpTimer(final TcpConnection<T> tp) {
-        this.tp = tp;
-    }
-
     /**
      * https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L144
      */
@@ -41,6 +39,12 @@ class TcpTimer<T extends IpPacket> {
     Runnable icsk_delack_timer;
     private Runnable sk_timer;
 
+
+    private final TcpConnection<T> tp;
+
+    TcpTimer(final TcpConnection<T> tp) {
+        this.tp = tp;
+    }
 
     void tcp_init_xmit_timers() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L883
@@ -183,9 +187,6 @@ class TcpTimer<T extends IpPacket> {
 
     /* *********** ]] DELAY ACK ************** */
 
-    private void tcp_keepalive_timer() {
-
-    }
 
     /* *********** WRITE TIMER [[ ************** */
 
@@ -243,7 +244,6 @@ class TcpTimer<T extends IpPacket> {
     /* *********** RETRANSMIT TIMER [[ ************** */
 
 
-
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L529">tcp_retransmit_timer</a>
      */
@@ -274,7 +274,7 @@ class TcpTimer<T extends IpPacket> {
 
 
             if (tcp_rtx_probe0_timed_out(rtx_delta)) {
-                tp.logError("RETRANSMIT_WRITE_ERROR");
+                tp.logError("[RETRANSMIT] RETRANSMIT_WRITE_ERROR");
                 tp.tcp_write_err();
                 return;
             }
@@ -399,7 +399,7 @@ class TcpTimer<T extends IpPacket> {
             /* user timeout has passed; fire ASAP */
             return 1;
         }
-        return Math.min(tp.icsk_rto, TcpUtils.msecs_to_jiffies(remaining));
+        return Math.min(tp.icsk_rto, msecs_to_jiffies(remaining));
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L241
@@ -420,6 +420,7 @@ class TcpTimer<T extends IpPacket> {
 
         if (expired) {
             /* Has it gone just too far? */
+            tp.logTrace("[RETRANSMIT] WRITE TIMEOUT");
             tp.tcp_write_err();
             return 1;
         }
@@ -517,5 +518,56 @@ class TcpTimer<T extends IpPacket> {
 
     void tcp_reset_keepalive_timer(long len) {
         sk_reset_timer(sk_timer, jiffies() + len);
+    }
+
+    private void tcp_keepalive_timer() {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L779
+        final TcpState state = tp.state.get();
+
+        if (TcpState.TCP_LISTEN.equals(state)) {
+            log.error("Hmm... keepalive on a LISTEN ???");
+            return;
+        }
+
+        tp.output.tcp_mstamp_refresh(tp);
+
+        if (TcpState.TCP_FIN_WAIT2.equals(state)) {
+
+        }
+        //...
+
+        int elapsed = keepalive_time_when(tp);
+
+        if (tp.packets_out > 0 || !tp.tcp_write_queue_empty()) {
+            tcp_reset_keepalive_timer(elapsed);
+            return;
+        }
+
+        elapsed = keepalive_time_elapsed(tp);
+        if (elapsed >= keepalive_time_when(tp)) {
+            final int user_timeout = tp.icsk_user_timeout;
+            /*-
+             * If the TCP_USER_TIMEOUT option is enabled, use that
+             * to determine when to timeout instead.
+             */
+//            if ((user_timeout != 0 && elapsed >= msecs_to_jiffies(user_timeout) && tp.icsk_probes_out > 0)
+//                || (user_timeout == 0 && tp.icsk_probes_out >= keepalive_probes(tp))) {
+            // tcp_send_active_reset(sk, GFP_ATOMIC, SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT);
+            // tcp_write_err(sk);
+            return;
+//            }
+        } else {
+            tcp_reset_keepalive_timer(keepalive_time_when(tp) - elapsed);
+        }
+    }
+
+    int keepalive_time_when(final TcpConnection<?> tp) {
+        int sysctl_tcp_keepalive_time = 7200;
+        // tp.keepalive_time;
+        return sysctl_tcp_keepalive_time;
+    }
+
+    int keepalive_time_elapsed(final TcpConnection<?> tp) {
+        return (int) Math.min(tcp_jiffies32() - tp.icsk_ack_lrcvtime, tcp_jiffies32() - tp.rcv_tstamp);
     }
 }

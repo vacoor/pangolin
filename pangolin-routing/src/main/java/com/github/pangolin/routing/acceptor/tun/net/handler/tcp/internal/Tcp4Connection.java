@@ -212,6 +212,6 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
         debug(ipPacket.getHeader(), buf.build(), false);
 //        parent.writeAndFlush(ipPacket).syncUninterruptibly();
         parent.writeAndFlush(ipPacket);
-        logTrace("[TCP] Write to Downstream");
+        logTrace("[TCP] Write to {}", ipHeader.getSrcAddr());
     }
 }

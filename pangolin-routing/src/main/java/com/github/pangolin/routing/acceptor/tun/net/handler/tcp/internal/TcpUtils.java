@@ -100,6 +100,17 @@ abstract class TcpUtils {
         return (int) (Math.log(a) / Math.log(2));
     }
 
+
+    static int _ilog2(int x) {
+        int i = 0;
+        while (x >= 2) {
+            x = x >> 1;  // 右移一位相当于除以2
+            i++;
+        }
+        return i;
+    }
+
+
     static int clamp(int value, int min, int max) {
         if (value < min) {
             return min;

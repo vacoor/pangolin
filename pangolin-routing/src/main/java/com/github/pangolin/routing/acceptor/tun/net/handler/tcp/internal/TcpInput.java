@@ -245,7 +245,7 @@ class TcpInput<T extends IpPacket> {
             if (output.tcp_receive_window(tp) == 0) {
                 final int len = skb.length() - hdr.length();
                 if (!(0 >= len && hdr.getFin())) {
-                    out_of_window(tp, skb, SKB_DROP_REASON_TCP_ZEROWINDOW);
+                    out_of_window(tp, skb, TcpDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
                     return;
                 }
             }
@@ -255,14 +255,14 @@ class TcpInput<T extends IpPacket> {
         } else if (!after(endSeq, tp.rcv_nxt)) {
             tcp_rcv_spurious_retrans(skb);
             /* A retransmit, 2nd most common case.  Force an immediate ack. */
-            out_of_window(tp, skb, SKB_DROP_REASON_TCP_OLD_DATA);
+            out_of_window(tp, skb, TcpDropReason.SKB_DROP_REASON_TCP_OLD_DATA);
         } else if (!before(seq, tp.rcv_nxt + output.tcp_receive_window(tp))) {
             /* Out of window. F.e. zero window probe. */
-            out_of_window(tp, skb, SKB_DROP_REASON_TCP_OVERWINDOW);
+            out_of_window(tp, skb, TcpDropReason.SKB_DROP_REASON_TCP_OVERWINDOW);
         } else if (before(seq, tp.rcv_nxt)) {
             /* Partial packet, seq < rcv_next < end_seq */
             if (output.tcp_receive_window(tp) == 0) {
-                out_of_window(tp, skb, SKB_DROP_REASON_TCP_ZEROWINDOW);
+                out_of_window(tp, skb, TcpDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
             } else {
                 // goto queue_and_out
                 queue_and_out(tp, skb);
@@ -304,12 +304,12 @@ class TcpInput<T extends IpPacket> {
 
         tp.sk_shutdown |= RCV_SHUTDOWN;
 
-        final State state = tp.state.get();
+        final TcpState state = tp.state.get();
         switch (state) {
             case TCP_SYN_RECV:
             case TCP_ESTABLISHED:
                 /* Move to CLOSE_WAIT */
-                tp.state.set(State.TCP_CLOSE_WAIT);
+                tp.state.set(TcpState.TCP_CLOSE_WAIT);
                 tp.inet_csk_enter_pingpong_mode();
 
                 break;
@@ -327,7 +327,7 @@ class TcpInput<T extends IpPacket> {
                  * enter the CLOSING state.
                  */
                 output.tcp_send_ack(tp);
-                tp.state.set(State.TCP_CLOSING);
+                tp.state.set(TcpState.TCP_CLOSING);
                 break;
             case TCP_FIN_WAIT2:
                 /* Received a FIN -- send ACK and enter TIME_WAIT. */
@@ -433,7 +433,7 @@ class TcpInput<T extends IpPacket> {
             seq_rtt_us = tp.tcp_stamp_us_delta(tp.tcp_mstamp, first_ackt);
             ca_rtt_us = tp.tcp_stamp_us_delta(tp.tcp_mstamp, last_ackt);
 
-            tp.logTrace("Seq {} round-trip-time: {}us", first_ackseq, seq_rtt_us);
+            tp.logTrace("[RTT] Seq {} round-trip-time: {}us", first_ackseq, seq_rtt_us);
         }
 
         /*-
@@ -651,7 +651,7 @@ class TcpInput<T extends IpPacket> {
                     // TODO tcp_send_challenge_ack?
                 }
                 log.warn("TOO OLD ACK on {}: ACK({}) < SND.UNA({}), {}", tp.state.get(), ack, prior_snd_una, tcpHdr);
-                return -SKB_DROP_REASON_TCP_TOO_OLD_ACK;
+                return -TcpDropReason.SKB_DROP_REASON_TCP_TOO_OLD_ACK;
             }
 
             // goto old_ack.
@@ -663,7 +663,7 @@ class TcpInput<T extends IpPacket> {
          * If the ack includes data we haven't sent yet, discard this segment (RFC793 Section 3.9).
          */
         if (after(ack, tp.snd_nxt)) {
-            return -SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
+            return -TcpDropReason.SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
         }
 
         /*-

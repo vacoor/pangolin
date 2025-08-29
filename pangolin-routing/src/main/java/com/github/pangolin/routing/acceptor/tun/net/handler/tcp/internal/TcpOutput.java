@@ -185,6 +185,7 @@ class TcpOutput<T extends IpPacket> {
             space = Math.max(space, ipv4_sysctl_tcp_rmem_2);
             space = Math.max(space, sysctl_rmem_max);
             space = Math.min(space, window_clamp);
+            int i = _ilog2(space);
             rcv_wscale.set(clamp(ilog2(space) - 15, 0, TCP_MAX_WSCALE));
         }
         /* Set the clamp no higher than max representable value */
@@ -852,7 +853,7 @@ class TcpOutput<T extends IpPacket> {
          * In time closedown will finish, we empty the write queue and
          * all will be happy.
          */
-        if (TcpConnection.State.TCP_CLOSE.equals(tp.state.get())) {
+        if (TcpState.TCP_CLOSE.equals(tp.state.get())) {
             return;
         }
         if (tcp_write_xmit(tp, mss, 0)) {
@@ -913,7 +914,7 @@ class TcpOutput<T extends IpPacket> {
         }
 
         // FIXME
-        tp.logWarn("TCP_RETRNSMIT_SKB");
+        tp.logWarn("[RETRNSMIT] Seq={}",skb.sequenceNumber());
 
 //        int plen = b.length();
         int skbLen = skb.asBuilder()
@@ -1081,7 +1082,7 @@ class TcpOutput<T extends IpPacket> {
      */
     private void __tcp_send_ack(final TcpConnection<T> tp, final int rcv_nxt) {
         /* If we have been reset, we may not send again. */
-        if (TcpConnection.State.TCP_CLOSE.equals(tp.state.get())) {
+        if (TcpState.TCP_CLOSE.equals(tp.state.get())) {
             return;
         }
 
@@ -1122,7 +1123,7 @@ class TcpOutput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4328">tcp_write_wakeup</a>
      */
     private int tcp_write_wakeup(TcpConnection<T> tp, int mib) {
-        if (TcpConnection.State.TCP_CLOSE.equals(tp.state.get())) {
+        if (TcpState.TCP_CLOSE.equals(tp.state.get())) {
             return -1;
         }
 

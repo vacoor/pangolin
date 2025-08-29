@@ -55,7 +55,7 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
         final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
         if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
             sessionMap.putIfAbsent(sockKey, create(ctx.channel(), childGroup, dnsEngine, socketChannelFactory, () -> {
-                    log.info("[TCP] Destroy: {}", sockKey);
+                    log.info("[{}] Destroy: {}", ctx.channel().id(), sockKey);
                     sessionMap.remove(sockKey);
             }));
         }
