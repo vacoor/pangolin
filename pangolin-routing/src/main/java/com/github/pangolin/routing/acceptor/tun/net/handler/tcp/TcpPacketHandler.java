@@ -42,7 +42,13 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
 
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final T rawIpPacket) throws Exception {
-        final T ipPacket = prepare(rawIpPacket);
+        final T ipPacket;
+        try {
+            ipPacket = prepare(rawIpPacket);
+        } catch (Exception e) {
+            ctx.channel().writeAndFlush(newReset(rawIpPacket));
+            return;
+        }
         final IpHeader ipHeader = ipPacket.getHeader();
         final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
@@ -51,6 +57,7 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
         final TcpHeader tcpHeader = tcpPacket.getHeader();
         final TcpPort tcpSrcPort = tcpHeader.getSrcPort();
         final TcpPort tcpDstPort = tcpHeader.getDstPort();
+
 
         final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
         if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
@@ -65,11 +72,14 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
                 tcpConnection.handler(ipPacket, tcpPacket);
             });
         }
+
     }
 
     protected T prepare(final T ipPacket) throws UnknownHostException {
         return ipPacket;
     }
+
+    protected abstract T newReset(final T ipPacket);
 
     protected InetAddress resolveDstAddress(final InetAddress address) throws UnknownHostException {
         final byte[] addr = address.getAddress();

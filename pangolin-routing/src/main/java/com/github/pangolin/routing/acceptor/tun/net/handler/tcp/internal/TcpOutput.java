@@ -20,7 +20,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
  */
 @Slf4j
 class TcpOutput<T extends IpPacket> {
-    private final TcpConnection<T> conn;
+    private final TcpConnection<T> tp;
 
     boolean ipv4_sysctl_tcp_shrink_window;
     /**
@@ -32,7 +32,7 @@ class TcpOutput<T extends IpPacket> {
     private int ipv4_sysctl_tcp_min_snd_mss;
 
     TcpOutput(final TcpConnection<T> conn) {
-        this.conn = conn;
+        this.tp = conn;
     }
 
     /**
@@ -42,7 +42,7 @@ class TcpOutput<T extends IpPacket> {
     void tcp_mstamp_refresh(final TcpConnection<T> tp) {
         final long ns = tcp_clock_ns();
         tp.tcp_clock_cache = ns;
-        tp.tcp_mstamp = (int) TimeUnit.NANOSECONDS.toMicros(ns);
+        tp.tcp_mstamp = TimeUnit.NANOSECONDS.toMicros(ns);
     }
 
     /**
@@ -626,6 +626,8 @@ class TcpOutput<T extends IpPacket> {
                 break;
             }
 
+            // FIXME
+            skb.skb_mstamp_ns = System.nanoTime();
             if (0 != tcp_transmit_skb(tp, skb, true)) {
                 break;
             }
@@ -914,7 +916,7 @@ class TcpOutput<T extends IpPacket> {
         }
 
         // FIXME
-        tp.logWarn("[RETRNSMIT] Seq={}",skb.sequenceNumber());
+        tp.logWarn("[RETRANSMIT] Seq={}",skb.sequenceNumber());
 
 //        int plen = b.length();
         int skbLen = skb.asBuilder()
@@ -976,11 +978,19 @@ class TcpOutput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3578">tcp_send_fin</a>
      */
     void tcp_send_fin(final TcpConnection<T> tp) {
-        TcpBuffer skb = new TcpBuffer()
-                .sequenceNumber(tp.write_seq)
-                .ack(true).fin(true);
+        final TcpBuffer skb = tcp_init_nondata_skb(tp.write_seq, TcpConstants.ACK | TcpConstants.FIN);
         tcp_queue_skb(tp, skb);
         __tcp_push_pending_frames(tp, tcp_current_mss(tp));
+    }
+
+    void tcp_send_active_reset(final TcpConnection<T> tp) {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3640
+        TcpBuffer skb = tcp_init_nondata_skb(tcp_acceptable_seq(tp), TcpConstants.ACK | TcpConstants.RST);
+        tcp_mstamp_refresh(tp);
+
+        if (0 < tcp_transmit_skb(tp, skb, false)) {
+
+        }
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708
@@ -1088,8 +1098,7 @@ class TcpOutput<T extends IpPacket> {
 
         final TcpBuffer buf = new TcpBuffer();
 
-        buf.sequenceNumber(tcp_acceptable_seq(tp))
-                .ack(true);
+        buf.sequenceNumber(tcp_acceptable_seq(tp)).ack(true);
 
         /* Send it off, this clears delayed acks for us. */
         __tcp_transmit_skb(tp, buf, false, rcv_nxt);
@@ -1219,5 +1228,14 @@ class TcpOutput<T extends IpPacket> {
 
     private long tcp_clock_ms() {
         return TimeUnit.NANOSECONDS.toMillis(tcp_clock_ns());
+    }
+
+    private TcpBuffer tcp_init_nondata_skb(int seq, int flags) {
+        TcpBuffer skb = new TcpBuffer();
+        skb.sequenceNumber(seq);
+        skb.fin(0 != (flags & TcpConstants.SYN));
+        skb.fin(0 != (flags & TcpConstants.ACK));
+        skb.fin(0 != (flags & TcpConstants.FIN));
+        return skb;
     }
 }

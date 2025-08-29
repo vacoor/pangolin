@@ -33,6 +33,8 @@ public class TcpBuffer {
     long tstamp;
     int sacked;
 
+    long skb_mstamp_ns;
+
     public TcpPort srcPort() {
         return srcPort;
     }

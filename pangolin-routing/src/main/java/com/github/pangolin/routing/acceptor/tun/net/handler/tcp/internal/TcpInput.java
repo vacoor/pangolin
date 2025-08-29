@@ -357,8 +357,8 @@ class TcpInput<T extends IpPacket> {
         int last_ackt = 0;
         int flag = 0;
         boolean fully_acked = true;
-        int seq_rtt_us = 0;
-        int ca_rtt_us = 0;
+        long seq_rtt_us = 0;
+        long ca_rtt_us = 0;
 
         TcpBuffer skb;
         while (null != (skb = tp.tcp_rtx_queue.peek())) {

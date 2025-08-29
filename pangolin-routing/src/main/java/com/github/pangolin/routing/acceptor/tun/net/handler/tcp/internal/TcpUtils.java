@@ -65,7 +65,8 @@ abstract class TcpUtils {
      * 定时器相关使用.
      */
     static long jiffies() {
-        return msecs_to_jiffies(System.currentTimeMillis());
+        return msecs_to_jiffies(TimeUnit.NANOSECONDS.toMillis(System.nanoTime()));
+        // return msecs_to_jiffies(System.currentTimeMillis());
     }
 
     static long usecs_to_jiffies(long us) {

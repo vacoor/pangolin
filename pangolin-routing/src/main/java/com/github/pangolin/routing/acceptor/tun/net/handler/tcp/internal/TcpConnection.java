@@ -804,10 +804,10 @@ public abstract class TcpConnection<T extends IpPacket> {
         icsk_ack_rcv_mss = hint;
     }
 
-    private int rcv_rtt_est_rtt_us;
+    private long rcv_rtt_est_rtt_us;
 
     private int rcv_rtt_est_seq;
-    private int rcv_rtt_est_time;
+    private long rcv_rtt_est_time;
 
     /**
      * Receiver "autotuning" code.
@@ -823,9 +823,9 @@ public abstract class TcpConnection<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L652">tcp_rcv_rtt_update</a>
      */
-    private void tcp_rcv_rtt_update(int sample, int win_dep) {
-        int new_sample = rcv_rtt_est_rtt_us;
-        int m = sample;
+    private void tcp_rcv_rtt_update(long sample, int win_dep) {
+        long new_sample = rcv_rtt_est_rtt_us;
+        long m = sample;
 
         if (new_sample != 0) {
             /* If we sample in larger samples in the non-timestamp
@@ -863,7 +863,7 @@ public abstract class TcpConnection<T extends IpPacket> {
             if (before(rcv_nxt, rcv_rtt_est_seq)) {
                 return;
             }
-            int delta_us = tcp_stamp_us_delta(tcp_mstamp, rcv_rtt_est_time);
+            long delta_us = tcp_stamp_us_delta(tcp_mstamp, rcv_rtt_est_time);
             if (delta_us == 0) {
                 delta_us = 1;
             }
@@ -1376,7 +1376,7 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     long tcp_skb_timestamp_ts(int usec_ts, TcpBuffer skb) {
         // FIXME
-        long skb_mstamp_ns = 0; //skb.skb_mstamp_ns;
+        long skb_mstamp_ns = skb.skb_mstamp_ns;
         if (usec_ts != 0) {
             // skb_mstamp_ns / NSEC_PER_USEC;
             return TimeUnit.NANOSECONDS.toMicros(skb_mstamp_ns);
@@ -1411,7 +1411,7 @@ public abstract class TcpConnection<T extends IpPacket> {
      * most recent packet received/sent.
      * us (micro seconds).
      */
-    int tcp_mstamp;
+    long tcp_mstamp;
 
     /*-
      * timestamp of last received ACK (for keepalives).
@@ -1504,7 +1504,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     }
 
 
-    int tcp_stamp_us_delta(int t1, int t0) {
+    long tcp_stamp_us_delta(long t1, long t0) {
         return Math.max(t1 - t0, 0);
     }
 
@@ -1552,8 +1552,8 @@ public abstract class TcpConnection<T extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3202
-    boolean tcp_ack_update_rtt(int flag, int seq_rtt_us,
-                               int sack_rtt_us, int ca_rtt_us/*,
+    boolean tcp_ack_update_rtt(int flag, long seq_rtt_us,
+                               long sack_rtt_us, long ca_rtt_us/*,
                                        struct rate_sample *rs*/) {
 
         /* Prefer RTT measured from ACK's timing to TS-ECR. This is because

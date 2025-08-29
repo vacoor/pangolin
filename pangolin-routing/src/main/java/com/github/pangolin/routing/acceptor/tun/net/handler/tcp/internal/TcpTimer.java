@@ -420,7 +420,7 @@ class TcpTimer<T extends IpPacket> {
 
         if (expired) {
             /* Has it gone just too far? */
-            tp.logTrace("[RETRANSMIT] WRITE TIMEOUT");
+            tp.logError("[RETRANSMIT] WRITE TIMEOUT");
             tp.tcp_write_err();
             return 1;
         }
