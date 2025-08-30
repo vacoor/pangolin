@@ -1,33 +1,12 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.after;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.before;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.determineEndSeq;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.jiffies_to_usecs;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.secureSeq;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.tcp_jiffies32;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.usecs_to_jiffies;
-
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
-import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
@@ -36,6 +15,20 @@ import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
+
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_FIN_WAIT2;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_TIME_WAIT;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
 public abstract class TcpConnection<T extends IpPacket> {
@@ -419,8 +412,8 @@ public abstract class TcpConnection<T extends IpPacket> {
         }
 
         final InetSocketAddress resolved = null != dstHostname
-            ? InetSocketAddress.createUnresolved(dstHostname, dstPort)
-            : new InetSocketAddress(dstAddr, dstPort);
+                ? InetSocketAddress.createUnresolved(dstHostname, dstPort)
+                : new InetSocketAddress(dstAddr, dstPort);
 
         final long sinceMs = System.currentTimeMillis();
 
@@ -1083,7 +1076,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         new_state[TcpState.TCP_SYN_SENT.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
         new_state[TcpState.TCP_SYN_RECV.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
         new_state[TcpState.TCP_FIN_WAIT1.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal();
-        new_state[TcpState.TCP_FIN_WAIT2.ordinal() + 1] = TcpState.TCP_FIN_WAIT2.ordinal();
+        new_state[TCP_FIN_WAIT2.ordinal() + 1] = TCP_FIN_WAIT2.ordinal();
         new_state[TcpState.TCP_TIME_WAIT.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
         new_state[TcpState.TCP_CLOSE.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
         new_state[TcpState.TCP_CLOSE_WAIT.ordinal() + 1] = TcpState.TCP_LAST_ACK.ordinal() | TCP_ACTION_FIN;
@@ -1167,12 +1160,12 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     private void adjudge_to_death() {
         final TcpState state = this.state.get();
-        if (TcpState.TCP_FIN_WAIT2.equals(state)) {
+        if (TCP_FIN_WAIT2.equals(state)) {
             final int tmo = tcp_fin_time();
             if (tmo > TCP_TIMEWAIT_LEN) {
                 timer.tcp_reset_keepalive_timer(tmo - TCP_TIMEWAIT_LEN);
             } else {
-                tcp_time_wait(TcpState.TCP_FIN_WAIT2, tmo);
+                tcp_time_wait(TCP_FIN_WAIT2, tmo);
                 return;
             }
         }
@@ -1527,6 +1520,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     long lsndtime;
     int icsk_pmtu_cookie;
 
+    private int linger2;
 
 
 
@@ -1779,27 +1773,25 @@ public abstract class TcpConnection<T extends IpPacket> {
                 if (snd_una != write_seq) {
                     break;
                 }
-                state.set(TcpState.TCP_FIN_WAIT2);
+                state.set(TCP_FIN_WAIT2);
                 sk_shutdown |= SEND_SHUTDOWN;
 
-                /*
-                if (!sock_flag(sk, SOCK_DEAD) {
-                   break;
-                }
+//                if (!sock_flag(sk, SOCK_DEAD) {
+//                   break;
+//                }
 
-                // TCP_TIMEWAIT2 timeout < 0, SKIP TCP_TIMEWAIT2.
-                if (lingger2 < 0) {
+                // skip TCP_TIMEWAIT2.
+                if (linger2 < 0) {
                     tcp_done();
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
-                 */
 
-                int seq = th.getSequenceNumber();
-                int end_seq = determineEndSeq(skb);
+                final int seq = th.getSequenceNumber();
+                final int end_seq = determineEndSeq(skb);
                 if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), rcv_nxt)) {
                     /* Receive out of order FIN after close() */
                     tcp_done();
-                    return TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
+                    return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
 
                 final int tmo = tcp_fin_time();
@@ -1814,14 +1806,14 @@ public abstract class TcpConnection<T extends IpPacket> {
                      */
                     timer.tcp_reset_keepalive_timer(tmo);
                 } else {
-                    // FIXME
-                    // tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
+                    tcp_time_wait(TCP_FIN_WAIT2, tmo);
+                    return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
                 break;
             case TCP_CLOSING:
                 if (snd_una == write_seq) {
-                    //
-                    state.set(TcpState.TCP_TIME_WAIT);
+                    tcp_time_wait(TCP_TIME_WAIT, 0);
+                    return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
                 break;
             case TCP_LAST_ACK:
@@ -1847,7 +1839,6 @@ public abstract class TcpConnection<T extends IpPacket> {
                 // fallthrough
             case TCP_FIN_WAIT1:
             case TCP_FIN_WAIT2:
-                // XXX
                 // fallthrough
             case TCP_ESTABLISHED:
                 input.tcp_data_queue(this, skb);
