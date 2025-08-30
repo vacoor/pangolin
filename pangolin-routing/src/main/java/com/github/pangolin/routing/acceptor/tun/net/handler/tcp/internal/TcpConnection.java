@@ -1,5 +1,14 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.after;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.before;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.determineEndSeq;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.jiffies_to_usecs;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.secureSeq;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.tcp_jiffies32;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.usecs_to_jiffies;
+
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
@@ -1076,7 +1085,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         new_state[TcpState.TCP_SYN_SENT.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
         new_state[TcpState.TCP_SYN_RECV.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
         new_state[TcpState.TCP_FIN_WAIT1.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal();
-        new_state[TCP_FIN_WAIT2.ordinal() + 1] = TCP_FIN_WAIT2.ordinal();
+        new_state[TcpState.TCP_FIN_WAIT2.ordinal() + 1] = TcpState.TCP_FIN_WAIT2.ordinal();
         new_state[TcpState.TCP_TIME_WAIT.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
         new_state[TcpState.TCP_CLOSE.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
         new_state[TcpState.TCP_CLOSE_WAIT.ordinal() + 1] = TcpState.TCP_LAST_ACK.ordinal() | TCP_ACTION_FIN;
@@ -1839,6 +1848,18 @@ public abstract class TcpConnection<T extends IpPacket> {
                 // fallthrough
             case TCP_FIN_WAIT1:
             case TCP_FIN_WAIT2:
+                /* RFC 793 says to queue data in these states,
+                 * RFC 1122 says we MUST send a reset.
+                 * BSD 4.4 also does reset.
+                 */
+                if (0 != (sk_shutdown & RCV_SHUTDOWN)) {
+                    int seq = th.getSequenceNumber();
+                    int end_seq = determineEndSeq(skb);
+                    if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), rcv_nxt)) {
+                        input.tcp_reset(this, skb);
+                        return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
+                    }
+                }
                 // fallthrough
             case TCP_ESTABLISHED:
                 input.tcp_data_queue(this, skb);
