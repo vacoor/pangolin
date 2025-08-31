@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  *
  */
-abstract class TcpUtils {
+public abstract class TcpUtils {
     private static final AtomicLong TIME_COUNTER = new AtomicLong(System.nanoTime());
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final long[] SIP_HASH_KEYS = {RANDOM.nextLong(), RANDOM.nextLong()};
@@ -127,7 +127,7 @@ abstract class TcpUtils {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c">tcp_ipv4.c</a>
      */
-    static int determineEndSeq(final TcpPacket skb) {
+    public static int determineEndSeq(final TcpPacket skb) {
         final TcpPacket.TcpHeader hdr = skb.getHeader();
         int endSeq = hdr.getSequenceNumber();
         if (hdr.getSyn()) {

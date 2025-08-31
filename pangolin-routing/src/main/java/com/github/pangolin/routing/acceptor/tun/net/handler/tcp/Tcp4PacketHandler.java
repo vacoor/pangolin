@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.Tcp4Connection;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import io.netty.channel.Channel;
@@ -34,9 +35,9 @@ public class Tcp4PacketHandler extends TcpPacketHandler<IpV4Packet> {
             .srcPort(th.getDstPort())
             .dstAddr(ih.getSrcAddr())
             .dstPort(th.getSrcPort())
-            .sequenceNumber(0)
-            .ack(true)
-            .acknowledgmentNumber(th.getSequenceNumber())
+            .sequenceNumber(th.getAcknowledgmentNumber())
+//            .ack(true)
+//            .acknowledgmentNumber(TcpUtils.determineEndSeq(tcpPacket))
             .rst(true)
             .paddingAtBuild(true)
             .correctChecksumAtBuild(true)
