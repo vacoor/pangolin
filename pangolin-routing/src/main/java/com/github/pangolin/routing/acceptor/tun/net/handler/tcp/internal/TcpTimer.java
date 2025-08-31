@@ -482,10 +482,12 @@ class TcpTimer<T extends IpPacket> {
     /* *********** ZERO WINDOW PROBE [[ ************** */
 
 
-    void tcp_check_probe_timer() {
-        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1454
-        // https://www.cnblogs.com/aiwz/p/6333260.html
-        if (tp.packets_out <= 0 && tp.icsk_pending <= 0) {
+    /**
+     * @see <a href="https://www.cnblogs.com/aiwz/p/6333260.html">零窗口探测/坚持/持续定时器</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1454">tcp_check_probe_timer</a>
+     */
+    protected void tcp_check_probe_timer() {
+        if (0 == tp.packets_out && 0 == tp.icsk_pending) {
             tp.tcp_reset_xmit_timer(ICSK_TIME_PROBE0, tp.tcp_probe0_base(), TCP_RTO_MAX);
         }
     }
@@ -511,11 +513,11 @@ class TcpTimer<T extends IpPacket> {
          * we use RTO to probe window in tcp_retransmit_timer().
          */
         if (tp.icsk_probes_tstamp == 0) {
-            tp.icsk_probes_tstamp = TcpUtils.tcp_jiffies32();
+            tp.icsk_probes_tstamp = tcp_jiffies32();
         } else {
             final int user_timeout = tp.icsk_user_timeout;
-            if (user_timeout > 0 && TcpUtils.tcp_jiffies32() - tp.icsk_probes_tstamp >= user_timeout) {
-                tp.logWarn("PROBE_WRITE_ERROR 1");
+            if (user_timeout > 0 && tcp_jiffies32() - tp.icsk_probes_tstamp >= msecs_to_jiffies(user_timeout)) {
+                tp.logWarn("PROBE TIMEOUT");
                 tp.tcp_write_err();
                 return;
             }
@@ -526,7 +528,7 @@ class TcpTimer<T extends IpPacket> {
         // ...
 
         if (tp.icsk_probes_out >= max_probes) {
-            tp.logWarn("PROBE_WRITE_ERROR 2");
+            tp.logWarn("TOO MANY PROBES");
             tp.tcp_write_err();
         } else {
             /* Only send another probe if we didn't close things up. */

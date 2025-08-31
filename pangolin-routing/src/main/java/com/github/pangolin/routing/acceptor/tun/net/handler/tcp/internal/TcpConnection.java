@@ -2128,24 +2128,32 @@ public abstract class TcpConnection<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1444">tcp_probe0_when</a>
      */
-    long tcp_probe0_when(int max_when) {
+    protected long tcp_probe0_when(int max_when) {
         // u8 backoff = ilog2(TCP_RTO_MAX / TCP_RTO_MIN) + 1
-        int backoff = (int) (Math.log(TCP_RTO_MAX / TCP_RTO_MIN) / Math.log(2)) + 1;
+        int backoff = ilog2(TCP_RTO_MAX / TCP_RTO_MIN) + 1;
         backoff = Math.min(backoff, icsk_backoff);
 
         final long when = tcp_probe0_base() << backoff;
         return Math.min(when, max_when);
     }
 
-    long tcp_probe0_base() {
-        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1438
+    /**
+     * Something is really bad, we could not queue an additional packet,
+     * because qdisc is full or receiver sent a 0 window, or we are paced.
+     * We do not want to add fuel to the fire, or abort too early,
+     * so make sure the timer we arm now is at least 200ms in the future,
+     * regardless of current icsk_rto value (as it could be ~2ms)
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1438">tcp_probe0_base</a>
+     */
+    protected long tcp_probe0_base() {
         return Math.max(icsk_rto, TCP_RTO_MIN);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L49">tcp_clamp_probe0_to_user_timeout</a>
      */
-    long tcp_clamp_probe0_to_user_timeout(long when) {
+    protected long tcp_clamp_probe0_to_user_timeout(long when) {
         int user_timeout = icsk_user_timeout;
         if (0 == user_timeout || 0 == icsk_probes_tstamp) {
             return when;

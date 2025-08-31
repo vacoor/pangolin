@@ -10,14 +10,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_OFF;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_PUSH;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_CLOSE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
 import static com.sun.jna.platform.linux.ErrNo.EINVAL;
 import static org.pcap4j.packet.TcpPacket.TcpOption;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_output.c</a>
@@ -614,6 +613,11 @@ class TcpOutput<T extends IpPacket> {
 
             cwnd_quota = Math.min(cwnd_quota, max_segs);
 
+            skb.srcAddr(tp.ipHeader.getDstAddr());
+            skb.dstAddr(tp.ipHeader.getSrcAddr());
+            skb.srcPort(tp.tcpDstPort);
+            skb.dstPort(tp.tcpSrcPort);
+
             final int skbLen = skb.asBuilder().build().length();
             final int missing_bytes = cwnd_quota * mss_now - skbLen;
             if (missing_bytes > 0) {
@@ -697,7 +701,7 @@ class TcpOutput<T extends IpPacket> {
             }
             return false;
         }
-        return tp.packets_out <= 0 && !tp.sk_write_queue.isEmpty();
+        return tp.packets_out == 0 && !tp.sk_write_queue.isEmpty();
     }
 
     private boolean tcp_in_cwnd_reduction(TcpConnection<T> tp) {
@@ -1251,7 +1255,7 @@ class TcpOutput<T extends IpPacket> {
          * send it.
          */
         final int seq = tp.snd_una - (0 == urgent ? 1 : 0);
-        TcpBuffer skb = new TcpBuffer().sequenceNumber(seq).ack(true);
+        final TcpBuffer skb = tcp_init_nondata_skb(seq, ACK);
         return tcp_transmit_skb(tp, skb, false);
     }
 
@@ -1265,8 +1269,7 @@ class TcpOutput<T extends IpPacket> {
             return -1;
         }
 
-        final TcpBuffer buf = tp.tcp_send_head();
-        final TcpBuffer skb = null != buf ? buf : null;
+        final TcpBuffer skb = tp.tcp_send_head();
         if (null != skb && skb.sequenceNumber() < tp.tcp_wnd_end()) {
             final int seq = skb.sequenceNumber();
             final int mss = tcp_current_mss(tp);
@@ -1274,7 +1277,6 @@ class TcpOutput<T extends IpPacket> {
 
             int end_seq = determineEndSeq(skb);
             if (before(tp.pushed_seq, end_seq)) {
-                // XXX ???
                 tp.pushed_seq = end_seq;
             }
 
@@ -1282,21 +1284,17 @@ class TcpOutput<T extends IpPacket> {
              * but the window size is != 0
              * must have been a result SWS avoidance ( sender )
              */
-            // FIXME
-//            final int len = skb.asBuilder().length();
-//            final int len = skb.length() - skb.getHeader().length();
-//            if (seg_size < end_seq - seq || len > mss) {
-//                seg_size = Math.min(seg_size, mss);
-//                buf.psh(true);
+            final int len = skb.asBuilder().build().length();
+            if (seg_size < end_seq - seq || len > mss) {
+                seg_size = Math.min(seg_size, mss);
+                skb.psh(true);
+                // FIXME
+            } else if (0 == tcp_skb_pcount(skb)) {
+                tcp_set_skb_tso_segs(skb, mss);
+            }
 
-            // FIXME
-//            }
+            skb.psh(true);
 
-            // ...
-
-            buf.psh(true);
-
-//            TcpPacket build = buf.build();
             int err = tcp_transmit_skb(tp, skb, true);
             if (0 == err) {
                 tcp_event_new_data_sent(tp, skb);
@@ -1304,7 +1302,7 @@ class TcpOutput<T extends IpPacket> {
             return err;
         } else {
             // XXX ????
-            if (tp.snd_up <= tp.snd_una + 1 && tp.snd_una + 1 <= tp.snd_una + 0xFFFF) {
+            if (between(tp.snd_up, tp.snd_una + 1, tp.snd_una + 0xFFFF)) {
                 tcp_xmit_probe_skb(tp, 1, mib);
             }
             return tcp_xmit_probe_skb(tp, 0, mib);
@@ -1317,7 +1315,7 @@ class TcpOutput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4374">tcp_send_probe0</a>
      */
-    void tcp_send_probe0(final TcpConnection<T> tp) {
+    protected void tcp_send_probe0(final TcpConnection<T> tp) {
         // LINUX_MIB_TCPWINPROBE
         int err = tcp_write_wakeup(tp, 0);
 
@@ -1335,7 +1333,7 @@ class TcpOutput<T extends IpPacket> {
             if (tp.icsk_backoff < sysctl_tcp_retries2) {
                 tp.icsk_backoff++;
             }
-            timeout = tp.tcp_probe0_when(TCP_RTO_MAX);
+            timeout = tp.tcp_probe0_when(tp.tcp_rto_max());
         } else {
             /* If packet was not sent due to local congestion,
              * Let senders fight for local resources conservatively.
@@ -1361,6 +1359,10 @@ class TcpOutput<T extends IpPacket> {
 
     private TcpBuffer tcp_init_nondata_skb(int seq, int flags) {
         TcpBuffer skb = new TcpBuffer();
+        skb.srcAddr(tp.ipHeader.getDstAddr());
+        skb.dstAddr(tp.ipHeader.getSrcAddr());
+        skb.srcPort(tp.tcpDstPort);
+        skb.dstPort(tp.tcpSrcPort);
         skb.sequenceNumber(seq);
         skb.syn(0 != (flags & TcpConstants.SYN));
         skb.ack(0 != (flags & TcpConstants.ACK));
