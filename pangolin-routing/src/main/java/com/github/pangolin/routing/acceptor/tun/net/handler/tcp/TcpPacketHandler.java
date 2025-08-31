@@ -68,9 +68,9 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
         }
         TcpConnection<T> tcpConnection = sessionMap.get(sockKey);
         if (null != tcpConnection) {
-            childGroup.execute(() -> {
+//            childGroup.execute(() -> {
                 tcpConnection.handler(ipPacket, tcpPacket);
-            });
+//            });
         }
 
     }

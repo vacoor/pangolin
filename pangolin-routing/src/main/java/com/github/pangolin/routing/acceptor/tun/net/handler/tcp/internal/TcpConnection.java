@@ -318,7 +318,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     }
 
     public void handler(final T ipHeader, final TcpPacket tcpPacket) {
-        if (null != child) {
+        if (null != child && child.isOpen()) {
             child.eventLoop().execute(() -> tcp_rcv(ipHeader, tcpPacket));
         } else {
             tcp_rcv(ipHeader, tcpPacket);
@@ -513,8 +513,12 @@ public abstract class TcpConnection<T extends IpPacket> {
                         .ack(true)
                         .acknowledgmentNumber(rcv_nxt)
                         .build(), -1);
-                if (ctx.channel().isOpen()) {
-                    ctx.channel().close();
+                try {
+                    if (ctx.channel().isOpen()) {
+                        ctx.channel().close();
+                    }
+                } finally {
+                    tcp_done();
                 }
             }
         });

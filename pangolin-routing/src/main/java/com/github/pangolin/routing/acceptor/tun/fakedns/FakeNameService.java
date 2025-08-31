@@ -89,6 +89,7 @@ public class FakeNameService implements DnsEngine {
         final DatagramDnsResponse response = new DatagramDnsResponse(dnsQuery.recipient(), dnsQuery.sender(), dnsQuery.id());
         response.addRecord(DnsSection.QUESTION, dnsQuestion);
         response.addRecord(DnsSection.ANSWER, dnsAnswer);
+        response.setRecursionAvailable(true);
         response.setAuthoritativeAnswer(true);
         return response;
     }
