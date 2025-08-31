@@ -7,11 +7,14 @@ import com.github.pangolin.routing.upstream.UpstreamRegistry;
 import com.github.pangolin.routing.upstream.stats.StatsAware;
 import com.github.pangolin.routing.upstream.stats.StatsUpstream;
 import com.google.common.collect.Lists;
+import com.netflix.client.config.IClientConfig;
 import com.netflix.client.config.PropertyResolver;
 import com.netflix.client.config.ReloadableClientConfig;
 import com.netflix.loadbalancer.*;
 import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -20,8 +23,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @Slf4j
 public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
@@ -34,7 +35,6 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
 
     @Override
     public Upstream combine(final String name, final Iterable<String> names, final UpstreamRegistry registry) {
-        /*
         final IClientConfig config = new DefaultClientConfig();
         final IRule rule = new WeightedResponseTimeRule();
         final IPing ping = new DummyPing();
@@ -43,8 +43,8 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
         final ServerListUpdater serverListUpdater = new PollingServerListUpdater(config);
         final ZoneAwareLoadBalancer<? extends Server> lb = new ZoneAwareLoadBalancer(config, rule, ping, serverList, serverListFilter, serverListUpdater);
         lb.setLoadBalancerStats(stats);
-        */
 
+        /*
         final IRule rule = new WeightedResponseTimeRule();
         final IPing ping = new AbstractLoadBalancerPing() {
             @Override
@@ -59,7 +59,7 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
         lb.setServersList(servers);
-
+         */
 
         return new AbstractUpstream(name) {
             private final Logger log = LoggerFactory.getLogger(name);
@@ -77,9 +77,9 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
             @Override
             public boolean isAvailable() {
                 return StreamSupport.stream(names.spliterator(), false)
-                    .map(registry::getUpstream)
-                    .filter(Objects::nonNull)
-                    .anyMatch(Upstream::isAvailable);
+                        .map(registry::getUpstream)
+                        .filter(Objects::nonNull)
+                        .anyMatch(Upstream::isAvailable);
             }
 
             @Override
@@ -92,11 +92,13 @@ public class UpstreamSelectFactory implements UpstreamCombiner, StatsAware {
             }
 
             protected Upstream choose() {
-//                return (Upstream) lb.chooseServer();
+                if (true) {
+                    return (Upstream) lb.chooseServer();
+                }
                 List<StatsUpstream> collect = StreamSupport.stream(names.spliterator(), false)
                         .map(n -> (StatsUpstream) registry.getUpstream(n))
                         .filter(Objects::nonNull)
-                    .filter(Upstream::isAvailable)
+                        .filter(Upstream::isAvailable)
                         .sorted(new Comparator<StatsUpstream>() {
                             @Override
                             public int compare(final StatsUpstream o1, final StatsUpstream o2) {

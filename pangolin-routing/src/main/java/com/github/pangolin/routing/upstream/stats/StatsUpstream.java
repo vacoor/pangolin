@@ -68,6 +68,14 @@ public class StatsUpstream extends Server implements Upstream {
         return new ChannelDuplexHandler() {
             private volatile long requestTime;
 
+            private void updateAvgResponseTime(long elapsed) {
+                if (0 < avgResponseTime) {
+                    avgResponseTime = (long) (0.2 * elapsed + 0.8 * avgResponseTime);
+                } else {
+                    avgResponseTime = elapsed;
+                }
+            }
+
             @Override
             public void connect(final ChannelHandlerContext ctx, final SocketAddress remoteAddress, final SocketAddress localAddress, final ChannelPromise promise) throws Exception {
                 final long s = System.currentTimeMillis();
@@ -75,12 +83,6 @@ public class StatsUpstream extends Server implements Upstream {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
                         if (!future.isSuccess()) {
-                            long elapsed = System.currentTimeMillis() - s;
-                            if (0 < avgResponseTime) {
-                                avgResponseTime = (long) (0.2 * elapsed + 0.8 * avgResponseTime);
-                            } else {
-                                avgResponseTime = elapsed;
-                            }
                             serverStats.incrementSuccessiveConnectionFailureCount();
                         } else {
                             serverStats.clearSuccessiveConnectionFailureCount();
@@ -120,7 +122,8 @@ public class StatsUpstream extends Server implements Upstream {
             public void channelReadComplete(final ChannelHandlerContext ctx) throws Exception {
                 super.channelReadComplete(ctx);
                 serverStats.decrementActiveRequestsCount();
-                serverStats.noteResponseTime(System.nanoTime() - requestTime / 1000D);
+                serverStats.noteResponseTime((System.nanoTime() - requestTime) / 1000D);
+                updateAvgResponseTime(System.currentTimeMillis() - requestTime / 1000);
             }
 
             private volatile long since;
