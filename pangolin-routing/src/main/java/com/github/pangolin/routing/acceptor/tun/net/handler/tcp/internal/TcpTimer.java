@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_CLOSE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_LISTEN;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_FIN_WAIT2;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
@@ -536,10 +537,11 @@ class TcpTimer<T extends IpPacket> {
         sk_reset_timer(sk_timer, jiffies() + len);
     }
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L779">tcp_keepalive_timer</a>
+     */
     private void tcp_keepalive_timer() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L779
         final TcpState state = tp.state.get();
-
         if (TcpState.TCP_LISTEN.equals(state)) {
             log.error("Hmm... keepalive on a LISTEN ???");
             return;
@@ -547,9 +549,19 @@ class TcpTimer<T extends IpPacket> {
 
         tp.output.tcp_mstamp_refresh(tp);
 
-        if (TcpState.TCP_FIN_WAIT2.equals(state)) {
-            // FIXME
+        if (TCP_FIN_WAIT2.equals(state)) {
+            if (tp.linger2 >= 0) {
+                final int tmo = tp.tcp_fin_time() - TCP_TIMEWAIT_LEN;
+                if (tmo > 0) {
+                    tp.tcp_time_wait(TCP_FIN_WAIT2, tmo);
+                    return;
+                }
+            }
+            tp.output.tcp_send_active_reset(tp, "SK_RST_REASON_TCP_STATE");
+            tp.tcp_done();
+            return;
         }
+
         //...
 
         int elapsed = keepalive_time_when(tp);

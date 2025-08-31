@@ -1115,14 +1115,22 @@ class TcpOutput<T extends IpPacket> {
         __tcp_push_pending_frames(tp, tcp_current_mss(tp), TCP_NAGLE_OFF);
     }
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3640">tcp_send_active_reset</a>
+     */
     void tcp_send_active_reset(final TcpConnection<T> tp, final String reason) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3640
+        //
         TcpBuffer skb = tcp_init_nondata_skb(tcp_acceptable_seq(tp), TcpConstants.ACK | TcpConstants.RST);
         tcp_mstamp_refresh(tp);
 
+        /* Send it off. */
         if (0 < tcp_transmit_skb(tp, skb, false)) {
-
+            log.warn("LINUX_MIB_TCPABORTFAILED");
         }
+        /* skb of trace_tcp_send_reset() keeps the skb that caused RST,
+         * skb here is different to the troublesome skb, so use NULL
+         */
+        // trace_tcp_send_reset(null, reason);
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708

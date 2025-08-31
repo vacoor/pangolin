@@ -1212,11 +1212,13 @@ public abstract class TcpConnection<T extends IpPacket> {
         }
 
         if (!TcpState.TCP_CLOSE.equals(state)) {
-
+            // TODO
         }
+
+        // ...
     }
 
-    private void tcp_time_wait(TcpState state, long timeout) {
+    void tcp_time_wait(TcpState state, long timeout) {
 
     }
 
@@ -1574,7 +1576,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     long lsndtime;
     int icsk_pmtu_cookie;
 
-    private int linger2;
+    int linger2;
 
 
 
