@@ -10,6 +10,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_OFF;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_PUSH;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_CLOSE;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.*;
 import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
 import static com.sun.jna.platform.linux.ErrNo.EINVAL;
 import static org.pcap4j.packet.TcpPacket.TcpOption;
@@ -56,15 +60,16 @@ class TcpOutput<T extends IpPacket> {
         tp.snd_nxt = determineEndSeq(skb);
 
         // XXX unlink skb from sk_write_queue and append to tcp_rtx_queue.
-        // __skb_unlink(skb, &sk->sk_write_queue);
-//        tp.sk_write_queue.remove(skb);
 
+        // __skb_unlink(skb, &sk->sk_write_queue);
         // tcp_rbtree_insert(&sk->tcp_rtx_queue, skb);
+
+        tp.sk_write_queue.remove(skb);
         tp.tcp_rtx_queue.offer(skb);
 
         tp.packets_out += tcp_skb_pcount(skb);
 
-        if (prior_packets <= 0 || tp.icsk_pending == TcpTimer.ICSK_TIME_LOSS_PROBE) {
+        if (prior_packets <= 0 || tp.icsk_pending == ICSK_TIME_LOSS_PROBE) {
             tp.tcp_rearm_rto();
         }
 
@@ -529,10 +534,11 @@ class TcpOutput<T extends IpPacket> {
      * But we can avoid doing the divide again given we already have
      *  skb_pcount = skb->len / mss_now
      */
-    void tcp_minshall_update(TcpConnection<T> tp, int mss_now, TcpBuffer skb) {
-//        if (skb->len < tcp_skb_pcount(skb) * mss_now) {
-//            tp.snd_sml = determineEndSeq(skb);
-//        }
+    protected void tcp_minshall_update(TcpConnection<T> tp, int mss_now, TcpBuffer skb) {
+        final int skbLen = skb.asBuilder().build().length();
+        if (skbLen < tcp_skb_pcount(skb) * mss_now) {
+            tp.snd_sml = determineEndSeq(skb);
+        }
     }
 
     /**
@@ -570,18 +576,16 @@ class TcpOutput<T extends IpPacket> {
      * @return overflow window (continue push)
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2739">tcp_write_xmit</a>
      */
-    private boolean tcp_write_xmit(TcpConnection<T> tp, int mss_now, final int push_one) {
-
+    private boolean tcp_write_xmit(TcpConnection<T> tp, int mss_now, final int nonagle, final int push_one) {
         int sent_pkts = 0;
         boolean is_cwnd_limited = false;
         boolean is_rwnd_limited = false;
 
         tcp_mstamp_refresh(tp);
 
-        if (push_one == 0) {
+        if (0 == push_one) {
             /* Do MTU probing. */
-            int mtu = tcp_mtu_probe();
-
+            final int mtu = tcp_mtu_probe();
             if (0 == mtu) {
                 return false;
             } else if (mtu > 0) {
@@ -589,15 +593,17 @@ class TcpOutput<T extends IpPacket> {
             }
         }
 
-        // XXX
-
         TcpBuffer skb;
+        final int max_segs = tcp_tso_segs(tp, mss_now);
         while (null != (skb = tp.tcp_send_head())) {
+            // XXX tp->repair
 
-            // XXX
+            if (tcp_pacing_check(tp)) {
+                break;
+            }
 
             int cwnd_quota = tcp_cwnd_test(tp);
-            if (cwnd_quota == 0) {
+            if (0 == cwnd_quota) {
                 if (push_one == 2) {
                     /* Force out a loss probe pkt. */
                     cwnd_quota = 1;
@@ -605,16 +611,47 @@ class TcpOutput<T extends IpPacket> {
                     break;
                 }
             }
-            if (!tp.sk_write_queue.remove(skb)) {
-                continue;
-            }
-            // cwnd_quota = Math.min(cwnd_quota, tso_max_segs);
-            // int missing_bytes = cwnd_quota * mss_now - skb.length();
-            // if (missing_bytes > 0) {
-            //     tcp_grow_skb(tp, skb, missing_bytes);
-            // }
 
-            // XXX
+            cwnd_quota = Math.min(cwnd_quota, max_segs);
+
+            final int skbLen = skb.asBuilder().build().length();
+            final int missing_bytes = cwnd_quota * mss_now - skbLen;
+            if (missing_bytes > 0) {
+                tcp_grow_skb(skb, missing_bytes);
+            }
+
+            final int tso_segs = tcp_set_skb_tso_segs(skb, mss_now);
+            if (!tcp_snd_wnd_test(skb, mss_now)) {
+                is_rwnd_limited = true;
+                break;
+            }
+
+            if (1 == tso_segs) {
+                if (!tcp_nagle_test(skb, mss_now, tcp_skb_is_last(skb) ? nonagle : TCP_NAGLE_PUSH)) {
+                    break;
+                }
+            } else {
+                // FIXME ...
+                if (0 == push_one && tcp_tso_should_defer(skb, is_cwnd_limited, is_rwnd_limited, max_segs)) {
+                    break;
+                }
+            }
+
+//            if (!tp.sk_write_queue.remove(skb)) {
+//                continue;
+//            }
+
+            int limit = mss_now;
+            if (tso_segs > 1 && !tcp_urg_mode(tp)) {
+                limit = tcp_mss_split_point(skb, mss_now, cwnd_quota, nonagle);
+            }
+
+            if (skbLen > limit && tso_fragment(skb, limit, mss_now)) {
+                break;
+            }
+            if (tcp_small_queue_check(skb, 0)) {
+                break;
+            }
 
             /*-
              * Argh, we hit an empty skb(), presumably a thread
@@ -644,11 +681,104 @@ class TcpOutput<T extends IpPacket> {
             }
         }
 
-        // XXX
+        // XXX ...
 
+        is_cwnd_limited |= (tp.tcp_packets_in_flight() >= tp.tcp_snd_cwnd());
+        if (sent_pkts != 0 || is_cwnd_limited) {
+            tcp_cwnd_validate(is_cwnd_limited);
+        }
+        if (sent_pkts != 0) {
+            if (tcp_in_cwnd_reduction(tp)) {
+                // tp.prr_out += sent_pkts;
+            }
+            /* Send one loss probe per tail loss episode. */
+            if (push_one != 2) {
+                // tcp_schedule_loss_probe(sk, false);
+            }
+            return false;
+        }
         return tp.packets_out <= 0 && !tp.sk_write_queue.isEmpty();
     }
 
+    private boolean tcp_in_cwnd_reduction(TcpConnection<T> tp) {
+        return false;
+    }
+
+    private void tcp_cwnd_validate(boolean isCwndLimited) {
+
+    }
+
+    private boolean tcp_small_queue_check(TcpBuffer skb, int i) {
+        return false;
+    }
+
+    private boolean tso_fragment(TcpBuffer skb, int limit, int mssNow) {
+        return false;
+    }
+
+    private int tcp_mss_split_point(TcpBuffer skb, int mssNow, int cwndQuota, int nonagle) {
+        return mssNow;
+    }
+
+    private boolean tcp_urg_mode(TcpConnection<T> tp) {
+        return false;
+    }
+
+    private boolean tcp_tso_should_defer(TcpBuffer skb, boolean isCwndLimited, boolean isRwndLimited, int maxSegs) {
+        return false;
+    }
+
+    private boolean tcp_skb_is_last(TcpBuffer skb) {
+        // FIXME
+        return false;
+    }
+
+    private boolean tcp_nagle_test(TcpBuffer skb, int mssNow, int nonagle) {
+        /*-
+         * Nagle rule does not apply to frames, which sit in the middle of the
+         * write_queue (they have no chances to get new data).
+         *
+         * This is implemented in the callers, where they modify the 'nonagle'
+         * argument based upon the location of SKB in the send queue.
+         */
+        if (0 != (nonagle & TCP_NAGLE_PUSH)) {
+            return true;
+        }
+
+        // ...
+        return true;
+    }
+
+    private int tcp_set_skb_tso_segs(TcpBuffer skb, int mssNow) {
+        return 1;
+    }
+
+    private void tcp_grow_skb(final TcpBuffer skb, final int len) {
+
+    }
+
+    /* Does at least the first segment of SKB fit into the send window? */
+    boolean tcp_snd_wnd_test(TcpBuffer skb, int cur_mss) {
+        int end_seq = determineEndSeq(skb);
+        int skb_len = skb.asBuilder().build().length();
+        if (skb_len > cur_mss)
+            end_seq = skb.sequenceNumber() + cur_mss;
+
+        return !after(end_seq, tp.tcp_wnd_end());
+    }
+
+    private int tcp_tso_segs(TcpConnection<?> tp, int mss) {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2040
+        // TODO
+        return Integer.MAX_VALUE;
+    }
+
+    private boolean tcp_pacing_check(TcpConnection<?> tp) {
+        if (tp.tcp_wstamp_ns <= tp.tcp_clock_cache) {
+            return false;
+        }
+        return true;
+    }
 
     /**
      * 接收窗口可用大小.
@@ -666,7 +796,7 @@ class TcpOutput<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3084">__tcp_select_window</a>
      */
-    private int __tcp_select_window(final TcpConnection<T> sock) {
+    int __tcp_select_window(final TcpConnection<T> sock) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3084
         TcpConnection<T> icsk = sock;
         TcpConnection<T> tp = sock;
@@ -848,16 +978,16 @@ class TcpOutput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3005">__tcp_push_pending_frames</a>
      */
-    void __tcp_push_pending_frames(final TcpConnection<T> tp, int mss) {
+    protected void __tcp_push_pending_frames(final TcpConnection<T> tp, int mss, int nonagle) {
         /*-
          * If we are closed, the bytes will have to remain here.
          * In time closedown will finish, we empty the write queue and
          * all will be happy.
          */
-        if (TcpState.TCP_CLOSE.equals(tp.state.get())) {
+        if (TCP_CLOSE.equals(tp.state.get())) {
             return;
         }
-        if (tcp_write_xmit(tp, mss, 0)) {
+        if (tcp_write_xmit(tp, mss, nonagle, 0)) {
             tp.timer.tcp_check_probe_timer();
         }
     }
@@ -874,6 +1004,7 @@ class TcpOutput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3321">__tcp_retransmit_skb</a>
      */
     private int __tcp_retransmit_skb(final TcpConnection<T> tp, final TcpBuffer skb, int segs) {
+        // ...
         // start
         int seq = skb.sequenceNumber();
 
@@ -887,10 +1018,11 @@ class TcpOutput<T extends IpPacket> {
             if (before(end_seq, tp.snd_una)) {
                 return -EINVAL;
             }
-            // ...
+            // ... tcp_trim_head
         }
 
-        // ...
+        // ... rebuild_header
+
         int cur_mss = tcp_current_mss(tp);
         int avail_wnd = tp.tcp_wnd_end() - skb.sequenceNumber();
 
@@ -914,30 +1046,27 @@ class TcpOutput<T extends IpPacket> {
             }
         }
 
-        // FIXME
-//        tp.logWarn("[RETRANSMIT] Seq={}",skb.sequenceNumber());
-
-//        int plen = b.length();
         int skbLen = skb.asBuilder()
                 .srcAddr(tp.ipHeader.getDstAddr())
                 .dstAddr(tp.ipHeader.getSrcAddr())
                 .build().length();
-        if (skbLen > avail_wnd) {
-            // FIXME
+        if (skbLen > len) {
+            // TODO
             // fragment
-            return -1;
         } else {
-            // FIXME
+            // TODO
         }
+
+        // ...
 
         segs = tcp_skb_pcount(skb);
 
-//        total_retrans += segs;
-//        bytes_retrans += skbLen;
+        tp.total_retrans += segs;
+        tp.bytes_retrans += skbLen;
 
         int err;
         if (false) {
-
+            // ...
         } else {
             err = tcp_transmit_skb(tp, skb, true);
         }
@@ -979,7 +1108,7 @@ class TcpOutput<T extends IpPacket> {
     void tcp_send_fin(final TcpConnection<T> tp) {
         final TcpBuffer skb = tcp_init_nondata_skb(tp.write_seq, TcpConstants.ACK | TcpConstants.FIN);
         tcp_queue_skb(tp, skb);
-        __tcp_push_pending_frames(tp, tcp_current_mss(tp));
+        __tcp_push_pending_frames(tp, tcp_current_mss(tp), TCP_NAGLE_OFF);
     }
 
     void tcp_send_active_reset(final TcpConnection<T> tp) {
@@ -1028,14 +1157,14 @@ class TcpOutput<T extends IpPacket> {
      */
     void tcp_send_delayed_ack(final TcpConnection<T> tp) {
         long ato = tp.icsk_ack_ato;
-        if (ato > TcpTimer.TCP_DELACK_MIN) {
+        if (ato > TCP_DELACK_MIN) {
             int max_ato = TcpConstants.HZ / 2;
 
             /*-
              * ping-pong 模式应该使用最大容忍度的超时时间.
              */
             if (tp.inet_csk_in_pingpong_model() || 0 != (tp.icsk_ack_pending & TcpTimer.ICSK_ACK_PUSHED)) {
-                max_ato = TcpTimer.TCP_DELACK_MAX;
+                max_ato = TCP_DELACK_MAX;
             }
 
             /* Slow path, intersegment interval is "high". */
@@ -1048,10 +1177,9 @@ class TcpOutput<T extends IpPacket> {
              * Note: 为了避免浮点运算 srtt_us 是实际 SRTT 8 倍.
              */
             if (tp.srtt_us != 0) {
-                int rtt = (int) Math.max(usecs_to_jiffies(tp.srtt_us >> 3), TcpTimer.TCP_DELACK_MIN);
+                int rtt = (int) Math.max(usecs_to_jiffies(tp.srtt_us >> 3), TCP_DELACK_MIN);
                 if (rtt < max_ato) {
                     max_ato = rtt;
-                    tp.logTrace("Delay ACK timeout = RTT({}ms)", rtt);
                 }
             }
             ato = Math.min(ato, max_ato);
@@ -1059,29 +1187,31 @@ class TcpOutput<T extends IpPacket> {
 
         ato = Math.min(ato, tcp_delack_max(tp));
 
+        tp.logTrace("Delay ACK Timeout = {}ms", ato);
+
         /* Stay within the limit we were given */
         long timeout = jiffies() + ato;
 
         /* Use new timeout only if there wasn't a older one earlier. */
         if ((tp.icsk_ack_pending & TcpTimer.ICSK_ACK_TIMER) != 0) {
-
             /* If delack timer is about to expire, send ACK now. */
-            if (time_before_eq(tp.icsk_ack_timeout, jiffies() + (ato >> 2))) {
+            long icsk_delack_timeout = tp.icsk_delack_timeout();
+            if (time_before_eq(icsk_delack_timeout, jiffies() + (ato >> 2))) {
                 // send now.
                 tcp_send_ack(tp);
                 return;
             }
 
-            if (!time_before(timeout, tp.icsk_ack_timeout)) {
-                timeout = tp.icsk_ack_timeout;
+            if (!time_before(timeout, icsk_delack_timeout)) {
+                timeout = icsk_delack_timeout;
             }
         }
 
         // XXX smp_store_release
         tp.icsk_ack_pending |= TcpTimer.ICSK_ACK_SCHED | TcpTimer.ICSK_ACK_TIMER;
 
-        if (tp.icsk_ack_timeout != timeout) {
-            tp.icsk_ack_timeout = timeout;
+        if (tp.icsk_delack_timeout() != timeout) {
+            tp.icsk_ack_timeout = tp.icsk_delack_timeout();
             tp.timer.sk_reset_timer(tp.timer.icsk_delack_timer, timeout);
         }
     }
@@ -1089,15 +1219,15 @@ class TcpOutput<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4237">__tcp_send_ack</a>
      */
-    private void __tcp_send_ack(final TcpConnection<T> tp, final int rcv_nxt) {
+    private void __tcp_send_ack(final TcpConnection<T> tp, final int rcv_nxt, int flags) {
         /* If we have been reset, we may not send again. */
-        if (TcpState.TCP_CLOSE.equals(tp.state.get())) {
+        if (TCP_CLOSE.equals(tp.state.get())) {
             return;
         }
 
-        final TcpBuffer buf = new TcpBuffer();
 
-        buf.sequenceNumber(tcp_acceptable_seq(tp)).ack(true);
+        // ...
+        TcpBuffer buf = tcp_init_nondata_skb(tcp_acceptable_seq(tp), TcpConstants.ACK);
 
         /* Send it off, this clears delayed acks for us. */
         __tcp_transmit_skb(tp, buf, false, rcv_nxt);
@@ -1107,7 +1237,7 @@ class TcpOutput<T extends IpPacket> {
      * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4279.
      */
     void tcp_send_ack(final TcpConnection<T> tp) {
-        __tcp_send_ack(tp, tp.rcv_nxt);
+        __tcp_send_ack(tp, tp.rcv_nxt, 0);
     }
 
 
@@ -1131,7 +1261,7 @@ class TcpOutput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4328">tcp_write_wakeup</a>
      */
     private int tcp_write_wakeup(TcpConnection<T> tp, int mib) {
-        if (TcpState.TCP_CLOSE.equals(tp.state.get())) {
+        if (TCP_CLOSE.equals(tp.state.get())) {
             return -1;
         }
 

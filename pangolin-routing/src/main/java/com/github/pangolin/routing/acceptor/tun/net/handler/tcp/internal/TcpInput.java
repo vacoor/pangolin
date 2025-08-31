@@ -62,9 +62,13 @@ class TcpInput<T extends IpPacket> {
     }
 
     /**
+     * If the current remaining number of quickly ACKs is
+     * less than the recalculated number of quickly ACKs, increment it.
+     *
+     * @param max_quickacks the maximum times of quickly ACKs allowed
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L300">tcp_incr_quickack</a>
      */
-    void tcp_incr_quickack(final TcpConnection<T> tp, int max_quickacks) {
+    protected void tcp_incr_quickack(final TcpConnection<T> tp, int max_quickacks) {
         int quickacks = tp.rcv_wnd / (2 * tp.icsk_ack_rcv_mss);
         if (0 == quickacks) {
             quickacks = 2;
@@ -77,9 +81,12 @@ class TcpInput<T extends IpPacket> {
     }
 
     /**
+     * Enter quickly ACK mode and calculate the number of quickly ACKs,
+     * exit ping-pong mode, and reset the delay ACK timeout.
+     *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_enter_quickack_mode</a>
      */
-    void tcp_enter_quickack_mode(TcpConnection<T> tp, int max_quickacks) {
+    protected void tcp_enter_quickack_mode(TcpConnection<T> tp, int max_quickacks) {
         tp.logTrace("[QUICK-ACK] enter QUICK-ARK count: {} -> {}", tp.icsk_ack_quick, max_quickacks);
         tcp_incr_quickack(tp, max_quickacks);
         tp.inet_csk_exit_pingpong_mode();
@@ -89,32 +96,36 @@ class TcpInput<T extends IpPacket> {
     /*-
      * Send ACKs quickly, if "quick" count is not exhausted
      * and the session is not interactive.
-     */
-
-    /**
+     *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_in_quickack_mode</a>
      */
-    private boolean tcp_in_quickack_mode(TcpConnection<T> tp) {
-        //const struct dst_entry *dst = __sk_dst_get(sk);
-
-        /*
-        return (dst && dst_metric(dst, RTAX_QUICKACK)) ||
-                (icsk->icsk_ack.quick && !inet_csk_in_pingpong_mode(sk));
-                */
+    protected boolean tcp_in_quickack_mode(TcpConnection<T> tp) {
         return tp.icsk_ack_quick > 0 && !tp.inet_csk_in_pingpong_model();
     }
 
     /**
      * Check if sending an ack is needed.
-     *
+     * <p>
      * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5760.
      */
     private void __tcp_ack_snd_check(final TcpConnection<T> tp) {
-        if (tcp_in_quickack_mode(tp) || 0 != (tp.icsk_ack_pending & ICSK_ACK_NOW)) {
+        if (
+            // (tp.rcv_nxt - tp.rcv_wup > tp.icsk_ack_rcv_mss
+            /* ... and right edge of window advances far enough.
+             * (tcp_recvmsg() will send ACK otherwise).
+             * If application uses SO_RCVLOWAT, we want send ack now if
+             * we have not received enough bytes to satisfy the condition.
+             */
+            // && (tp.rcv_nxt - tp.copied_seq < tp.sk_rcvlowat || tp.output.__tcp_select_window(tp) >= tp.rcv_wnd)
+            // ) ||
+                tcp_in_quickack_mode(tp) || 0 != (tp.icsk_ack_pending & ICSK_ACK_NOW)) {
             output.tcp_send_ack(tp);
             return;
         }
+
         output.tcp_send_delayed_ack(tp);
+
+        // ...
     }
 
     /**
@@ -623,7 +634,6 @@ class TcpInput<T extends IpPacket> {
         tcp_snd_sne_update(tp, ack);
         tp.snd_una = ack;
     }
-
 
 
     /**

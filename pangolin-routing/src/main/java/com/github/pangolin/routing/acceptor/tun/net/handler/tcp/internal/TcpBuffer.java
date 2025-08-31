@@ -31,7 +31,7 @@ public class TcpBuffer {
 
 
     long tstamp;
-    int sacked;
+    transient int sacked;
 
     long skb_mstamp_ns;
 

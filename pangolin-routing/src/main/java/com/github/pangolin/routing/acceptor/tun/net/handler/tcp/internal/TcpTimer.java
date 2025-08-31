@@ -1,12 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.TCP_ATO_MIN;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.TCP_RESOURCE_PROBE_INTERVAL;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.TCP_RTO_MAX;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.TCP_RTO_MIN;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.TCP_TIMEOUT_INIT;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.sysctl_tcp_retries1;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.sysctl_tcp_retries2;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_CLOSE;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_LISTEN;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_ESTABLISHED;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.jiffies;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.msecs_to_jiffies;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.tcp_jiffies32;
@@ -15,6 +12,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 import com.google.common.collect.Maps;
 import io.netty.util.concurrent.Future;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
@@ -81,17 +79,18 @@ class TcpTimer<T extends IpPacket> {
         if (when > max_when) {
             when = max_when;
         }
+        when += jiffies();
         if (what == ICSK_TIME_RETRANS || what == ICSK_TIME_PROBE0 ||
                 what == ICSK_TIME_LOSS_PROBE || what == ICSK_TIME_REO_TIMEOUT) {
             tp.icsk_pending = what;
-            tp.icsk_timeout = TcpUtils.jiffies() + when;
+            tp.icsk_timeout = when;
 
 //            log.warn("[Retransmit] Delay: {}", when);
-            sk_reset_timer(icsk_retransmit_timer, tp.icsk_timeout);
+            sk_reset_timer(icsk_retransmit_timer, when);
         } else if (what == ICSK_TIME_DACK) {
             tp.icsk_ack_pending |= ICSK_ACK_TIMER;
-            tp.icsk_ack_timeout = TcpUtils.jiffies() + when;
-            sk_reset_timer(icsk_delack_timer, tp.icsk_ack_timeout);
+            tp.icsk_ack_timeout = when;
+            sk_reset_timer(icsk_delack_timer, when);
         }
     }
 
@@ -157,16 +156,18 @@ class TcpTimer<T extends IpPacket> {
      */
     private void tcp_delack_timer_handler() {
         final int state = tp.state.get().ordinal();
-        if (((1 << state) & (TcpConstants.TCPF_CLOSE | TcpConstants.TCPF_LISTEN)) != 0) {
+        if (((1 << state) & (TCPF_CLOSE | TCPF_LISTEN)) != 0) {
             return;
         }
+
+        // ...
 
         if ((tp.icsk_ack_pending & ICSK_ACK_TIMER) == 0) {
             return;
         }
 
-        if (time_after(tp.icsk_ack_timeout, jiffies())) {
-            sk_reset_timer(icsk_delack_timer, tp.icsk_ack_timeout);
+        if (time_after(tp.icsk_delack_timeout(), jiffies())) {
+            sk_reset_timer(icsk_delack_timer, tp.icsk_delack_timeout());
             return;
         }
 
@@ -211,7 +212,7 @@ class TcpTimer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L688">tcp_write_timer_handler</a>
      */
     private void tcp_write_timer_handler() {
-        if (0 != ((1 << tp.state.get().ordinal()) & (TcpConstants.TCPF_CLOSE | TcpConstants.TCPF_LISTEN))
+        if (0 != ((1 << tp.state.get().ordinal()) & (TCPF_CLOSE | TCPF_LISTEN))
                 || tp.icsk_pending <= 0) {
             return;
         }
@@ -261,8 +262,6 @@ class TcpTimer<T extends IpPacket> {
             return;
         }
 
-        // if ....
-//        if (false) {
         if (tp.snd_wnd > 0
                 // && !sock_flag(sk, SOCK_DEAD)
                 && ((1 << tp.state.get().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV)) != 0) {
@@ -276,15 +275,15 @@ class TcpTimer<T extends IpPacket> {
                 rtx_delta = TimeUnit.MICROSECONDS.toMillis(rtx_delta);
             }
 
-
             if (tcp_rtx_probe0_timed_out(rtx_delta)) {
-                tp.logError("[RETRANSMIT] RETRANSMIT_WRITE_ERROR");
+                tp.logError("[RETRANSMIT] RTX PROBE0 TIMEOUT");
                 tp.tcp_write_err();
                 return;
             }
 
             tp.tcp_enter_loss();
             tp.output.tcp_retransmit_skb(tp, skb, 1);
+            // __sk_dst_reset
         } else {
             //....
             if (0 != tcp_write_timeout()) {
@@ -292,11 +291,12 @@ class TcpTimer<T extends IpPacket> {
             }
 
             if (tp.icsk_retransmits == 0) {
-                // FIXME ignore
+                // ...
             }
 
             tp.tcp_enter_loss();
             tcp_update_rto_stats();
+
             if (tp.output.tcp_retransmit_skb(tp, tp.tcp_rtx_queue_head(), 1) > 0) {
                 /* Retransmission failed because of local congestion,
                  * Let senders fight for local resources conservatively.
@@ -321,14 +321,13 @@ class TcpTimer<T extends IpPacket> {
          * implemented ftp to mars will work nicely. We will have to fix
          * the 120 second clamps though!
          */
-
         // ...
-        // FIXME
-        inet_csk_reset_xmit_timer(ICSK_TIME_RETRANS, tcp_clamp_rto_to_user_timeout(), TCP_RTO_MAX);
-        if (retransmits_timed_out(sysctl_tcp_retries1 + 1, 0)) {
+
+        inet_csk_reset_xmit_timer(ICSK_TIME_RETRANS, tcp_clamp_rto_to_user_timeout(), tp.tcp_rto_max());
+//        if (retransmits_timed_out(sysctl_tcp_retries1 + 1, 0)) {
             // 重置路由缓存
             // __sk_dst_reset(sk);
-        }
+//        }
     }
 
 
@@ -410,9 +409,22 @@ class TcpTimer<T extends IpPacket> {
     private int tcp_write_timeout() {
         boolean expired = false;
         int retry_until = sysctl_tcp_retries2;
+        int max_retransmits;
+
         if (0 != ((1 << tp.state.get().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV))) {
-            // FIXME
+            retry_until = tp.icsk_syn_retries > 0 ? tp.icsk_syn_retries : sysctl_tcp_syn_retries;
+
+            max_retransmits = retry_until;
+
+            // ...
+
+            expired = tp.icsk_retransmits >= max_retransmits;
         } else {
+//            if (retransmits_timed_out(sysctl_tcp_retries1, 0)) {
+//                /* Black hole detection */
+//                tcp_mtu_probing(icsk, sk);
+//            }
+
             // ...
             retry_until = sysctl_tcp_retries2;
             // ...
@@ -421,6 +433,8 @@ class TcpTimer<T extends IpPacket> {
         if (!expired) {
             expired = retransmits_timed_out(retry_until, tp.icsk_user_timeout);
         }
+
+        // ...
 
         if (expired) {
             /* Has it gone just too far? */
@@ -437,7 +451,8 @@ class TcpTimer<T extends IpPacket> {
      */
     private boolean tcp_rtx_probe0_timed_out(long rtx_delta) {
         int user_timeout = tp.icsk_user_timeout;
-        int timeout = TCP_RTO_MAX << 1;
+        int timeout = tp.tcp_rto_max() << 1;
+
         if (user_timeout > 0) {
             /* If user application specified a TCP_USER_TIMEOUT,
              * it does not want win 0 packets to 'reset the timer'
@@ -446,18 +461,19 @@ class TcpTimer<T extends IpPacket> {
             if (rtx_delta > user_timeout) {
                 return true;
             }
-            timeout = Math.min(timeout, user_timeout);
+            timeout = Math.min(timeout, (int) msecs_to_jiffies(user_timeout));
         }
 
         /* Note: timer interrupt might have been delayed by at least one jiffy,
          * and tp->rcv_tstamp might very well have been written recently.
          * rcv_delta can thus be negative.
          */
-        long rcv_delta = tp.icsk_timeout - tp.rcv_tstamp;
+        long icsk_timeout = tp.icsk_timeout();
+        long rcv_delta = icsk_timeout - tp.rcv_tstamp;
         if (rcv_delta <= timeout) {
             return false;
         }
-        return rtx_delta > timeout;
+        return msecs_to_jiffies(rtx_delta) > timeout;
     }
 
 

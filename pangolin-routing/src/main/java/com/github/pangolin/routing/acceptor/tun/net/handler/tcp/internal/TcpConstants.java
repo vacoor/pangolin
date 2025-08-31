@@ -20,4 +20,26 @@ public interface TcpConstants {
     int TCPF_LAST_ACK = 1 << TcpState.TCP_LAST_ACK.ordinal();
     int TCPF_CLOSING = 1 << TcpState.TCP_CLOSING.ordinal();
 
+
+    /**
+     * Nagle's algo is disabled.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L238">TCP_NAGLE_OFF</a>
+     */
+    int TCP_NAGLE_OFF = 1;
+
+    /**
+     * TCP_NAGLE_CORK.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L239">TCP_NAGLE_CORK</a>
+     */
+    int TCP_NAGLE_CORK = 2;
+
+    /**
+     * TCP_NAGLE_PUSH.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L240">TCP_NAGLE_PUSH</a>
+     */
+    int TCP_NAGLE_PUSH = 4;
+
 }

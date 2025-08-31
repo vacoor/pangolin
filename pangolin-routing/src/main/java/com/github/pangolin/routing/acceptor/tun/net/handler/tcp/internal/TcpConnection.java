@@ -1,6 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_OFF;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.after;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.before;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.determineEndSeq;
@@ -35,8 +38,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_FIN_WAIT2;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_TIME_WAIT;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
@@ -55,6 +56,9 @@ public abstract class TcpConnection<T extends IpPacket> {
     public static final int TCPCB_REPAIRED = (1 << 4);    /* SKB repaired (no skb_mstamp_ns)	*/
     public static final int TCPCB_EVER_RETRANS = (1 << 7);    /* Ever retransmitted frame	*/
     public static final int TCPCB_RETRANS = (TCPCB_SACKED_RETRANS | TCPCB_EVER_RETRANS | TCPCB_REPAIRED);
+
+    public int total_retrans;
+    public int bytes_retrans;
 
 
     IpHeader ipHeader;
@@ -124,7 +128,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     int rcv_nxt;
     int rcv_wnd;
 
-    private int copied_seq;
+    int copied_seq;
 
     byte rcv_wscale = 6;
 
@@ -166,6 +170,10 @@ public abstract class TcpConnection<T extends IpPacket> {
      */
     @Deprecated
     int snd_up;
+
+    /**
+     * 小包(small)发送的结束序号.
+     */
     int snd_sml;
 
     byte snd_wscale;
@@ -200,9 +208,14 @@ public abstract class TcpConnection<T extends IpPacket> {
     int pushed_seq;
 
     /**
-     * 已发出待接收ACK的数据包数量.
+     * 已发送未ACK的数据包数量.
+     *
+     * @see TcpOutput#tcp_event_new_data_sent(TcpConnection, TcpBuffer)
+     * @see TcpInput#tcp_clean_rtx_queue(TcpConnection, int)
      */
     int packets_out;
+
+    int nonagle = TCP_NAGLE_OFF;
 
     /**
      *
@@ -221,6 +234,19 @@ public abstract class TcpConnection<T extends IpPacket> {
     TcpInput<T> input;
     TcpOutput<T> output;
     TcpTimer<T> timer;
+
+    /**
+     * nano seconds
+     */
+    long tcp_clock_cache;
+
+    /*-
+     * most recent packet received/sent.
+     * us (micro seconds).
+     */
+    long tcp_mstamp;
+
+    int icsk_syn_retries;
 
     protected TcpConnection(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         this.parent = parent;
@@ -266,7 +292,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         /* Really, if the socket is already in listen state
          * we can only allow the backlog to be adjusted.
          */
-        if (!TcpState.TCP_LISTEN.equals(s)) {
+        if (!TCP_LISTEN.equals(s)) {
             // ...
             int err = inet_csk_listen_start();
             if (err != 0) {
@@ -285,7 +311,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         // reqsk_queue_alloc(&icsk->icsk_accept_queue);
 
         // inet_csk_delack_init
-        state.compareAndSet(TcpState.TCP_CLOSE, TcpState.TCP_LISTEN);
+        state.compareAndSet(TcpState.TCP_CLOSE, TCP_LISTEN);
         return 0;
     }
 
@@ -1090,7 +1116,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         new_state[TcpState.TCP_CLOSE.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
         new_state[TcpState.TCP_CLOSE_WAIT.ordinal() + 1] = TcpState.TCP_LAST_ACK.ordinal() | TCP_ACTION_FIN;
         new_state[TcpState.TCP_LAST_ACK.ordinal() + 1] = TcpState.TCP_LAST_ACK.ordinal();
-        new_state[TcpState.TCP_LISTEN.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
+        new_state[TCP_LISTEN.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
         new_state[TcpState.TCP_CLOSING.ordinal() + 1] = TcpState.TCP_CLOSING.ordinal();
         new_state[TcpState.TCP_NEW_SYN_RECV.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal(); /* should not happen ! */
     }
@@ -1146,8 +1172,8 @@ public abstract class TcpConnection<T extends IpPacket> {
         sk_shutdown = SHUTDOWN_MASK;
 
         TcpState state = this.state.get();
-        if (TcpState.TCP_LISTEN.equals(state)) {
-            this.state.set(TcpState.TCP_CLOSE);
+        if (TCP_LISTEN.equals(state)) {
+            this.state.set(TCP_CLOSE);
             adjudge_to_death();
             return;
         }
@@ -1155,7 +1181,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         // ...
 
         /* If socket has been already reset (e.g. in tcp_reset()) - kill it. */
-        if (TcpState.TCP_CLOSE.equals(state)) {
+        if (TCP_CLOSE.equals(state)) {
             adjudge_to_death();
             return;
         }
@@ -1188,9 +1214,13 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     }
 
-    void tcp_push_pending_frames() {
-        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2102
-        output.__tcp_push_pending_frames(this, output.tcp_current_mss(this));
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2102">tcp_push_pending_frames</a>
+     */
+    protected void tcp_push_pending_frames() {
+        if (null != tcp_send_head()) {
+            output.__tcp_push_pending_frames(this, output.tcp_current_mss(this), this.nonagle);
+        }
     }
 
 
@@ -1263,7 +1293,6 @@ public abstract class TcpConnection<T extends IpPacket> {
 
         sk_shutdown = SHUTDOWN_MASK;
 
-
         destroy();
     }
 
@@ -1306,7 +1335,7 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     boolean inet_csk_ack_scheduled() {
         // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h
-        return 0 != (icsk_ack_pending & TcpTimer.ICSK_ACK_SCHED);
+        return 0 != (icsk_ack_pending & ICSK_ACK_SCHED);
     }
 
     /**
@@ -1409,11 +1438,6 @@ public abstract class TcpConnection<T extends IpPacket> {
     int tcp_usec_ts;
     long ts_off;
 
-    /*-
-     * most recent packet received/sent.
-     * us (micro seconds).
-     */
-    long tcp_mstamp;
 
     /*-
      * timestamp of last received ACK (for keepalives).
@@ -1440,12 +1464,24 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     int icsk_pending;
     int icsk_ack_pending;
+
+    /**
+     * ACK timeout.
+     */
     long icsk_ack_ato = 0;
+
+    /**
+     * Retransmission timeout.
+     */
     int icsk_rto;
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L146
     static final int TCP_RTO_MAX = 120 * HZ;
     static final int TCP_RTO_MIN = HZ / 5;
+
+    /**
+     * timestamp of retransmission timeout.
+     */
     long icsk_timeout;
 
 
@@ -1524,8 +1560,11 @@ public abstract class TcpConnection<T extends IpPacket> {
     static final int TCP_MAX_WINDOW = 32767;
 
 
-    long tcp_clock_cache;
     long tcp_wstamp_ns;
+
+    /**
+     * Last send time.
+     */
     long lsndtime;
     int icsk_pmtu_cookie;
 
@@ -1604,20 +1643,20 @@ public abstract class TcpConnection<T extends IpPacket> {
     void tcp_rearm_rto() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3261
         if (packets_out <= 0) {
-            inet_csk_clear_xmit_timer(TcpTimer.ICSK_TIME_RETRANS);
+            inet_csk_clear_xmit_timer(ICSK_TIME_RETRANS);
         } else {
-            long rto = icsk_rto;
+            int rto = icsk_rto;
 
             /* Offset the time elapsed after installing regular RTO */
-            if (icsk_pending == TcpTimer.ICSK_TIME_REO_TIMEOUT
-                    || icsk_pending == TcpTimer.ICSK_TIME_LOSS_PROBE) {
+            if (icsk_pending == ICSK_TIME_REO_TIMEOUT
+                    || icsk_pending == ICSK_TIME_LOSS_PROBE) {
                 long delta_us = tcp_rto_delta_us();
                 /* delta_us may not be positive if the socket is locked
                  * when the retrans timer fires and is rescheduled.
                  */
-                rto = usecs_to_jiffies(Math.max(delta_us, 1));
+                rto = (int) usecs_to_jiffies(Math.max(delta_us, 1));
             }
-            tcp_reset_xmit_timer(TcpTimer.ICSK_TIME_RETRANS, rto, TCP_RTO_MAX);
+            tcp_reset_xmit_timer(ICSK_TIME_RETRANS, rto, TCP_RTO_MAX);
         }
     }
 
@@ -1715,7 +1754,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                 /*-
                  * XXX client mode not supported.
                  */
-                return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
+                return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
             // 临时处理.
             case TCP_NEW_SYN_RECV:
                 return discard(skb, TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED);
@@ -2044,6 +2083,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         log.debug(buff.toString());
     }
 
+    static final int sysctl_tcp_syn_retries = 5;
     static final int sysctl_tcp_retries2 = 5;
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L160
     static final long TCP_RESOURCE_PROBE_INTERVAL = HZ / 2;
@@ -2070,6 +2110,7 @@ public abstract class TcpConnection<T extends IpPacket> {
      */
     long icsk_ack_timeout;
     int icsk_rto_min = TCP_RTO_MIN;//40;
+    int icsk_rto_max = TCP_RTO_MAX;
     int icsk_delack_max;
 
     static final int sysctl_tcp_pingpong_thresh = 1;
@@ -2126,7 +2167,7 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     void inet_csk_clear_xmit_timer(int what) {
         // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L195
-        if (TcpTimer.ICSK_TIME_RETRANS == what || TcpTimer.ICSK_TIME_PROBE0 == what) {
+        if (ICSK_TIME_RETRANS == what || TcpTimer.ICSK_TIME_PROBE0 == what) {
             icsk_pending = 0;
             // stop icsk_retransmit_timer
             timer.sk_stop_timer(timer.icsk_retransmit_timer);
@@ -2147,7 +2188,15 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2448
     private long tcp_rto_delta_us() {
-        return TCP_RTO_MAX;
+        final int rto = icsk_rto;
+        final TcpBuffer skb = tcp_rtx_queue_head();
+        if (null != skb) {
+            final long rto_time_stamp_us = tcp_skb_timestamp_us(skb) + jiffies_to_usecs(rto);
+            return (rto_time_stamp_us - tcp_mstamp);
+        } else {
+            logWarn("RTX queue empty");
+            return jiffies_to_usecs(rto);
+        }
     }
 
     int tcp_fin_time() {
@@ -2164,5 +2213,18 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     void tcp_send_challenge_ack() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3649
+    }
+
+    int tcp_rto_max() {
+        return icsk_rto_max;
+    }
+
+    public long icsk_delack_timeout() {
+        // FIXME
+        return icsk_ack_timeout;
+    }
+
+    public long icsk_timeout() {
+        return icsk_timeout;
     }
 }
