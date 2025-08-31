@@ -1,21 +1,17 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import com.google.common.collect.Maps;
+import io.netty.util.concurrent.Future;
+import lombok.extern.slf4j.Slf4j;
+import org.pcap4j.packet.IpPacket;
+
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
+
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_CLOSE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_LISTEN;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_ESTABLISHED;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.jiffies;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.msecs_to_jiffies;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.tcp_jiffies32;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.time_after;
-
-import com.google.common.collect.Maps;
-import io.netty.util.concurrent.Future;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpPacket;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
 class TcpTimer<T extends IpPacket> {
@@ -46,7 +42,7 @@ class TcpTimer<T extends IpPacket> {
 
     void tcp_init_xmit_timers() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L883
-        inet_csk_init_xmit_timers( this::tcp_write_timer, this::tcp_delack_timer, this::tcp_keepalive_timer);
+        inet_csk_init_xmit_timers(this::tcp_write_timer, this::tcp_delack_timer, this::tcp_keepalive_timer);
     }
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L702
@@ -144,7 +140,6 @@ class TcpTimer<T extends IpPacket> {
     static final int ICSK_ACK_NOMEM = 1 << 5;
 
 
-
     private void tcp_delack_timer() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L358
         tcp_delack_timer_handler();
@@ -230,7 +225,7 @@ class TcpTimer<T extends IpPacket> {
                 // tcp_rack_reo_timeout(sk);
                 break;
             case ICSK_TIME_LOSS_PROBE:
-                 tp.output.tcp_send_loss_probe();
+                tp.output.tcp_send_loss_probe();
                 break;
             case ICSK_TIME_RETRANS:
                 tp.icsk_pending = 0;
@@ -324,8 +319,8 @@ class TcpTimer<T extends IpPacket> {
 
         inet_csk_reset_xmit_timer(ICSK_TIME_RETRANS, tcp_clamp_rto_to_user_timeout(), tp.tcp_rto_max());
 //        if (retransmits_timed_out(sysctl_tcp_retries1 + 1, 0)) {
-            // 重置路由缓存
-            // __sk_dst_reset(sk);
+        // 重置路由缓存
+        // __sk_dst_reset(sk);
 //        }
     }
 
@@ -553,12 +548,13 @@ class TcpTimer<T extends IpPacket> {
         tp.output.tcp_mstamp_refresh(tp);
 
         if (TcpState.TCP_FIN_WAIT2.equals(state)) {
-
+            // FIXME
         }
         //...
 
         int elapsed = keepalive_time_when(tp);
 
+        /* It is alive without keepalive 8) */
         if (tp.packets_out > 0 || !tp.tcp_write_queue_empty()) {
             tcp_reset_keepalive_timer(elapsed);
             return;
@@ -571,21 +567,55 @@ class TcpTimer<T extends IpPacket> {
              * If the TCP_USER_TIMEOUT option is enabled, use that
              * to determine when to timeout instead.
              */
-//            if ((user_timeout != 0 && elapsed >= msecs_to_jiffies(user_timeout) && tp.icsk_probes_out > 0)
-//                || (user_timeout == 0 && tp.icsk_probes_out >= keepalive_probes(tp))) {
-            // tcp_send_active_reset(sk, GFP_ATOMIC, SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT);
-            // tcp_write_err(sk);
-            return;
-//            }
+            if ((user_timeout != 0 && elapsed >= msecs_to_jiffies(user_timeout) && tp.icsk_probes_out > 0)
+                    || (user_timeout == 0 && tp.icsk_probes_out >= keepalive_probes(tp))) {
+                tp.output.tcp_send_active_reset(tp, "SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT");
+                tp.tcp_write_err();
+                return;
+            }
+
+            if (tp.output.tcp_write_wakeup(tp, 1) <= 0) {
+                tp.icsk_probes_out++;
+                elapsed = keepalive_intvl_when(tp);
+            } else {
+                /* If keepalive was lost due to local congestion,
+                 * try harder.
+                 */
+                elapsed = TCP_RESOURCE_PROBE_INTERVAL;
+            }
         } else {
-            tcp_reset_keepalive_timer(keepalive_time_when(tp) - elapsed);
+            /* It is tp->rcv_tstamp + keepalive_time_when(tp) */
+            elapsed = keepalive_time_when(tp) - elapsed;
         }
+        tcp_reset_keepalive_timer(elapsed);
+    }
+
+    private int keepalive_probes(TcpConnection<T> tp) {
+        final int sysctl_tcp_keepalive_probes = 9;
+        int val;
+
+        /* Paired with WRITE_ONCE() in tcp_sock_set_keepcnt()
+         * and do_tcp_setsockopt().
+         */
+        val = tp.keepalive_probes;
+
+        return 0 != val ? val : sysctl_tcp_keepalive_probes;
     }
 
     int keepalive_time_when(final TcpConnection<?> tp) {
-        int sysctl_tcp_keepalive_time = 7200;
+        int sysctl_tcp_keepalive_time = 7200 * 1000;
         // tp.keepalive_time;
         return sysctl_tcp_keepalive_time;
+    }
+
+    int keepalive_intvl_when(final TcpConnection<?> tp) {
+        /*-
+         * Paired with WRITE_ONCE() in tcp_sock_set_keepintvl()
+         * and do_tcp_setsockopt().
+         */
+        final int sysctl_tcp_keepalive_intvl = 75 * 1000;
+        int val = tp.keepalive_intvl;
+        return 0 != val ? val : sysctl_tcp_keepalive_intvl;
     }
 
     int keepalive_time_elapsed(final TcpConnection<?> tp) {

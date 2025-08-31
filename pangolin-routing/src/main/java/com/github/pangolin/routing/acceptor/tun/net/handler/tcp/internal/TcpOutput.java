@@ -1115,7 +1115,7 @@ class TcpOutput<T extends IpPacket> {
         __tcp_push_pending_frames(tp, tcp_current_mss(tp), TCP_NAGLE_OFF);
     }
 
-    void tcp_send_active_reset(final TcpConnection<T> tp) {
+    void tcp_send_active_reset(final TcpConnection<T> tp, final String reason) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3640
         TcpBuffer skb = tcp_init_nondata_skb(tcp_acceptable_seq(tp), TcpConstants.ACK | TcpConstants.RST);
         tcp_mstamp_refresh(tp);
@@ -1264,7 +1264,7 @@ class TcpOutput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4328">tcp_write_wakeup</a>
      */
-    private int tcp_write_wakeup(TcpConnection<T> tp, int mib) {
+    protected int tcp_write_wakeup(TcpConnection<T> tp, int mib) {
         if (TCP_CLOSE.equals(tp.state.get())) {
             return -1;
         }

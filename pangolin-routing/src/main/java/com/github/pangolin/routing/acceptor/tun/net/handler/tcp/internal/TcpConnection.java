@@ -59,6 +59,8 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     public int total_retrans;
     public int bytes_retrans;
+    public int keepalive_intvl;
+    public int keepalive_probes;
 
 
     IpHeader ipHeader;
@@ -2085,7 +2087,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     static final int sysctl_tcp_syn_retries = 5;
     static final int sysctl_tcp_retries2 = 5;
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L160
-    static final long TCP_RESOURCE_PROBE_INTERVAL = HZ / 2;
+    static final int TCP_RESOURCE_PROBE_INTERVAL = HZ / 2;
 
     /*
     RFC6298 2.1 initial RTO value.
