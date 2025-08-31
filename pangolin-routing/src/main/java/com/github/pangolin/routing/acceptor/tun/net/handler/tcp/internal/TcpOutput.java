@@ -1369,4 +1369,9 @@ class TcpOutput<T extends IpPacket> {
         skb.fin(0 != (flags & TcpConstants.FIN));
         return skb;
     }
+
+    public void tcp_send_loss_probe() {
+
+    }
+
 }

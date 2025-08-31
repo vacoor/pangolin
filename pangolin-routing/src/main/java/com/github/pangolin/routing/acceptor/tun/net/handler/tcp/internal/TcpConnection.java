@@ -1914,9 +1914,8 @@ public abstract class TcpConnection<T extends IpPacket> {
                 // FIXME
                 if (null != child && child.isOpen()) {
                     child.close();
-                } else {
-                    // if not connected.
-                    tcp_shutdown(SEND_SHUTDOWN);
+                } else if (tcp_close_state()) {
+                    output.tcp_send_fin(TcpConnection.this);
                 }
 
             }

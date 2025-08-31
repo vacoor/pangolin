@@ -230,8 +230,7 @@ class TcpTimer<T extends IpPacket> {
                 // tcp_rack_reo_timeout(sk);
                 break;
             case ICSK_TIME_LOSS_PROBE:
-                // FIXME
-                // tcp_send_loss_probe(sk);
+                 tp.output.tcp_send_loss_probe();
                 break;
             case ICSK_TIME_RETRANS:
                 tp.icsk_pending = 0;
