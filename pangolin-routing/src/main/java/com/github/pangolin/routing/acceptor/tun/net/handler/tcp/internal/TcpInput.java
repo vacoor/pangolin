@@ -343,7 +343,7 @@ class TcpInput<T extends IpPacket> {
             case TCP_FIN_WAIT2:
                 /* Received a FIN -- send ACK and enter TIME_WAIT. */
                 output.tcp_send_ack(tp);
-                // tcp_time_wait(sk, State.TCP_TIME_WAIT, 0);
+                tp.tcp_time_wait(TcpState.TCP_TIME_WAIT, 0);
                 break;
             default:
                 /* Only TCP_LISTEN and TCP_CLOSE are left, in these
@@ -565,7 +565,7 @@ class TcpInput<T extends IpPacket> {
                     inMss = user_mss > 0 && user_mss < inMss ? user_mss : inMss;
                     tp.tmp_opt_rx_mss_clamp.set(inMss);
                 }
-            } else if (option instanceof TcpWindowScaleOption && hdr.getSyn() && !estab && tp.sysctl_tcp_window_scaling) {
+            } else if (option instanceof TcpWindowScaleOption && hdr.getSyn() && !estab && SysctlOptions.sysctl_tcp_window_scaling) {
                 final byte wscale = ((TcpWindowScaleOption) option).getShiftCount();
                 tp.tmp_opt_wscale_ok.set(true);
                 tp.tmp_opt_snd_wscale.set(wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale);

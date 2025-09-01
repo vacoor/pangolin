@@ -1,10 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
+import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.Tcp4Connection;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils;
 import com.github.pangolin.routing.support.SocketChannelFactory;
-import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
 import java.net.Inet4Address;
@@ -12,10 +11,7 @@ import java.net.UnknownHostException;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.IpV4Packet.IpV4Header;
-import org.pcap4j.packet.IpV4Rfc791Tos;
-import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.TcpPacket.Builder;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 
 @Slf4j

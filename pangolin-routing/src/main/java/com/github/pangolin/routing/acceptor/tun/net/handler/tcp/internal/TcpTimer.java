@@ -114,13 +114,11 @@ class TcpTimer<T extends IpPacket> {
     private int __mod_timer(Runnable timer, long expires, int options) {
 //        io.netty.util.concurrent.ScheduledFuture<?> nf = parent.eventLoop().schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
         final long delay = expires - jiffies();
-        io.netty.util.concurrent.ScheduledFuture<?> nf = tp.child.eventLoop().schedule(timer, delay, TimeUnit.MILLISECONDS);
-//        final ScheduledFuture<?> nf = scheduler.schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
-        Future<?> future = timers.put(timer, nf);
-        if (null != future && !future.isDone() && !future.isCancelled()) {
-            if (!future.cancel(true)) {
-                log.warn("CANCEL FAILED");
-            }
+        final Future<?> future = timers.get(timer);
+        if (null == future || future.isDone() || future.isCancelled() || future.cancel(true)) {
+            timers.put(timer, tp.child.eventLoop().schedule(timer, delay, TimeUnit.MILLISECONDS));
+        } else {
+            log.warn("CANCEL FAILED: {}", tp.icsk_pending);
         }
         return 0;
     }
@@ -403,11 +401,11 @@ class TcpTimer<T extends IpPacket> {
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L241
     private int tcp_write_timeout() {
         boolean expired = false;
-        int retry_until = sysctl_tcp_retries2;
+        int retry_until = SysctlOptions.sysctl_tcp_retries2;
         int max_retransmits;
 
         if (0 != ((1 << tp.state.get().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV))) {
-            retry_until = tp.icsk_syn_retries > 0 ? tp.icsk_syn_retries : sysctl_tcp_syn_retries;
+            retry_until = tp.icsk_syn_retries > 0 ? tp.icsk_syn_retries : SysctlOptions.sysctl_tcp_syn_retries;
 
             max_retransmits = retry_until;
 
@@ -421,7 +419,7 @@ class TcpTimer<T extends IpPacket> {
 //            }
 
             // ...
-            retry_until = sysctl_tcp_retries2;
+            retry_until = SysctlOptions.sysctl_tcp_retries2;
             // ...
         }
 
@@ -518,7 +516,7 @@ class TcpTimer<T extends IpPacket> {
             }
         }
 
-        int max_probes = sysctl_tcp_retries2;
+        int max_probes = SysctlOptions.sysctl_tcp_retries2;
 
         // ...
 
@@ -603,7 +601,6 @@ class TcpTimer<T extends IpPacket> {
     }
 
     private int keepalive_probes(TcpConnection<T> tp) {
-        final int sysctl_tcp_keepalive_probes = 9;
         int val;
 
         /* Paired with WRITE_ONCE() in tcp_sock_set_keepcnt()
@@ -611,13 +608,12 @@ class TcpTimer<T extends IpPacket> {
          */
         val = tp.keepalive_probes;
 
-        return 0 != val ? val : sysctl_tcp_keepalive_probes;
+        return 0 != val ? val : SysctlOptions.sysctl_tcp_keepalive_probes;
     }
 
     int keepalive_time_when(final TcpConnection<?> tp) {
-        int sysctl_tcp_keepalive_time = 7200 * 1000;
         // tp.keepalive_time;
-        return sysctl_tcp_keepalive_time;
+        return SysctlOptions.sysctl_tcp_keepalive_time;
     }
 
     int keepalive_intvl_when(final TcpConnection<?> tp) {
@@ -625,9 +621,8 @@ class TcpTimer<T extends IpPacket> {
          * Paired with WRITE_ONCE() in tcp_sock_set_keepintvl()
          * and do_tcp_setsockopt().
          */
-        final int sysctl_tcp_keepalive_intvl = 75 * 1000;
         int val = tp.keepalive_intvl;
-        return 0 != val ? val : sysctl_tcp_keepalive_intvl;
+        return 0 != val ? val : SysctlOptions.sysctl_tcp_keepalive_intvl;
     }
 
     int keepalive_time_elapsed(final TcpConnection<?> tp) {

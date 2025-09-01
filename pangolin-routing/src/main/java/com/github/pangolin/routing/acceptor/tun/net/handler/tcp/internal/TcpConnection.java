@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.sysctl_tcp_fin_timeout;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_OFF;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
@@ -37,7 +38,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
@@ -81,8 +81,6 @@ public abstract class TcpConnection<T extends IpPacket> {
     static final byte TCP_MAX_WSCALE = 14;
 
     static final int HZ = 1000;
-    static final boolean sysctl_tcp_window_scaling = true;
-    static final int sysctl_tcp_retries1 = 5;
 
     /**
      * 用户定义的 MSS.
@@ -350,10 +348,6 @@ public abstract class TcpConnection<T extends IpPacket> {
     // https://www.cnblogs.com/wanpengcoder/p/11751763.html
 
 
-    /**
-     * https://github.com/torvalds/linux/blob/master/include/net/dropreason-core.h.
-     */
-    public static final int SKB_NOT_DROPPED_YET = 0;
 
     int tcp_header_len;
     int icsk_ext_hdr_len;
@@ -539,7 +533,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                 }
             });
             return true;
-        } catch (InterruptedException e) {
+        } catch (Exception e) {
             logInfo("CONNECTION RESET by {}: {}", e.getMessage(), resolved, e);
             return false;
         }
@@ -1219,6 +1213,12 @@ public abstract class TcpConnection<T extends IpPacket> {
     }
 
     void tcp_time_wait(TcpState state, long timeout) {
+        this.state.set(state);
+
+        if (TCP_TIME_WAIT.equals(state)) {
+            this.state.set(TCP_CLOSE);
+            tcp_done();
+        }
 
     }
 
@@ -1350,8 +1350,8 @@ public abstract class TcpConnection<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L329">inet_csk_enter_pingpong_mode</a>
      */
     void inet_csk_enter_pingpong_mode() {
-        logTrace("[PING-PONG] enter PING-PONG mode, PING-PONG threshold = {}", sysctl_tcp_pingpong_thresh);
-        icsk_ack_pingpong = sysctl_tcp_pingpong_thresh;
+        logTrace("[PING-PONG] enter PING-PONG mode, PING-PONG threshold = {}", SysctlOptions.sysctl_tcp_pingpong_thresh);
+        icsk_ack_pingpong = SysctlOptions.sysctl_tcp_pingpong_thresh;
     }
 
     /**
@@ -1368,7 +1368,7 @@ public abstract class TcpConnection<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L340">inet_csk_in_pingpong_model</a>
      */
     boolean inet_csk_in_pingpong_model() {
-        return icsk_ack_pingpong >= sysctl_tcp_pingpong_thresh;
+        return icsk_ack_pingpong >= SysctlOptions.sysctl_tcp_pingpong_thresh;
     }
 
     /**
@@ -1836,7 +1836,6 @@ public abstract class TcpConnection<T extends IpPacket> {
 //                   break;
 //                }
 
-                // skip TCP_TIMEWAIT2.
                 if (linger2 < 0) {
                     tcp_done();
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
@@ -1845,13 +1844,15 @@ public abstract class TcpConnection<T extends IpPacket> {
                 final int seq = th.getSequenceNumber();
                 final int end_seq = determineEndSeq(skb);
                 if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), rcv_nxt)) {
-                    /* Receive out of order FIN after close() */
                     tcp_done();
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
 
                 final int tmo = tcp_fin_time();
                 if (tmo > TCP_TIMEWAIT_LEN) {
+                    /*-
+                     * FIN_WAIT2 开始的总超时时间 > TIME_WAIT 的 2MSL, 则在进入 TIME_WAIT 前保证连接存活.
+                     */
                     timer.tcp_reset_keepalive_timer(tmo - TCP_TIMEWAIT_LEN);
                 } else if (th.getFin()) {
                     /* Bad case. We could lose such FIN otherwise.
@@ -1983,16 +1984,9 @@ public abstract class TcpConnection<T extends IpPacket> {
         final String srcHostAddr = srcAddr.getHostAddress();
         final String dstHostAddr = dstAddr.getHostAddress();
 
-        final StringBuilder buff = new StringBuilder();
-        if (null != child) {
-            buff.append("[").append(child.id()).append("]");
-        } else {
-            buff.append("[").append("????????").append("]");
-        }
 
-        buff.append(" ").append(srcHostAddr).append(":").append(srcPort)
-                .append(" -> ")
-                .append(dstHostAddr).append(":").append(dstPort);
+        final StringBuilder buff = new StringBuilder();
+        buff.append(TcpUtils.logPrefix(null != child ? child.id() : null, srcHostAddr, srcPort, dstHostAddr, dstPort));
         buff.append(" ");
 
         buff.append(format);
@@ -2000,98 +1994,10 @@ public abstract class TcpConnection<T extends IpPacket> {
     }
 
     protected void debug(final IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
-        final InetAddress srcAddr = ipHeader.getSrcAddr();
-        final InetAddress dstAddr = ipHeader.getDstAddr();
-        final TcpHeader tcpHeader = tcpPacket.getHeader();
-        final String srcHostName = srcAddr.getHostAddress();
-        final String dstHostName = dstAddr.getHostAddress();
-        final int srcPort = tcpHeader.getSrcPort().valueAsInt();
-        final int dstPort = tcpHeader.getDstPort().valueAsInt();
-
-        /*
-        String dstHostNameToUse = resolve(dstAddr);
-        if (null != dstHostNameToUse) {
-            dstHostNameToUse = dstHostName + "(" + dstHostNameToUse +  ")";
-        } else {
-            dstHostNameToUse = dstHostName;
-        }
-        */
-        String dstHostNameToUse = dstHostName;
-
-        final StringBuilder buff = new StringBuilder();
-        if (null != child) {
-            buff.append("[").append(child.id()).append("]");
-        } else {
-            buff.append("[").append("????????").append("]");
-        }
-
-
-        buff.append(" ").append(srcHostName).append(":").append(srcPort)
-                .append(" -> ")
-                .append(dstHostNameToUse).append(":").append(dstPort);
-
-        final int len = buff.length();
-        if (tcpHeader.getFin()) {
-            buff.append("FIN,");
-        }
-        if (tcpHeader.getSyn()) {
-            buff.append("SYN,");
-        }
-        if (tcpHeader.getRst()) {
-            buff.append("RST,");
-        }
-        if (tcpHeader.getPsh()) {
-            buff.append("PSH,");
-        }
-        if (tcpHeader.getAck()) {
-            buff.append("ACK,");
-        }
-        if (tcpHeader.getUrg()) {
-            buff.append("URG,");
-        }
-
-        if (buff.length() > len) {
-            buff.replace(buff.length() - 1, buff.length(), "] ").insert(len, " [");
-        }
-
-        final boolean useRelative = false;
-        long sequence = tcpHeader.getSequenceNumberAsLong();
-        long acknowledgment = tcpHeader.getAcknowledgmentNumberAsLong();
-        if (useRelative) {
-            final long rcv_isn_l = rcv_isn & 0xFFFFFFFFL;
-            final long snt_isn_l = snt_isn & 0xFFFFFFFFL;
-            final boolean syn = tcpHeader.getSyn();
-            sequence -= !syn ? rcv_isn_l : sequence;
-            acknowledgment -= !syn ? snt_isn_l : acknowledgment - 1;
-        }
-
-        buff.append("Seq=").append(sequence);
-        if (tcpHeader.getAck()) {
-            buff.append(" Ack=").append(acknowledgment);
-        }
-
-        final int window = tcpHeader.getWindowAsInt() << (inbound ? rcv_wscale : snd_wscale);
-        buff.append(" Win=").append(window);
-
-        final int payloadLen = tcpPacket.length() - tcpHeader.length();
-        buff.append(" Len=").append(payloadLen);
-
-        if (tcpHeader.getSyn()) {
-
-        }
-
-        /*
-        final Packet payload = tcpPacket.getPayload();
-        if (null != payload) {
-            buff.append(" ").append(Bytes.toString(payload.getRawData()));
-        }
-        */
-
-        log.debug(buff.toString());
+        final String message = TcpUtils.logify(null != child ? child.id() : null, ipHeader, tcpPacket, inbound ? rcv_wscale : snd_wscale);
+        log.debug(message);
     }
 
-    static final int sysctl_tcp_syn_retries = 5;
-    static final int sysctl_tcp_retries2 = 5;
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L160
     static final int TCP_RESOURCE_PROBE_INTERVAL = HZ / 2;
 
@@ -2120,7 +2026,6 @@ public abstract class TcpConnection<T extends IpPacket> {
     int icsk_rto_max = TCP_RTO_MAX;
     int icsk_delack_max;
 
-    static final int sysctl_tcp_pingpong_thresh = 1;
     int icsk_ack_pingpong;
 
     long tcp_rto_min_us() {
@@ -2216,9 +2121,10 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     int tcp_fin_time() {
         // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1746
-        // linger2 > 0 ?
-        int fin_timeout = 60 * HZ;
+        int fin_timeout = 0 != linger2 ? linger2 : sysctl_tcp_fin_timeout;
         int rto = icsk_rto;
+
+        // 3.5 * rto
         if (fin_timeout < (rto << 2) - (rto >> 1)) {
             fin_timeout = (rto << 2) - (rto >> 1);
         }

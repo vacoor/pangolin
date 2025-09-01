@@ -1,5 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.util.SipHash;
+import java.net.InetAddress;
+import org.pcap4j.packet.IpPacket.IpHeader;
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
 
@@ -9,14 +12,13 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import org.pcap4j.packet.TcpPacket.TcpHeader;
 
 /**
  *
  */
 public abstract class TcpUtils {
     private static final AtomicLong TIME_COUNTER = new AtomicLong(System.nanoTime());
-    private static final SecureRandom RANDOM = new SecureRandom();
-    private static final long[] SIP_HASH_KEYS = {RANDOM.nextLong(), RANDOM.nextLong()};
 
     private TcpUtils() {
     }
@@ -171,5 +173,98 @@ public abstract class TcpUtils {
         } catch (final NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+
+    public static String logPrefix(final Object id,
+                                   final String srcAddr, final int srcPort,
+                                   final String dstAddr, final int dstPort) {
+
+        final StringBuilder buff = new StringBuilder();
+        if (null != id) {
+            buff.append("[").append(id).append("]");
+        } else {
+            buff.append("[").append("????????").append("]");
+        }
+
+        buff.append(" ")
+            .append(srcAddr).append(":").append(srcPort)
+            .append(" -> ")
+            .append(dstAddr).append(":").append(dstPort);
+        return buff.toString();
+    }
+
+    public static String logify(final Object id, final IpHeader ipHeader, final TcpPacket tcpPacket, final int wscale) {
+        final InetAddress srcAddr = ipHeader.getSrcAddr();
+        final InetAddress dstAddr = ipHeader.getDstAddr();
+        final TcpHeader tcpHeader = tcpPacket.getHeader();
+        final String srcHostName = srcAddr.getHostAddress();
+        final String dstHostName = dstAddr.getHostAddress();
+        final int srcPort = tcpHeader.getSrcPort().valueAsInt();
+        final int dstPort = tcpHeader.getDstPort().valueAsInt();
+
+        final StringBuilder buff = new StringBuilder();
+        buff.append(logPrefix(id, srcHostName, srcPort, dstHostName, dstPort));
+
+        final int len = buff.length();
+        if (tcpHeader.getFin()) {
+            buff.append("FIN,");
+        }
+        if (tcpHeader.getSyn()) {
+            buff.append("SYN,");
+        }
+        if (tcpHeader.getRst()) {
+            buff.append("RST,");
+        }
+        if (tcpHeader.getPsh()) {
+            buff.append("PSH,");
+        }
+        if (tcpHeader.getAck()) {
+            buff.append("ACK,");
+        }
+        if (tcpHeader.getUrg()) {
+            buff.append("URG,");
+        }
+
+        if (buff.length() > len) {
+            buff.replace(buff.length() - 1, buff.length(), "] ").insert(len, " [");
+        }
+
+        final boolean useRelative = false;
+        long sequence = tcpHeader.getSequenceNumberAsLong();
+        long acknowledgment = tcpHeader.getAcknowledgmentNumberAsLong();
+
+        /*
+        if (useRelative) {
+            final long rcv_isn_l = rcv_isn & 0xFFFFFFFFL;
+            final long snt_isn_l = snt_isn & 0xFFFFFFFFL;
+            final boolean syn = tcpHeader.getSyn();
+            sequence -= !syn ? rcv_isn_l : sequence;
+            acknowledgment -= !syn ? snt_isn_l : acknowledgment - 1;
+        }
+        */
+
+        buff.append("Seq=").append(sequence);
+        if (tcpHeader.getAck()) {
+            buff.append(" Ack=").append(acknowledgment);
+        }
+
+        final int window = tcpHeader.getWindowAsInt() << wscale;
+        buff.append(" Win=").append(window);
+
+        final int payloadLen = tcpPacket.length() - tcpHeader.length();
+        buff.append(" Len=").append(payloadLen);
+
+        if (tcpHeader.getSyn()) {
+
+        }
+
+        /*
+        final Packet payload = tcpPacket.getPayload();
+        if (null != payload) {
+            buff.append(" ").append(Bytes.toString(payload.getRawData()));
+        }
+        */
+        return buff.toString();
     }
 }

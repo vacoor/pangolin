@@ -6,6 +6,11 @@ public class TcpDropReason {
    * https://github.com/torvalds/linux/blob/master/include/net/dropreason-core.h#L127.
    */
   public static final int SKB_DROP_REASON_NOT_SPECIFIED = 0;
+
+  /**
+   * https://github.com/torvalds/linux/blob/master/include/net/dropreason-core.h.
+   */
+  public static final int SKB_NOT_DROPPED_YET = 0;
   public static final int SKB_DROP_REASON_TCP_FLAGS = 1;
   public static final int SKB_DROP_REASON_TCP_RESET = 2;
   public static final int SKB_DROP_REASON_TCP_CLOSE = 6;

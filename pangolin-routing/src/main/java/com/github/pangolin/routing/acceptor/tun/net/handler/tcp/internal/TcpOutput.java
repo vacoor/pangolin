@@ -25,15 +25,6 @@ import static org.pcap4j.packet.TcpPacket.TcpOption;
 class TcpOutput<T extends IpPacket> {
     private final TcpConnection<T> tp;
 
-    boolean ipv4_sysctl_tcp_shrink_window;
-    /**
-     * 有符号Window.
-     */
-    boolean ipv4_sysctl_tcp_workaround_signed_windows;
-    private int ipv4_sysctl_tcp_rmem_2;
-    private int sysctl_rmem_max;
-    private int ipv4_sysctl_tcp_min_snd_mss;
-
     TcpOutput(final TcpConnection<T> conn) {
         this.tp = conn;
     }
@@ -173,7 +164,7 @@ class TcpOutput<T extends IpPacket> {
          * which we interpret as a sign the remote TCP is not
          * misinterpreting the window field as a signed quantity.
          */
-        if (ipv4_sysctl_tcp_workaround_signed_windows) {
+        if (SysctlOptions.ipv4_sysctl_tcp_workaround_signed_windows) {
             rcv_wnd.set(Math.min(space, TCP_MAX_WINDOW));
         } else {
             rcv_wnd.set(space);
@@ -186,8 +177,8 @@ class TcpOutput<T extends IpPacket> {
         rcv_wscale.set(0);
         if (wscale_ok) {
             /* Set window scaling on max possible window */
-            space = Math.max(space, ipv4_sysctl_tcp_rmem_2);
-            space = Math.max(space, sysctl_rmem_max);
+            space = Math.max(space, SysctlOptions.ipv4_sysctl_tcp_rmem_2);
+            space = Math.max(space, SysctlOptions.sysctl_rmem_max);
             space = Math.min(space, window_clamp);
             int i = _ilog2(space);
             rcv_wscale.set(clamp(ilog2(space) - 15, 0, TCP_MAX_WSCALE));
@@ -225,7 +216,7 @@ class TcpOutput<T extends IpPacket> {
              *
              * Relax Will Robinson.
              */
-            if (!ipv4_sysctl_tcp_shrink_window || 0 != tp.rcv_wscale) {
+            if (!SysctlOptions.ipv4_sysctl_tcp_shrink_window || 0 != tp.rcv_wscale) {
                 /* Never shrink the offered window */
                 new_win = align(cur_win, 1 << tp.rcv_wscale);
             }
@@ -238,7 +229,7 @@ class TcpOutput<T extends IpPacket> {
          * Make sure we do not exceed the maximum possible
          * scaled window.
          */
-        if (tp.rcv_wscale == 0 && ipv4_sysctl_tcp_workaround_signed_windows) {
+        if (tp.rcv_wscale == 0 && SysctlOptions.ipv4_sysctl_tcp_workaround_signed_windows) {
             new_win = Math.min(new_win, TCP_MAX_WINDOW);
         } else {
             new_win = Math.min(new_win, U16_MAX << tp.rcv_wscale);
@@ -455,7 +446,7 @@ class TcpOutput<T extends IpPacket> {
 
         /* Then reserve room for full set of TCP options and 8 bytes of data */
         // mss_now = max(mss_now, READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_min_snd_mss));
-        mss_now = Math.max(mss_now, ipv4_sysctl_tcp_min_snd_mss);
+        mss_now = Math.max(mss_now, SysctlOptions.ipv4_sysctl_tcp_min_snd_mss);
         return mss_now;
     }
 
@@ -1338,7 +1329,7 @@ class TcpOutput<T extends IpPacket> {
         tp.icsk_probes_out++;
         long timeout;
         if (err <= 0) {
-            if (tp.icsk_backoff < sysctl_tcp_retries2) {
+            if (tp.icsk_backoff < SysctlOptions.sysctl_tcp_retries2) {
                 tp.icsk_backoff++;
             }
             timeout = tp.tcp_probe0_when(tp.tcp_rto_max());

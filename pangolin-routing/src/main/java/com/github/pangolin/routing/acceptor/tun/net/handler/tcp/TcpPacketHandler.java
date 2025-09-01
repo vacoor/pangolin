@@ -1,9 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
+import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.IpPacketHandler;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection;
 import com.github.pangolin.routing.support.SocketChannelFactory;
-import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 import freework.reflect.Types;
@@ -11,7 +11,10 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
+import java.lang.reflect.Type;
+import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
@@ -19,10 +22,6 @@ import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.TcpPort;
-
-import java.lang.reflect.Type;
-import java.net.InetAddress;
-import java.util.Map;
 
 @Slf4j
 public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandler<T> {
@@ -75,6 +74,8 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
 
     }
 
+
+
     protected T prepare(final T ipPacket) throws UnknownHostException {
         return ipPacket;
     }
@@ -99,4 +100,5 @@ public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandl
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         super.exceptionCaught(ctx, cause);
     }
+
 }
