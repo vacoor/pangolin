@@ -1,6 +1,5 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.util.SipHash;
 import java.net.InetAddress;
 import org.pcap4j.packet.IpPacket.IpHeader;
 import org.pcap4j.packet.Packet;
@@ -9,8 +8,6 @@ import org.pcap4j.packet.TcpPacket;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 
@@ -57,42 +54,6 @@ public abstract class TcpUtils {
 
     static boolean time_before_eq(long a, long b) {
         return time_after_eq(b, a);
-    }
-
-    static long tcp_jiffies32() {
-        return jiffies();
-    }
-
-    /*-
-     * 定时器相关使用.
-     */
-    static long jiffies() {
-        return msecs_to_jiffies(TimeUnit.NANOSECONDS.toMillis(System.nanoTime()));
-        // return msecs_to_jiffies(System.currentTimeMillis());
-    }
-
-    static long usecs_to_jiffies(long us) {
-        return msecs_to_jiffies(TimeUnit.MICROSECONDS.toMillis(us));
-    }
-
-    static long msecs_to_jiffies(long ms) {
-        int MSEC_PER_SEC = 1000;
-        if (0 == (TcpConstants.HZ % MSEC_PER_SEC)) {
-            return (TcpConstants.HZ / MSEC_PER_SEC) * ms;
-        }
-        return (long) ((TcpConstants.HZ * 1F / MSEC_PER_SEC) * ms);
-    }
-
-    static long jiffies_to_usecs(long jiffies) {
-        long USEC_PER_SEC = 1000 * 1000;
-        if (0 == (USEC_PER_SEC % TcpConstants.HZ)) {
-            return USEC_PER_SEC / TcpConstants.HZ * jiffies;
-        }
-        return (long) ((1000F * 1000 / TcpConstants.HZ) * jiffies);
-    }
-
-    static long jiffies_to_msecs(long jiffies) {
-        return TimeUnit.MICROSECONDS.toMillis(jiffies_to_usecs(jiffies));
     }
 
     static long toUint32(final int value) {

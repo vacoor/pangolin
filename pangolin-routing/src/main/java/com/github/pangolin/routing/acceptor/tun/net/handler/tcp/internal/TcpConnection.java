@@ -1,18 +1,5 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.sysctl_tcp_fin_timeout;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_OFF;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.after;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.before;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.determineEndSeq;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.jiffies_to_usecs;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.secureSeq;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.tcp_jiffies32;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.usecs_to_jiffies;
-
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
@@ -38,6 +25,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.sysctl_tcp_fin_timeout;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_OFF;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
@@ -61,6 +53,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     public int bytes_retrans;
     public int keepalive_intvl;
     public int keepalive_probes;
+    public boolean compressed_ack;
 
 
     IpHeader ipHeader;
@@ -326,27 +319,121 @@ public abstract class TcpConnection<T extends IpPacket> {
     protected abstract void tcp_rcv(final T ipHeader, final TcpPacket tcpPacket);
 
     /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1356">tcp_left_out</a>
+     */
+    private int tcp_left_out() {
+        // FIXME return tp->sacked_out + tp->lost_out;
+        return 0;
+    }
+
+    /**
+     * This determines how many packets are "in the network" to the best
+     * of our knowledge.  In many cases it is conservative, but where
+     * detailed information is available from the receiver (via SACK
+     * blocks etc.) we can make more aggressive calculations.
+     * <p>
+     * Use this for decisions involving congestion control, use just
+     * tp->packets_out to determine if the send queue is empty or not.
+     * <p>
+     * Read this equation as:
+     * <p>
+     * "Packets sent once on transmission queue" MINUS
+     * "Packets left network, but not honestly ACKed yet" PLUS
+     * "Packets fast retransmitted"
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1375">tcp_packets_in_flight</a>
+     */
+    protected int tcp_packets_in_flight() {
+        return packets_out - tcp_left_out() + retrans_out;
+    }
+
+    /**
      * 发送可用/拥塞窗口大小.
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1312">tcp_snd_cwnd</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1382">tcp_snd_cwnd</a>
      */
-    int tcp_snd_cwnd() {
-        // FIXME
+    protected int tcp_snd_cwnd() {
         return snd_cwnd;
     }
 
     /**
-     * 发送窗口右边界.
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1387">tcp_snd_cwnd_set</a>
      */
-    int tcp_wnd_end() {
+    private void tcp_snd_cwnd_set(final int cwnd) {
+        snd_cwnd = cwnd;
+    }
+
+    // ...
+
+    /**
+     * 发送窗口右边界.
+     * Returns end sequence number of the receiver's advertised window.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1440">tcp_wnd_end</a>
+     */
+    protected int tcp_wnd_end() {
         return snd_una + snd_wnd;
+    }
+
+    /**
+     * Estimates in how many jiffies next packet for this flow can be sent.
+     * Scheduling a retransmit timer too early would be silly.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1486">tcp_pacing_delay</a>
+     */
+    protected long tcp_pacing_delay() {
+        final long delay = tcp_wstamp_ns - tcp_clock_cache;
+        return delay > 0 ? TcpClock.nsecs_to_jiffies(delay) : 0;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1423">tcp_reset_xmit_timer</a>
+     */
+    protected void tcp_reset_xmit_timer(final int what, long when, final boolean pace_delay) {
+        if (pace_delay) {
+            when += tcp_pacing_delay();
+        }
+        timer.inet_csk_reset_xmit_timer(what, when, tcp_rto_max());
+    }
+
+    /**
+     * Something is really bad, we could not queue an additional packet,
+     * because qdisc is full or receiver sent a 0 window, or we are paced.
+     * We do not want to add fuel to the fire, or abort too early,
+     * so make sure the timer we arm now is at least 200ms in the future,
+     * regardless of current icsk_rto value (as it could be ~2ms)
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1510">tcp_probe0_base</a>
+     */
+    protected long tcp_probe0_base() {
+        return Math.max(icsk_rto, TCP_RTO_MIN);
+    }
+
+    /**
+     * Variant of inet_csk_rto_backoff() used for zero window probes.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1516">tcp_probe0_when</a>
+     */
+    protected long tcp_probe0_when(int max_when) {
+        final int backoff = Math.min(ilog2(TCP_RTO_MAX / TCP_RTO_MIN) + 1, icsk_backoff);
+        final long when = tcp_probe0_base() << backoff;
+        return Math.min(when, max_when);
+    }
+
+    /**
+     * @see <a href="https://www.cnblogs.com/aiwz/p/6333260.html">零窗口探测/坚持/持续定时器</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1526">tcp_check_probe_timer</a>
+     */
+    protected void tcp_check_probe_timer() {
+        if (0 == packets_out && 0 == icsk_pending) {
+            tcp_reset_xmit_timer(ICSK_TIME_PROBE0, tcp_probe0_base(), true);
+        }
     }
 
     int sk_shutdown;
 
 
     // https://www.cnblogs.com/wanpengcoder/p/11751763.html
-
 
 
     int tcp_header_len;
@@ -719,7 +806,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         icsk_rto = TCP_TIMEOUT_INIT;
         icsk_delack_max = TcpTimer.TCP_DELACK_MAX;
 
-        mdev_us = (int) jiffies_to_usecs(TCP_TIMEOUT_INIT);
+        mdev_us = (int) TcpClock.jiffies_to_usecs(TCP_TIMEOUT_INIT);
 
         tcp_snd_cwnd_set(TCP_INIT_CWND);
 
@@ -748,10 +835,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     private void tcp_init_metrics() {
     }
 
-    private void tcp_snd_cwnd_set(final int cwnd) {
-        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1317
-        snd_cwnd = cwnd;
-    }
+
 
     private void tcp_init_congestion_control() {
     }
@@ -1032,7 +1116,7 @@ public abstract class TcpConnection<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L765">__tcp_set_rto</a>
      */
     private long __tcp_set_rto() {
-        return usecs_to_jiffies((srtt_us >> 3) + rttvar_us);
+        return TcpClock.usecs_to_jiffies((srtt_us >> 3) + rttvar_us);
     }
 
     /**
@@ -1335,14 +1419,17 @@ public abstract class TcpConnection<T extends IpPacket> {
     int icsk_retransmits;
 
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L172">inet_csk_schedule_ack</a>
+     */
     void inet_csk_schedule_ack() {
-        // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L177
-        // 确保在适当的时候发送 ACK，以确认接收到数据
         icsk_ack_pending |= TcpTimer.ICSK_ACK_SCHED;
     }
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L177">inet_csk_ack_scheduled</a>
+     */
     boolean inet_csk_ack_scheduled() {
-        // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h
         return 0 != (icsk_ack_pending & ICSK_ACK_SCHED);
     }
 
@@ -1470,8 +1557,8 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     static final int TCP_ATO_MIN = HZ / 25;
 
-    int icsk_pending;
-    int icsk_ack_pending;
+    volatile int icsk_pending;
+    volatile int icsk_ack_pending;
 
     /**
      * ACK timeout.
@@ -1502,34 +1589,7 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     /* *********** [[ ************** */
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1286">tcp_left_out</a>
-     */
-    private int tcp_left_out() {
-        // return tp->sacked_out + tp->lost_out;
-        return 0;
-    }
 
-    /**
-     * This determines how many packets are "in the network" to the best
-     * of our knowledge.  In many cases it is conservative, but where
-     * detailed information is available from the receiver (via SACK
-     * blocks etc.) we can make more aggressive calculations.
-     * <p>
-     * Use this for decisions involving congestion control, use just
-     * tp->packets_out to determine if the send queue is empty or not.
-     * <p>
-     * Read this equation as:
-     * <p>
-     * "Packets sent once on transmission queue" MINUS
-     * "Packets left network, but not honestly ACKed yet" PLUS
-     * "Packets fast retransmitted"
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1305">tcp_packets_in_flight</a>
-     */
-    int tcp_packets_in_flight() {
-        return packets_out - tcp_left_out() + retrans_out;
-    }
 
 
 
@@ -1645,11 +1705,16 @@ public abstract class TcpConnection<T extends IpPacket> {
         return true;
     }
 
-    /* Restart timer after forward progress on connection.
+    /**
+     * Restart timer after forward progress on connection.
      * RFC2988 recommends to restart timer to now+rto.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3147">tcp_rearm_rto</a>
      */
-    void tcp_rearm_rto() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3261
+    protected void tcp_rearm_rto() {
+
+        // ...
+
         if (packets_out <= 0) {
             inet_csk_clear_xmit_timer(ICSK_TIME_RETRANS);
         } else {
@@ -1658,13 +1723,13 @@ public abstract class TcpConnection<T extends IpPacket> {
             /* Offset the time elapsed after installing regular RTO */
             if (icsk_pending == ICSK_TIME_REO_TIMEOUT
                     || icsk_pending == ICSK_TIME_LOSS_PROBE) {
-                long delta_us = tcp_rto_delta_us();
+                final long delta_us = tcp_rto_delta_us();
                 /* delta_us may not be positive if the socket is locked
                  * when the retrans timer fires and is rescheduled.
                  */
-                rto = (int) usecs_to_jiffies(Math.max(delta_us, 1));
+                rto = (int) TcpClock.usecs_to_jiffies(Math.max(delta_us, 1));
             }
-            tcp_reset_xmit_timer(ICSK_TIME_RETRANS, rto, TCP_RTO_MAX);
+            tcp_reset_xmit_timer(ICSK_TIME_RETRANS, rto, true);
         }
     }
 
@@ -1695,7 +1760,7 @@ public abstract class TcpConnection<T extends IpPacket> {
 
         tcp_snd_cwnd_set(tcp_init_cwnd());
 
-        snd_cwnd_stamp = tcp_jiffies32();
+        snd_cwnd_stamp = TcpClock.tcp_jiffies32();
 
         tcp_init_congestion_control();
 
@@ -1821,7 +1886,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                 // ...
 
                 /* Prevent spurious tcp_cwnd_restart() on first data packet */
-                lsndtime = tcp_jiffies32();
+                lsndtime = TcpClock.tcp_jiffies32();
                 tcp_initialize_rcv_mss();
 
                 break;
@@ -1915,6 +1980,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                 break;
         }
 
+        /* tcp_data could move socket to TIME-WAIT */
         if (!TcpState.TCP_CLOSE.equals(state.get())) {
             input.tcp_data_snd_check(this);
             input.tcp_ack_snd_check(this);
@@ -2029,7 +2095,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     int icsk_ack_pingpong;
 
     long tcp_rto_min_us() {
-        return jiffies_to_usecs(tcp_rto_min());
+        return TcpClock.jiffies_to_usecs(tcp_rto_min());
     }
 
     int tcp_rto_min() {
@@ -2037,30 +2103,6 @@ public abstract class TcpConnection<T extends IpPacket> {
         return icsk_rto_min;
     }
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1444">tcp_probe0_when</a>
-     */
-    protected long tcp_probe0_when(int max_when) {
-        // u8 backoff = ilog2(TCP_RTO_MAX / TCP_RTO_MIN) + 1
-        int backoff = ilog2(TCP_RTO_MAX / TCP_RTO_MIN) + 1;
-        backoff = Math.min(backoff, icsk_backoff);
-
-        final long when = tcp_probe0_base() << backoff;
-        return Math.min(when, max_when);
-    }
-
-    /**
-     * Something is really bad, we could not queue an additional packet,
-     * because qdisc is full or receiver sent a 0 window, or we are paced.
-     * We do not want to add fuel to the fire, or abort too early,
-     * so make sure the timer we arm now is at least 200ms in the future,
-     * regardless of current icsk_rto value (as it could be ~2ms)
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1438">tcp_probe0_base</a>
-     */
-    protected long tcp_probe0_base() {
-        return Math.max(icsk_rto, TCP_RTO_MIN);
-    }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L49">tcp_clamp_probe0_to_user_timeout</a>
@@ -2070,7 +2112,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         if (0 == user_timeout || 0 == icsk_probes_tstamp) {
             return when;
         }
-        long elapsed = tcp_jiffies32() - icsk_probes_tstamp;
+        long elapsed = TcpClock.tcp_jiffies32() - icsk_probes_tstamp;
         if (elapsed < 0) {
             elapsed = 0;
         }
@@ -2079,11 +2121,6 @@ public abstract class TcpConnection<T extends IpPacket> {
         return Math.min(remaining, when);
     }
 
-    void tcp_reset_xmit_timer(final int what, long when, long max_when) {
-        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1423
-        long tcp_pacing_delay = 0; // FIXME
-        timer.inet_csk_reset_xmit_timer(what, when + tcp_pacing_delay, max_when);
-    }
 
     void inet_csk_clear_xmit_timer(int what) {
         // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L195
@@ -2111,11 +2148,11 @@ public abstract class TcpConnection<T extends IpPacket> {
         final int rto = icsk_rto;
         final TcpBuffer skb = tcp_rtx_queue_head();
         if (null != skb) {
-            final long rto_time_stamp_us = tcp_skb_timestamp_us(skb) + jiffies_to_usecs(rto);
+            final long rto_time_stamp_us = tcp_skb_timestamp_us(skb) + TcpClock.jiffies_to_usecs(rto);
             return (rto_time_stamp_us - tcp_mstamp);
         } else {
             logWarn("RTX queue empty");
-            return jiffies_to_usecs(rto);
+            return TcpClock.jiffies_to_usecs(rto);
         }
     }
 

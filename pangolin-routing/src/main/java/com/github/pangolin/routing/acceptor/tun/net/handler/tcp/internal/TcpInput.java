@@ -10,6 +10,7 @@ import java.io.IOException;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_NOT_DROPPED_YET;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_ACK_NOW;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_TIME_PROBE0;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
@@ -196,7 +197,7 @@ class TcpInput<T extends IpPacket> {
         tp.tcp_measure_rcv_mss(skb);
         tp.tcp_rcv_rtt_measure();
 
-        long now = tcp_jiffies32();
+        long now = TcpClock.tcp_jiffies32();
         if (0 == tp.icsk_ack_ato) {
             /*
              * The _first_ data packet received, initialize
@@ -477,7 +478,7 @@ class TcpInput<T extends IpPacket> {
         } else {
             long when = tp.tcp_probe0_when(TCP_RTO_MAX);
             when = tp.tcp_clamp_probe0_to_user_timeout(when);
-            tp.tcp_reset_xmit_timer(ICSK_TIME_PROBE0, when, TCP_RTO_MAX);
+            tp.tcp_reset_xmit_timer(ICSK_TIME_PROBE0, when, true);
         }
     }
 
@@ -576,12 +577,13 @@ class TcpInput<T extends IpPacket> {
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5739
     void tcp_check_space() {
+        // FIXME
     }
 
     /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5745">tcp_data_snd_check</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5664">tcp_data_snd_check</a>
      */
-    void tcp_data_snd_check(TcpConnection<T> tp) {
+    protected void tcp_data_snd_check(final TcpConnection<T> tp) {
         tp.tcp_push_pending_frames();
         tcp_check_space();
     }
@@ -595,12 +597,21 @@ class TcpInput<T extends IpPacket> {
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5957
     boolean tcp_validate_incoming(TcpConnection<T> tp, final TcpPacket skb) {
-        final TcpPacket.TcpHeader hdr = skb.getHeader();
+        final TcpPacket.TcpHeader th = skb.getHeader();
+        final int seq = th.getSequenceNumber();
+        final int end_seq = determineEndSeq(skb);
+        final int ack = th.getAcknowledgmentNumber();
+
+        // Step 1: check sequence number.
+        int reason = tcp_sequence(tp, seq, end_seq);
+        if (0 != reason) {
+
+        }
 
         /*-
          * Step 2: check RST bit.
          */
-        if (hdr.getRst()) {
+        if (th.getRst()) {
             /*-
              * RFC 5961 3.2 (extend to match against (RCV.NXT - 1) after a  FIN and SACK too if available):
              * If seq num matches RCV.NXT or (RCV.NXT - 1) after a FIN, or the right-most SACK block,
@@ -609,7 +620,7 @@ class TcpInput<T extends IpPacket> {
              * else
              *     Send a challenge ACK
              */
-            if (hdr.getSequenceNumber() == tp.rcv_nxt || tcp_reset_check(tp, skb)) {
+            if (th.getSequenceNumber() == tp.rcv_nxt || tcp_reset_check(tp, skb)) {
                 // reset
                 tcp_reset(tp, skb);
                 return false;
@@ -621,6 +632,25 @@ class TcpInput<T extends IpPacket> {
          */
 
         return true;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4394">tcp_sequence</a>
+     */
+    private int tcp_sequence(final TcpConnection<T> tp, final int seq, final int end_seq) {
+        /*
+        if (before(end_seq, tp.rcv_wup)) {
+            return SKB_DROP_REASON_TCP_OLD_SEQUENCE;
+        }
+        if (after(end_seq, tp.rcv_nxt + tp.output.tcp_receive_window(tp))) {
+            if (after(seq, tp.rcv_nxt + tp.output.tcp_receive_window(tp))) {
+                return SKB_DROP_REASON_TCP_INVALID_SEQUENCE;
+            }
+
+            // TODO ...
+        }
+        */
+        return SKB_NOT_DROPPED_YET;
     }
 
     /**
@@ -715,7 +745,7 @@ class TcpInput<T extends IpPacket> {
          */
         tp.sk_err_soft = 0;
         tp.icsk_probes_out = 0;
-        tp.rcv_tstamp = tcp_jiffies32();
+        tp.rcv_tstamp = TcpClock.tcp_jiffies32();
 
         if (prior_packets_out == 0) {
             // goto no_queue.
@@ -739,5 +769,9 @@ class TcpInput<T extends IpPacket> {
         // tcp_cong_control();
 
         return 1;
+    }
+
+    public void tcp_sack_compress_send_ack(TcpConnection<T> tp) {
+        // FIXME
     }
 }

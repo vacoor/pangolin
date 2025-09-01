@@ -34,7 +34,7 @@ class TcpOutput<T extends IpPacket> {
      * ensuring monotically increasing values.
      */
     void tcp_mstamp_refresh(final TcpConnection<T> tp) {
-        final long ns = tcp_clock_ns();
+        final long ns = TcpClock.tcp_clock_ns();
         tp.tcp_clock_cache = ns;
         tp.tcp_mstamp = TimeUnit.NANOSECONDS.toMicros(ns);
     }
@@ -91,7 +91,7 @@ class TcpOutput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L163">tcp_event_data_sent</a>
      */
     void tcp_event_data_sent(final TcpConnection<T> tp) {
-        long now = tcp_jiffies32();
+        long now = TcpClock.tcp_jiffies32();
 
         tp.lsndtime = now;
 
@@ -695,7 +695,7 @@ class TcpOutput<T extends IpPacket> {
         return tp.packets_out == 0 && !tp.sk_write_queue.isEmpty();
     }
 
-    private boolean tcp_in_cwnd_reduction(TcpConnection<T> tp) {
+    protected boolean tcp_in_cwnd_reduction(TcpConnection<T> tp) {
         return false;
     }
 
@@ -983,7 +983,7 @@ class TcpOutput<T extends IpPacket> {
             return;
         }
         if (tcp_write_xmit(tp, mss, nonagle, 0)) {
-            tp.timer.tcp_check_probe_timer();
+            tp.tcp_check_probe_timer();
         }
     }
 
@@ -1127,7 +1127,7 @@ class TcpOutput<T extends IpPacket> {
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708
     protected TcpBuffer tcp_make_synack(final TcpConnection<T> tp, final IpPacket.IpHeader ipHdr, final TcpPacket skb) {
         int mss = tp.tcp_mss_clamp(tp.dst_metric_advmss());
-        long now = tcp_clock_ns();
+        long now = TcpClock.tcp_clock_ns();
 
         final TcpBuffer current = new TcpBuffer()
                 .srcAddr(ipHdr.getDstAddr())
@@ -1180,7 +1180,7 @@ class TcpOutput<T extends IpPacket> {
              * Note: 为了避免浮点运算 srtt_us 是实际 SRTT 8 倍.
              */
             if (tp.srtt_us != 0) {
-                int rtt = (int) Math.max(usecs_to_jiffies(tp.srtt_us >> 3), TCP_DELACK_MIN);
+                int rtt = (int) Math.max(TcpClock.usecs_to_jiffies(tp.srtt_us >> 3), TCP_DELACK_MIN);
                 if (rtt < max_ato) {
                     max_ato = rtt;
                 }
@@ -1193,13 +1193,13 @@ class TcpOutput<T extends IpPacket> {
         tp.logTrace("Delay ACK Timeout = {}ms", ato);
 
         /* Stay within the limit we were given */
-        long timeout = jiffies() + ato;
+        long timeout = TcpClock.jiffies() + ato;
 
         /* Use new timeout only if there wasn't a older one earlier. */
         if ((tp.icsk_ack_pending & TcpTimer.ICSK_ACK_TIMER) != 0) {
             /* If delack timer is about to expire, send ACK now. */
             long icsk_delack_timeout = tp.icsk_delack_timeout();
-            if (time_before_eq(icsk_delack_timeout, jiffies() + (ato >> 2))) {
+            if (time_before_eq(icsk_delack_timeout, TcpClock.jiffies() + (ato >> 2))) {
                 // send now.
                 tcp_send_ack(tp);
                 return;
@@ -1228,6 +1228,12 @@ class TcpOutput<T extends IpPacket> {
             return;
         }
 
+        /*-
+         * We are not putting this on the write queue, so
+         * tcp_transmit_skb() will set the ownership to this
+         * sock.
+         */
+        // FIXME
 
         // ...
         TcpBuffer buf = tcp_init_nondata_skb(tcp_acceptable_seq(tp), TcpConstants.ACK);
@@ -1237,9 +1243,9 @@ class TcpOutput<T extends IpPacket> {
     }
 
     /**
-     * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4279.
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4279">tcp_send_ack</a>
      */
-    void tcp_send_ack(final TcpConnection<T> tp) {
+    protected void tcp_send_ack(final TcpConnection<T> tp) {
         __tcp_send_ack(tp, tp.rcv_nxt, 0);
     }
 
@@ -1341,19 +1347,7 @@ class TcpOutput<T extends IpPacket> {
         }
 
         timeout = tp.tcp_clamp_probe0_to_user_timeout(timeout);
-        tp.tcp_reset_xmit_timer(TcpTimer.ICSK_TIME_PROBE0, timeout, TCP_RTO_MAX);
-    }
-
-    long tcp_clock_ns() {
-        return System.nanoTime();
-    }
-
-    private long tcp_clock_us() {
-        return TimeUnit.NANOSECONDS.toMicros(tcp_clock_ns());
-    }
-
-    private long tcp_clock_ms() {
-        return TimeUnit.NANOSECONDS.toMillis(tcp_clock_ns());
+        tp.tcp_reset_xmit_timer(TcpTimer.ICSK_TIME_PROBE0, timeout, true);
     }
 
     private TcpBuffer tcp_init_nondata_skb(int seq, int flags) {

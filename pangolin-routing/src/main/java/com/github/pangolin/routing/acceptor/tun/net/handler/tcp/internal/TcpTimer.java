@@ -41,26 +41,26 @@ class TcpTimer<T extends IpPacket> {
         this.tp = tp;
     }
 
-    void tcp_init_xmit_timers() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L883
-        inet_csk_init_xmit_timers(this::tcp_write_timer, this::tcp_delack_timer, this::tcp_keepalive_timer);
-    }
-
-    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L702
-    void tcp_clear_xmit_timers() {
-        inet_csk_clear_xmit_timers();
-    }
-
-    private void inet_csk_init_xmit_timers(Runnable icsk_retransmit_handler,
-                                           Runnable icsk_delack_handler,
-                                           Runnable keepalive_handler) {
+    /**
+     * Using different timers for retransmit, delayed acks and probes
+     * We may wish use just one timer maintaining a list of expire jiffies
+     * to optimize.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L165">inet_csk_init_xmit_timers</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L755">inet_csk_init_xmit_timers</a>
+     */
+    private void inet_csk_init_xmit_timers(final Runnable icsk_retransmit_handler,
+                                           final Runnable icsk_delack_handler,
+                                           final Runnable keepalive_handler) {
         icsk_retransmit_timer = icsk_retransmit_handler;
         icsk_delack_timer = icsk_delack_handler;
         sk_timer = keepalive_handler;
         tp.icsk_pending = tp.icsk_ack_pending = 0;
     }
 
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L785
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c">inet_csk_clear_xmit_timers</a>
+     */
     private void inet_csk_clear_xmit_timers() {
         tp.icsk_pending = 0;
         tp.icsk_ack_pending = 0;
@@ -71,23 +71,37 @@ class TcpTimer<T extends IpPacket> {
     }
 
 
-    // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L218
-    void inet_csk_reset_xmit_timer(final int what, long when, long max_when) {
+    void tcp_init_xmit_timers() {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L883
+        inet_csk_init_xmit_timers(this::tcp_write_timer, this::tcp_delack_timer, this::tcp_keepalive_timer);
+    }
+
+    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L702
+    void tcp_clear_xmit_timers() {
+        inet_csk_clear_xmit_timers();
+    }
+
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L218">inet_csk_reset_xmit_timer</a>
+     */
+    protected void inet_csk_reset_xmit_timer(final int what, long when, long max_when) {
         if (when > max_when) {
             when = max_when;
         }
-        when += jiffies();
+
+        when += TcpClock.jiffies();
         if (what == ICSK_TIME_RETRANS || what == ICSK_TIME_PROBE0 ||
                 what == ICSK_TIME_LOSS_PROBE || what == ICSK_TIME_REO_TIMEOUT) {
             tp.icsk_pending = what;
-            tp.icsk_timeout = when;
-
-//            log.warn("[Retransmit] Delay: {}", when);
+            tp.icsk_timeout = when; // FIXME
             sk_reset_timer(icsk_retransmit_timer, when);
         } else if (what == ICSK_TIME_DACK) {
             tp.icsk_ack_pending |= ICSK_ACK_TIMER;
-            tp.icsk_ack_timeout = when;
+            tp.icsk_ack_timeout = when; // FIXME
             sk_reset_timer(icsk_delack_timer, when);
+        } else {
+            log.warn("BUG: unknown timer value");
         }
     }
 
@@ -113,7 +127,7 @@ class TcpTimer<T extends IpPacket> {
 
     private int __mod_timer(Runnable timer, long expires, int options) {
 //        io.netty.util.concurrent.ScheduledFuture<?> nf = parent.eventLoop().schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
-        final long delay = expires - jiffies();
+        final long delay = expires - TcpClock.jiffies();
         final Future<?> future = timers.get(timer);
         if (null == future || future.isDone() || future.isCancelled() || future.cancel(true)) {
             timers.put(timer, tp.child.eventLoop().schedule(timer, delay, TimeUnit.MILLISECONDS));
@@ -138,12 +152,6 @@ class TcpTimer<T extends IpPacket> {
     static final int ICSK_ACK_NOW = 1 << 4;
     static final int ICSK_ACK_NOMEM = 1 << 5;
 
-
-    private void tcp_delack_timer() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L358
-        tcp_delack_timer_handler();
-    }
-
     /**
      * @see <a href="https://www.cnblogs.com/wanpengcoder/p/11749449.html">TCP定时器 之 延迟确认定时器</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L307">tcp_delack_timer_handler</a>
@@ -154,13 +162,18 @@ class TcpTimer<T extends IpPacket> {
             return;
         }
 
-        // ...
+        /* Handling the sack compression case */
+        if (tp.compressed_ack) {
+            tp.output.tcp_mstamp_refresh(tp);
+            tp.input.tcp_sack_compress_send_ack(tp);
+            return;
+        }
 
         if ((tp.icsk_ack_pending & ICSK_ACK_TIMER) == 0) {
             return;
         }
 
-        if (time_after(tp.icsk_delack_timeout(), jiffies())) {
+        if (time_after(tp.icsk_delack_timeout(), TcpClock.jiffies())) {
             sk_reset_timer(icsk_delack_timer, tp.icsk_delack_timeout());
             return;
         }
@@ -184,11 +197,28 @@ class TcpTimer<T extends IpPacket> {
         }
     }
 
+
+    /**
+     * tcp_delack_timer() - The TCP delayed ACK timeout handler
+     *
+     * @t: Pointer to the timer. (gets casted to struct sock *)
+     * <p>
+     * This function gets (indirectly) called when the kernel timer for a TCP packet
+     * of this socket expires. Calls tcp_delack_timer_handler() to do the actual work.
+     * <p>
+     * Returns: Nothing (void)
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L359">tcp_delack_timer</a>
+     */
+    private void tcp_delack_timer() {
+        // FIXME
+        tcp_delack_timer_handler();
+    }
+
     /* *********** ]] DELAY ACK ************** */
 
 
     /* *********** WRITE TIMER [[ ************** */
-
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L723">tcp_write_timer</a>
@@ -210,7 +240,7 @@ class TcpTimer<T extends IpPacket> {
                 || tp.icsk_pending <= 0) {
             return;
         }
-        if (tp.icsk_timeout > TcpUtils.jiffies()) {
+        if (tp.icsk_timeout > TcpClock.jiffies()) {
             sk_reset_timer(icsk_retransmit_timer, tp.icsk_timeout);
             return;
         }
@@ -294,7 +324,7 @@ class TcpTimer<T extends IpPacket> {
                 /* Retransmission failed because of local congestion,
                  * Let senders fight for local resources conservatively.
                  */
-                inet_csk_reset_xmit_timer(ICSK_TIME_RETRANS, TCP_RESOURCE_PROBE_INTERVAL, TCP_RTO_MAX);
+                tp.tcp_reset_xmit_timer(ICSK_TIME_RETRANS, TCP_RESOURCE_PROBE_INTERVAL, false);
                 return;
             }
         }
@@ -316,7 +346,8 @@ class TcpTimer<T extends IpPacket> {
          */
         // ...
 
-        inet_csk_reset_xmit_timer(ICSK_TIME_RETRANS, tcp_clamp_rto_to_user_timeout(), tp.tcp_rto_max());
+        tp.tcp_reset_xmit_timer(ICSK_TIME_RETRANS, tcp_clamp_rto_to_user_timeout(), false);
+        ;
 //        if (retransmits_timed_out(sysctl_tcp_retries1 + 1, 0)) {
         // 重置路由缓存
         // __sk_dst_reset(sk);
@@ -352,7 +383,7 @@ class TcpTimer<T extends IpPacket> {
         }
 
         if (tp.tcp_usec_ts != 0) {
-            long delta = tp.tcp_mstamp - start_ts + TcpUtils.jiffies_to_usecs(1);
+            long delta = tp.tcp_mstamp - start_ts + TcpClock.jiffies_to_usecs(1);
             return delta - TimeUnit.MILLISECONDS.toMicros(timeout) >= 0;
         }
         return tp.tcp_time_stamp_ts() - start_ts - timeout >= 0;
@@ -367,7 +398,7 @@ class TcpTimer<T extends IpPacket> {
         } else {
             timeout = ((2 << linear_backoff_thresh) - 1) * rto_base + (boundary - linear_backoff_thresh) * TCP_RTO_MAX;
         }
-        return TcpUtils.jiffies_to_msecs(timeout);
+        return TcpClock.jiffies_to_msecs(timeout);
     }
 
     /**
@@ -395,7 +426,7 @@ class TcpTimer<T extends IpPacket> {
             /* user timeout has passed; fire ASAP */
             return 1;
         }
-        return Math.min(tp.icsk_rto, msecs_to_jiffies(remaining));
+        return Math.min(tp.icsk_rto, TcpClock.msecs_to_jiffies(remaining));
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L241
@@ -454,7 +485,7 @@ class TcpTimer<T extends IpPacket> {
             if (rtx_delta > user_timeout) {
                 return true;
             }
-            timeout = Math.min(timeout, (int) msecs_to_jiffies(user_timeout));
+            timeout = Math.min(timeout, (int) TcpClock.msecs_to_jiffies(user_timeout));
         }
 
         /* Note: timer interrupt might have been delayed by at least one jiffy,
@@ -466,24 +497,13 @@ class TcpTimer<T extends IpPacket> {
         if (rcv_delta <= timeout) {
             return false;
         }
-        return msecs_to_jiffies(rtx_delta) > timeout;
+        return TcpClock.msecs_to_jiffies(rtx_delta) > timeout;
     }
 
 
     /* *********** ]] RETRANSMIT TIMER ************** */
 
     /* *********** ZERO WINDOW PROBE [[ ************** */
-
-
-    /**
-     * @see <a href="https://www.cnblogs.com/aiwz/p/6333260.html">零窗口探测/坚持/持续定时器</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1454">tcp_check_probe_timer</a>
-     */
-    protected void tcp_check_probe_timer() {
-        if (0 == tp.packets_out && 0 == tp.icsk_pending) {
-            tp.tcp_reset_xmit_timer(ICSK_TIME_PROBE0, tp.tcp_probe0_base(), TCP_RTO_MAX);
-        }
-    }
 
 
     /**
@@ -506,10 +526,10 @@ class TcpTimer<T extends IpPacket> {
          * we use RTO to probe window in tcp_retransmit_timer().
          */
         if (tp.icsk_probes_tstamp == 0) {
-            tp.icsk_probes_tstamp = tcp_jiffies32();
+            tp.icsk_probes_tstamp = TcpClock.tcp_jiffies32();
         } else {
             final int user_timeout = tp.icsk_user_timeout;
-            if (user_timeout > 0 && tcp_jiffies32() - tp.icsk_probes_tstamp >= msecs_to_jiffies(user_timeout)) {
+            if (user_timeout > 0 && TcpClock.tcp_jiffies32() - tp.icsk_probes_tstamp >= TcpClock.msecs_to_jiffies(user_timeout)) {
                 tp.logWarn("PROBE TIMEOUT");
                 tp.tcp_write_err();
                 return;
@@ -532,7 +552,7 @@ class TcpTimer<T extends IpPacket> {
     /* *********** ]] ZERO WINDOW PROBE ************** */
 
     void tcp_reset_keepalive_timer(long len) {
-        sk_reset_timer(sk_timer, jiffies() + len);
+        sk_reset_timer(sk_timer, TcpClock.jiffies() + len);
     }
 
     /**
@@ -577,7 +597,7 @@ class TcpTimer<T extends IpPacket> {
              * If the TCP_USER_TIMEOUT option is enabled, use that
              * to determine when to timeout instead.
              */
-            if ((user_timeout != 0 && elapsed >= msecs_to_jiffies(user_timeout) && tp.icsk_probes_out > 0)
+            if ((user_timeout != 0 && elapsed >= TcpClock.msecs_to_jiffies(user_timeout) && tp.icsk_probes_out > 0)
                     || (user_timeout == 0 && tp.icsk_probes_out >= keepalive_probes(tp))) {
                 tp.output.tcp_send_active_reset(tp, "SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT");
                 tp.tcp_write_err();
@@ -626,6 +646,6 @@ class TcpTimer<T extends IpPacket> {
     }
 
     int keepalive_time_elapsed(final TcpConnection<?> tp) {
-        return (int) Math.min(tcp_jiffies32() - tp.icsk_ack_lrcvtime, tcp_jiffies32() - tp.rcv_tstamp);
+        return (int) Math.min(TcpClock.tcp_jiffies32() - tp.icsk_ack_lrcvtime, TcpClock.tcp_jiffies32() - tp.rcv_tstamp);
     }
 }
