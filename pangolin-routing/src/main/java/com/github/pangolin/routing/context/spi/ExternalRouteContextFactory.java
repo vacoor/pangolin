@@ -125,7 +125,7 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
             httpUrlConnection.setRequestProperty("Accept", "application/json, text/plain, */*");
             httpUrlConnection.setRequestProperty("pragma", "No-Cache");
             // ClashforWindows User-Agent trojan proxies is block ??? 20250831
-            // httpUrlConnection.setRequestProperty("User-Agent", "ClashforWindows/0.19.25");
+            httpUrlConnection.setRequestProperty("User-Agent", "ClashforWindows/0.19.25");
             final int responseCode = httpUrlConnection.getResponseCode();
             Preconditions.checkState(HttpURLConnection.HTTP_OK == responseCode, "responseCode = %s", responseCode);
 
