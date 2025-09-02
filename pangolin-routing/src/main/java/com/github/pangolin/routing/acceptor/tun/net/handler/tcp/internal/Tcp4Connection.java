@@ -151,7 +151,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
         tcp_v4_send_synack(ih, syn_skb);
     }
 
-    private void tcp_v4_send_synack(final IpHeader iphdr, final TcpPacket syn_skb) {
+    protected void tcp_v4_send_synack(final IpHeader iphdr, final TcpPacket syn_skb) {
         final IpV4Header iph = (IpV4Header) iphdr;
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
         final TcpPacket.Builder skb = output.tcp_make_synack(this, iph, syn_skb)

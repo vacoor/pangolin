@@ -54,6 +54,11 @@ public abstract class TcpConnection<T extends IpPacket> {
     public int keepalive_intvl;
     public int keepalive_probes;
     public boolean compressed_ack;
+    public long ipv4_sysctl_tcp_invalid_ratelimit = HZ / 2;
+    public long last_oow_ack_time;
+    public int ipv4_sysctl_tcp_challenge_ack_limit = HZ / 2;
+    public long ipv4_tcp_challenge_timestamp;
+    public int ipv4_tcp_challenge_count;
 
 
     IpHeader ipHeader;
@@ -1771,7 +1776,7 @@ public abstract class TcpConnection<T extends IpPacket> {
      * @param skb
      * @return error code
      * @throws IOException
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6743">tcp_rcv_state_process</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6676">tcp_rcv_state_process</a>
      */
     protected int tcp_rcv_state_process(final T ipPacket, final TcpPacket skb) throws IOException {
         final TcpHeader th = skb.getHeader();

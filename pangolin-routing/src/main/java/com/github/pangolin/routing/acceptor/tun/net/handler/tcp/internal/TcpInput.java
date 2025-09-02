@@ -7,9 +7,14 @@ import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpWindowScaleOption;
 
 import java.io.IOException;
+import java.security.SecureRandom;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.sysctl_tcp_invalid_ratelimit;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.jiffies;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.tcp_jiffies32;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_NOT_DROPPED_YET;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_ACK_NOW;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_TIME_PROBE0;
@@ -197,7 +202,7 @@ class TcpInput<T extends IpPacket> {
         tp.tcp_measure_rcv_mss(skb);
         tp.tcp_rcv_rtt_measure();
 
-        long now = TcpClock.tcp_jiffies32();
+        long now = tcp_jiffies32();
         if (0 == tp.icsk_ack_ato) {
             /*
              * The _first_ data packet received, initialize
@@ -688,12 +693,11 @@ class TcpInput<T extends IpPacket> {
             /* RFC 5961 5.2 [Blind Data Injection Attack].[Mitigation] */
             if (before(ack, prior_snd_una - max_window)) {
                 if (0 == (flag & FLAG_NO_CHALLENGE_ACK)) {
-                    // TODO tcp_send_challenge_ack?
+                    tcp_send_challenge_ack(tp);
                 }
                 log.warn("TOO OLD ACK on {}: ACK({}) < SND.UNA({}), {}", tp.state.get(), ack, prior_snd_una, tcpHdr);
                 return -TcpDropReason.SKB_DROP_REASON_TCP_TOO_OLD_ACK;
             }
-
             // goto old_ack.
             log.warn("OLD ACK on {}: ACK({}) < SND.UNA({}), {}", tp.state.get(), ack, prior_snd_una, tcpHdr);
             return 0;
@@ -714,6 +718,16 @@ class TcpInput<T extends IpPacket> {
             tp.icsk_retransmits = 0;
         }
 
+//        prior_fack = tcp_is_sack(tp) ? tcp_highest_sack_seq(tp) : tp.snd_una;
+//        rs.prior_in_flight = tp.tcp_packets_in_flight();
+
+        /* ts_recent update must be made after we are sure that the packet
+         * is in window.
+         */
+        if (0 != (flag & FLAG_UPDATE_TS_RECENT)) {
+//            flag |= tcp_replace_ts_recent(tp, tcpHdr.getSequenceNumber());
+        }
+
         if ((flag & (FLAG_SLOWPATH | FLAG_SND_UNA_ADVANCED)) == FLAG_SND_UNA_ADVANCED) {
             /*-
              * Window is constant, pure forward advance.
@@ -723,29 +737,31 @@ class TcpInput<T extends IpPacket> {
             tp.tcp_update_wl(ack_seq);
             tcp_snd_una_update(tp, ack);
             flag |= FLAG_WIN_UPDATE;
-
-            tcp_in_ack_event(CA_ACK_WIN_UPDATE);
         } else {
-            int ack_ev_flags = CA_ACK_SLOWPATH;
+//            int ack_ev_flags = CA_ACK_SLOWPATH;
             if (ack_seq != determineEndSeq(skb)) {
                 flag |= FLAG_DATA;
             }
 
             flag |= tcp_ack_update_window(tp, tcpHdr, ack, ack_seq);
 
+//            if (skb.sacked) {
+//                flag |= tcp_sacktag_write_queue(sk, skb, prior_snd_una, &sack_state);
+//            }
 
-            if (0 != (flag & FLAG_WIN_UPDATE)) {
-                ack_ev_flags |= CA_ACK_WIN_UPDATE;
-            }
-            tcp_in_ack_event(ack_ev_flags);
+//            if (sack_state.sack_delivered) {
+//                tcp_count_delivered(tp, sack_state.sack_delivered, flag & FLAG_ECE);
+//            }
+
         }
 
+//        tcp_in_ack_event(CA_ACK_WIN_UPDATE);
         /*-
          * We passed data and got it acked, remove any soft error log. Something worked...
          */
         tp.sk_err_soft = 0;
         tp.icsk_probes_out = 0;
-        tp.rcv_tstamp = TcpClock.tcp_jiffies32();
+        tp.rcv_tstamp = tcp_jiffies32();
 
         if (prior_packets_out == 0) {
             // goto no_queue.
@@ -760,15 +776,92 @@ class TcpInput<T extends IpPacket> {
             return 1;
         }
 
-
         // See if we can take anything off of the retransmit queue.
         flag |= tcp_clean_rtx_queue(tp, prior_snd_una);
 
+        // tcp_rack_update_reo_wnd(sk, &rs);
+
         tcp_in_ack_event(flag);
+
+//        if (tp->tlp_high_seq)
+//            tcp_process_tlp_ack(sk, ack, flag);
+        // TODO ...
 
         // tcp_cong_control();
 
         return 1;
+    }
+
+    /**
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3606"></a>
+     */
+    private boolean __tcp_oow_rate_limited(TcpConnection<T> net, int mib_idx, long last_oow_ack_time) {
+//        final long last_oow_ack_time = net.last_oow_ack_time;
+        if (0 != last_oow_ack_time) {
+            final long elapsed = tcp_jiffies32() - last_oow_ack_time;
+            if (0 <= elapsed && elapsed < net.ipv4_sysctl_tcp_invalid_ratelimit) {
+                return true;/* rate-limited: don't send yet! */
+            }
+        }
+
+        net.last_oow_ack_time = tcp_jiffies32();
+
+        return false;	/* not rate-limited: go ahead, send dupack now! */
+    }
+
+    /* Return true if we're currently rate-limiting out-of-window ACKs and
+     * thus shouldn't send a dupack right now. We rate-limit dupacks in
+     * response to out-of-window SYNs or ACKs to mitigate ACK loops or DoS
+     * attacks that send repeated SYNs or ACKs for the same connection. To
+     * do this, we do not send a duplicate SYNACK or ACK if the remote
+     * endpoint is sending out-of-window SYNs or pure ACKs at a high rate.
+     */
+    private boolean tcp_oow_rate_limited(TcpConnection<T> net, TcpPacket skb, int mib_idx, long last_oow_ack_time) {
+        final TcpPacket.TcpHeader th = skb.getHeader();
+        /* Data packets without SYNs are not likely part of an ACK loop. */
+        if ((th.getSequenceNumber() != determineEndSeq(skb)) && !th.getSyn()) {
+            return false;
+        }
+        return __tcp_oow_rate_limited(net, mib_idx, last_oow_ack_time);
+    }
+
+    /**
+     * RFC 5961 7 [ACK Throttling]
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3649">tcp_send_challenge_ack</a>
+     * @param tp
+     */
+    private void tcp_send_challenge_ack(TcpConnection<T> tp) {
+        /* First check our per-socket dupack rate limit. */
+        if (__tcp_oow_rate_limited(tp, 0, tp.last_oow_ack_time)) {
+            return;
+        }
+
+        int ack_limit = tp.ipv4_sysctl_tcp_challenge_ack_limit;
+        if (ack_limit == Integer.MAX_VALUE) {
+            output.tcp_send_ack(tp);
+            return;
+        }
+
+        /* Then check host-wide RFC 5961 rate limit. */
+        final long now = jiffies() / HZ;
+        if (now != tp.ipv4_tcp_challenge_timestamp) {
+            int half = (ack_limit + 1) >> 1;
+            tp.ipv4_tcp_challenge_timestamp = now;
+            tp.ipv4_tcp_challenge_count = get_random_u32_inclusive(half, ack_limit + half - 1);
+        }
+        int count = tp.ipv4_tcp_challenge_count;
+        if (count > 0) {
+            tp.ipv4_tcp_challenge_count -= 1;
+            output.tcp_send_ack(tp);
+        }
+    }
+
+    private final SecureRandom random = new SecureRandom();
+
+    private int get_random_u32_inclusive(int a, int b) {
+        return a + random.nextInt(b - a);
     }
 
     public void tcp_sack_compress_send_ack(TcpConnection<T> tp) {

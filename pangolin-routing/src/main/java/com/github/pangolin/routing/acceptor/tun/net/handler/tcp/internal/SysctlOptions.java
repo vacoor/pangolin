@@ -25,4 +25,6 @@ public class SysctlOptions {
 
   public static final int sysctl_tcp_fin_timeout = 60 * HZ;
 
+  public static final int sysctl_tcp_invalid_ratelimit = HZ / 2;
+
 }
