@@ -130,6 +130,7 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
             Preconditions.checkState(HttpURLConnection.HTTP_OK == responseCode, "responseCode = %s", responseCode);
 
             final String responseBody = Http.getResponseBodyAsString(httpUrlConnection);
+            log.info("Configuration: \n{}", responseBody);
             return load(new ByteArrayInputStream(responseBody.getBytes(StandardCharsets.UTF_8)));
         } finally {
             Http.close(httpUrlConnection);
