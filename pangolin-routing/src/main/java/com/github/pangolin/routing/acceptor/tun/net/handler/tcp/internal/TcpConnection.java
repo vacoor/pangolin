@@ -1851,15 +1851,6 @@ public abstract class TcpConnection<T extends IpPacket> {
             return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
         }
 
-        if (TcpState.TCP_SYN_RECV.equals(state.get())) {
-//            tcp_check_req(skb);
-
-            // FIXED SYNC retransmit.
-            if (th.getSyn() && !th.getAck()) {
-                return discard(skb, TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED);
-            }
-        }
-
         /* step 5: check the ACK field */
         int reason = input.tcp_ack(this, skb, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {

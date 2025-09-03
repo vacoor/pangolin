@@ -15,7 +15,8 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_NOT_DROPPED_YET;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_SYN_RECV;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_ACK_NOW;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_TIME_PROBE0;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
@@ -600,17 +601,77 @@ class TcpInput<T extends IpPacket> {
         return seq == tp.rcv_nxt - 1 && 0 != ((1 << tp.state.get().ordinal()) | (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
     }
 
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5957
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5870">tcp_validate_incoming</a>
+     */
     boolean tcp_validate_incoming(TcpConnection<T> tp, final TcpPacket skb) {
         final TcpPacket.TcpHeader th = skb.getHeader();
         final int seq = th.getSequenceNumber();
         final int end_seq = determineEndSeq(skb);
         final int ack = th.getAcknowledgmentNumber();
 
-        // Step 1: check sequence number.
-        int reason = tcp_sequence(tp, seq, end_seq);
-        if (0 != reason) {
+        int reason = tcp_disordered_ack_check(tp, skb);
+        if (0 == reason) {
+            // goto step1;
+        }
 
+        /* Reset is accepted even if it did not pass PAWS. */
+        if (0 == reason || th.getRst()) {
+            // goto step1
+        } else if (th.getSyn()) {
+            // goto syn_challenge
+            tcp_send_challenge_ack(tp);
+            reason = SKB_DROP_REASON_TCP_INVALID_SYN;
+//            goto discard;
+            tcp_drop_reason(tp, reason);
+            return false;
+        } else if (reason == SKB_DROP_REASON_TCP_RFC7323_PAWS_ACK) {
+            // goto discard;
+            tcp_drop_reason(tp, reason);
+            return false;
+        } else if (!tcp_oow_rate_limited(tp, skb, 0, tp.last_oow_ack_time)) {
+            tcp_send_dupack(tp, skb);
+            // goto dicard
+            tcp_drop_reason(tp, reason);
+            return false;
+        }
+
+        step1:
+        // Step 1: check sequence number.
+        reason = tcp_sequence(tp, seq, end_seq);
+        if (0 != reason) {
+            /* RFC793, page 37: "In all states except SYN-SENT, all reset
+             * (RST) segments are validated by checking their SEQ-fields."
+             * And page 69: "If an incoming segment is not acceptable,
+             * an acknowledgment should be sent in reply (unless the RST
+             * bit is set, if so drop the segment and return)".
+             */
+            if (!th.getRst()) {
+                if (th.getSyn()) {
+                    // goto syn_challenge;
+                    tcp_send_challenge_ack(tp);
+                    reason = SKB_DROP_REASON_TCP_RESET;
+                    // goto discard;
+                    tcp_drop_reason(tp, reason);
+                    return false;
+                }
+
+                if (reason == SKB_DROP_REASON_TCP_INVALID_SEQUENCE
+                        || reason == SKB_DROP_REASON_TCP_INVALID_END_SEQUENCE) {
+                    // stats
+                }
+
+                if (!tcp_oow_rate_limited(tp, skb, 1, tp.last_oow_ack_time)) {
+                    tcp_send_dupack(tp, skb);
+                }
+            } else if (tcp_reset_check(tp, skb)) {
+                // goto reset
+                tcp_reset(tp, skb);
+                return false;
+            }
+            // goto discard
+            tcp_drop_reason(tp, reason);
+            return false;
         }
 
         /*-
@@ -626,24 +687,107 @@ class TcpInput<T extends IpPacket> {
              *     Send a challenge ACK
              */
             if (th.getSequenceNumber() == tp.rcv_nxt || tcp_reset_check(tp, skb)) {
-                // reset
+                // goto reset
                 tcp_reset(tp, skb);
                 return false;
             }
+
+            // if tcp_is_sack ...
+
+            /* Disable TFO if RST is out-of-order
+             * and no data has been received
+             * for current active TFO socket
+             */
+//            if (tp->syn_fastopen && !tp->data_segs_in &&
+//                    sk->sk_state == TCP_ESTABLISHED)
+//                tcp_fastopen_active_disable(sk);
+
+            tcp_send_challenge_ack(tp);
+            reason = SKB_DROP_REASON_TCP_RESET;
+//            goto discard;
+            tcp_drop_reason(tp, reason);
+            return false;
         }
 
-        /*-
-         *
-         */
+        /* step 3: check security and precedence [ignored] */
 
+        /* step 4: Check for a SYN
+         * RFC 5961 4.2 : Send a challenge ack
+         */
+        if (th.getSyn()) {
+            TcpState tcpState = tp.state.get();
+            if (TCP_SYN_RECV.equals(tcpState)
+                    && th.getAck()
+                    && seq + 1 == end_seq
+                    && seq + 1 == tp.rcv_nxt
+                    && ack == tp.snd_nxt) {
+                // goto pass
+                return true;
+            }
+
+            // syn_challenge
+            tcp_send_challenge_ack(tp);
+            reason = SKB_DROP_REASON_TCP_INVALID_SYN;
+            // goto discard
+            tcp_drop_reason(tp, reason);
+            return false;
+        }
         return true;
+    }
+
+    private void tcp_drop_reason(final TcpConnection<T> tp, int reason) {
+    }
+
+
+    private int tcp_disordered_ack_check(final TcpConnection<T> tp, final TcpPacket skb) {
+        int reason = TCP_RFC7323_PAWS;
+        TcpPacket.TcpHeader th = skb.getHeader();
+        int seq = th.getSequenceNumber();
+        int ack = th.getAcknowledgmentNumber();
+
+        /* 1. Is this not a pure ACK ? */
+        if (!th.getAck() || seq != determineEndSeq(skb)) {
+            return reason;
+        }
+
+        /* 2. Is its sequence not the expected one ? */
+        if (seq != tp.rcv_nxt) {
+            return before(seq, tp.rcv_nxt) ? SKB_DROP_REASON_TCP_RFC7323_PAWS_ACK : reason;
+        }
+
+        /* 3. Is this not a duplicate ACK ? */
+        if (ack != tp.snd_una) {
+            return reason;
+        }
+
+        /* 4. Is this updating the window ? */
+//        if (tcp_may_update_window(tp, ack, seq, th.getWindowAsInt() << tp.rx_opt.snd_wscale)) {
+//            return reason;
+//        }
+        /* 5. Is this not in the replay window ? */
+//        if ((s32)(tp->rx_opt.ts_recent - tp->rx_opt.rcv_tsval) > tcp_tsval_replay(sk)) {
+//            return reason;
+//        }
+        return 0;
+    }
+
+    private void tcp_send_dupack(final TcpConnection<T> tp, final TcpPacket skb) {
+        TcpPacket.TcpHeader th = skb.getHeader();
+        int seq = th.getSequenceNumber();
+        int end_seq = determineEndSeq(skb);
+        if (end_seq != seq && before(seq, tp.rcv_nxt)) {
+            tcp_enter_quickack_mode(tp, TCP_MAX_QUICKACKS);
+
+            // if tcp_is_sack ...
+        }
+
+        output.tcp_send_ack(tp);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4394">tcp_sequence</a>
      */
     private int tcp_sequence(final TcpConnection<T> tp, final int seq, final int end_seq) {
-        /*
         if (before(end_seq, tp.rcv_wup)) {
             return SKB_DROP_REASON_TCP_OLD_SEQUENCE;
         }
@@ -652,9 +796,11 @@ class TcpInput<T extends IpPacket> {
                 return SKB_DROP_REASON_TCP_INVALID_SEQUENCE;
             }
 
-            // TODO ...
+            /* Only accept this packet if receive queue is empty. */
+//            if (skb_queue_len(&sk->sk_receive_queue)){
+//                return SKB_DROP_REASON_TCP_INVALID_END_SEQUENCE;
+//            }
         }
-        */
         return SKB_NOT_DROPPED_YET;
     }
 

@@ -29,4 +29,13 @@ public class TcpDropReason {
    */
   public static final int SKB_DROP_REASON_TCP_TOO_OLD_ACK = 11;
 
+  public static final int TCP_RFC7323_PAWS = 36;
+  public static final int SKB_DROP_REASON_TCP_RFC7323_PAWS_ACK = 37;
+
+  public static final int SKB_DROP_REASON_TCP_OLD_SEQUENCE = 41;
+  public static final int SKB_DROP_REASON_TCP_INVALID_SEQUENCE = 42;
+  public static final int SKB_DROP_REASON_TCP_INVALID_END_SEQUENCE = 43;
+
+  public static final int SKB_DROP_REASON_TCP_INVALID_SYN = 46;
+
 }
