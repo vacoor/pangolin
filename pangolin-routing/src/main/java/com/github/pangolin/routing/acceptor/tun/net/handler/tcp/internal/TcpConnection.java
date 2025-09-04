@@ -245,6 +245,7 @@ public abstract class TcpConnection<T extends IpPacket> {
     long tcp_mstamp;
 
     int icsk_syn_retries;
+    private int delivered;
 
     protected TcpConnection(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         this.parent = parent;
@@ -849,11 +850,17 @@ public abstract class TcpConnection<T extends IpPacket> {
     /* **************** ]] Open Connection Request *************/
 
     static final int EPIPE = 32;
+
+    static final int ECONNREFUSED = 61;
     static final int ECONNRESET = 104;
     static final int ETIMEOUT = 110;
 
 
-    protected void destroy() {
+    protected void inet_csk_destroy_sock() {
+        if (!TCP_CLOSE.equals(state.get())) {
+            // ...
+        }
+
         if (null != child && child.isOpen()) {
             child.close();
         }
@@ -1368,7 +1375,7 @@ public abstract class TcpConnection<T extends IpPacket> {
 
     }
 
-    void consume(final TcpPacket skb) throws IOException {
+    void consume(final TcpPacket skb) {
         if (null != child && child.isOpen()) {
             final TcpHeader hdr = skb.getHeader();
             final byte[] bytes = skb.getPayload().getRawData();
@@ -1381,16 +1388,23 @@ public abstract class TcpConnection<T extends IpPacket> {
 
 
     /**
-     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L4939">tcp_done</a>
      */
     void tcp_done() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L4867
+        // ... fastopen
+
         state.set(TcpState.TCP_CLOSE);
         timer.tcp_clear_xmit_timers();
 
+        // ... fastopen...
+
         sk_shutdown = SHUTDOWN_MASK;
 
-        destroy();
+//        if (!sock_flag(tp, SOCK_DEAD)) {
+//            sk->sk_state_change(tp);
+//        } else
+        //
+        inet_csk_destroy_sock();
     }
 
 
@@ -1871,6 +1885,7 @@ public abstract class TcpConnection<T extends IpPacket> {
         reason = TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
         switch (state.get()) {
             case TCP_SYN_RECV:
+                delivered++; /* SYN-ACK delivery isn't tracked in tcp_ack */
                 tcp_init_transfer(skb);
 
                 state.set(TcpState.TCP_ESTABLISHED);
@@ -1887,6 +1902,8 @@ public abstract class TcpConnection<T extends IpPacket> {
 
                 break;
             case TCP_FIN_WAIT1:
+                // ... fastopen
+
                 if (snd_una != write_seq) {
                     break;
                 }
@@ -1894,6 +1911,7 @@ public abstract class TcpConnection<T extends IpPacket> {
                 sk_shutdown |= SEND_SHUTDOWN;
 
 //                if (!sock_flag(sk, SOCK_DEAD) {
+//                   sk_state_change
 //                   break;
 //                }
 
@@ -1952,6 +1970,10 @@ public abstract class TcpConnection<T extends IpPacket> {
             case TCP_CLOSING:
             case TCP_LAST_ACK:
                 if (!before(th.getSequenceNumber(), rcv_nxt)) {
+                    /* If a subflow has been reset, the packet should not
+                     * continue to be processed, drop the packet.
+                     */
+                    // ... sk_is_mptcp
                     break;
                 }
                 // fallthrough

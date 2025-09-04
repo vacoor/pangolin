@@ -155,9 +155,15 @@ class TcpInput<T extends IpPacket> {
         tp.rcv_nxt = seq;
     }
 
-    private void tcp_queue_rcv(final TcpConnection<T> tp, final TcpPacket skb) {
+    private int tcp_queue_rcv(final TcpConnection<T> tp, final TcpPacket skb) {
         // https://www.cnblogs.com/wanpengcoder/p/11752122.html
+        final TcpPacket.TcpHeader hdr = skb.getHeader();
+        final int len = skb.length() - hdr.length();
+        if (len > 0) {
+            tp.consume(skb);
+        }
         tcp_rcv_nxt_update(tp, determineEndSeq(skb));
+        return len;
     }
 
 
@@ -173,25 +179,37 @@ class TcpInput<T extends IpPacket> {
 
 
     private void queue_and_out(TcpConnection<T> tp, final TcpPacket skb) throws IOException {
-        final TcpPacket.TcpHeader hdr = skb.getHeader();
         // queue_and_out;
+        final TcpPacket.TcpHeader th = skb.getHeader();
 
-//        tp.inet_csk_schedule_ack();
-//        tp.sk_data_ready();
+        // tcp_try_remem_schedule ...
 
-        if (skb.length() - hdr.length() > 0) {
-            tp.consume(skb);
-        }
+        int eaten = tcp_queue_rcv(tp, skb/*, &fragstolen*/);
 
-        tcp_queue_rcv(tp, skb);
-
-        if (skb.length() - hdr.length() > 0) {
+        final int len = skb.length() - th.length();
+        if (len > 0) {
             tcp_event_data_recv(tp, skb);
         }
 
-        if (hdr.getFin()) {
+        if (th.getFin()) {
             tcp_fin(tp);
         }
+
+        // TODO ...
+        // if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
+        //    tcp_ofo_queue(sk);
+        // ...
+        // }
+//        if (tp->rx_opt.num_sacks)
+//            tcp_sack_remove(tp)
+
+        // tcp_fast_path_check(sk)
+
+//        if (eaten > 0) {
+//            kfree_skb_partial(skb, fragstolen)
+//        }
+//        if (!sock_flag(sk, SOCK_DEAD))
+//            tcp_data_ready(sk);
     }
 
     /**
@@ -236,6 +254,12 @@ class TcpInput<T extends IpPacket> {
         tp.icsk_ack_lrcvtime = now;
 
         // ...
+
+        TcpPacket.TcpHeader th = skb.getHeader();
+        int len = skb.length() - th.length();
+        if (len >= 128) {
+            // tcp_grow_window(sk, skb, true);
+        }
     }
 
     void tcp_rcv_spurious_retrans(final TcpPacket skb) {
@@ -259,10 +283,24 @@ class TcpInput<T extends IpPacket> {
             return;
         }
 
+        /*-
+         * Queue data for delivery to the user.
+         * Packets in sequence go to the receive queue.
+         * Out of sequence packets to the out_of_order_queue.
+         */
         if (seq == tp.rcv_nxt) {
             if (output.tcp_receive_window(tp) == 0) {
+                /*-
+                 * Some stacks are known to send bare FIN packets
+                 * in a loop even if we send RWIN 0 in our ACK.
+                 * Accepting this FIN does not hurt memory pressure
+                 * because the FIN flag will simply be merged to the
+                 * receive queue tail skb in most cases.
+                 */
                 final int len = skb.length() - hdr.length();
-                if (!(0 >= len && hdr.getFin())) {
+                if (len > 0 && hdr.getFin()) {
+                    queue_and_out(tp, skb);
+                } else {
                     out_of_window(tp, skb, TcpDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
                     return;
                 }
@@ -273,12 +311,19 @@ class TcpInput<T extends IpPacket> {
         } else if (!after(endSeq, tp.rcv_nxt)) {
             tcp_rcv_spurious_retrans(skb);
             /* A retransmit, 2nd most common case.  Force an immediate ack. */
+            // ... tcp_dsack_set ....
             out_of_window(tp, skb, TcpDropReason.SKB_DROP_REASON_TCP_OLD_DATA);
         } else if (!before(seq, tp.rcv_nxt + output.tcp_receive_window(tp))) {
             /* Out of window. F.e. zero window probe. */
             out_of_window(tp, skb, TcpDropReason.SKB_DROP_REASON_TCP_OVERWINDOW);
         } else if (before(seq, tp.rcv_nxt)) {
             /* Partial packet, seq < rcv_next < end_seq */
+            // tcp_dasck_set ...
+
+            /*-
+             * If window is closed, drop tail of packet. But after
+             * remembering D-SACK for its head made in previous line.
+             */
             if (output.tcp_receive_window(tp) == 0) {
                 out_of_window(tp, skb, TcpDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
             } else {
@@ -292,17 +337,30 @@ class TcpInput<T extends IpPacket> {
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4521
     void tcp_done_with_error(final TcpConnection<T> tp, int err) {
+        // sk->sk_err = err;
         tp.logError("TCP DONE WITH ERROR: {}", err);
+
+        // tcp_write_queue_purge(sk);
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4515
         tp.tcp_done();
+
+        // if (!sock_flag(sk, SOCK_DEAD))
+        //    sk_error_report(sk);
     }
 
     /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4530">tcp_reset</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4430">tcp_reset</a>
      */
     void tcp_reset(TcpConnection<T> tp, final TcpPacket skb) {
+        // sk_is_mptcp
+
         int err;
+
+        /* We want the right error as BSD sees it (and indeed as we do). */
         switch (tp.state.get()) {
+            case TCP_SYN_SENT:
+                err = ECONNREFUSED;
+                break;
             case TCP_CLOSE_WAIT:
                 err = EPIPE;
                 break;
@@ -321,6 +379,7 @@ class TcpInput<T extends IpPacket> {
         tp.inet_csk_schedule_ack();
 
         tp.sk_shutdown |= RCV_SHUTDOWN;
+        // sock_set_flag(sk, SOCK_DONE)
 
         final TcpState state = tp.state.get();
         switch (state) {
@@ -329,7 +388,6 @@ class TcpInput<T extends IpPacket> {
                 /* Move to CLOSE_WAIT */
                 tp.state.set(TcpState.TCP_CLOSE_WAIT);
                 tp.inet_csk_enter_pingpong_mode();
-
                 break;
             case TCP_CLOSE_WAIT:
             case TCP_CLOSING:
@@ -360,7 +418,23 @@ class TcpInput<T extends IpPacket> {
                 break;
         }
 
-        // TODO
+        /* It _is_ possible, that we have something out-of-order _after_ FIN.
+         * Probably, we should reset in this case. For now drop them.
+         */
+        // skb_rbtree_purge(&tp->out_of_order_queue);
+//        if (tcp_is_sack(tp)) {
+//            tcp_sack_reset(&tp->rx_opt)
+//        }
+
+//        if (!sock_flag(sk, SOCK_DEAD)) {
+            // sk->sk_state_change(sk)
+            /* Do not send POLL_HUP for half duplex close. */
+//            if (sk->sk_shutdown == SHUTDOWN_MASK ||
+//                    sk->sk_state == TCP_CLOSE)
+//                sk_wake_async(sk, SOCK_WAKE_WAITD, POLL_HUP);
+//            else
+//                sk_wake_async(sk, SOCK_WAKE_WAITD, POLL_IN);
+//        }
     }
 
     private void tcp_in_ack_event(int ack_env_flags) {

@@ -67,11 +67,11 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
             int err = tcp_rcv_state_process(ih, skb);
             if (0 != err) {
                 tcp_v4_send_reset(ih.getHeader(), skb, err);
-                destroy();
+                inet_csk_destroy_sock();
             }
         } catch (final Throwable cause) {
             cause.printStackTrace();
-            destroy();
+            inet_csk_destroy_sock();
         }
     }
 
