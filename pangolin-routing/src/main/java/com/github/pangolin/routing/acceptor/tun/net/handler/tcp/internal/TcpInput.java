@@ -176,9 +176,9 @@ class TcpInput<T extends IpPacket> {
         final TcpPacket.TcpHeader hdr = skb.getHeader();
         // queue_and_out;
 
-        tp.inet_csk_schedule_ack();
+//        tp.inet_csk_schedule_ack();
+//        tp.sk_data_ready();
 
-        tp.sk_data_ready();
         if (skb.length() - hdr.length() > 0) {
             tp.consume(skb);
         }
@@ -820,7 +820,7 @@ class TcpInput<T extends IpPacket> {
     /**
      * This routine deals with incoming acks, but not outgoing ones.
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3904">tcp_ack</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3805">tcp_ack</a>
      */
     int tcp_ack(final TcpConnection<T> tp, final TcpPacket skb, int flag) {
         final TcpPacket.TcpHeader tcpHdr = skb.getHeader();
@@ -901,7 +901,6 @@ class TcpInput<T extends IpPacket> {
 
         }
 
-//        tcp_in_ack_event(CA_ACK_WIN_UPDATE);
         /*-
          * We passed data and got it acked, remove any soft error log. Something worked...
          */
@@ -934,6 +933,7 @@ class TcpInput<T extends IpPacket> {
         // TODO ...
 
         // tcp_cong_control();
+        // tcp_xmit_recovery
 
         return 1;
     }

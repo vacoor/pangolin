@@ -32,6 +32,8 @@ class TcpOutput<T extends IpPacket> {
     /**
      * Refresh clocks of a TCP socket,
      * ensuring monotically increasing values.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L55">tcp_mstamp_refresh</a>
      */
     void tcp_mstamp_refresh(final TcpConnection<T> tp) {
         final long ns = TcpClock.tcp_clock_ns();

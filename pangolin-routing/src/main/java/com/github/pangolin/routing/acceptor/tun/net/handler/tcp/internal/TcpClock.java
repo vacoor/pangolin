@@ -2,6 +2,8 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import java.util.concurrent.TimeUnit;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
+
 public class TcpClock {
     protected static long tcp_clock_ns() {
         return System.nanoTime();
@@ -37,18 +39,18 @@ public class TcpClock {
 
     public static long msecs_to_jiffies(long ms) {
         int MSEC_PER_SEC = 1000;
-        if (0 == (TcpConstants.HZ % MSEC_PER_SEC)) {
-            return (TcpConstants.HZ / MSEC_PER_SEC) * ms;
+        if (0 == (HZ % MSEC_PER_SEC)) {
+            return (HZ / MSEC_PER_SEC) * ms;
         }
-        return (long) ((TcpConstants.HZ * 1F / MSEC_PER_SEC) * ms);
+        return (long) ((HZ * 1F / MSEC_PER_SEC) * ms);
     }
 
     public static long jiffies_to_usecs(long jiffies) {
         long USEC_PER_SEC = 1000 * 1000;
-        if (0 == (USEC_PER_SEC % TcpConstants.HZ)) {
-            return USEC_PER_SEC / TcpConstants.HZ * jiffies;
+        if (0 == (USEC_PER_SEC % HZ)) {
+            return USEC_PER_SEC / HZ * jiffies;
         }
-        return (long) ((1000F * 1000 / TcpConstants.HZ) * jiffies);
+        return (long) ((1000F * 1000 / HZ) * jiffies);
     }
 
     public static long jiffies_to_msecs(long jiffies) {
