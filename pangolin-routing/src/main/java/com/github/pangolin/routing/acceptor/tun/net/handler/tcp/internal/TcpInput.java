@@ -684,7 +684,7 @@ class TcpInput<T extends IpPacket> {
         final int end_seq = determineEndSeq(skb);
         final int ack = th.getAcknowledgmentNumber();
 
-        int reason = tcp_disordered_ack_check(tp, skb);
+        int reason = 0; //tcp_disordered_ack_check(tp, skb);
         if (0 == reason) {
             // goto step1;
         }
