@@ -42,6 +42,29 @@ class TcpOutput<T extends IpPacket> {
     }
 
     /**
+     * Congestion state accounting after a packet has been sent.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L163">tcp_event_data_sent</a>
+     */
+    private void tcp_event_data_sent(final TcpConnection<T> tp) {
+        long now = TcpClock.tcp_jiffies32();
+
+        tp.lsndtime = now;
+
+        /*-
+         * If it is a reply for ato after last received
+         * packet, increase pingpong count.
+         *
+         * 如果本地对最后收到数据包的回复在ATO(ACK超时)之前,
+         * 本地可能在快速发送数据, 增加 ping-pong 次数,
+         * (后续延迟ACK使用最大容忍度的超时时间, 以便减少不必要的ACK发送更多数据).
+         */
+        if (now - tp.icsk_ack_lrcvtime < tp.icsk_ack_ato) {
+            tp.inet_csk_inc_pingpong_cnt();
+        }
+    }
+
+    /**
      * Account for new data that has been sent to the network.
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L67">tcp_event_new_data_sent</a>
@@ -68,6 +91,22 @@ class TcpOutput<T extends IpPacket> {
         tp.input.tcp_check_space();
     }
 
+    /**
+     * Account for an ACK we sent.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L182">tcp_event_ack_sent</a>
+     */
+    private void tcp_event_ack_sent(final TcpConnection<T> tp, final int rcv_nxt) {
+        if (rcv_nxt != tp.rcv_nxt) {
+            return;
+        }
+
+        /*-
+         * 如果最后一个收到的包也 ACK 了, 快速ACK次数 - 1, 不需要再执行延迟 ACK.
+         */
+        tp.tcp_dec_quickack_mode();
+        tp.inet_csk_clear_xmit_timer(TcpTimer.ICSK_TIME_DACK);
+    }
 
     /**
      * SND.NXT, if window was not shrunk or the amount of shrunk was less than one
@@ -87,45 +126,7 @@ class TcpOutput<T extends IpPacket> {
         return tp.tcp_wnd_end();
     }
 
-    /**
-     * Congestion state accounting after a packet has been sent.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L163">tcp_event_data_sent</a>
-     */
-    void tcp_event_data_sent(final TcpConnection<T> tp) {
-        long now = TcpClock.tcp_jiffies32();
 
-        tp.lsndtime = now;
-
-        /*-
-         * If it is a reply for ato after last received
-         * packet, increase pingpong count.
-         *
-         * 如果本地对最后收到数据包的回复在ATO(ACK超时)之前,
-         * 本地可能在快速发送数据, 增加 ping-pong 次数,
-         * (后续延迟ACK使用最大容忍度的超时时间, 以便减少不必要的ACK发送更多数据).
-         */
-        if (now - tp.icsk_ack_lrcvtime < tp.icsk_ack_ato) {
-            tp.inet_csk_inc_pingpong_cnt();
-        }
-    }
-
-    /**
-     * Account for an ACK we sent.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L182">tcp_event_ack_sent</a>
-     */
-    private void tcp_event_ack_sent(final TcpConnection<T> tp, final int rcv_nxt) {
-        if (rcv_nxt != tp.rcv_nxt) {
-            return;
-        }
-
-        /*-
-         * 如果最后一个收到的包也 ACK 了, 快速ACK次数 - 1, 不需要再执行延迟 ACK.
-         */
-        tp.tcp_dec_quickack_mode();
-        tp.inet_csk_clear_xmit_timer(TcpTimer.ICSK_TIME_DACK);
-    }
 
 
     /**
