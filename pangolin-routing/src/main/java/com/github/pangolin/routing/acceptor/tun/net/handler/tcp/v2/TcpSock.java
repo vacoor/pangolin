@@ -110,7 +110,7 @@ public class TcpSock extends InetConnectionSock {
     public int rcv_wup;
     public int bytes_acked;
 
-    public RcvRttEst rcv_rtt_est;
+    public final RcvRttEst rcv_rtt_est = new RcvRttEst();
 
     public int nonagle = TCP_NAGLE_OFF;
 
