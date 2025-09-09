@@ -59,7 +59,7 @@ class TcpOutput<T extends IpPacket> {
          * 本地可能在快速发送数据, 增加 ping-pong 次数,
          * (后续延迟ACK使用最大容忍度的超时时间, 以便减少不必要的ACK发送更多数据).
          */
-        if (now - tp.icsk_ack_lrcvtime < tp.icsk_ack_ato) {
+        if (now - tp.icsk_ack.lrcvtime < tp.icsk_ack.ato) {
             tp.inet_csk_inc_pingpong_cnt();
         }
     }
@@ -805,7 +805,7 @@ class TcpOutput<T extends IpPacket> {
          * but may be worse for the performance because of rcv_mss
          * fluctuations.  --SAW  1998/11/1
          */
-        int mss = icsk.icsk_ack_rcv_mss;
+        int mss = icsk.icsk_ack.rcv_mss;
         int free_space = tcp_space(tp);
         int allowed_space = tcp_full_space(tp);
 
@@ -827,7 +827,7 @@ class TcpOutput<T extends IpPacket> {
 
         if (free_space < (full_space >> 1)) {
             // 窗口已使用一半, 认为将要变紧张.
-            icsk.icsk_ack_quick = 0;
+            icsk.icsk_ack.quick = 0;
 
             if (tcp_under_memory_pressure()) {
                 tcp_adjust_rcv_ssthresh(tp);
@@ -1162,14 +1162,14 @@ class TcpOutput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4183">tcp_send_delayed_ack</a>
      */
     void tcp_send_delayed_ack(final TcpConnection<T> tp) {
-        long ato = tp.icsk_ack_ato;
+        long ato = tp.icsk_ack.ato;
         if (ato > TCP_DELACK_MIN) {
             int max_ato = TcpConstants.HZ / 2;
 
             /*-
              * ping-pong 模式应该使用最大容忍度的超时时间.
              */
-            if (tp.inet_csk_in_pingpong_model() || 0 != (tp.icsk_ack_pending & TcpTimer.ICSK_ACK_PUSHED)) {
+            if (tp.inet_csk_in_pingpong_model() || 0 != (tp.icsk_ack.pending & TcpTimer.ICSK_ACK_PUSHED)) {
                 max_ato = TCP_DELACK_MAX;
             }
 
@@ -1199,7 +1199,7 @@ class TcpOutput<T extends IpPacket> {
         long timeout = TcpClock.jiffies() + ato;
 
         /* Use new timeout only if there wasn't a older one earlier. */
-        if ((tp.icsk_ack_pending & TcpTimer.ICSK_ACK_TIMER) != 0) {
+        if ((tp.icsk_ack.pending & TcpTimer.ICSK_ACK_TIMER) != 0) {
             /* If delack timer is about to expire, send ACK now. */
             long icsk_delack_timeout = tp.icsk_delack_timeout();
             if (time_before_eq(icsk_delack_timeout, TcpClock.jiffies() + (ato >> 2))) {
@@ -1214,10 +1214,10 @@ class TcpOutput<T extends IpPacket> {
         }
 
         // XXX smp_store_release
-        tp.icsk_ack_pending |= TcpTimer.ICSK_ACK_SCHED | TcpTimer.ICSK_ACK_TIMER;
+        tp.icsk_ack.pending |= TcpTimer.ICSK_ACK_SCHED | TcpTimer.ICSK_ACK_TIMER;
 
         if (tp.icsk_delack_timeout() != timeout) {
-            tp.icsk_ack_timeout = tp.icsk_delack_timeout();
+            tp.icsk_ack.timeout = tp.icsk_delack_timeout();
             tp.timer.sk_reset_timer(tp.timer.icsk_delack_timer, timeout);
         }
     }

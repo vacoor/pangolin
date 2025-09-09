@@ -15,9 +15,9 @@ import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 
 @Slf4j
-public class Tcp4PacketHandler extends TcpPacketHandler<IpV4Packet> {
+public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler<IpV4Packet> {
 
-    public Tcp4PacketHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
+    public Tcp4DemultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
         super(dnsEngine, factory);
     }
 

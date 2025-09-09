@@ -14,7 +14,7 @@ import com.github.pangolin.routing.acceptor.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelOption;
 import com.github.pangolin.routing.acceptor.tun.net.handler.IpPacketCodec;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.Tcp4PacketHandler;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.Tcp4DemultiplexHandler;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.support.DatagramChannelFactory;
 import com.github.pangolin.routing.support.SocketChannelFactory;
@@ -115,7 +115,7 @@ public class TunAcceptor implements Acceptor {
                     @Override
                     protected void initChannel(final Channel ch) throws Exception {
                         ch.pipeline().addLast(new IpPacketCodec());
-                        ch.pipeline().addLast(new Tcp4PacketHandler(dnsEngine, socketFactory));
+                        ch.pipeline().addLast(new Tcp4DemultiplexHandler(dnsEngine, socketFactory));
                     }
                 });
         return b.bind(new TunAddress(ifname, bindings)).addListener(new ChannelFutureListener() {

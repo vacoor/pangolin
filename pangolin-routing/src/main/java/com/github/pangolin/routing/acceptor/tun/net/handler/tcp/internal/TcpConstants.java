@@ -42,4 +42,45 @@ public interface TcpConstants {
      */
     int TCP_NAGLE_PUSH = 4;
 
+    int DEFAULT_MTU = 1500;
+    int MINIMUM_MTU = 576;
+    int TCP_MSS_DEFAULT = 536;
+    int TCP_MIN_MSS = 88;
+    int U8_MAX = 255;
+    int U16_MAX = 65535;
+    int TCP_ATO_MIN = TcpConnection.HZ / 25;
+    /**
+     * Never offer a window over 32767 without using window scaling. Some
+     * poor stacks do signed 16bit maths!
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L68">TCP_MAX_WINDOW</a>
+     */
+    int TCP_MAX_WINDOW = 32767;
+    /*
+        RFC6298 2.1 initial RTO value.
+        https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L152
+        */
+    int TCP_TIMEOUT_INIT = 1 * TcpConnection.HZ;
+    int TCP_TIMEOUT_MIN = 2;
+    int TCP_TIMEWAIT_LEN = 60 * TcpConnection.HZ;
+    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L86
+    int TCP_MAX_QUICKACKS = 16;
+    // https://github.com/torvalds/linux/blob/master/include/net/sock.h#L1472
+    int RCV_SHUTDOWN = 1;
+    int SEND_SHUTDOWN = 2;
+    int SHUTDOWN_MASK = 2;
+    // No options.
+    int SIZE_OF_TCP_HDR = 20;
+    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L160
+    int TCP_RESOURCE_PROBE_INTERVAL = TcpConnection.HZ / 2;
+    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L243
+    /* TCP initial congestion window as per rfc6928 */
+    int TCP_INIT_CWND = 10;
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1327">TCP_INFINITE_SSTHRESH</a>
+     */
+    int TCP_INFINITE_SSTHRESH = 0x7fffffff;
+    byte TCP_MAX_WSCALE = 14;
+    int RTAX_WINDOW = 1;
+    int RTAX_INITRWND = 2;
 }

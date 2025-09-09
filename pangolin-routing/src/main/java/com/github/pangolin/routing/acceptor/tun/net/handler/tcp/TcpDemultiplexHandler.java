@@ -24,19 +24,19 @@ import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 @Slf4j
-public abstract class TcpPacketHandler<T extends IpPacket> extends IpPacketHandler<T> {
+public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacketHandler<T> {
     private final DnsEngine dnsEngine;
     private final SocketChannelFactory socketChannelFactory;
     private final EventLoopGroup childGroup = new NioEventLoopGroup();
 
     private final Map<String, TcpConnection> sessionMap = Maps.newConcurrentMap();
 
-    public TcpPacketHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
+    public TcpDemultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
         super(IpNumber.TCP);
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = factory;
-        final Type type = Types.resolveType(TcpPacketHandler.class.getTypeParameters()[0], getClass());
-        Preconditions.checkState(type instanceof Class<?>, "Can't resolve %s IpPacket Class", TcpPacketHandler.class.getName());
+        final Type type = Types.resolveType(TcpDemultiplexHandler.class.getTypeParameters()[0], getClass());
+        Preconditions.checkState(type instanceof Class<?>, "Can't resolve %s IpPacket Class", TcpDemultiplexHandler.class.getName());
     }
 
     @Override

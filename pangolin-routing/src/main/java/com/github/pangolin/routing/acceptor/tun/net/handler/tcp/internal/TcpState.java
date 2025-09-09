@@ -4,7 +4,7 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp_states.h">tcp_states.h</a>
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.c">tcp.c</a>
  */
-enum TcpState {
+public enum TcpState {
 
   /**
    * connection established.

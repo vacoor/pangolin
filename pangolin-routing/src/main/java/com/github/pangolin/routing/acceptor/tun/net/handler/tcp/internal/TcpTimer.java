@@ -55,7 +55,7 @@ class TcpTimer<T extends IpPacket> {
         icsk_retransmit_timer = icsk_retransmit_handler;
         icsk_delack_timer = icsk_delack_handler;
         sk_timer = keepalive_handler;
-        tp.icsk_pending = tp.icsk_ack_pending = 0;
+        tp.icsk_pending = tp.icsk_ack.pending = 0;
     }
 
     /**
@@ -63,7 +63,7 @@ class TcpTimer<T extends IpPacket> {
      */
     private void inet_csk_clear_xmit_timers() {
         tp.icsk_pending = 0;
-        tp.icsk_ack_pending = 0;
+        tp.icsk_ack.pending = 0;
 
         sk_stop_timer(icsk_retransmit_timer);
         sk_stop_timer(icsk_delack_timer);
@@ -97,8 +97,8 @@ class TcpTimer<T extends IpPacket> {
             tp.icsk_timeout = when; // FIXME
             sk_reset_timer(icsk_retransmit_timer, when);
         } else if (what == ICSK_TIME_DACK) {
-            tp.icsk_ack_pending |= ICSK_ACK_TIMER;
-            tp.icsk_ack_timeout = when; // FIXME
+            tp.icsk_ack.pending |= ICSK_ACK_TIMER;
+            tp.icsk_ack.timeout = when; // FIXME
             sk_reset_timer(icsk_delack_timer, when);
         } else {
             log.warn("BUG: unknown timer value");
@@ -169,7 +169,7 @@ class TcpTimer<T extends IpPacket> {
             return;
         }
 
-        if ((tp.icsk_ack_pending & ICSK_ACK_TIMER) == 0) {
+        if ((tp.icsk_ack.pending & ICSK_ACK_TIMER) == 0) {
             return;
         }
 
@@ -178,18 +178,18 @@ class TcpTimer<T extends IpPacket> {
             return;
         }
 
-        tp.icsk_ack_pending &= ~ICSK_ACK_TIMER;
+        tp.icsk_ack.pending &= ~ICSK_ACK_TIMER;
         if (tp.inet_csk_ack_scheduled()) {
             if (!tp.inet_csk_in_pingpong_model()) {
                 /* Delayed ACK missed: inflate ATO. */
-                tp.icsk_ack_ato = Math.min(tp.icsk_ack_ato << 1, tp.icsk_rto);
+                tp.icsk_ack.ato = Math.min(tp.icsk_ack.ato << 1, tp.icsk_rto);
             } else {
                 /*-
                  * Delayed ACK missed: leave pingpong mode and deflate ATO.
                  * ping-pong 模式触发了延迟ACK, 说明ATO周期内没有数据要发送, 退出 ping-pong 模式.
                  */
                 tp.inet_csk_exit_pingpong_mode();
-                tp.icsk_ack_ato = TCP_ATO_MIN;
+                tp.icsk_ack.ato = TcpConstants.TCP_ATO_MIN;
             }
 
             tp.output.tcp_mstamp_refresh(tp);
@@ -324,7 +324,7 @@ class TcpTimer<T extends IpPacket> {
                 /* Retransmission failed because of local congestion,
                  * Let senders fight for local resources conservatively.
                  */
-                tp.tcp_reset_xmit_timer(ICSK_TIME_RETRANS, TCP_RESOURCE_PROBE_INTERVAL, false);
+                tp.tcp_reset_xmit_timer(ICSK_TIME_RETRANS, TcpConstants.TCP_RESOURCE_PROBE_INTERVAL, false);
                 return;
             }
         }
@@ -406,7 +406,7 @@ class TcpTimer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2702">tcp_timeout_init</a>
      */
     private long tcp_timeout_init() {
-        return Math.min(TCP_TIMEOUT_INIT, TCP_RTO_MAX);
+        return Math.min(TcpConstants.TCP_TIMEOUT_INIT, TCP_RTO_MAX);
     }
 
     /**
@@ -569,7 +569,7 @@ class TcpTimer<T extends IpPacket> {
 
         if (TCP_FIN_WAIT2.equals(state)) {
             if (tp.linger2 >= 0) {
-                final int tmo = tp.tcp_fin_time() - TCP_TIMEWAIT_LEN;
+                final int tmo = tp.tcp_fin_time() - TcpConstants.TCP_TIMEWAIT_LEN;
                 if (tmo > 0) {
                     tp.tcp_time_wait(TCP_FIN_WAIT2, tmo);
                     return;
@@ -611,7 +611,7 @@ class TcpTimer<T extends IpPacket> {
                 /* If keepalive was lost due to local congestion,
                  * try harder.
                  */
-                elapsed = TCP_RESOURCE_PROBE_INTERVAL;
+                elapsed = TcpConstants.TCP_RESOURCE_PROBE_INTERVAL;
             }
         } else {
             /* It is tp->rcv_tstamp + keepalive_time_when(tp) */
@@ -646,6 +646,6 @@ class TcpTimer<T extends IpPacket> {
     }
 
     int keepalive_time_elapsed(final TcpConnection<?> tp) {
-        return (int) Math.min(TcpClock.tcp_jiffies32() - tp.icsk_ack_lrcvtime, TcpClock.tcp_jiffies32() - tp.rcv_tstamp);
+        return (int) Math.min(TcpClock.tcp_jiffies32() - tp.icsk_ack.lrcvtime, TcpClock.tcp_jiffies32() - tp.rcv_tstamp);
     }
 }

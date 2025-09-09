@@ -9,7 +9,6 @@ import org.pcap4j.packet.TcpWindowScaleOption;
 import java.io.IOException;
 import java.security.SecureRandom;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.sysctl_tcp_invalid_ratelimit;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.jiffies;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.tcp_jiffies32;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
@@ -76,14 +75,14 @@ class TcpInput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L300">tcp_incr_quickack</a>
      */
     protected void tcp_incr_quickack(final TcpConnection<T> tp, int max_quickacks) {
-        int quickacks = tp.rcv_wnd / (2 * tp.icsk_ack_rcv_mss);
+        int quickacks = tp.rcv_wnd / (2 * tp.icsk_ack.rcv_mss);
         if (0 == quickacks) {
             quickacks = 2;
         }
         quickacks = Math.min(quickacks, max_quickacks);
-        if (quickacks > tp.icsk_ack_quick) {
-            tp.logTrace("[QUICK-ACK] increment QUICK-ARK count: {} -> {}", tp.icsk_ack_quick, quickacks);
-            tp.icsk_ack_quick = quickacks;
+        if (quickacks > tp.icsk_ack.quick) {
+            tp.logTrace("[QUICK-ACK] increment QUICK-ARK count: {} -> {}", tp.icsk_ack.quick, quickacks);
+            tp.icsk_ack.quick = quickacks;
         }
     }
 
@@ -94,10 +93,10 @@ class TcpInput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_enter_quickack_mode</a>
      */
     protected void tcp_enter_quickack_mode(TcpConnection<T> tp, int max_quickacks) {
-        tp.logTrace("[QUICK-ACK] enter QUICK-ARK count: {} -> {}", tp.icsk_ack_quick, max_quickacks);
+        tp.logTrace("[QUICK-ACK] enter QUICK-ARK count: {} -> {}", tp.icsk_ack.quick, max_quickacks);
         tcp_incr_quickack(tp, max_quickacks);
         tp.inet_csk_exit_pingpong_mode();
-        tp.icsk_ack_ato = TCP_ATO_MIN;
+        tp.icsk_ack.ato = TCP_ATO_MIN;
     }
 
     /*-
@@ -107,7 +106,7 @@ class TcpInput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_in_quickack_mode</a>
      */
     protected boolean tcp_in_quickack_mode(TcpConnection<T> tp) {
-        return tp.icsk_ack_quick > 0 && !tp.inet_csk_in_pingpong_model();
+        return tp.icsk_ack.quick > 0 && !tp.inet_csk_in_pingpong_model();
     }
 
     /**
@@ -117,7 +116,7 @@ class TcpInput<T extends IpPacket> {
      */
     private void __tcp_ack_snd_check(final TcpConnection<T> tp) {
         if (
-            // (tp.rcv_nxt - tp.rcv_wup > tp.icsk_ack_rcv_mss
+            // (tp.rcv_nxt - tp.rcv_wup > tp.icsk_ack.rcv_mss
             /* ... and right edge of window advances far enough.
              * (tcp_recvmsg() will send ACK otherwise).
              * If application uses SO_RCVLOWAT, we want send ack now if
@@ -125,7 +124,7 @@ class TcpInput<T extends IpPacket> {
              */
             // && (tp.rcv_nxt - tp.copied_seq < tp.sk_rcvlowat || tp.output.__tcp_select_window(tp) >= tp.rcv_wnd)
             // ) ||
-                tcp_in_quickack_mode(tp) || 0 != (tp.icsk_ack_pending & ICSK_ACK_NOW)) {
+                tcp_in_quickack_mode(tp) || 0 != (tp.icsk_ack.pending & ICSK_ACK_NOW)) {
             output.tcp_send_ack(tp);
             return;
         }
@@ -222,28 +221,28 @@ class TcpInput<T extends IpPacket> {
         tp.tcp_rcv_rtt_measure();
 
         long now = tcp_jiffies32();
-        if (0 == tp.icsk_ack_ato) {
+        if (0 == tp.icsk_ack.ato) {
             /*
              * The _first_ data packet received, initialize
              * delayed ACK engine.
              */
             tcp_incr_quickack(tp, TCP_MAX_QUICKACKS);
-            tp.icsk_ack_ato = TCP_ATO_MIN;
+            tp.icsk_ack.ato = TCP_ATO_MIN;
         } else {
-            long m = now - tp.icsk_ack_lrcvtime;
+            long m = now - tp.icsk_ack.lrcvtime;
             /*-
              * 1. 如果两次收到数据的间隔 <= TCP_ATO_MIN / 2, ato = ato / 2 + TCP_ATO_MIN / 2
              * 2. 如果收到数据间隔 > TCP_ATO_MIN / 2 && < ato, ato = ato / 2 + 间隔, 最大不超过rto
              */
             if (m <= TCP_ATO_MIN / 2) {
                 /* The fastest case is the first. */
-                tp.icsk_ack_ato = (tp.icsk_ack_ato >> 1) + TCP_ATO_MIN / 2;
-            } else if (m < tp.icsk_ack_ato) {
-                tp.icsk_ack_ato = (tp.icsk_ack_ato >> 1) + m;
-                if (tp.icsk_ack_ato > tp.icsk_rto) {
-                    tp.icsk_ack_ato = tp.icsk_rto;
+                tp.icsk_ack.ato = (tp.icsk_ack.ato >> 1) + TCP_ATO_MIN / 2;
+            } else if (m < tp.icsk_ack.ato) {
+                tp.icsk_ack.ato = (tp.icsk_ack.ato >> 1) + m;
+                if (tp.icsk_ack.ato > tp.icsk_rto) {
+                    tp.icsk_ack.ato = tp.icsk_rto;
                 }
-            } else if (m > tp.icsk_ack_ato) {
+            } else if (m > tp.icsk_ack.ato) {
                 /*-
                  * Too long gap. Apparently sender failed to
                  * restart window, so that we send ACKs quickly.
@@ -251,7 +250,7 @@ class TcpInput<T extends IpPacket> {
                 tcp_incr_quickack(tp, TCP_MAX_QUICKACKS);
             }
         }
-        tp.icsk_ack_lrcvtime = now;
+        tp.icsk_ack.lrcvtime = now;
 
         // ...
 
