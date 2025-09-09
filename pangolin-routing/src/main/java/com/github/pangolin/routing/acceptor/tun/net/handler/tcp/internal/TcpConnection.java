@@ -28,6 +28,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.sysctl_tcp_fin_timeout;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_MSS_DEFAULT;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.*;
@@ -61,8 +63,6 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
     TcpPort tcpSrcPort;
     TcpPort tcpDstPort;
 
-
-    static final int HZ = 1000;
 
     /**
      * 用户定义的 MSS.
@@ -359,7 +359,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
 
 
     protected boolean conn_request(final T ih, final TcpPacket skb) {
-        return tcp_conn_request(ih, skb);
+        return tcp_conn_request(new tcp_request_sock_ops(), new tcp_request_sock_ipv4_ops(), ih, skb);
     }
 
     /**
@@ -367,7 +367,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
-    private boolean tcp_conn_request(final T pkg, final TcpPacket skb) {
+    private boolean tcp_conn_request(tcp_request_sock_ops rsk_ops, tcp_request_sock_ipv4_ops af_ops, final T pkg, final TcpPacket skb) {
         final IpHeader ipHdr = pkg.getHeader();
         /*-
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
@@ -1954,5 +1954,43 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
 
     public long icsk_timeout() {
         return icsk_timeout;
+    }
+
+    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1705
+    class tcp_request_sock_ops {
+        public void send_ack() {
+
+        }
+
+        public void send_reset() {
+
+        }
+    }
+
+    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1714
+    class tcp_request_sock_ipv4_ops {
+        public int mss_clamp = TCP_MSS_DEFAULT;
+
+        public int init_seq() {
+            return -1;
+        }
+
+        public void send_synack() {
+
+        }
+    }
+
+    // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L149
+    class tcp_request_sock {
+        int mss;
+        boolean req_usec_ts;
+        int rcv_isn;
+        int snt_isn;
+        int ts_off;
+        int snt_tsval_first;
+        int snt_tsval_last;
+        int last_oow_ack_time;
+        int rcv_nxt;
+        int syn_tos;
     }
 }

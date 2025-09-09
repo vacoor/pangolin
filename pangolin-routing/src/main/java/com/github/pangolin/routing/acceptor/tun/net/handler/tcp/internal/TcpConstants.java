@@ -48,7 +48,7 @@ public interface TcpConstants {
     int TCP_MIN_MSS = 88;
     int U8_MAX = 255;
     int U16_MAX = 65535;
-    int TCP_ATO_MIN = TcpConnection.HZ / 25;
+    int TCP_ATO_MIN = HZ / 25;
     /**
      * Never offer a window over 32767 without using window scaling. Some
      * poor stacks do signed 16bit maths!
@@ -60,9 +60,9 @@ public interface TcpConstants {
         RFC6298 2.1 initial RTO value.
         https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L152
         */
-    int TCP_TIMEOUT_INIT = 1 * TcpConnection.HZ;
+    int TCP_TIMEOUT_INIT = 1 * HZ;
     int TCP_TIMEOUT_MIN = 2;
-    int TCP_TIMEWAIT_LEN = 60 * TcpConnection.HZ;
+    int TCP_TIMEWAIT_LEN = 60 * HZ;
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L86
     int TCP_MAX_QUICKACKS = 16;
     // https://github.com/torvalds/linux/blob/master/include/net/sock.h#L1472
@@ -72,7 +72,7 @@ public interface TcpConstants {
     // No options.
     int SIZE_OF_TCP_HDR = 20;
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L160
-    int TCP_RESOURCE_PROBE_INTERVAL = TcpConnection.HZ / 2;
+    int TCP_RESOURCE_PROBE_INTERVAL = HZ / 2;
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L243
     /* TCP initial congestion window as per rfc6928 */
     int TCP_INIT_CWND = 10;

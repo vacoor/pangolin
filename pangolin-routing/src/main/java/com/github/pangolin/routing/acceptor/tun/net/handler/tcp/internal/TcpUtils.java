@@ -144,8 +144,8 @@ public abstract class TcpUtils {
         final StringBuilder buff = new StringBuilder();
         if (null != id) {
             buff.append("[").append(id).append("]");
-        } else {
-            buff.append("[").append("????????").append("]");
+//        } else {
+//            buff.append("[").append("????????").append("]");
         }
 
         buff.append(" ")
