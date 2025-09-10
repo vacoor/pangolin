@@ -4,6 +4,7 @@ import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.InetConnectionSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.Sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_options_received;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
@@ -65,19 +66,9 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
 
 
     /**
-     * 用户定义的 MSS.
-     */
-    private int user_mss;
-
-    /**
      * 对端通告 MSS.
      */
     int mss_clamp;
-
-    /**
-     * 由最近接收到的段估算的对端mss，主要用来确定是否执行延迟确认.
-     */
-    private int rcv_mss;
 
     boolean wscale_ok;
 
@@ -341,24 +332,24 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
 
     /* ************** Initialize Connection Request [[ ************ */
 
-    AtomicInteger tmp_opt_rx_user_mss = new AtomicInteger();
-    AtomicInteger tmp_opt_rx_mss_clamp = new AtomicInteger();
-    AtomicBoolean tmp_opt_wscale_ok = new AtomicBoolean();
-    AtomicInteger tmp_opt_snd_wscale = new AtomicInteger();
+//    AtomicInteger tmp_opt_rx_user_mss = new AtomicInteger();
+//    AtomicInteger tmp_opt_rx_mss_clamp = new AtomicInteger();
+//    AtomicBoolean tmp_opt_wscale_ok = new AtomicBoolean();
+//    AtomicInteger tmp_opt_snd_wscale = new AtomicInteger();
 
-    final AtomicInteger req_snt_isn_ref = new AtomicInteger();
-    final AtomicInteger req_rcv_isn_ref = new AtomicInteger();
-    final AtomicInteger req_rcv_nxt_ref = new AtomicInteger();
-    private final AtomicInteger req_mss_ref = new AtomicInteger();
-    final AtomicInteger req_rsk_rcv_wnd_ref = new AtomicInteger();
-    private final AtomicInteger req_rsk_window_clamp_ref = new AtomicInteger();
+//    final AtomicInteger req_snt_isn_ref = new AtomicInteger();
+//    final AtomicInteger req_rcv_isn_ref = new AtomicInteger();
+//    final AtomicInteger req_rcv_nxt_ref = new AtomicInteger();
+//    private final AtomicInteger req_mss_ref = new AtomicInteger();
+//    final AtomicInteger req_rsk_rcv_wnd_ref = new AtomicInteger();
+//    private final AtomicInteger req_rsk_window_clamp_ref = new AtomicInteger();
 
-    final AtomicBoolean ireq_wscale_ok_ref = new AtomicBoolean();
-    private final AtomicInteger ireq_snd_wscale_ref = new AtomicInteger();
-    final AtomicInteger ireq_rcv_wscale_ref = new AtomicInteger();
+//    final AtomicBoolean ireq_wscale_ok_ref = new AtomicBoolean();
+//    private final AtomicInteger ireq_snd_wscale_ref = new AtomicInteger();
+//    final AtomicInteger ireq_rcv_wscale_ref = new AtomicInteger();
 
 
-    protected boolean conn_request(final T ih, final TcpPacket skb) {
+    protected tcp_request_sock conn_request(final T ih, final TcpPacket skb) {
         return tcp_conn_request(new tcp_request_sock_ops(), new tcp_request_sock_ipv4_ops(), ih, skb);
     }
 
@@ -367,24 +358,29 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
-    private boolean tcp_conn_request(tcp_request_sock_ops rsk_ops, tcp_request_sock_ipv4_ops af_ops, final T pkg, final TcpPacket skb) {
+    private tcp_request_sock tcp_conn_request(tcp_request_sock_ops rsk_ops, tcp_request_sock_ipv4_ops af_ops, final T pkg, final TcpPacket skb) {
         final IpHeader ipHdr = pkg.getHeader();
         /*-
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
          */
         if (!inet_reqsk_alloc(ipHdr, skb)) {
-            return false;
+            return null;
         }
 
-        ts_off = 0;
-        tcp_usec_ts = 0;
+        final tcp_request_sock req = new tcp_request_sock();
 
-        tmp_opt_rx_user_mss.set(user_mss);
-        tmp_opt_rx_mss_clamp.set(mss_clamp);
+        ts_off = req.ts_off = 0;
+        tcp_usec_ts = req.req_usec_ts = 0;
 
-        input.tcp_parse_options(this, skb, false);
-        tcp_openreq_init(skb);
+        final int user_mss = 0; // FIXME parent.rx_opt.user_mss;
+
+        final tcp_options_received opt_rx = new tcp_options_received();
+        opt_rx.user_mss = user_mss;
+        opt_rx.mss_clamp = af_ops.mss_clamp;
+
+        input.tcp_parse_options(this, opt_rx, skb, false);
+        tcp_openreq_init(req, opt_rx, skb);
 
         ipHeader = ipHdr;
         tcpSrcPort = skb.getHeader().getSrcPort();
@@ -392,21 +388,26 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
         // ...
 
         // FIXME
-        final boolean opt_tstamp_ok = false;
+        final boolean opt_tstamp_ok = opt_rx.tstamp_ok;
         if (opt_tstamp_ok) {
             tcp_usec_ts = 0;
-            ts_off = init_ts_off(skb);
+            ts_off = req.ts_off = init_ts_off(skb);
         }
 
-        req_snt_isn_ref.set(initSeq(ipHdr, skb.getHeader()));
+        int isn = af_ops.init_seq();
+
+//        req_snt_isn_ref.set(isn = initSeq(ipHdr, skb.getHeader()));
+        isn = initSeq(ipHdr, skb.getHeader());
+
+        req.snt_isn = isn;
 
         // init rwin
-        tcp_openreq_init_rwin(skb);
+        tcp_openreq_init_rwin(req, skb);
 
         // send_synack
-        send_synack(ipHdr, skb);
+        send_synack(req, ipHdr, skb);
 
-        return true;
+        return req;
     }
 
 
@@ -529,17 +530,25 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7068">tcp_openreq_init</a>
      * @see <a href="https://www.cnblogs.com/wanpengcoder/p/11751292.html">TCP MSS</a>
      */
-    private void tcp_openreq_init(final TcpPacket skb) {
+    private void tcp_openreq_init(tcp_request_sock req, tcp_options_received rx_opt, final TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7068
         final TcpHeader hdr = skb.getHeader();
-        req_rsk_rcv_wnd_ref.set(0);
-        req_rcv_isn_ref.set(hdr.getSequenceNumber());
-        req_rcv_nxt_ref.set(hdr.getSequenceNumber() + 1);
+        req.rsk_rcv_wnd = 0;
+        req.rcv_isn = hdr.getSequenceNumber();
+        req.rcv_nxt = hdr.getSequenceNumber() + 1;
 
-        req_mss_ref.set(tmp_opt_rx_mss_clamp.get());
+        req.mss = rx_opt.mss_clamp;
+        req.snd_wscale = rx_opt.snd_wscacle;
+        req.wscale_ok = rx_opt.wsacle_ok;
 
-        ireq_wscale_ok_ref.set(tmp_opt_wscale_ok.get());
-        ireq_snd_wscale_ref.set(tmp_opt_snd_wscale.get());
+//        req_rsk_rcv_wnd_ref.set(0);
+//        req_rcv_isn_ref.set(hdr.getSequenceNumber());
+//        req_rcv_nxt_ref.set(hdr.getSequenceNumber() + 1);
+//
+//        req_mss_ref.set(rx_opt.mss_clamp);
+//
+//        ireq_wscale_ok_ref.set(rx_opt.wsacle_ok);
+//        ireq_snd_wscale_ref.set(rx_opt.snd_wscacle);
     }
 
     /**
@@ -557,12 +566,17 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
         );
     }
 
-    private void tcp_openreq_init_rwin(TcpPacket skb) {
+    private void tcp_openreq_init_rwin(tcp_request_sock req, TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L422
         int full_space = output.tcp_full_space(this);
-        final int mss = tcp_mss_clamp(dst_metric_advmss());
+        final int mss = tcp_mss_clamp(this, dst_metric_advmss());
 
-        req_rsk_window_clamp_ref.set(dst_metric(TcpConstants.RTAX_WINDOW));
+        // FIXME
+        final int window_clamp = 0;
+
+        AtomicInteger req_rsk_window_clamp_ref = new AtomicInteger(window_clamp > 0 ? window_clamp : dst_metric(TcpConstants.RTAX_WINDOW));
+        AtomicInteger req_rsk_rcv_wnd_ref = new AtomicInteger();
+
 
         int rcv_wnd = 0; //...
         if (rcv_wnd == 0) {
@@ -579,15 +593,20 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
                 mss, // - stamp
                 req_rsk_rcv_wnd_ref,
                 req_rsk_window_clamp_ref,
-                ireq_wscale_ok_ref.get(),
+                req.wscale_ok,
                 rcv_wscale_ref,
                 rcv_wnd
         );
-        ireq_rcv_wscale_ref.set(rcv_wscale_ref.get());
+
+//        ireq_rcv_wscale_ref.set(rcv_wscale_ref.get());
+
+        req.rcv_wscale = rcv_wscale_ref.get();
+        req.rsk_rcv_wnd = req_rsk_rcv_wnd_ref.get();
+        req.rsk_window_clamp = req_rsk_window_clamp_ref.get();
     }
 
 
-    protected abstract void send_synack(final IpHeader ipHdr, final TcpPacket syn_skb);
+    protected abstract void send_synack(final tcp_request_sock req, final IpHeader ipHdr, final TcpPacket syn_skb);
 
 
     /* ************** ]] Initialize Connection Request ************ */
@@ -600,8 +619,8 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpConnection tcp_check_req(final TcpPacket skb) {
-        TcpConnection nsk = tcp_v4_syn_recv_sock(skb);
+    private TcpConnection tcp_check_req(tcp_request_sock req, final TcpPacket skb) {
+        TcpConnection nsk = tcp_v4_syn_recv_sock(req, skb);
         return nsk;
     }
 
@@ -611,11 +630,11 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpConnection tcp_v4_syn_recv_sock(final TcpPacket skb) {
-        TcpConnection newsk = tcp_create_openreq_child(skb);
+    private TcpConnection tcp_v4_syn_recv_sock(tcp_request_sock req, final TcpPacket skb) {
+        TcpConnection newsk = tcp_create_openreq_child(req, skb);
         icsk_ext_hdr_len = 0;
         output.tcp_sync_mss(this, dst_mtu());
-        advmss = tcp_mss_clamp(dst_metric_advmss());
+        advmss = tcp_mss_clamp(this, dst_metric_advmss());
         tcp_initialize_rcv_mss();
         return newsk;
     }
@@ -626,33 +645,33 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpConnection tcp_create_openreq_child(final TcpPacket skb) {
+    private TcpConnection tcp_create_openreq_child(tcp_request_sock req, final TcpPacket skb) {
         /*-
          * 第一步调用 <code>inet_csk_clone_lock<code/> 基于原 TCP_NEW_SYN_RECV sock clone时会将状态设置为 TCP_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1247"></a>
          */
         inet_csk_clone_lock();
 
-        rcv_isn = req_rcv_isn_ref.get();
-        int _seq = req_rcv_isn_ref.get() + 1;
+        rcv_isn = req.rcv_isn;
+        int _seq = req.rcv_isn + 1;
         rcv_wup = copied_seq = rcv_nxt = _seq;
 
-        snt_isn = req_snt_isn_ref.get();
-        _seq = req_snt_isn_ref.get() + 1;
+        snt_isn = req.snt_isn;
+        _seq = req.snt_isn + 1;
         snd_sml = snd_una = snd_nxt = snd_up = _seq;
 
         // total_retrans = req->num_retrans;
 
         timer.tcp_init_xmit_timers();
-        write_seq = pushed_seq = req_snt_isn_ref.get() + 1;
+        write_seq = pushed_seq = req.snt_isn + 1;
 
-        window_clamp = req_rsk_window_clamp_ref.get();
-        rcv_ssthresh = req_rsk_rcv_wnd_ref.get();
-        rcv_wnd = req_rsk_rcv_wnd_ref.get();
-        wscale_ok = ireq_wscale_ok_ref.get();
+        window_clamp = req.rsk_window_clamp;
+        rcv_ssthresh = req.rsk_rcv_wnd;
+        rcv_wnd = req.rsk_rcv_wnd;
+        wscale_ok = req.wscale_ok;
         if (wscale_ok) {
-            snd_wscale = (byte) ireq_snd_wscale_ref.get();
-            rcv_wscale = (byte) ireq_rcv_wscale_ref.get();
+            snd_wscale = (byte) req.snd_wscale;
+            rcv_wscale = (byte) req.rcv_wscale;
         } else {
             snd_wscale = 0;
             rcv_wscale = 0;
@@ -675,7 +694,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
         }
 
         // ...
-        mss_clamp = req_mss_ref.get();
+        mss_clamp = req.mss;
         return this;
     }
 
@@ -1208,7 +1227,8 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
     }
 
     // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L597
-    int tcp_mss_clamp(final int mss) {
+    int tcp_mss_clamp(final TcpSock tp, final int mss) {
+        final int user_mss = tp.rx_opt.user_mss;
         return user_mss > 0 && user_mss < mss ? user_mss : mss;
     }
 
@@ -1611,8 +1631,8 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
                      * 此处调整为直接创建连接.
                      */
                     sk.state(TcpState.TCP_NEW_SYN_RECV);
-                    final boolean accept = conn_request(ipPacket, skb);
-                    if (!accept) {
+                    tcp_request_sock tcpRequestSock = conn_request(ipPacket, skb);
+                    if (null == tcpRequestSock) {
                         return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
                     }
 
@@ -1621,7 +1641,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
                      * 调用 tcp_check_req, 转换为 TCP_SYN_RECV 的子套接字, 并完成握手后迁移到全连接队列.
                      * 这里暂时没有采用父子关系, 上面直接建立了连接所以直接转换为 TCP_SYNC_RECV.
                      */
-                    tcp_check_req(skb);
+                    tcp_check_req(tcpRequestSock, skb);
 
                     // FIXME 移动到连接打开时
 //                    state.set(State.TCP_SYN_RECV);
@@ -1980,13 +2000,25 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
         }
     }
 
+    public static class inet_request_sock {
+        public int snd_wscale;
+        public int rcv_wscale;
+        public boolean wscale_ok;
+    }
+
+    public static class request_sock extends inet_request_sock{
+        public int rsk_rcv_wnd;
+        public int rsk_window_clamp;
+
+    }
+
     // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L149
-    class tcp_request_sock {
+    public static class tcp_request_sock extends request_sock {
         int mss;
-        boolean req_usec_ts;
+        int req_usec_ts;
         int rcv_isn;
         int snt_isn;
-        int ts_off;
+        long ts_off;
         int snt_tsval_first;
         int snt_tsval_last;
         int last_oow_ack_time;

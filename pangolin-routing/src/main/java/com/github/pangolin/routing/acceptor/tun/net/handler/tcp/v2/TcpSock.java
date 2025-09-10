@@ -104,7 +104,7 @@ public class TcpSock extends InetConnectionSock {
     public int delivered;
     public int rcv_wnd;
 
-    public final RxOptions rx_opt = new RxOptions();
+    public final tcp_options_received rx_opt = new tcp_options_received();
 
     public long bytes_received;
     public int rcv_wup;
@@ -137,10 +137,6 @@ public class TcpSock extends InetConnectionSock {
     public int keepalive_intvl;
     public int linger2;
 
-
-    public class RxOptions {
-        public long saw_tstmap;
-    }
 
     public class RcvRttEst {
         public long rtt_us;

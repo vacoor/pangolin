@@ -135,26 +135,25 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
     }
 
     /**
-     *
      * @param ih
      * @param skb
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1722">tcp_v4_conn_request</a>
      */
     @Override
-    protected boolean conn_request(final IpV4Packet ih, final TcpPacket skb) {
+    protected TcpConnection.tcp_request_sock conn_request(final IpV4Packet ih, final TcpPacket skb) {
         return super.conn_request(ih, skb);
     }
 
     @Override
-    protected void send_synack(final IpHeader ih, final TcpPacket syn_skb) {
-        tcp_v4_send_synack(ih, syn_skb);
+    protected void send_synack(final tcp_request_sock req, final IpHeader ih, final TcpPacket syn_skb) {
+        tcp_v4_send_synack(req, ih, syn_skb);
     }
 
-    protected void tcp_v4_send_synack(final IpHeader iphdr, final TcpPacket syn_skb) {
+    protected void tcp_v4_send_synack(tcp_request_sock req, final IpHeader iphdr, final TcpPacket syn_skb) {
         final IpV4Header iph = (IpV4Header) iphdr;
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
-        final TcpPacket.Builder skb = output.tcp_make_synack(this, iph, syn_skb)
+        final TcpPacket.Builder skb = output.tcp_make_synack(this, req, iph, syn_skb)
                 .asBuilder()
                 .srcAddr(iph.getDstAddr())
                 .dstAddr(iph.getSrcAddr())

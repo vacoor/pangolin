@@ -273,7 +273,7 @@ class TcpOutput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L902">tcp_synack_options</a>
      */
-    private List<TcpOption> tcp_synack_options(TcpConnection<T> tp, int mss) {
+    private List<TcpOption> tcp_synack_options(TcpConnection<T> tp, tcp_request_sock req, int mss) {
         final List<TcpOption> options = Lists.newArrayList();
 
         // XXX
@@ -283,10 +283,10 @@ class TcpOutput<T extends IpPacket> {
                 .maxSegSize((short) mss)
                 .correctLengthAtBuild(true).build());
 
-        if (tp.ireq_wscale_ok_ref.get()) {
+        if (req.wscale_ok) {
             options.add(TcpNoOperationOption.getInstance());
             options.add(new TcpWindowScaleOption.Builder()
-                    .shiftCount((byte) tp.ireq_rcv_wscale_ref.get())
+                    .shiftCount((byte) req.rcv_wscale)
                     .correctLengthAtBuild(true)
                     .build());
         }
@@ -1128,8 +1128,10 @@ class TcpOutput<T extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708
-    protected TcpBuffer tcp_make_synack(final TcpConnection<T> tp, final IpPacket.IpHeader ipHdr, final TcpPacket skb) {
-        int mss = tp.tcp_mss_clamp(tp.dst_metric_advmss());
+    protected TcpBuffer tcp_make_synack(final TcpConnection<T> tp,
+                                        final tcp_request_sock req,
+                                        final IpPacket.IpHeader ipHdr, final TcpPacket skb) {
+        int mss = tp.tcp_mss_clamp(tp, tp.dst_metric_advmss());
         long now = TcpClock.tcp_clock_ns();
 
         final TcpBuffer current = new TcpBuffer()
@@ -1138,13 +1140,13 @@ class TcpOutput<T extends IpPacket> {
                 .srcPort(skb.getHeader().getDstPort())
                 .dstPort(skb.getHeader().getSrcPort())
                 .syn(true).ack(true)
-                .sequenceNumber(tp.req_snt_isn_ref.get())
-                .acknowledgmentNumber(tp.req_rcv_nxt_ref.get())
-                .window((short) Math.min(tp.req_rsk_rcv_wnd_ref.get(), U16_MAX));
+                .sequenceNumber(req.snt_isn)
+                .acknowledgmentNumber(req.rcv_nxt)
+                .window((short) Math.min(req.rsk_rcv_wnd, U16_MAX));
 
         tp.skb_set_delivery_time(current, now, "SKB_CLOCK_MONOTONIC");
 
-        current.options(tcp_synack_options(tp, mss));
+        current.options(tcp_synack_options(tp, req, mss));
 
 
         return current;

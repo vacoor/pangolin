@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_options_received;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
@@ -634,21 +635,26 @@ class TcpInput<T extends IpPacket> {
     }
 
 
-    void tcp_parse_options(TcpConnection<T> tp, final TcpPacket skb, final boolean estab) {
+    void tcp_parse_options(TcpConnection<T> tp, tcp_options_received opt_rx, final TcpPacket skb, final boolean estab) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4183
         final TcpPacket.TcpHeader hdr = skb.getHeader();
         for (final TcpPacket.TcpOption option : hdr.getOptions()) {
             if (option instanceof TcpMaximumSegmentSizeOption && hdr.getSyn() && !estab) {
                 int inMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
                 if (inMss > 0) {
-                    int user_mss = tp.tmp_opt_rx_user_mss.get();
+                    int user_mss = opt_rx.user_mss;
                     inMss = user_mss > 0 && user_mss < inMss ? user_mss : inMss;
-                    tp.tmp_opt_rx_mss_clamp.set(inMss);
+                    opt_rx.mss_clamp = inMss;
+
+//                    tp.tmp_opt_rx_mss_clamp.set(inMss);
                 }
             } else if (option instanceof TcpWindowScaleOption && hdr.getSyn() && !estab && SysctlOptions.sysctl_tcp_window_scaling) {
                 final byte wscale = ((TcpWindowScaleOption) option).getShiftCount();
-                tp.tmp_opt_wscale_ok.set(true);
-                tp.tmp_opt_snd_wscale.set(wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale);
+                opt_rx.wsacle_ok = true;
+                opt_rx.snd_wscacle = wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale;
+
+//                tp.tmp_opt_wscale_ok.set(true);
+//                tp.tmp_opt_snd_wscale.set(wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale);
             }
         }
     }
