@@ -119,9 +119,12 @@ public class TcpSock extends InetConnectionSock {
 
     public long mdev_max_us;
 
+
     // ...
 
     public int snd_cwnd_clamp;
+
+    public long snd_cwnd_stamp;
 
     // ...
 

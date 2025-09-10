@@ -596,7 +596,7 @@ class TcpInput<T extends IpPacket> {
         int nwin = tcpHdr.getWindowAsInt();
 
         if (!tcpHdr.getSyn()) {
-            nwin <<= tp.snd_wscale;
+            nwin <<= tp.rx_opt.snd_wscale;
         }
 
         /*-
@@ -651,7 +651,7 @@ class TcpInput<T extends IpPacket> {
             } else if (option instanceof TcpWindowScaleOption && hdr.getSyn() && !estab && SysctlOptions.sysctl_tcp_window_scaling) {
                 final byte wscale = ((TcpWindowScaleOption) option).getShiftCount();
                 opt_rx.wsacle_ok = true;
-                opt_rx.snd_wscacle = wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale;
+                opt_rx.snd_wscale = wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale;
 
 //                tp.tmp_opt_wscale_ok.set(true);
 //                tp.tmp_opt_snd_wscale.set(wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale);

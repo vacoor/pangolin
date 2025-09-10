@@ -120,7 +120,7 @@ class TcpOutput<T extends IpPacket> {
      */
     private int tcp_acceptable_seq(final TcpConnection<T> tp) {
         if (!before(tp.tcp_wnd_end(), tp.snd_nxt)
-                || (tp.wscale_ok && tp.snd_nxt - tp.tcp_wnd_end() < (1 << tp.rcv_wscale))) {
+                || (tp.rx_opt.wscale_ok && tp.snd_nxt - tp.tcp_wnd_end() < (1 << tp.rx_opt.rcv_wscale))) {
             return tp.snd_nxt;
         }
         return tp.tcp_wnd_end();
@@ -219,9 +219,9 @@ class TcpOutput<T extends IpPacket> {
              *
              * Relax Will Robinson.
              */
-            if (!SysctlOptions.ipv4_sysctl_tcp_shrink_window || 0 != tp.rcv_wscale) {
+            if (!SysctlOptions.ipv4_sysctl_tcp_shrink_window || 0 != tp.rx_opt.rcv_wscale) {
                 /* Never shrink the offered window */
-                new_win = align(cur_win, 1 << tp.rcv_wscale);
+                new_win = align(cur_win, 1 << tp.rx_opt.rcv_wscale);
             }
         }
 
@@ -232,14 +232,14 @@ class TcpOutput<T extends IpPacket> {
          * Make sure we do not exceed the maximum possible
          * scaled window.
          */
-        if (tp.rcv_wscale == 0 && SysctlOptions.ipv4_sysctl_tcp_workaround_signed_windows) {
+        if (tp.rx_opt.rcv_wscale == 0 && SysctlOptions.ipv4_sysctl_tcp_workaround_signed_windows) {
             new_win = Math.min(new_win, TCP_MAX_WINDOW);
         } else {
-            new_win = Math.min(new_win, U16_MAX << tp.rcv_wscale);
+            new_win = Math.min(new_win, U16_MAX << tp.rx_opt.rcv_wscale);
         }
 
         /* RFC1323 scaling applied */
-        new_win >>= tp.rcv_wscale;
+        new_win >>= tp.rx_opt.rcv_wscale;
 
         /* If we advertise zero window, disable fast path. */
         if (new_win == 0) {
@@ -440,8 +440,8 @@ class TcpOutput<T extends IpPacket> {
         int mss_now = pmtu - net_header_len - SIZE_OF_TCP_HDR;
 
         /* Clamp it (mss_clamp does not include tcp options) */
-        if (mss_now > tp.mss_clamp) {
-            mss_now = tp.mss_clamp;
+        if (mss_now > tp.rx_opt.mss_clamp) {
+            mss_now = tp.rx_opt.mss_clamp;
         }
 
         /* Now subtract optional transport overhead */
@@ -840,7 +840,7 @@ class TcpOutput<T extends IpPacket> {
              * FIXME 1. rounddown --> round_down, 2. 和 free_space >> rcv_wscale << rcv_wscale 什么区别 ??
              * free_space = round_down(free_space, 1 << rcv_wscale);
              */
-            free_space = free_space >> tp.rcv_wscale << tp.rcv_wscale;
+            free_space = free_space >> tp.rx_opt.rcv_wscale << tp.rx_opt.rcv_wscale;
 
             /*-
              * if free space is less than mss estimate, or is below 1/16th
@@ -864,14 +864,14 @@ class TcpOutput<T extends IpPacket> {
          * scaled window will not line up with the MSS boundary anyway.
          */
         int window;
-        if (tp.rcv_wscale > 0) {
+        if (tp.rx_opt.rcv_wscale > 0) {
             window = free_space;
 
             /* Advertise enough space so that it won't get scaled away.
              * Import case: prevent zero window announcement if
              * 1<<rcv_wscale > mss.
              */
-            window = align(window, (1 << tp.rcv_wscale));
+            window = align(window, (1 << tp.rx_opt.rcv_wscale));
         } else {
             window = tp.rcv_wnd;
             /* Get the largest window that is a nice multiple of mss.
