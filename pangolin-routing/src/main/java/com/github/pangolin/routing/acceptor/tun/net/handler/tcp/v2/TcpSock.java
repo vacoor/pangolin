@@ -140,6 +140,10 @@ public class TcpSock extends InetConnectionSock {
     public int keepalive_intvl;
     public int linger2;
 
+    public long last_oow_ack_time;
+    public boolean compressed_ack;
+    public int keepalive_probes;
+
 
     public class RcvRttEst {
         public long rtt_us;

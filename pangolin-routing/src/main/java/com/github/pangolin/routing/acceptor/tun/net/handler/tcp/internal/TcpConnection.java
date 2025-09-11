@@ -51,10 +51,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
     public static final int TCPCB_EVER_RETRANS = (1 << 7);    /* Ever retransmitted frame	*/
     public static final int TCPCB_RETRANS = (TCPCB_SACKED_RETRANS | TCPCB_EVER_RETRANS | TCPCB_REPAIRED);
 
-    public int keepalive_probes;
-    public boolean compressed_ack;
     public long ipv4_sysctl_tcp_invalid_ratelimit = HZ / 2;
-    public long last_oow_ack_time;
     public int ipv4_sysctl_tcp_challenge_ack_limit = HZ / 2;
     public long ipv4_tcp_challenge_timestamp;
     public int ipv4_tcp_challenge_count;
@@ -140,9 +137,9 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
-        this.output = new TcpOutput<T>(this);
+        this.output = new TcpOutput<T>();
         this.input = new TcpInput<>(this.output);
-        this.timer = new TcpTimer<>(this);
+        this.timer = new TcpTimer<>();
         init();
         this.listen();
     }
@@ -287,7 +284,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
         if (pace_delay) {
             when += tcp_pacing_delay();
         }
-        timer.inet_csk_reset_xmit_timer(what, when, tcp_rto_max());
+        timer.inet_csk_reset_xmit_timer(this, what, when, tcp_rto_max());
     }
 
     /**
@@ -682,7 +679,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
         newsk.lsndtime = tcp_jiffies32();
         // newsk.total_retrans = req->num_retrans;
 
-        timer.tcp_init_xmit_timers();
+        timer.tcp_init_xmit_timers(this);
         newtp.write_seq = newtp.pushed_seq = req.snt_isn + 1;
 
         // ... keepopen
@@ -1210,7 +1207,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
         if (TCP_FIN_WAIT2.equals(state)) {
             final int tmo = tcp_fin_time();
             if (tmo > TcpConstants.TCP_TIMEWAIT_LEN) {
-                timer.tcp_reset_keepalive_timer(tmo - TcpConstants.TCP_TIMEWAIT_LEN);
+                timer.tcp_reset_keepalive_timer(this, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
             } else {
                 tcp_time_wait(TCP_FIN_WAIT2, tmo);
                 return;
@@ -1302,7 +1299,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
         // ... fastopen
 
         state.set(TcpState.TCP_CLOSE);
-        timer.tcp_clear_xmit_timers();
+        timer.tcp_clear_xmit_timers(this);
 
         // ... fastopen...
 
@@ -1775,7 +1772,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
                     /*-
                      * FIN_WAIT2 开始的总超时时间 > TIME_WAIT 的 2MSL, 则在进入 TIME_WAIT 前保证连接存活.
                      */
-                    timer.tcp_reset_keepalive_timer(tmo - TcpConstants.TCP_TIMEWAIT_LEN);
+                    timer.tcp_reset_keepalive_timer(this, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
                 } else if (th.getFin()) {
                     /* Bad case. We could lose such FIN otherwise.
                      * It is not a big problem, but it looks confusing
@@ -1783,7 +1780,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
                      * if it spins in bh_lock_sock(), but it is really
                      * marginal case.
                      */
-                    timer.tcp_reset_keepalive_timer(tmo);
+                    timer.tcp_reset_keepalive_timer(this, tmo);
                 } else {
                     tcp_time_wait(TCP_FIN_WAIT2, tmo);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;

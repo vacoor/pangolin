@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.*;
@@ -23,11 +24,6 @@ import static org.pcap4j.packet.TcpPacket.TcpOption;
  */
 @Slf4j
 class TcpOutput<T extends IpPacket> {
-    private final TcpConnection<T> tp;
-
-    TcpOutput(final TcpConnection<T> conn) {
-        this.tp = conn;
-    }
 
     /**
      * Refresh clocks of a TCP socket,
@@ -35,7 +31,7 @@ class TcpOutput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L55">tcp_mstamp_refresh</a>
      */
-    void tcp_mstamp_refresh(final TcpConnection<T> tp) {
+    void tcp_mstamp_refresh(final TcpSock tp) {
         final long ns = TcpClock.tcp_clock_ns();
         tp.tcp_clock_cache = ns;
         tp.tcp_mstamp = TimeUnit.NANOSECONDS.toMicros(ns);
@@ -619,7 +615,7 @@ class TcpOutput<T extends IpPacket> {
             }
 
             final int tso_segs = tcp_set_skb_tso_segs(skb, mss_now);
-            if (!tcp_snd_wnd_test(skb, mss_now)) {
+            if (!tcp_snd_wnd_test(tp, skb, mss_now)) {
                 is_rwnd_limited = true;
                 break;
             }
@@ -756,7 +752,7 @@ class TcpOutput<T extends IpPacket> {
     }
 
     /* Does at least the first segment of SKB fit into the send window? */
-    boolean tcp_snd_wnd_test(TcpBuffer skb, int cur_mss) {
+    boolean tcp_snd_wnd_test(TcpConnection<?> tp, TcpBuffer skb, int cur_mss) {
         int end_seq = determineEndSeq(skb);
         int skb_len = skb.asBuilder().build().length();
         if (skb_len > cur_mss)
@@ -1104,7 +1100,7 @@ class TcpOutput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3578">tcp_send_fin</a>
      */
     void tcp_send_fin(final TcpConnection<T> tp) {
-        final TcpBuffer skb = tcp_init_nondata_skb(tp.write_seq, TcpConstants.ACK | TcpConstants.FIN);
+        final TcpBuffer skb = tcp_init_nondata_skb(tp, tp.write_seq, TcpConstants.ACK | TcpConstants.FIN);
         tcp_queue_skb(tp, skb);
         __tcp_push_pending_frames(tp, tcp_current_mss(tp), TCP_NAGLE_OFF);
     }
@@ -1114,7 +1110,7 @@ class TcpOutput<T extends IpPacket> {
      */
     void tcp_send_active_reset(final TcpConnection<T> tp, final String reason) {
         //
-        TcpBuffer skb = tcp_init_nondata_skb(tcp_acceptable_seq(tp), TcpConstants.ACK | TcpConstants.RST);
+        TcpBuffer skb = tcp_init_nondata_skb(tp, tcp_acceptable_seq(tp), TcpConstants.ACK | TcpConstants.RST);
         tcp_mstamp_refresh(tp);
 
         /* Send it off. */
@@ -1220,7 +1216,7 @@ class TcpOutput<T extends IpPacket> {
 
         if (tp.icsk_delack_timeout() != timeout) {
             tp.icsk_ack.timeout = tp.icsk_delack_timeout();
-            tp.timer.sk_reset_timer(tp.timer.icsk_delack_timer, timeout);
+            tp.timer.sk_reset_timer(tp, tp.timer.icsk_delack_timer, timeout);
         }
     }
 
@@ -1241,7 +1237,7 @@ class TcpOutput<T extends IpPacket> {
         // FIXME
 
         // ...
-        TcpBuffer buf = tcp_init_nondata_skb(tcp_acceptable_seq(tp), TcpConstants.ACK);
+        TcpBuffer buf = tcp_init_nondata_skb(tp, tcp_acceptable_seq(tp), TcpConstants.ACK);
 
         /* Send it off, this clears delayed acks for us. */
         __tcp_transmit_skb(tp, buf, false, rcv_nxt);
@@ -1265,7 +1261,7 @@ class TcpOutput<T extends IpPacket> {
          * send it.
          */
         final int seq = tp.snd_una - (0 == urgent ? 1 : 0);
-        final TcpBuffer skb = tcp_init_nondata_skb(seq, ACK);
+        final TcpBuffer skb = tcp_init_nondata_skb(tp, seq, ACK);
         return tcp_transmit_skb(tp, skb, false);
     }
 
@@ -1355,7 +1351,7 @@ class TcpOutput<T extends IpPacket> {
         tp.tcp_reset_xmit_timer(TcpTimer.ICSK_TIME_PROBE0, timeout, true);
     }
 
-    private TcpBuffer tcp_init_nondata_skb(int seq, int flags) {
+    private TcpBuffer tcp_init_nondata_skb(TcpConnection<?> tp, int seq, int flags) {
         TcpBuffer skb = new TcpBuffer();
         skb.srcAddr(tp.ipHeader.getDstAddr());
         skb.dstAddr(tp.ipHeader.getSrcAddr());
