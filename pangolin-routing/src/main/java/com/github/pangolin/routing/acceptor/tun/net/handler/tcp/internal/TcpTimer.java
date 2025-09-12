@@ -284,7 +284,7 @@ class TcpTimer<T extends IpPacket> {
                 // && !sock_flag(sk, SOCK_DEAD)
                 && ((1 << tp.state.get().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV)) != 0) {
 
-            long us_or_ms1 = tp.tcp_time_stamp_ts();
+            long us_or_ms1 = tp.tcp_time_stamp_ts(tp);
             long retrans_stamp0 = tp.retrans_stamp != 0 ? tp.retrans_stamp : tp.tcp_skb_timestamp_ts(tp.tcp_usec_ts, skb);
             long rtx_delta = us_or_ms1 - retrans_stamp0;
 
@@ -381,7 +381,7 @@ class TcpTimer<T extends IpPacket> {
             long delta = tp.tcp_mstamp - start_ts + TcpClock.jiffies_to_usecs(1);
             return delta - TimeUnit.MILLISECONDS.toMicros(timeout) >= 0;
         }
-        return tp.tcp_time_stamp_ts() - start_ts - timeout >= 0;
+        return tp.tcp_time_stamp_ts(tp) - start_ts - timeout >= 0;
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L186
@@ -412,7 +412,7 @@ class TcpTimer<T extends IpPacket> {
         if (user_timeout == 0) {
             return tp.icsk_rto;
         }
-        long elapsed = tp.tcp_time_stamp_ts() - tp.retrans_stamp;
+        long elapsed = tp.tcp_time_stamp_ts(tp) - tp.retrans_stamp;
         if (tp.tcp_usec_ts != 0) {
             elapsed = TimeUnit.MICROSECONDS.toMillis(elapsed);
         }

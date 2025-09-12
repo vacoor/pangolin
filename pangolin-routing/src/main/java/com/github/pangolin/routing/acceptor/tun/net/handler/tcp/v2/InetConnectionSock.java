@@ -38,7 +38,6 @@ public class InetConnectionSock extends Sock {
     public int icsk_user_timeout;
 
 
-
     public static class IcskAck {
         public volatile int pending;
         public int pingpong;

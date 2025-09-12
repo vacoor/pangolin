@@ -60,7 +60,7 @@ public abstract class TcpUtils {
         return value & 0xFFFFFFFFL;
     }
 
-    static int ilog2(int a) {
+    public static int ilog2(int a) {
         return (int) (Math.log(a) / Math.log(2));
     }
 

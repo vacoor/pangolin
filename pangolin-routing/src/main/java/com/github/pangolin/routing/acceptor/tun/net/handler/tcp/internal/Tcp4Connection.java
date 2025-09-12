@@ -5,6 +5,7 @@ import static org.pcap4j.packet.IpPacket.IpHeader;
 import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
@@ -36,7 +37,7 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
     }
 
     private void tcp_v4_init_sock() {
-        tcp_init_sock();
+        tcp_init_sock(this);
     }
 
     /**
@@ -141,19 +142,19 @@ public class Tcp4Connection extends TcpConnection<IpV4Packet> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1722">tcp_v4_conn_request</a>
      */
     @Override
-    protected TcpConnection.tcp_request_sock conn_request(final IpV4Packet ih, final TcpPacket skb) {
-        return super.conn_request(ih, skb);
+    protected TcpConnection.tcp_request_sock conn_request(TcpConnection<IpV4Packet> sock, final IpV4Packet ih, final TcpPacket skb) {
+        return super.conn_request(sock, ih, skb);
     }
 
     @Override
-    protected void send_synack(final tcp_request_sock req, final IpHeader ih, final TcpPacket syn_skb) {
-        tcp_v4_send_synack(req, ih, syn_skb);
+    protected void send_synack(final TcpConnection<IpV4Packet> p, final tcp_request_sock req, final IpHeader ih, final TcpPacket syn_skb) {
+        tcp_v4_send_synack(p, req, ih, syn_skb);
     }
 
-    protected void tcp_v4_send_synack(tcp_request_sock req, final IpHeader iphdr, final TcpPacket syn_skb) {
+    protected void tcp_v4_send_synack(TcpConnection<IpV4Packet> p, tcp_request_sock req, final IpHeader iphdr, final TcpPacket syn_skb) {
         final IpV4Header iph = (IpV4Header) iphdr;
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
-        final TcpPacket.Builder skb = output.tcp_make_synack(this, req, iph, syn_skb)
+        final TcpPacket.Builder skb = output.tcp_make_synack(p, req, iph, syn_skb)
                 .asBuilder()
                 .srcAddr(iph.getDstAddr())
                 .dstAddr(iph.getSrcAddr())

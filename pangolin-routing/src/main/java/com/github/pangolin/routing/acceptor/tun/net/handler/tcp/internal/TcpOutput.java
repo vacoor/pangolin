@@ -425,7 +425,7 @@ class TcpOutput<T extends IpPacket> {
      * @return mss to use
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1755">__tcp_mtu_to_mss</a>
      */
-    private int __tcp_mtu_to_mss(final TcpConnection<T> tp, final int pmtu) {
+    private int __tcp_mtu_to_mss(final TcpSock tp, final int pmtu) {
         // XXX icsk->icsk_af_ops->net_header_len
         final int net_header_len = IP_HEADER_SIZE;
 
@@ -454,7 +454,7 @@ class TcpOutput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1780">tcp_mtu_to_mss</a>
      */
-    private int tcp_mtu_to_mss(final TcpConnection<T> tp, final int pmtu) {
+    private int tcp_mtu_to_mss(final TcpSock tp, final int pmtu) {
         /* Subtract TCP options size, not including SACKs */
         return __tcp_mtu_to_mss(tp, pmtu) - (tp.tcp_header_len - SIZE_OF_TCP_HDR);
     }
@@ -946,7 +946,7 @@ class TcpOutput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1552">TCP_DEFAULT_SCALING_RATIO</a>
      */
-    private static final int TCP_DEFAULT_SCALING_RATIO = (1 << (TCP_RMEM_TO_WIN_SCALE - 1));
+    public static final int TCP_DEFAULT_SCALING_RATIO = (1 << (TCP_RMEM_TO_WIN_SCALE - 1));
 
     private int __tcp_win_from_space(int scaling_ratio, int space) {
         int scaled_space = space * scaling_ratio;

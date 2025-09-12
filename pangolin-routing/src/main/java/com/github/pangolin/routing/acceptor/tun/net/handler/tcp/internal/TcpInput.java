@@ -645,16 +645,11 @@ class TcpInput<T extends IpPacket> {
                     int user_mss = opt_rx.user_mss;
                     inMss = user_mss > 0 && user_mss < inMss ? user_mss : inMss;
                     opt_rx.mss_clamp = inMss;
-
-//                    tp.tmp_opt_rx_mss_clamp.set(inMss);
                 }
             } else if (option instanceof TcpWindowScaleOption && hdr.getSyn() && !estab && SysctlOptions.sysctl_tcp_window_scaling) {
                 final byte wscale = ((TcpWindowScaleOption) option).getShiftCount();
-                opt_rx.wsacle_ok = true;
+                opt_rx.wscale_ok = true;
                 opt_rx.snd_wscale = wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale;
-
-//                tp.tmp_opt_wscale_ok.set(true);
-//                tp.tmp_opt_snd_wscale.set(wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale);
             }
         }
     }

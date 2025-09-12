@@ -33,7 +33,7 @@ public class TcpClock {
         return msecs_to_jiffies(TimeUnit.MICROSECONDS.toMillis(us));
     }
 
-    static long nsecs_to_jiffies(long ns) {
+    public static long nsecs_to_jiffies(long ns) {
         return msecs_to_jiffies(TimeUnit.NANOSECONDS.toMillis(ns));
     }
 
