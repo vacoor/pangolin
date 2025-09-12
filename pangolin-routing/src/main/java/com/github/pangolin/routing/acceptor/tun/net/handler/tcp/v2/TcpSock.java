@@ -1,17 +1,20 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.nsecs_to_jiffies;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_OFF;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_ACK_SCHED;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.ilog2;
 
 /**
  * https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L194
  */
+@Slf4j
 public class TcpSock extends InetConnectionSock {
     /*-
      *              |<------- TCP recv window ------->|
@@ -127,8 +130,8 @@ public class TcpSock extends InetConnectionSock {
     /**
      * 已发送未ACK的数据包数量.
      *
-     * @see TcpOutput#tcp_event_new_data_sent(TcpConnection, TcpBuffer)
-     * @see TcpInput#tcp_clean_rtx_queue(TcpConnection, int)
+     * @see TcpOutput#tcp_event_new_data_sent(TcpDemultiplexer, TcpBuffer)
+     * @see TcpInput#tcp_clean_rtx_queue(TcpDemultiplexer, int)
      */
     public int packets_out;
     /**
@@ -273,6 +276,89 @@ public class TcpSock extends InetConnectionSock {
         final int backoff = Math.min(ilog2(TCP_RTO_MAX / TCP_RTO_MIN) + 1, icsk_backoff);
         final long when = tcp_probe0_base() << backoff;
         return Math.min(when, max_when);
+    }
+
+    public long tcp_time_stamp_ts() {
+        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L934
+        // ???
+        TcpSock tp = this;
+        if (tp.tcp_usec_ts > 0) {
+            return tcp_mstamp;
+        }
+        return tcp_time_stamp_ms();
+    }
+
+    public long tcp_time_stamp_ms() {
+        return TimeUnit.MICROSECONDS.toMillis(tcp_mstamp);
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L172">inet_csk_schedule_ack</a>
+     */
+    public void inet_csk_schedule_ack() {
+        icsk_ack.pending |= TcpTimer.ICSK_ACK_SCHED;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L177">inet_csk_ack_scheduled</a>
+     */
+    public boolean inet_csk_ack_scheduled() {
+        return 0 != (icsk_ack.pending & ICSK_ACK_SCHED);
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L329">inet_csk_enter_pingpong_mode</a>
+     */
+    public void inet_csk_enter_pingpong_mode() {
+        log.trace("[PING-PONG] enter PING-PONG mode, PING-PONG threshold = {}", SysctlOptions.sysctl_tcp_pingpong_thresh);
+        icsk_ack.pingpong = SysctlOptions.sysctl_tcp_pingpong_thresh;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L335">inet_csk_exit_pingpong_mode</a>
+     */
+    public void inet_csk_exit_pingpong_mode() {
+        if (inet_csk_in_pingpong_model()) {
+            log.trace("[PING-PONG] exit PING-PONG mode");
+        }
+        icsk_ack.pingpong = 0;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L340">inet_csk_in_pingpong_model</a>
+     */
+    public boolean inet_csk_in_pingpong_model() {
+        return icsk_ack.pingpong >= SysctlOptions.sysctl_tcp_pingpong_thresh;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L346">inet_csk_inc_pingpong_cnt</a>
+     */
+    public void inet_csk_inc_pingpong_cnt() {
+        if (icsk_ack.pingpong < TcpConstants.U8_MAX) {
+            log.trace("[PING-PONG] increment PING-PONG count: {} -> {}", icsk_ack.pingpong, icsk_ack.pingpong + 1);
+            icsk_ack.pingpong++;
+        }
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L357">tcp_dec_quickack_mode</a>
+     */
+    public void tcp_dec_quickack_mode() {
+        if (icsk_ack.quick != 0) {
+            /* How many ACKs S/ACKing new data have we sent? */
+            final int pkts = inet_csk_ack_scheduled() ? 1 : 0;
+
+            if (pkts >= icsk_ack.quick) {
+                log.trace("[QUICK-ACK] decrement QUICK-ARK count: {} -> {}", icsk_ack.quick, 0);
+                icsk_ack.quick = 0;
+                /* Leaving quickack mode we deflate ATO. */
+                icsk_ack.ato = TcpConstants.TCP_ATO_MIN;
+            } else if (pkts != 0) {
+                log.trace("[QUICK-ACK] decrement QUICK-ARK count: {} -> {}", icsk_ack.quick, icsk_ack.quick - pkts);
+                icsk_ack.quick -= pkts;
+            }
+        }
     }
 
 

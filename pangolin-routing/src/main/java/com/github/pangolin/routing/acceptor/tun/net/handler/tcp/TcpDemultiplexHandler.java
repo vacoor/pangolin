@@ -2,7 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.IpPacketHandler;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
@@ -29,7 +29,7 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
     private final SocketChannelFactory socketChannelFactory;
     private final EventLoopGroup childGroup = new NioEventLoopGroup();
 
-    private final Map<String, TcpConnection> sessionMap = Maps.newConcurrentMap();
+    private final Map<String, TcpDemultiplexer> sessionMap = Maps.newConcurrentMap();
 
     public TcpDemultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
         super(IpNumber.TCP);
@@ -65,10 +65,10 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
                     sessionMap.remove(sockKey);
             }));
         }
-        TcpConnection<T> tcpConnection = sessionMap.get(sockKey);
-        if (null != tcpConnection) {
+        TcpDemultiplexer<T> tcpDemultiplexer = sessionMap.get(sockKey);
+        if (null != tcpDemultiplexer) {
             childGroup.execute(() -> {
-                tcpConnection.handler(ipPacket, tcpPacket);
+                tcpDemultiplexer.handler(ipPacket, tcpPacket);
             });
         }
 
@@ -94,7 +94,7 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
         return address;
     }
 
-    protected abstract TcpConnection<T> create(Channel parent, EventLoopGroup childGroup, DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory, Runnable destroyCallback);
+    protected abstract TcpDemultiplexer<T> create(Channel parent, EventLoopGroup childGroup, DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory, Runnable destroyCallback);
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {

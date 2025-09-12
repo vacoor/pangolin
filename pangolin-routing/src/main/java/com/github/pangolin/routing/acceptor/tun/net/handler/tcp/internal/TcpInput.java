@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_options_received;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
@@ -12,7 +13,7 @@ import java.security.SecureRandom;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.jiffies;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.tcp_jiffies32;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.*;
@@ -75,7 +76,7 @@ class TcpInput<T extends IpPacket> {
      * @param max_quickacks the maximum times of quickly ACKs allowed
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L300">tcp_incr_quickack</a>
      */
-    protected void tcp_incr_quickack(final TcpConnection<T> tp, int max_quickacks) {
+    protected void tcp_incr_quickack(final TcpDemultiplexer<T> tp, int max_quickacks) {
         int quickacks = tp.rcv_wnd / (2 * tp.icsk_ack.rcv_mss);
         if (0 == quickacks) {
             quickacks = 2;
@@ -93,7 +94,7 @@ class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_enter_quickack_mode</a>
      */
-    protected void tcp_enter_quickack_mode(TcpConnection<T> tp, int max_quickacks) {
+    protected void tcp_enter_quickack_mode(TcpDemultiplexer<T> tp, int max_quickacks) {
         tp.logTrace("[QUICK-ACK] enter QUICK-ARK count: {} -> {}", tp.icsk_ack.quick, max_quickacks);
         tcp_incr_quickack(tp, max_quickacks);
         tp.inet_csk_exit_pingpong_mode();
@@ -106,7 +107,7 @@ class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_in_quickack_mode</a>
      */
-    protected boolean tcp_in_quickack_mode(TcpConnection<T> tp) {
+    protected boolean tcp_in_quickack_mode(TcpDemultiplexer<T> tp) {
         return tp.icsk_ack.quick > 0 && !tp.inet_csk_in_pingpong_model();
     }
 
@@ -115,7 +116,7 @@ class TcpInput<T extends IpPacket> {
      * <p>
      * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5760.
      */
-    private void __tcp_ack_snd_check(final TcpConnection<T> tp) {
+    private void __tcp_ack_snd_check(final TcpDemultiplexer<T> tp) {
         if (
             // (tp.rcv_nxt - tp.rcv_wup > tp.icsk_ack.rcv_mss
             /* ... and right edge of window advances far enough.
@@ -140,7 +141,7 @@ class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5827">tcp_ack_snd_check</a>
      */
-    void tcp_ack_snd_check(TcpConnection<T> tp) {
+    void tcp_ack_snd_check(TcpDemultiplexer<T> tp) {
         if (!tp.inet_csk_ack_scheduled()) {
             /* We sent a data segment already. */
             return;
@@ -148,14 +149,14 @@ class TcpInput<T extends IpPacket> {
         __tcp_ack_snd_check(tp);
     }
 
-    private void tcp_rcv_nxt_update(TcpConnection<T> tp, final int seq) {
+    private void tcp_rcv_nxt_update(TcpSock tp, final int seq) {
         final int delta = seq - tp.rcv_nxt;
         tp.bytes_received += delta;
         // tcp_rcv_sne_update(seq)
         tp.rcv_nxt = seq;
     }
 
-    private int tcp_queue_rcv(final TcpConnection<T> tp, final TcpPacket skb) {
+    private int tcp_queue_rcv(final TcpDemultiplexer<T> tp, final TcpPacket skb) {
         // https://www.cnblogs.com/wanpengcoder/p/11752122.html
         final TcpPacket.TcpHeader hdr = skb.getHeader();
         final int len = skb.length() - hdr.length();
@@ -167,7 +168,7 @@ class TcpInput<T extends IpPacket> {
     }
 
 
-    private void out_of_window(TcpConnection<T> tp, final TcpPacket skb, final int reason) {
+    private void out_of_window(TcpDemultiplexer<T> tp, final TcpPacket skb, final int reason) {
         tcp_enter_quickack_mode(tp, TCP_MAX_QUICKACKS);
         tp.inet_csk_schedule_ack();
         drop(skb, reason);
@@ -178,7 +179,7 @@ class TcpInput<T extends IpPacket> {
     }
 
 
-    private void queue_and_out(TcpConnection<T> tp, final TcpPacket skb) throws IOException {
+    private void queue_and_out(TcpDemultiplexer<T> tp, final TcpPacket skb) throws IOException {
         // queue_and_out;
         final TcpPacket.TcpHeader th = skb.getHeader();
 
@@ -215,7 +216,7 @@ class TcpInput<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L820">tcp_event_data_recv</a>
      */
-    private void tcp_event_data_recv(TcpConnection<T> tp, final TcpPacket skb) throws IOException {
+    private void tcp_event_data_recv(TcpDemultiplexer<T> tp, final TcpPacket skb) throws IOException {
         tp.inet_csk_schedule_ack();
 
         tp.tcp_measure_rcv_mss(skb);
@@ -274,7 +275,7 @@ class TcpInput<T extends IpPacket> {
      * @param skb
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5229">tcp_input.c</a>
      */
-    void tcp_data_queue(final TcpConnection<T> tp, final TcpPacket skb) throws IOException {
+    void tcp_data_queue(final TcpDemultiplexer<T> tp, final TcpPacket skb) throws IOException {
         final TcpPacket.TcpHeader hdr = skb.getHeader();
         final int seq = hdr.getSequenceNumber();
         final int endSeq = determineEndSeq(skb);
@@ -336,7 +337,7 @@ class TcpInput<T extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4521
-    void tcp_done_with_error(final TcpConnection<T> tp, int err) {
+    void tcp_done_with_error(final TcpDemultiplexer<T> tp, int err) {
         // sk->sk_err = err;
         tp.logError("TCP DONE WITH ERROR: {}", err);
 
@@ -351,7 +352,7 @@ class TcpInput<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4430">tcp_reset</a>
      */
-    void tcp_reset(TcpConnection<T> tp, final TcpPacket skb) {
+    void tcp_reset(TcpDemultiplexer<T> tp, final TcpPacket skb) {
         // sk_is_mptcp
 
         int err;
@@ -375,7 +376,7 @@ class TcpInput<T extends IpPacket> {
     /**
      * Process the FIN bit.
      */
-    private void tcp_fin(TcpConnection<T> tp) {
+    private void tcp_fin(TcpDemultiplexer<T> tp) {
         tp.inet_csk_schedule_ack();
 
         tp.sk_shutdown |= RCV_SHUTDOWN;
@@ -441,7 +442,7 @@ class TcpInput<T extends IpPacket> {
 
     }
 
-    private int tcp_clean_rtx_queue(TcpConnection<T> tp, int prior_snd_una) {
+    private int tcp_clean_rtx_queue(TcpDemultiplexer<T> tp, int prior_snd_una) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3340
 
         long first_ackt = 0;
@@ -541,7 +542,7 @@ class TcpInput<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3546">tcp_ack_probe</a>
      */
-    private void tcp_ack_probe(TcpConnection<T> tp) {
+    private void tcp_ack_probe(TcpDemultiplexer<T> tp) {
         final TcpBuffer head = tp.tcp_send_head();
 
         /* Was it a usable window open? */
@@ -569,7 +570,7 @@ class TcpInput<T extends IpPacket> {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3620">tcp_may_update_window</a>
      */
-    private boolean tcp_may_update_window(TcpConnection<T> tp, final int ack, final int ack_seq, final int nwin) {
+    private boolean tcp_may_update_window(TcpDemultiplexer<T> tp, final int ack, final int ack_seq, final int nwin) {
         return ack > tp.snd_una
                 || ack_seq > tp.snd_wl1
                 || (ack_seq == tp.snd_wl1 && (nwin > tp.snd_wnd || nwin == 0));
@@ -579,7 +580,7 @@ class TcpInput<T extends IpPacket> {
      * @param ack
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3629">tcp_snd_sne_update</a>
      */
-    private void tcp_snd_sne_update(TcpConnection<T> tp, int ack) {
+    private void tcp_snd_sne_update(TcpDemultiplexer<T> tp, int ack) {
 
     }
 
@@ -591,7 +592,7 @@ class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3696">tcp_ack_update_window</a>
      */
-    private int tcp_ack_update_window(TcpConnection<T> tp, final TcpPacket.TcpHeader tcpHdr, final int ack, final int ack_seq) {
+    private int tcp_ack_update_window(TcpDemultiplexer<T> tp, final TcpPacket.TcpHeader tcpHdr, final int ack, final int ack_seq) {
         int flag = 0;
         int nwin = tcpHdr.getWindowAsInt();
 
@@ -635,7 +636,7 @@ class TcpInput<T extends IpPacket> {
     }
 
 
-    void tcp_parse_options(TcpConnection<T> tp, tcp_options_received opt_rx, final TcpPacket skb, final boolean estab) {
+    void tcp_parse_options(TcpDemultiplexer<T> tp, tcp_options_received opt_rx, final TcpPacket skb, final boolean estab) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4183
         final TcpPacket.TcpHeader hdr = skb.getHeader();
         for (final TcpPacket.TcpOption option : hdr.getOptions()) {
@@ -663,13 +664,13 @@ class TcpInput<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5664">tcp_data_snd_check</a>
      */
-    protected void tcp_data_snd_check(final TcpConnection<T> tp) {
+    protected void tcp_data_snd_check(final TcpDemultiplexer<T> tp) {
         tp.tcp_push_pending_frames();
         tcp_check_space();
     }
 
 
-    private boolean tcp_reset_check(TcpConnection<T> tp, final TcpPacket skb) {
+    private boolean tcp_reset_check(TcpDemultiplexer<T> tp, final TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5939
         final int seq = skb.getHeader().getSequenceNumber();
         return seq == tp.rcv_nxt - 1 && 0 != ((1 << tp.state.get().ordinal()) | (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
@@ -678,7 +679,7 @@ class TcpInput<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5870">tcp_validate_incoming</a>
      */
-    boolean tcp_validate_incoming(TcpConnection<T> tp, final TcpPacket skb) {
+    boolean tcp_validate_incoming(TcpDemultiplexer<T> tp, final TcpPacket skb) {
         final TcpPacket.TcpHeader th = skb.getHeader();
         final int seq = th.getSequenceNumber();
         final int end_seq = determineEndSeq(skb);
@@ -809,11 +810,11 @@ class TcpInput<T extends IpPacket> {
         return true;
     }
 
-    private void tcp_drop_reason(final TcpConnection<T> tp, int reason) {
+    private void tcp_drop_reason(final TcpDemultiplexer<T> tp, int reason) {
     }
 
 
-    private int tcp_disordered_ack_check(final TcpConnection<T> tp, final TcpPacket skb) {
+    private int tcp_disordered_ack_check(final TcpDemultiplexer<T> tp, final TcpPacket skb) {
         int reason = TCP_RFC7323_PAWS;
         TcpPacket.TcpHeader th = skb.getHeader();
         int seq = th.getSequenceNumber();
@@ -845,7 +846,7 @@ class TcpInput<T extends IpPacket> {
         return 0;
     }
 
-    private void tcp_send_dupack(final TcpConnection<T> tp, final TcpPacket skb) {
+    private void tcp_send_dupack(final TcpDemultiplexer<T> tp, final TcpPacket skb) {
         TcpPacket.TcpHeader th = skb.getHeader();
         int seq = th.getSequenceNumber();
         int end_seq = determineEndSeq(skb);
@@ -861,7 +862,7 @@ class TcpInput<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4394">tcp_sequence</a>
      */
-    private int tcp_sequence(final TcpConnection<T> tp, final int seq, final int end_seq) {
+    private int tcp_sequence(final TcpDemultiplexer<T> tp, final int seq, final int end_seq) {
         if (before(end_seq, tp.rcv_wup)) {
             return SKB_DROP_REASON_TCP_OLD_SEQUENCE;
         }
@@ -883,7 +884,7 @@ class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3647">tcp_snd_una_update</a>
      */
-    private void tcp_snd_una_update(TcpConnection<T> tp, final int ack) {
+    private void tcp_snd_una_update(TcpDemultiplexer<T> tp, final int ack) {
         final int delta = ack - tp.snd_una;
         tp.bytes_acked += delta;
         tcp_snd_sne_update(tp, ack);
@@ -896,7 +897,7 @@ class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3805">tcp_ack</a>
      */
-    int tcp_ack(final TcpConnection<T> tp, final TcpPacket skb, int flag) {
+    int tcp_ack(final TcpDemultiplexer<T> tp, final TcpPacket skb, int flag) {
         final TcpPacket.TcpHeader tcpHdr = skb.getHeader();
         final int prior_snd_una = tp.snd_una;
         final int prior_packets_out = tp.packets_out;
@@ -1016,7 +1017,7 @@ class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3606"></a>
      */
-    private boolean __tcp_oow_rate_limited(TcpConnection<T> net, int mib_idx, long last_oow_ack_time) {
+    private boolean __tcp_oow_rate_limited(TcpDemultiplexer<T> net, int mib_idx, long last_oow_ack_time) {
 //        final long last_oow_ack_time = net.last_oow_ack_time;
         if (0 != last_oow_ack_time) {
             final long elapsed = tcp_jiffies32() - last_oow_ack_time;
@@ -1037,7 +1038,7 @@ class TcpInput<T extends IpPacket> {
      * do this, we do not send a duplicate SYNACK or ACK if the remote
      * endpoint is sending out-of-window SYNs or pure ACKs at a high rate.
      */
-    private boolean tcp_oow_rate_limited(TcpConnection<T> net, TcpPacket skb, int mib_idx, long last_oow_ack_time) {
+    private boolean tcp_oow_rate_limited(TcpDemultiplexer<T> net, TcpPacket skb, int mib_idx, long last_oow_ack_time) {
         final TcpPacket.TcpHeader th = skb.getHeader();
         /* Data packets without SYNs are not likely part of an ACK loop. */
         if ((th.getSequenceNumber() != determineEndSeq(skb)) && !th.getSyn()) {
@@ -1052,7 +1053,7 @@ class TcpInput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3649">tcp_send_challenge_ack</a>
      * @param tp
      */
-    private void tcp_send_challenge_ack(TcpConnection<T> tp) {
+    private void tcp_send_challenge_ack(TcpDemultiplexer<T> tp) {
         /* First check our per-socket dupack rate limit. */
         if (__tcp_oow_rate_limited(tp, 0, tp.last_oow_ack_time)) {
             return;
@@ -1084,7 +1085,7 @@ class TcpInput<T extends IpPacket> {
         return a + random.nextInt(b - a);
     }
 
-    public void tcp_sack_compress_send_ack(TcpConnection<T> tp) {
+    public void tcp_sack_compress_send_ack(TcpDemultiplexer<T> tp) {
         // FIXME
     }
 }

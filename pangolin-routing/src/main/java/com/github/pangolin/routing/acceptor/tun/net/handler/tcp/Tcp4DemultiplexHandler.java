@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.Tcp4Connection;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConnection;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.Tcp4Demultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
@@ -59,8 +59,8 @@ public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler<IpV4Packet> {
     }
 
     @Override
-    protected TcpConnection<IpV4Packet> create(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory, final Runnable destroyCallback) {
-        return new Tcp4Connection(parent, childGroup, dnsEngine, socketChannelFactory) {
+    protected TcpDemultiplexer<IpV4Packet> create(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory, final Runnable destroyCallback) {
+        return new Tcp4Demultiplexer(parent, childGroup, dnsEngine, socketChannelFactory) {
             @Override
             protected void destroy0() {
                 destroyCallback.run();

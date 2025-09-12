@@ -23,7 +23,6 @@ import org.pcap4j.packet.namednumber.TcpPort;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,7 +36,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
-public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
+public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
     static final short IP_HEADER_SIZE = 20;
     private static final short TCP_HEADER_SIZE = 20;
@@ -86,7 +85,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
     TcpOutput<T> output;
     TcpTimer<T> timer;
 
-    protected TcpConnection(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+    protected TcpDemultiplexer(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         this.parent = parent;
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
@@ -102,7 +101,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
         tcp_init_sock(this);
     }
 
-    private TcpConnection<T> listen() {
+    private TcpDemultiplexer<T> listen() {
         inet_listen(100);
         return this;
     }
@@ -193,24 +192,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
 
     /* ************** Initialize Connection Request [[ ************ */
 
-//    AtomicInteger tmp_opt_rx_user_mss = new AtomicInteger();
-//    AtomicInteger tmp_opt_rx_mss_clamp = new AtomicInteger();
-//    AtomicBoolean tmp_opt_wscale_ok = new AtomicBoolean();
-//    AtomicInteger tmp_opt_snd_wscale = new AtomicInteger();
-
-//    final AtomicInteger req_snt_isn_ref = new AtomicInteger();
-//    final AtomicInteger req_rcv_isn_ref = new AtomicInteger();
-//    final AtomicInteger req_rcv_nxt_ref = new AtomicInteger();
-//    private final AtomicInteger req_mss_ref = new AtomicInteger();
-//    final AtomicInteger req_rsk_rcv_wnd_ref = new AtomicInteger();
-//    private final AtomicInteger req_rsk_window_clamp_ref = new AtomicInteger();
-
-//    final AtomicBoolean ireq_wscale_ok_ref = new AtomicBoolean();
-//    private final AtomicInteger ireq_snd_wscale_ref = new AtomicInteger();
-//    final AtomicInteger ireq_rcv_wscale_ref = new AtomicInteger();
-
-
-    protected tcp_request_sock conn_request(TcpConnection<T> p, final T ih, final TcpPacket skb) {
+    protected tcp_request_sock conn_request(TcpDemultiplexer<T> p, final T ih, final TcpPacket skb) {
         return tcp_conn_request(new tcp_request_sock_ops(), new tcp_request_sock_ipv4_ops(), p, ih, skb);
     }
 
@@ -220,7 +202,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
     private tcp_request_sock tcp_conn_request(tcp_request_sock_ops rsk_ops, tcp_request_sock_ipv4_ops af_ops,
-                                              TcpConnection<T> pSock,
+                                              TcpDemultiplexer<T> pSock,
                                               final T pkg, final TcpPacket skb) {
         final IpHeader ipHdr = pkg.getHeader();
         /*-
@@ -321,7 +303,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
                             ), true);
                             */
 
-                    final int mss = output.tcp_current_mss(TcpConnection.this);
+                    final int mss = output.tcp_current_mss(TcpDemultiplexer.this);
                     for (int offset = 0; offset < payload.length; ) {
                         final int len = payload.length - offset;
                         if (len <= mss) {
@@ -374,7 +356,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
                 public void operationComplete(final ChannelFuture future) throws Exception {
                     logInfo("DISCONNECTED: {}", resolved);
                     if (tcp_close_state()) {
-                        output.tcp_send_fin(TcpConnection.this);
+                        output.tcp_send_fin(TcpDemultiplexer.this);
                     }
 //                    shutdown(SEND_SHUTDOWN);
                 }
@@ -433,7 +415,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
         );
     }
 
-    private void tcp_openreq_init_rwin(TcpConnection<T> pSock, tcp_request_sock req, TcpPacket skb) {
+    private void tcp_openreq_init_rwin(TcpDemultiplexer<T> pSock, tcp_request_sock req, TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L422
         int full_space = output.tcp_full_space(pSock);
         final int mss = tcp_mss_clamp(pSock, dst_metric_advmss());
@@ -471,7 +453,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
     }
 
 
-    protected abstract void send_synack(final TcpConnection<T> p, final tcp_request_sock req, final IpHeader ipHdr, final TcpPacket syn_skb);
+    protected abstract void send_synack(final TcpDemultiplexer<T> p, final tcp_request_sock req, final IpHeader ipHdr, final TcpPacket syn_skb);
 
 
     /* ************** ]] Initialize Connection Request ************ */
@@ -484,8 +466,8 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpConnection tcp_check_req(tcp_request_sock req, final TcpPacket skb) {
-        TcpConnection nsk = tcp_v4_syn_recv_sock(req, skb);
+    private TcpDemultiplexer tcp_check_req(tcp_request_sock req, final TcpPacket skb) {
+        TcpDemultiplexer nsk = tcp_v4_syn_recv_sock(req, skb);
         return nsk;
     }
 
@@ -495,8 +477,8 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpConnection<T> tcp_v4_syn_recv_sock(tcp_request_sock req, final TcpPacket skb) {
-        TcpConnection<T> newsk = tcp_create_openreq_child(this, req, skb);
+    private TcpDemultiplexer<T> tcp_v4_syn_recv_sock(tcp_request_sock req, final TcpPacket skb) {
+        TcpDemultiplexer<T> newsk = tcp_create_openreq_child(this, req, skb);
 
         newsk.icsk_ext_hdr_len = 0;
         output.tcp_sync_mss(this, dst_mtu());
@@ -511,13 +493,13 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpConnection<T> tcp_create_openreq_child(TcpConnection<T> sk, tcp_request_sock req, final TcpPacket skb) {
+    private TcpDemultiplexer<T> tcp_create_openreq_child(TcpDemultiplexer<T> sk, tcp_request_sock req, final TcpPacket skb) {
         /*-
          * 第一步调用 <code>inet_csk_clone_lock<code/> 基于原 TCP_NEW_SYN_RECV sock clone时会将状态设置为 TCP_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1247"></a>
          */
-        TcpConnection<T> newsk = inet_csk_clone_lock(sk, req);
-        TcpConnection<T> newtp = newsk;
+        TcpDemultiplexer<T> newsk = inet_csk_clone_lock(sk, req);
+        TcpDemultiplexer<T> newtp = newsk;
 
         // FIXME
         // rcv_isn = req.rcv_isn;
@@ -592,8 +574,8 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1216">inet_csk_clone_lock</a>
      */
-    private TcpConnection<T> inet_csk_clone_lock(final TcpConnection<T> sk, tcp_request_sock req) {
-        final TcpConnection<T> newsk = sk; // sk_clone_lock
+    private TcpDemultiplexer<T> inet_csk_clone_lock(final TcpDemultiplexer<T> sk, tcp_request_sock req) {
+        final TcpDemultiplexer<T> newsk = sk; // sk_clone_lock
 
         // newsk.inet_dport = req....
         // newsk.inet_sport = ...
@@ -611,7 +593,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
 
     // FIXME TODO tcp_init_sock https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L422
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2492
-    protected void tcp_init_sock(final TcpConnection<T> sk) {
+    protected void tcp_init_sock(final TcpDemultiplexer<T> sk) {
         // ...
 
 //        timer.tcp_init_xmit_timers(sk);
@@ -695,7 +677,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1478">tcp_init_wl</a>
      */
-    private void tcp_init_wl(TcpConnection<T> tp, int seq) {
+    private void tcp_init_wl(TcpDemultiplexer<T> tp, int seq) {
         tp.snd_wl1 = seq;
     }
 
@@ -732,7 +714,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L622">tcp_initialize_rcv_mss</a>
      */
-    private void tcp_initialize_rcv_mss(final TcpConnection<T> tp) {
+    private void tcp_initialize_rcv_mss(final TcpDemultiplexer<T> tp) {
         int hint = Math.min(tp.advmss, tp.mss_cache);
         hint = Math.min(hint, tp.rcv_wnd / 2);
         hint = Math.min(hint, TcpConstants.TCP_MSS_DEFAULT);
@@ -1220,76 +1202,6 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
     }
 
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L172">inet_csk_schedule_ack</a>
-     */
-    void inet_csk_schedule_ack() {
-        icsk_ack.pending |= TcpTimer.ICSK_ACK_SCHED;
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L177">inet_csk_ack_scheduled</a>
-     */
-    boolean inet_csk_ack_scheduled() {
-        return 0 != (icsk_ack.pending & ICSK_ACK_SCHED);
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L329">inet_csk_enter_pingpong_mode</a>
-     */
-    void inet_csk_enter_pingpong_mode() {
-        logTrace("[PING-PONG] enter PING-PONG mode, PING-PONG threshold = {}", SysctlOptions.sysctl_tcp_pingpong_thresh);
-        icsk_ack.pingpong = SysctlOptions.sysctl_tcp_pingpong_thresh;
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L335">inet_csk_exit_pingpong_mode</a>
-     */
-    void inet_csk_exit_pingpong_mode() {
-        if (inet_csk_in_pingpong_model()) {
-            logTrace("[PING-PONG] exit PING-PONG mode");
-        }
-        icsk_ack.pingpong = 0;
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L340">inet_csk_in_pingpong_model</a>
-     */
-    boolean inet_csk_in_pingpong_model() {
-        return icsk_ack.pingpong >= SysctlOptions.sysctl_tcp_pingpong_thresh;
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L346">inet_csk_inc_pingpong_cnt</a>
-     */
-    void inet_csk_inc_pingpong_cnt() {
-        if (icsk_ack.pingpong < TcpConstants.U8_MAX) {
-            logTrace("[PING-PONG] increment PING-PONG count: {} -> {}", icsk_ack.pingpong, icsk_ack.pingpong + 1);
-            icsk_ack.pingpong++;
-        }
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L357">tcp_dec_quickack_mode</a>
-     */
-    void tcp_dec_quickack_mode() {
-        if (icsk_ack.quick != 0) {
-            /* How many ACKs S/ACKing new data have we sent? */
-            final int pkts = inet_csk_ack_scheduled() ? 1 : 0;
-
-            if (pkts >= icsk_ack.quick) {
-                logTrace("[QUICK-ACK] decrement QUICK-ARK count: {} -> {}", icsk_ack.quick, 0);
-                icsk_ack.quick = 0;
-                /* Leaving quickack mode we deflate ATO. */
-                icsk_ack.ato = TcpConstants.TCP_ATO_MIN;
-            } else if (pkts != 0) {
-                logTrace("[QUICK-ACK] decrement QUICK-ARK count: {} -> {}", icsk_ack.quick, icsk_ack.quick - pkts);
-                icsk_ack.quick -= pkts;
-            }
-        }
-    }
-
-
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2190
     void tcp_enter_loss() {
 
@@ -1328,19 +1240,6 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
 //        skb.tstamp = kt;
         skb.skb_mstamp_ns = kt;
         skb.tstamp = kt;
-    }
-
-    long tcp_time_stamp_ts(final TcpConnection<T> tp) {
-        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L934
-        // ???
-        if (tp.tcp_usec_ts > 0) {
-            return tcp_mstamp;
-        }
-        return tcp_time_stamp_ms();
-    }
-
-    long tcp_time_stamp_ms() {
-        return TimeUnit.MICROSECONDS.toMillis(tcp_mstamp);
     }
 
 
@@ -1467,7 +1366,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
                 /* delta_us may not be positive if the socket is locked
                  * when the retrans timer fires and is rescheduled.
                  */
-                rto = (int) TcpClock.usecs_to_jiffies(Math.max(delta_us, 1));
+                rto = (int) usecs_to_jiffies(Math.max(delta_us, 1));
             }
             tcp_reset_xmit_timer(ICSK_TIME_RETRANS, rto, true);
         }
@@ -1513,7 +1412,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
      * @throws IOException
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6676">tcp_rcv_state_process</a>
      */
-    protected int tcp_rcv_state_process(final TcpConnection<T> tp, final T ipPacket, final TcpPacket skb) throws IOException {
+    protected int tcp_rcv_state_process(final TcpDemultiplexer<T> tp, final T ipPacket, final TcpPacket skb) throws IOException {
         Sock sk = tp;
         InetConnectionSock icsk = tp;
         final TcpHeader th = skb.getHeader();
@@ -1732,7 +1631,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
                 if (null != child && child.isOpen()) {
                     child.close();
                 } else if (tcp_close_state()) {
-                    output.tcp_send_fin(TcpConnection.this);
+                    output.tcp_send_fin(TcpDemultiplexer.this);
                 }
 
             }
@@ -1758,7 +1657,7 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
     protected abstract void INDIRECT_CALL_INET(final TcpBuffer skb);
 
 
-    int tcp_send_mss(final TcpConnection<T> tp) {
+    int tcp_send_mss(final TcpDemultiplexer<T> tp) {
         return output.tcp_current_mss(tp);
     }
 
@@ -1911,8 +1810,8 @@ public abstract class TcpConnection<T extends IpPacket> extends TcpSock {
             return initSeq(ipHdr, header);
         }
 
-        public void send_synack(TcpConnection<T> p, tcp_request_sock req, IpHeader ipHdr, TcpPacket skb) {
-            TcpConnection.this.send_synack(p, req, ipHdr, skb);
+        public void send_synack(TcpDemultiplexer<T> p, tcp_request_sock req, IpHeader ipHdr, TcpPacket skb) {
+            TcpDemultiplexer.this.send_synack(p, req, ipHdr, skb);
         }
     }
 
