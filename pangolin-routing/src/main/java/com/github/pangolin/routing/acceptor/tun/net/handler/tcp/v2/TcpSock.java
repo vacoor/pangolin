@@ -1,14 +1,17 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.sysctl_tcp_fin_timeout;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.jiffies_to_usecs;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.nsecs_to_jiffies;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_OFF;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_ACK_SCHED;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.ilog2;
 
 /**
@@ -187,6 +190,13 @@ public class TcpSock extends InetConnectionSock {
     public ConcurrentLinkedQueue<TcpBuffer> sk_write_queue = new ConcurrentLinkedQueue<>();
     public ConcurrentLinkedQueue<TcpBuffer> tcp_rtx_queue = new ConcurrentLinkedQueue<>();
 
+    public Channel child;
+    public TcpTimer timer;
+
+    public TcpSock() {
+        this.timer = new TcpTimer<>();
+    }
+
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1356">tcp_left_out</a>
@@ -359,6 +369,166 @@ public class TcpSock extends InetConnectionSock {
                 icsk_ack.quick -= pkts;
             }
         }
+    }
+
+    public int tcp_rto_min() {
+        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L783
+        return icsk_rto_min;
+    }
+
+    public long tcp_rto_min_us() {
+        return jiffies_to_usecs(tcp_rto_min());
+    }
+
+    public long icsk_timeout() {
+        return icsk_timeout;
+    }
+
+    public int tcp_fin_time() {
+        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1746
+        int fin_timeout = 0 != linger2 ? linger2 : sysctl_tcp_fin_timeout;
+        int rto = icsk_rto;
+
+        // 3.5 * rto
+        if (fin_timeout < (rto << 2) - (rto >> 1)) {
+            fin_timeout = (rto << 2) - (rto >> 1);
+        }
+
+        return fin_timeout;
+    }
+
+    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2448
+    public long tcp_rto_delta_us() {
+        final int rto = icsk_rto;
+        final TcpBuffer skb = tcp_rtx_queue_head();
+        if (null != skb) {
+            final long rto_time_stamp_us = tcp_skb_timestamp_us(skb) + jiffies_to_usecs(rto);
+            return (rto_time_stamp_us - tcp_mstamp);
+        } else {
+            log.warn("RTX queue empty");
+            return jiffies_to_usecs(rto);
+        }
+    }
+
+    public int tcp_rto_max() {
+        return icsk_rto_max;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L905">tcp_skb_timestamp_us</a>
+     * https://github.com/torvalds/linux/blob/v6.13/include/linux/skbuff.h#L867
+     */
+    public long tcp_skb_timestamp_us(final TcpBuffer skb) {
+        // skb_mstamp_ns <==> skb->tstamp
+        // return div_u64(skb->skb_mstamp_ns, NSEC_PER_USEC);
+        // FIXME
+        return (skb.tstamp / 1000);
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2003">tcp_rtx_queue_head</a>
+     */
+    public TcpBuffer tcp_rtx_queue_head() {
+        return tcp_rtx_queue.peek();
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L759">tcp_bound_rto</a>
+     */
+    public void tcp_bound_rto() {
+        if (icsk_rto > TCP_RTO_MAX) {
+            icsk_rto = TCP_RTO_MAX;
+        }
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L765">__tcp_set_rto</a>
+     */
+    public long __tcp_set_rto() {
+        return TcpClock.usecs_to_jiffies((srtt_us >> 3) + rttvar_us);
+    }
+
+    public void inet_csk_clear_xmit_timer(int what) {
+        // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L195
+        if (ICSK_TIME_RETRANS == what || TcpTimer.ICSK_TIME_PROBE0 == what) {
+            icsk_pending = 0;
+            // stop icsk_retransmit_timer
+            timer.sk_stop_timer(timer.icsk_retransmit_timer);
+        }
+        if (TcpTimer.ICSK_TIME_DACK == what) {
+            icsk_ack.pending = 0;
+            icsk_ack.retry = 0;
+            timer.sk_stop_timer(timer.icsk_delack_timer);
+        }
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2021">tcp_send_head</a>
+     */
+    public TcpBuffer tcp_send_head() {
+        return sk_write_queue.peek();
+    }
+
+    // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L597
+    public int tcp_mss_clamp(final TcpSock tp, final int mss) {
+        final int user_mss = tp.rx_opt.user_mss;
+        return user_mss > 0 && user_mss < mss ? user_mss : mss;
+    }
+
+    public boolean tcp_write_queue_empty() {
+        return sk_write_queue.isEmpty();
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1483">tcp_update_wl</a>
+     */
+    public void tcp_update_wl(int ack_seq) {
+        snd_wl1 = ack_seq;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1478">tcp_init_wl</a>
+     */
+    public void tcp_init_wl(int seq) {
+        snd_wl1 = seq;
+    }
+
+    /**
+     * @see <a href="https://www.cnblogs.com/aiwz/p/6333260.html">零窗口探测/坚持/持续定时器</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1526">tcp_check_probe_timer</a>
+     */
+    public void tcp_check_probe_timer() {
+        if (0 == packets_out && 0 == icsk_pending) {
+            tcp_reset_xmit_timer(ICSK_TIME_PROBE0, tcp_probe0_base(), true);
+        }
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1423">tcp_reset_xmit_timer</a>
+     */
+    public void tcp_reset_xmit_timer(final int what, long when, final boolean pace_delay) {
+        if (pace_delay) {
+            when += tcp_pacing_delay();
+        }
+        timer.inet_csk_reset_xmit_timer(this, what, when, tcp_rto_max());
+    }
+
+    public int tcp_bound_to_half_wnd(int pktsize) {
+        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L704
+        int cutoff;
+        if (max_window > TcpConstants.TCP_MSS_DEFAULT) {
+            cutoff = max_window >> 1;
+        } else {
+            cutoff = max_window;
+        }
+        if (cutoff > 0 && pktsize > cutoff) {
+            return Math.max(cutoff, 68 - tcp_header_len);
+        }
+        return pktsize;
+    }
+
+    public int dst_mtu() {
+        return 1500;
     }
 
 

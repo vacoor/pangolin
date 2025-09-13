@@ -30,7 +30,7 @@ public class TcpBuffer {
     private InetAddress dstAddr;
 
 
-    long tstamp;
+    public long tstamp;
     transient int sacked;
 
     long skb_mstamp_ns;

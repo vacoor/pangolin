@@ -76,14 +76,14 @@ class TcpInput<T extends IpPacket> {
      * @param max_quickacks the maximum times of quickly ACKs allowed
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L300">tcp_incr_quickack</a>
      */
-    protected void tcp_incr_quickack(final TcpDemultiplexer<T> tp, int max_quickacks) {
+    protected void tcp_incr_quickack(final TcpSock tp, int max_quickacks) {
         int quickacks = tp.rcv_wnd / (2 * tp.icsk_ack.rcv_mss);
         if (0 == quickacks) {
             quickacks = 2;
         }
         quickacks = Math.min(quickacks, max_quickacks);
         if (quickacks > tp.icsk_ack.quick) {
-            tp.logTrace("[QUICK-ACK] increment QUICK-ARK count: {} -> {}", tp.icsk_ack.quick, quickacks);
+            log.trace("[QUICK-ACK] increment QUICK-ARK count: {} -> {}", tp.icsk_ack.quick, quickacks);
             tp.icsk_ack.quick = quickacks;
         }
     }
@@ -94,8 +94,8 @@ class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_enter_quickack_mode</a>
      */
-    protected void tcp_enter_quickack_mode(TcpDemultiplexer<T> tp, int max_quickacks) {
-        tp.logTrace("[QUICK-ACK] enter QUICK-ARK count: {} -> {}", tp.icsk_ack.quick, max_quickacks);
+    protected void tcp_enter_quickack_mode(TcpSock tp, int max_quickacks) {
+        log.trace("[QUICK-ACK] enter QUICK-ARK count: {} -> {}", tp.icsk_ack.quick, max_quickacks);
         tcp_incr_quickack(tp, max_quickacks);
         tp.inet_csk_exit_pingpong_mode();
         tp.icsk_ack.ato = TCP_ATO_MIN;
@@ -107,7 +107,7 @@ class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L318">tcp_in_quickack_mode</a>
      */
-    protected boolean tcp_in_quickack_mode(TcpDemultiplexer<T> tp) {
+    protected boolean tcp_in_quickack_mode(TcpSock tp) {
         return tp.icsk_ack.quick > 0 && !tp.inet_csk_in_pingpong_model();
     }
 
@@ -168,7 +168,7 @@ class TcpInput<T extends IpPacket> {
     }
 
 
-    private void out_of_window(TcpDemultiplexer<T> tp, final TcpPacket skb, final int reason) {
+    private void out_of_window(TcpSock tp, final TcpPacket skb, final int reason) {
         tcp_enter_quickack_mode(tp, TCP_MAX_QUICKACKS);
         tp.inet_csk_schedule_ack();
         drop(skb, reason);
@@ -570,7 +570,7 @@ class TcpInput<T extends IpPacket> {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3620">tcp_may_update_window</a>
      */
-    private boolean tcp_may_update_window(TcpDemultiplexer<T> tp, final int ack, final int ack_seq, final int nwin) {
+    private boolean tcp_may_update_window(TcpSock tp, final int ack, final int ack_seq, final int nwin) {
         return ack > tp.snd_una
                 || ack_seq > tp.snd_wl1
                 || (ack_seq == tp.snd_wl1 && (nwin > tp.snd_wnd || nwin == 0));
@@ -580,7 +580,7 @@ class TcpInput<T extends IpPacket> {
      * @param ack
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3629">tcp_snd_sne_update</a>
      */
-    private void tcp_snd_sne_update(TcpDemultiplexer<T> tp, int ack) {
+    private void tcp_snd_sne_update(TcpSock tp, int ack) {
 
     }
 
@@ -592,7 +592,7 @@ class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3696">tcp_ack_update_window</a>
      */
-    private int tcp_ack_update_window(TcpDemultiplexer<T> tp, final TcpPacket.TcpHeader tcpHdr, final int ack, final int ack_seq) {
+    private int tcp_ack_update_window(TcpSock tp, final TcpPacket.TcpHeader tcpHdr, final int ack, final int ack_seq) {
         int flag = 0;
         int nwin = tcpHdr.getWindowAsInt();
 
@@ -884,7 +884,7 @@ class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3647">tcp_snd_una_update</a>
      */
-    private void tcp_snd_una_update(TcpDemultiplexer<T> tp, final int ack) {
+    private void tcp_snd_una_update(TcpSock tp, final int ack) {
         final int delta = ack - tp.snd_una;
         tp.bytes_acked += delta;
         tcp_snd_sne_update(tp, ack);

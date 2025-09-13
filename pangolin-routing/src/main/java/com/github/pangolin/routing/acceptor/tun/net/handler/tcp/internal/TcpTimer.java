@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.google.common.collect.Maps;
 import io.netty.util.concurrent.Future;
 import lombok.extern.slf4j.Slf4j;
@@ -20,19 +21,19 @@ public class TcpTimer<T extends IpPacket> {
      * https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L144
      */
     /* Retransmit timer */
-    static final int ICSK_TIME_RETRANS = 1;
+    public static final int ICSK_TIME_RETRANS = 1;
     /* Delayed ack timer */
-    static final int ICSK_TIME_DACK = 2;
+    public static final int ICSK_TIME_DACK = 2;
     /* Zero window probe timer */
-    static final int ICSK_TIME_PROBE0 = 3;
+    public static final int ICSK_TIME_PROBE0 = 3;
     /* Tail loss probe timer */
-    static final int ICSK_TIME_LOSS_PROBE = 5;
+    public static final int ICSK_TIME_LOSS_PROBE = 5;
     /* Reordering timer */
-    static final int ICSK_TIME_REO_TIMEOUT = 6;
+    public static final int ICSK_TIME_REO_TIMEOUT = 6;
 
-    Runnable icsk_retransmit_timer;
-    Runnable icsk_delack_timer;
-    private Runnable sk_timer;
+    public Runnable icsk_retransmit_timer;
+    public Runnable icsk_delack_timer;
+    public Runnable sk_timer;
 
 
     /**
@@ -80,7 +81,7 @@ public class TcpTimer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L218">inet_csk_reset_xmit_timer</a>
      */
-    protected void inet_csk_reset_xmit_timer(final TcpDemultiplexer<T> tp, final int what, long when, long max_when) {
+    public void inet_csk_reset_xmit_timer(final TcpSock tp, final int what, long when, long max_when) {
         if (when > max_when) {
             when = max_when;
         }
@@ -101,26 +102,26 @@ public class TcpTimer<T extends IpPacket> {
     }
 
 
-    void sk_stop_timer(Runnable timer) {
+    public void sk_stop_timer(Runnable timer) {
         Future<?> future = timers.remove(timer);
         if (null != future && !future.isDone() && !future.isCancelled()) {
             future.cancel(false);
         }
     }
 
-    void sk_reset_timer(TcpDemultiplexer<T> tp, Runnable timer, long expires) {
+    void sk_reset_timer(TcpSock tp, Runnable timer, long expires) {
         // https://github.com/torvalds/linux/blob/master/net/core/sock.c#L3539
         mod_timer(tp, timer, expires);
     }
 
-    private int mod_timer(TcpDemultiplexer<T> tp, Runnable timer, long expires) {
+    private int mod_timer(TcpSock tp, Runnable timer, long expires) {
         // https://github.com/torvalds/linux/blob/master/kernel/time/timer.c#L1235
         return __mod_timer(tp, timer, expires, 0);
     }
 
     private final ConcurrentMap<Runnable, Future<?>> timers = Maps.newConcurrentMap();
 
-    private int __mod_timer(final TcpDemultiplexer<T> tp, Runnable timer, long expires, int options) {
+    private int __mod_timer(final TcpSock tp, Runnable timer, long expires, int options) {
 //        io.netty.util.concurrent.ScheduledFuture<?> nf = parent.eventLoop().schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
         final long delay = expires - TcpClock.jiffies();
         final Future<?> future = timers.get(timer);

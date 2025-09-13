@@ -4,7 +4,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpStat
 
 import java.util.concurrent.atomic.AtomicReference;
 
-public abstract class Sock {
+public abstract class Sock extends SockCommon {
     public final AtomicReference<TcpState> state = new AtomicReference<>(TcpState.TCP_CLOSE);
 
     public int sk_shutdown;

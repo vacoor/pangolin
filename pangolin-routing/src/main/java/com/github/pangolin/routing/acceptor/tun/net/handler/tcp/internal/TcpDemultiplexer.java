@@ -1,10 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.InetConnectionSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.Sock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_options_received;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.*;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
@@ -27,7 +24,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.sysctl_tcp_fin_timeout;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
@@ -62,15 +58,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
 
     /**
-     * 对端通告 MSS.
-     */
-//    int mss_clamp;
-
-//    boolean wscale_ok;
-
-
-
-    /**
      *
      */
     protected final Channel parent;
@@ -78,21 +65,20 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     private final EventLoopGroup childGroup;
     private final SocketChannelFactory socketChannelFactory;
 
-    volatile Channel child;
+//    volatile Channel child;
     private int connTimeoutMs = 10 * 1000;
 
     TcpInput<T> input;
     TcpOutput<T> output;
-    TcpTimer<T> timer;
 
     protected TcpDemultiplexer(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+        super();
         this.parent = parent;
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
         this.output = new TcpOutput<T>();
         this.input = new TcpInput<>(this.output);
-        this.timer = new TcpTimer<>();
         init();
         this.listen();
     }
@@ -163,26 +149,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     protected abstract void tcp_rcv(final T ipHeader, final TcpPacket tcpPacket);
 
     // ...
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1423">tcp_reset_xmit_timer</a>
-     */
-    protected void tcp_reset_xmit_timer(final int what, long when, final boolean pace_delay) {
-        if (pace_delay) {
-            when += tcp_pacing_delay();
-        }
-        timer.inet_csk_reset_xmit_timer(this, what, when, tcp_rto_max());
-    }
-
-    /**
-     * @see <a href="https://www.cnblogs.com/aiwz/p/6333260.html">零窗口探测/坚持/持续定时器</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1526">tcp_check_probe_timer</a>
-     */
-    protected void tcp_check_probe_timer() {
-        if (0 == packets_out && 0 == icsk_pending) {
-            tcp_reset_xmit_timer(ICSK_TIME_PROBE0, tcp_probe0_base(), true);
-        }
-    }
 
 
     // https://www.cnblogs.com/wanpengcoder/p/11751763.html
@@ -364,6 +330,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
 
             final tcp_request_sock req = new tcp_request_sock();
+            req.srcAddr = ipHeader.getSrcAddr();
+            req.dstAddr = ipHeader.getDstAddr();
 
             return req;
         } catch (Exception e) {
@@ -371,6 +339,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
             return null;
         }
     }
+
 
     protected abstract void send_reset(IpHeader request, TcpPacket skb, int err);
 
@@ -389,6 +358,9 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         req.mss = rx_opt.mss_clamp;
         req.snd_wscale = rx_opt.snd_wscale;
         req.wscale_ok = rx_opt.wscale_ok;
+
+        req.srcPort = hdr.getSrcPort();
+        req.dstPort = hdr.getDstPort();
 
 //        req_rsk_rcv_wnd_ref.set(0);
 //        req_rcv_isn_ref.set(hdr.getSequenceNumber());
@@ -521,7 +493,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 //        snd_sml = snd_una = snd_nxt = snd_up = _seq;
         newtp.snd_up = _seq;
 
-        tcp_init_wl(newtp, req.rcv_isn);
+        newtp.tcp_init_wl(req.rcv_isn);
 
         // ...
         newsk.icsk_ack.lrcvtime = tcp_jiffies32();
@@ -577,8 +549,14 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     private TcpDemultiplexer<T> inet_csk_clone_lock(final TcpDemultiplexer<T> sk, tcp_request_sock req) {
         final TcpDemultiplexer<T> newsk = sk; // sk_clone_lock
 
-        // newsk.inet_dport = req....
-        // newsk.inet_sport = ...
+//         newsk.inet_dport = req....
+//         newsk.inet_sport = ...
+
+        newsk.srcAddr = req.srcAddr;
+        newsk.dstAddr = req.dstAddr;
+        newsk.srcPort = req.srcPort;
+        newsk.dstPort = req.dstPort;
+
 
         newsk.icsk_retransmits = 0;
         newsk.icsk_backoff = 0;
@@ -674,21 +652,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     }
 
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1478">tcp_init_wl</a>
-     */
-    private void tcp_init_wl(TcpDemultiplexer<T> tp, int seq) {
-        tp.snd_wl1 = seq;
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1483">tcp_update_wl</a>
-     */
-    void tcp_update_wl(int ack_seq) {
-        snd_wl1 = ack_seq;
-    }
-
-
     /* *************** */
     /* *************** */
     /* *************** */
@@ -714,7 +677,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L622">tcp_initialize_rcv_mss</a>
      */
-    private void tcp_initialize_rcv_mss(final TcpDemultiplexer<T> tp) {
+    private void tcp_initialize_rcv_mss(final TcpSock tp) {
         int hint = Math.min(tp.advmss, tp.mss_cache);
         hint = Math.min(hint, tp.rcv_wnd / 2);
         hint = Math.min(hint, TcpConstants.TCP_MSS_DEFAULT);
@@ -900,22 +863,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     }
 
     /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L759">tcp_bound_rto</a>
-     */
-    private void tcp_bound_rto() {
-        if (icsk_rto > TCP_RTO_MAX) {
-            icsk_rto = TCP_RTO_MAX;
-        }
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L765">__tcp_set_rto</a>
-     */
-    private long __tcp_set_rto() {
-        return TcpClock.usecs_to_jiffies((srtt_us >> 3) + rttvar_us);
-    }
-
-    /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L1001">tcp_init_cwnd</a>
      */
     private int tcp_init_cwnd() {
@@ -1033,8 +980,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3240">tcp_close</a>
      */
-    private void tcp_close(long timeout) {
-        __tcp_close(timeout);
+    private void tcp_close(TcpSock sk, long timeout) {
+        __tcp_close(sk, timeout);
         // release_sock();
         // ...
     }
@@ -1042,14 +989,14 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3066">__tcp_close</a>
      */
-    private void __tcp_close(long timeout) {
+    private void __tcp_close(TcpSock sk, long timeout) {
         // FIXME
         sk_shutdown = TcpConstants.SHUTDOWN_MASK;
 
         TcpState state = this.state.get();
         if (TCP_LISTEN.equals(state)) {
             this.state.set(TCP_CLOSE);
-            adjudge_to_death();
+            adjudge_to_death(sk);
             return;
         }
 
@@ -1057,7 +1004,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
         /* If socket has been already reset (e.g. in tcp_reset()) - kill it. */
         if (TCP_CLOSE.equals(state)) {
-            adjudge_to_death();
+            adjudge_to_death(sk);
             return;
         }
 
@@ -1065,13 +1012,13 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
             output.tcp_send_fin(this);
         }
 
-        adjudge_to_death();
+        adjudge_to_death(sk);
     }
 
-    private void adjudge_to_death() {
+    private void adjudge_to_death(TcpSock sk) {
         final TcpState state = this.state.get();
         if (TCP_FIN_WAIT2.equals(state)) {
-            final int tmo = tcp_fin_time();
+            final int tmo = sk.tcp_fin_time();
             if (tmo > TcpConstants.TCP_TIMEWAIT_LEN) {
                 timer.tcp_reset_keepalive_timer(this, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
             } else {
@@ -1117,28 +1064,9 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     }
 
 
-    boolean tcp_write_queue_empty() {
-        return sk_write_queue.isEmpty();
-    }
-
-
     private long init_ts_off(TcpPacket skb) {
         // return TimeUnit.NANOSECONDS.toMicros(System.nanoTime());
         return 0;
-    }
-
-    // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L597
-    int tcp_mss_clamp(final TcpSock tp, final int mss) {
-        final int user_mss = tp.rx_opt.user_mss;
-        return user_mss > 0 && user_mss < mss ? user_mss : mss;
-    }
-
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2021">tcp_send_head</a>
-     */
-    TcpBuffer tcp_send_head() {
-        return sk_write_queue.peek();
     }
 
 
@@ -1182,26 +1110,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /*       MSS    */
 
 
-    int tcp_bound_to_half_wnd(int pktsize) {
-        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L704
-        int cutoff;
-        if (max_window > TcpConstants.TCP_MSS_DEFAULT) {
-            cutoff = max_window >> 1;
-        } else {
-            cutoff = max_window;
-        }
-        if (cutoff > 0 && pktsize > cutoff) {
-            return Math.max(cutoff, 68 - tcp_header_len);
-        }
-        return pktsize;
-    }
-
-
-    int dst_mtu() {
-        return 1500;
-    }
-
-
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2190
     void tcp_enter_loss() {
 
@@ -1223,17 +1131,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         return TimeUnit.NANOSECONDS.toMillis(skb_mstamp_ns);
     }
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L905">tcp_skb_timestamp_us</a>
-     * https://github.com/torvalds/linux/blob/v6.13/include/linux/skbuff.h#L867
-     */
-    long tcp_skb_timestamp_us(final TcpBuffer skb) {
-        // skb_mstamp_ns <==> skb->tstamp
-        // return div_u64(skb->skb_mstamp_ns, NSEC_PER_USEC);
-        // FIXME
-        return (skb.tstamp / 1000);
-    }
-
     // https://github.com/torvalds/linux/blob/v6.13/include/linux/skbuff.h#L4322
     void skb_set_delivery_time(TcpBuffer skb, long kt, String tstamp_type) {
         // FIXME
@@ -1242,13 +1139,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         skb.tstamp = kt;
     }
 
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2003">tcp_rtx_queue_head</a>
-     */
-    TcpBuffer tcp_rtx_queue_head() {
-        return tcp_rtx_queue.peek();
-    }
 
     /* *********** [[ ************** */
 
@@ -1477,7 +1367,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         /*-
          * 刷新最近发送/接收时间戳.
          */
-        output.tcp_mstamp_refresh(this);
+        output.tcp_mstamp_refresh(tp);
         tp.rx_opt.saw_tstmap = 0;
 
         if (!th.getAck() && !th.getRst() && !th.getSyn()) {
@@ -1489,7 +1379,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         }
 
         /* step 5: check the ACK field */
-        int reason = input.tcp_ack(this, skb, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
+        int reason = input.tcp_ack(tp, skb, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {
             if (TcpState.TCP_SYN_RECV.equals(sk.state())) {
                 // send one RST
@@ -1515,7 +1405,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
                 snd_una = th.getAcknowledgmentNumber();
                 snd_wnd = th.getWindowAsInt() << rx_opt.snd_wscale;
-                tcp_init_wl(this, th.getSequenceNumber());
+                tp.tcp_init_wl(th.getSequenceNumber());
 
                 // ...
 
@@ -1705,15 +1595,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         log.debug(message);
     }
 
-    long tcp_rto_min_us() {
-        return jiffies_to_usecs(tcp_rto_min());
-    }
-
-    int tcp_rto_min() {
-        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L783
-        return icsk_rto_min;
-    }
-
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L49">tcp_clamp_probe0_to_user_timeout</a>
@@ -1733,62 +1614,13 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     }
 
 
-    void inet_csk_clear_xmit_timer(int what) {
-        // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L195
-        if (ICSK_TIME_RETRANS == what || TcpTimer.ICSK_TIME_PROBE0 == what) {
-            icsk_pending = 0;
-            // stop icsk_retransmit_timer
-            timer.sk_stop_timer(timer.icsk_retransmit_timer);
-        }
-        if (TcpTimer.ICSK_TIME_DACK == what) {
-            icsk_ack.pending = 0;
-            icsk_ack.retry = 0;
-            timer.sk_stop_timer(timer.icsk_delack_timer);
-        }
-    }
-
-
-    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2448
-    private long tcp_rto_delta_us() {
-        final int rto = icsk_rto;
-        final TcpBuffer skb = tcp_rtx_queue_head();
-        if (null != skb) {
-            final long rto_time_stamp_us = tcp_skb_timestamp_us(skb) + jiffies_to_usecs(rto);
-            return (rto_time_stamp_us - tcp_mstamp);
-        } else {
-            logWarn("RTX queue empty");
-            return jiffies_to_usecs(rto);
-        }
-    }
-
-    int tcp_fin_time() {
-        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1746
-        int fin_timeout = 0 != linger2 ? linger2 : sysctl_tcp_fin_timeout;
-        int rto = icsk_rto;
-
-        // 3.5 * rto
-        if (fin_timeout < (rto << 2) - (rto >> 1)) {
-            fin_timeout = (rto << 2) - (rto >> 1);
-        }
-
-        return fin_timeout;
-    }
-
     void tcp_send_challenge_ack() {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3649
-    }
-
-    int tcp_rto_max() {
-        return icsk_rto_max;
     }
 
     public long icsk_delack_timeout() {
         // FIXME
         return icsk_ack.timeout;
-    }
-
-    public long icsk_timeout() {
-        return icsk_timeout;
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1705
@@ -1811,24 +1643,26 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         }
 
         public void send_synack(TcpDemultiplexer<T> p, tcp_request_sock req, IpHeader ipHdr, TcpPacket skb) {
-            TcpDemultiplexer.this.send_synack(p, req, ipHdr, skb);
+            p.send_synack(p, req, ipHdr, skb);
         }
     }
 
-    public static class inet_request_sock {
-        public int snd_wscale;
-        public int rcv_wscale;
-        public boolean wscale_ok;
-    }
-
-    public static class request_sock extends inet_request_sock{
+    public static class request_sock extends SockCommon {
         public int rsk_rcv_wnd;
         public int rsk_window_clamp;
 
     }
 
+    // https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69
+    public static class inet_request_sock extends request_sock {
+        public int snd_wscale;
+        public int rcv_wscale;
+        public boolean wscale_ok;
+    }
+
+
     // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L149
-    public static class tcp_request_sock extends request_sock {
+    public static class tcp_request_sock extends inet_request_sock {
         int mss;
         boolean req_usec_ts;
         int rcv_isn;
