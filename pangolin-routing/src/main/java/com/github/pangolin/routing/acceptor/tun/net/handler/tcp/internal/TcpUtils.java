@@ -1,6 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import java.net.InetAddress;
+
+import org.bouncycastle.crypto.macs.SipHash;
+import org.bouncycastle.crypto.params.KeyParameter;
 import org.pcap4j.packet.IpPacket.IpHeader;
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
@@ -8,6 +11,7 @@ import org.pcap4j.packet.TcpPacket;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.concurrent.atomic.AtomicLong;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 
@@ -119,21 +123,30 @@ public abstract class TcpUtils {
         return a - (a % b);
     }
 
+    private static final byte[] key = new byte[128 / 8];
+    static {
+        new SecureRandom().nextBytes(key);
+    }
+
     static int secureSeq(final byte[] srcAddress, final short srcPort,
                          final byte[] dstAddress, final short dstPort) {
-        final long timeBase = (System.nanoTime() - TIME_COUNTER.getAndIncrement()) >> 6;
-        try {
-            final ByteBuffer buf = ByteBuffer.allocate(
-                    srcAddress.length + 2 + dstAddress.length + 2
-            ).put(srcAddress).putShort(srcPort).put(dstAddress).putShort(dstPort);
+        final SipHash sipHash = new SipHash();
+        sipHash.init(new KeyParameter(key));
+        sipHash.update(dstAddress, 0, dstAddress.length);
+        sipHash.update(srcAddress, 0, srcAddress.length);
 
-            final MessageDigest digest = MessageDigest.getInstance("MD5");
-            final byte[] hash = digest.digest(buf.array());
-            final int hashV = ((hash[0] & 0xFF) << 24) | ((hash[1] & 0xFF) << 16) | ((hash[2] & 0xFF) << 8) | ((hash[3] & 0xFF));
-            return (int) (timeBase + hashV);
-        } catch (final NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
+        sipHash.update((byte) ((dstPort >> 8) & 0xFF));
+        sipHash.update((byte) ((dstPort >> 0) & 0xFF));
+        sipHash.update((byte) ((srcPort >> 8) & 0xFF));
+        sipHash.update((byte) ((srcPort >> 0) & 0xFF));
+
+        final long hash64 = sipHash.doFinal();
+        final int hash32 = (int)(hash64 & 0xFFFFFFFFL);
+        return seq_scale(hash32);
+    }
+
+    static int seq_scale(int seq) {
+        return seq + (int) (System.nanoTime() >> 6);
     }
 
 

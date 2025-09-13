@@ -167,7 +167,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
-    private tcp_request_sock tcp_conn_request(tcp_request_sock_ops rsk_ops, tcp_request_sock_ipv4_ops af_ops,
+    public tcp_request_sock tcp_conn_request(tcp_request_sock_ops rsk_ops, tcp_request_sock_ipv4_ops af_ops,
                                               TcpDemultiplexer<T> pSock,
                                               final T pkg, final TcpPacket skb) {
         final IpHeader ipHdr = pkg.getHeader();
@@ -175,7 +175,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
          */
-        tcp_request_sock req = inet_reqsk_alloc(ipHeader, skb);
+        tcp_request_sock req = inet_reqsk_alloc(ipHdr, skb);
         if (null == req) {
             return null;
         }
@@ -206,10 +206,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         }
 
         int isn = af_ops.init_seq(ipHdr, skb.getHeader());
-
-//        req_snt_isn_ref.set(isn = initSeq(ipHdr, skb.getHeader()));
-//        isn = initSeq(ipHdr, skb.getHeader());
-
         req.snt_isn = isn;
 
         // init rwin
@@ -361,15 +357,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
         req.srcPort = hdr.getSrcPort();
         req.dstPort = hdr.getDstPort();
-
-//        req_rsk_rcv_wnd_ref.set(0);
-//        req_rcv_isn_ref.set(hdr.getSequenceNumber());
-//        req_rcv_nxt_ref.set(hdr.getSequenceNumber() + 1);
-//
-//        req_mss_ref.set(rx_opt.mss_clamp);
-//
-//        ireq_wscale_ok_ref.set(rx_opt.wsacle_ok);
-//        ireq_snd_wscale_ref.set(rx_opt.snd_wscacle);
     }
 
     /**
