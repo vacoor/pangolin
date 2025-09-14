@@ -604,10 +604,10 @@ class TcpOutput<T extends IpPacket> {
 
             cwnd_quota = Math.min(cwnd_quota, max_segs);
 
-            skb.srcAddr(tp.ipHeader.getDstAddr());
-            skb.dstAddr(tp.ipHeader.getSrcAddr());
-            skb.srcPort(tp.tcpDstPort);
-            skb.dstPort(tp.tcpSrcPort);
+            skb.srcAddr(tp.dstAddr);
+            skb.dstAddr(tp.srcAddr);
+            skb.srcPort(tp.dstPort);
+            skb.dstPort(tp.srcPort);
 
             final int skbLen = skb.asBuilder().build().length();
             final int missing_bytes = cwnd_quota * mss_now - skbLen;

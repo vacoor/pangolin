@@ -567,12 +567,12 @@ public class TcpTimer<T extends IpPacket> {
             if (tp.linger2 >= 0) {
                 final int tmo = tp.tcp_fin_time() - TcpConstants.TCP_TIMEWAIT_LEN;
                 if (tmo > 0) {
-                    tp.tcp_time_wait(TCP_FIN_WAIT2, tmo);
+                    tp.tcp_time_wait(tp, TCP_FIN_WAIT2, tmo);
                     return;
                 }
             }
             tp.output.tcp_send_active_reset(tp, "SK_RST_REASON_TCP_STATE");
-            tp.tcp_done();
+            tp.tcp_done(tp);
             return;
         }
 

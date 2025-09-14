@@ -220,6 +220,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
     private tcp_request_sock inet_reqsk_alloc(IpHeader ipHeader, TcpPacket skb) {
         final InetAddress dstAddr = ipHeader.getDstAddr();
+        TcpPort tcpSrcPort = skb.getHeader().getSrcPort();
+        TcpPort tcpDstPort = skb.getHeader().getDstPort();
         final int dstPort = skb.getHeader().getDstPort().valueAsInt();
 
         final String dstHostname;
@@ -242,28 +244,22 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         logInfo("ESTABLISHING -> {}", resolved);
 
         final AtomicBoolean initialized = new AtomicBoolean(false);
-        final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, true, childGroup, new ChannelInboundHandlerAdapter() {
+        final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                 try {
                     if (initialized.compareAndSet(false, true)) {
                         logInfo("First Response elapsed: {}ms", System.currentTimeMillis() - sinceMs);
                     }
+                    if (true) {
+                        ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
+                        return;
+                    }
 
+                    /*
                     logTrace("Read from {}", resolved);
                     final ByteBuf buf = (ByteBuf) msg;
                     final byte[] payload = ByteBufUtil.getBytes(buf);
-
-                    // tcp data len = tcp snd.mss - tcp options.len
-                    // 超过 tcp data len 不切割, 会使用TSO功能通过网卡来分段.
-                    /*
-                    tcp_sendmsg2(new TcpBuffer()
-                            .ack(true)
-                            .psh(true)
-                            .payloadBuilder(
-                                    UnknownPacket.newPacket(payload, 0, payload.length).getBuilder()
-                            ), true);
-                            */
 
                     final int mss = output.tcp_current_mss(TcpDemultiplexer.this);
                     for (int offset = 0; offset < payload.length; ) {
@@ -282,11 +278,13 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
                             offset += mss;
                         }
                     }
+                    */
                 } finally {
                     ReferenceCountUtil.release(msg);
                 }
             }
 
+            /*
             @Override
             public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
                 logError("Exception caught: {}", cause.getMessage(), cause);
@@ -306,6 +304,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
                     tcp_done();
                 }
             }
+
+             */
         });
 
         try {
@@ -901,17 +901,17 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         final int mss_now = tcp_send_mss(this);
     }
 
-    private synchronized void tcp_sendmsg2(TcpBuffer skb, boolean flush) {
-        skb.sequenceNumber(write_seq);
-        skb.dstPort(tcpSrcPort).srcPort(tcpDstPort);
+    private synchronized void tcp_sendmsg2(final TcpDemultiplexer<T> tp, TcpBuffer skb, boolean flush) {
+        skb.sequenceNumber(tp.write_seq);
+        skb.dstPort(tp.srcPort).srcPort(tp.dstPort);
         tcp_skb_entail(skb);
 
         final Packet.Builder payload = skb.payloadBuilder();
         if (null != payload) {
-            write_seq += payload.build().length();
+            tp.write_seq += payload.build().length();
         }
         if (flush) {
-            tcp_push_pending_frames();
+            tcp_push_pending_frames(tp);
         }
     }
 
@@ -967,7 +967,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3240">tcp_close</a>
      */
-    private void tcp_close(TcpSock sk, long timeout) {
+    private void tcp_close(TcpDemultiplexer<T> sk, long timeout) {
         __tcp_close(sk, timeout);
         // release_sock();
         // ...
@@ -976,13 +976,13 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3066">__tcp_close</a>
      */
-    private void __tcp_close(TcpSock sk, long timeout) {
+    private void __tcp_close(TcpDemultiplexer<T> sk, long timeout) {
         // FIXME
-        sk_shutdown = TcpConstants.SHUTDOWN_MASK;
+        sk.sk_shutdown = TcpConstants.SHUTDOWN_MASK;
 
-        TcpState state = this.state.get();
+        TcpState state = sk.state.get();
         if (TCP_LISTEN.equals(state)) {
-            this.state.set(TCP_CLOSE);
+            sk.state.set(TCP_CLOSE);
             adjudge_to_death(sk);
             return;
         }
@@ -996,20 +996,20 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         }
 
         if (tcp_close_state()) {
-            output.tcp_send_fin(this);
+            output.tcp_send_fin(sk);
         }
 
         adjudge_to_death(sk);
     }
 
-    private void adjudge_to_death(TcpSock sk) {
+    private void adjudge_to_death(TcpDemultiplexer<T> sk) {
         final TcpState state = this.state.get();
         if (TCP_FIN_WAIT2.equals(state)) {
             final int tmo = sk.tcp_fin_time();
             if (tmo > TcpConstants.TCP_TIMEWAIT_LEN) {
-                timer.tcp_reset_keepalive_timer(this, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
+                sk.timer.tcp_reset_keepalive_timer(sk, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
             } else {
-                tcp_time_wait(TCP_FIN_WAIT2, tmo);
+                tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
                 return;
             }
         }
@@ -1021,12 +1021,12 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         // ...
     }
 
-    void tcp_time_wait(TcpState state, long timeout) {
-        this.state.set(state);
+    void tcp_time_wait(TcpSock tp, TcpState state, long timeout) {
+        tp.state.set(state);
 
         if (TCP_TIME_WAIT.equals(state)) {
-            this.state.set(TCP_CLOSE);
-            tcp_done();
+            tp.state.set(TCP_CLOSE);
+            tcp_done(tp);
         }
 
     }
@@ -1034,9 +1034,9 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2102">tcp_push_pending_frames</a>
      */
-    protected void tcp_push_pending_frames() {
+    protected void tcp_push_pending_frames(final TcpDemultiplexer<T> tp) {
         if (null != tcp_send_head()) {
-            output.__tcp_push_pending_frames(this, output.tcp_current_mss(this), this.nonagle);
+            output.__tcp_push_pending_frames(tp, output.tcp_current_mss(tp), tp.nonagle);
         }
     }
 
@@ -1076,15 +1076,15 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L4939">tcp_done</a>
      */
-    void tcp_done() {
+    void tcp_done(TcpSock tp) {
         // ... fastopen
 
-        state.set(TcpState.TCP_CLOSE);
-        timer.tcp_clear_xmit_timers(this);
+        tp.state.set(TcpState.TCP_CLOSE);
+        tp.timer.tcp_clear_xmit_timers(this);
 
         // ... fastopen...
 
-        sk_shutdown = TcpConstants.SHUTDOWN_MASK;
+        tp.sk_shutdown = TcpConstants.SHUTDOWN_MASK;
 
 //        if (!sock_flag(tp, SOCK_DEAD)) {
 //            sk->sk_state_change(tp);
@@ -1270,7 +1270,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6299">tcp_init_transfer</a>
      */
-    private void tcp_init_transfer(TcpSock tp, TcpPacket skb) {
+    private void tcp_init_transfer(TcpDemultiplexer<T> tp, TcpPacket skb) {
         output.tcp_mtup_init();
         tcp_init_metrics();
 
@@ -1280,7 +1280,73 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
         tcp_init_congestion_control();
 
-        child.config().setAutoRead(true);
+        // child.
+        tp.child.pipeline().addLast(new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+                try {
+//                    if (initialized.compareAndSet(false, true)) {
+//                        logInfo("First Response elapsed: {}ms", System.currentTimeMillis() - sinceMs);
+//                    }
+
+//                    logTrace("Read from {}", resolved);
+                    final ByteBuf buf = (ByteBuf) msg;
+                    final byte[] payload = ByteBufUtil.getBytes(buf);
+
+                    // tcp data len = tcp snd.mss - tcp options.len
+                    // 超过 tcp data len 不切割, 会使用TSO功能通过网卡来分段.
+                    /*
+                    tcp_sendmsg2(new TcpBuffer()
+                            .ack(true)
+                            .psh(true)
+                            .payloadBuilder(
+                                    UnknownPacket.newPacket(payload, 0, payload.length).getBuilder()
+                            ), true);
+                            */
+
+                    final int mss = output.tcp_current_mss(tp);
+                    for (int offset = 0; offset < payload.length; ) {
+                        final int len = payload.length - offset;
+                        if (len <= mss) {
+                            final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, len).getBuilder();
+                            tcp_sendmsg2(tp, new TcpBuffer().ack(true)
+                                    //.psh(true)
+                                    .payloadBuilder(builder), true);
+                            offset += len;
+                        } else {
+                            UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, mss).getBuilder();
+                            tcp_sendmsg2(tp, new TcpBuffer().ack(true)
+                                    // .psh(true)
+                                    .payloadBuilder(builder), false);
+                            offset += mss;
+                        }
+                    }
+                } finally {
+                    ReferenceCountUtil.release(msg);
+                }
+            }
+
+            @Override
+            public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
+                logError("Exception caught: {}", cause.getMessage(), cause);
+                send_reset(ipHeader, new TcpPacket.Builder()
+                        .srcAddr(tp.srcAddr)
+                        .dstAddr(tp.dstAddr)
+                        .srcPort(tp.srcPort)
+                        .dstPort(tp.dstPort)
+                        .ack(true)
+                        .acknowledgmentNumber(tp.rcv_nxt)
+                        .build(), -1);
+                try {
+                    if (ctx.channel().isOpen()) {
+                        ctx.channel().close();
+                    }
+                } finally {
+                    tcp_done(tp);
+                }
+            }
+        });
+        tp.child.config().setAutoRead(true);
     }
 
     /**
@@ -1416,14 +1482,14 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 //                }
 
                 if (linger2 < 0) {
-                    tcp_done();
+                    tcp_done(tp);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
 
                 final int seq = th.getSequenceNumber();
                 final int end_seq = determineEndSeq(skb);
                 if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), rcv_nxt)) {
-                    tcp_done();
+                    tcp_done(tp);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
 
@@ -1442,20 +1508,20 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
                      */
                     timer.tcp_reset_keepalive_timer(this, tmo);
                 } else {
-                    tcp_time_wait(TCP_FIN_WAIT2, tmo);
+                    tcp_time_wait(tp, TCP_FIN_WAIT2, tmo);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
                 break;
             case TCP_CLOSING:
                 if (snd_una == write_seq) {
-                    tcp_time_wait(TCP_TIME_WAIT, 0);
+                    tcp_time_wait(tp, TCP_TIME_WAIT, 0);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
                 break;
             case TCP_LAST_ACK:
                 if (snd_una == write_seq) {
                     // tcp_update_metrics
-                    tcp_done();
+                    tcp_done(tp);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
                 break;

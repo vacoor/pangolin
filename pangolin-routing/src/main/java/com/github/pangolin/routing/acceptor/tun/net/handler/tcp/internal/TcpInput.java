@@ -343,7 +343,7 @@ class TcpInput<T extends IpPacket> {
 
         // tcp_write_queue_purge(sk);
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4515
-        tp.tcp_done();
+        tp.tcp_done(tp);
 
         // if (!sock_flag(sk, SOCK_DEAD))
         //    sk_error_report(sk);
@@ -409,7 +409,7 @@ class TcpInput<T extends IpPacket> {
             case TCP_FIN_WAIT2:
                 /* Received a FIN -- send ACK and enter TIME_WAIT. */
                 output.tcp_send_ack(tp);
-                tp.tcp_time_wait(TcpState.TCP_TIME_WAIT, 0);
+                tp.tcp_time_wait(tp, TcpState.TCP_TIME_WAIT, 0);
                 break;
             default:
                 /* Only TCP_LISTEN and TCP_CLOSE are left, in these
@@ -665,7 +665,7 @@ class TcpInput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5664">tcp_data_snd_check</a>
      */
     protected void tcp_data_snd_check(final TcpDemultiplexer<T> tp) {
-        tp.tcp_push_pending_frames();
+        tp.tcp_push_pending_frames(tp);
         tcp_check_space();
     }
 
