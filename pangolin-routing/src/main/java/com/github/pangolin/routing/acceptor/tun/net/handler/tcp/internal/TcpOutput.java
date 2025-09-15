@@ -356,8 +356,8 @@ class TcpOutput<T extends IpPacket> {
 
         skb.srcAddr(tp.ipHeader.getDstAddr());
         skb.dstAddr(tp.ipHeader.getSrcAddr());
-        skb.srcPort(tp.tcpDstPort);
-        skb.dstPort(tp.tcpSrcPort);
+        skb.srcPort(tp.dstPort);
+        skb.dstPort(tp.srcPort);
         skb.acknowledgmentNumber(rcv_nxt);
 
         // TODO URG ...
@@ -1356,8 +1356,8 @@ class TcpOutput<T extends IpPacket> {
         TcpBuffer skb = new TcpBuffer();
         skb.srcAddr(tp.ipHeader.getDstAddr());
         skb.dstAddr(tp.ipHeader.getSrcAddr());
-        skb.srcPort(tp.tcpDstPort);
-        skb.dstPort(tp.tcpSrcPort);
+        skb.srcPort(tp.dstPort);
+        skb.dstPort(tp.srcPort);
         skb.sequenceNumber(seq);
         skb.syn(0 != (flags & TcpConstants.SYN));
         skb.ack(0 != (flags & TcpConstants.ACK));
