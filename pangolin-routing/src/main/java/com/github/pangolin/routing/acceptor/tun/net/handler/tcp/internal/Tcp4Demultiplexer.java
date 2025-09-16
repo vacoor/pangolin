@@ -141,7 +141,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1722">tcp_v4_conn_request</a>
      */
     @Override
-    protected TcpDemultiplexer.tcp_request_sock conn_request(TcpDemultiplexer<IpV4Packet> sock, final IpV4Packet ih, final TcpPacket skb) {
+    protected tcp_request_sock conn_request(TcpDemultiplexer<IpV4Packet> sock, final IpV4Packet ih, final TcpPacket skb) {
         return super.conn_request(sock, ih, skb);
     }
 

@@ -1,7 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
-import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -190,7 +189,6 @@ public class TcpSock extends InetConnectionSock {
     public ConcurrentLinkedQueue<TcpBuffer> sk_write_queue = new ConcurrentLinkedQueue<>();
     public ConcurrentLinkedQueue<TcpBuffer> tcp_rtx_queue = new ConcurrentLinkedQueue<>();
 
-    public Channel child;
     public TcpTimer timer;
 
     public TcpSock() {

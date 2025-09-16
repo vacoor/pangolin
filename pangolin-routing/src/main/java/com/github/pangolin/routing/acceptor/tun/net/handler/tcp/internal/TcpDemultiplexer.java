@@ -159,8 +159,11 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
     /* ************** Initialize Connection Request [[ ************ */
 
-    protected tcp_request_sock conn_request(TcpDemultiplexer p, final T ih, final TcpPacket skb) {
-        return tcp_conn_request(new tcp_request_sock_ops(), new tcp_request_sock_ipv4_ops(), p, ih, skb);
+    protected tcp_request_sock conn_request(TcpDemultiplexer<T> p, final T ih, final TcpPacket skb) {
+        return tcp_conn_request(
+                new tcp_request_sock_ops(), new tcp_request_sock_ipv4_ops(), p, ih, skb,
+                dnsEngine, socketChannelFactory, connTimeoutMs, childGroup
+                );
     }
 
     /**
@@ -170,13 +173,16 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
      */
     public tcp_request_sock tcp_conn_request(tcp_request_sock_ops rsk_ops, tcp_request_sock_ipv4_ops af_ops,
                                              TcpDemultiplexer<T> listenSock,
-                                             final T pkg, final TcpPacket skb) {
+                                             final T pkg, final TcpPacket skb,
+                                             DnsEngine dnsEngine,
+                                             SocketChannelFactory socketChannelFactory,
+                                             int connTimeoutMs, EventLoopGroup childGroup) {
         final IpHeader ipHdr = pkg.getHeader();
         /*-
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
          */
-        tcp_request_sock req = inet_reqsk_alloc(ipHdr, skb);
+        tcp_request_sock req = inet_reqsk_alloc(ipHdr, skb, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup);
         if (null == req) {
             return null;
         }
@@ -216,7 +222,11 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     }
 
 
-    private tcp_request_sock inet_reqsk_alloc(IpHeader ipHeader, TcpPacket skb) {
+    private tcp_request_sock inet_reqsk_alloc(IpHeader ipHeader, TcpPacket skb,
+                                              DnsEngine dnsEngine,
+                                              SocketChannelFactory socketChannelFactory,
+                                              int connTimeoutMs, EventLoopGroup childGroup) {
+        final InetAddress srcAddr = ipHeader.getSrcAddr();
         final InetAddress dstAddr = ipHeader.getDstAddr();
         final TcpPort tcpSrcPort = skb.getHeader().getSrcPort();
         final TcpPort tcpDstPort = skb.getHeader().getDstPort();
@@ -231,7 +241,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         if (dnsEngine.isFakeAddress(dstAddr.getAddress())) {
             dstHostname = dnsEngine.getHostByAddress(dstAddr.getAddress());
             if (null == dstHostname || dstHostname.isEmpty()) {
-                logError(null, srcAddr, srcPort, dstAddr, dstPort, "Can't resolve fake IP: {}", dstAddr.getHostAddress());
+                tcpLogError(null, srcAddr, srcPort, dstAddr, dstPort, "Can't resolve fake IP: {}", dstAddr.getHostAddress());
                 return null;
             }
         } else {
@@ -245,7 +255,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         final long sinceMs = System.currentTimeMillis();
 
         if (log.isInfoEnabled()) {
-            logInfo("ESTABLISHING -> {}", resolved);
+            tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "ESTABLISHING -> {}", resolved);
         }
 
 
@@ -255,7 +265,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                 try {
                     if (initialized.compareAndSet(false, true)) {
-                        logInfo("First Response elapsed: {}ms", System.currentTimeMillis() - sinceMs);
+                        tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "First Response elapsed: {}ms", System.currentTimeMillis() - sinceMs);
                     }
                     if (true) {
                         ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
@@ -294,21 +304,24 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 //            state.set(TcpState.TCP_SYN_RECV);
 
             final long elapsedMs = System.currentTimeMillis() - sinceMs;
-            logInfo("ESTABLISHED: {} elapsed: {}ms", resolved, elapsedMs);
+            tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "ESTABLISHED: {} elapsed: {}ms", resolved, elapsedMs);
+
+            /*
             req.child.closeFuture().addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(final ChannelFuture future) throws Exception {
-                    logInfo("DISCONNECTED: {}", resolved);
-                    if (tcp_close_state()) {
+                    tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "DISCONNECTED: {}", resolved);
+                    if (tcp_close_state(req)) {
                         output.tcp_send_fin(TcpDemultiplexer.this);
                     }
 //                    shutdown(SEND_SHUTDOWN);
                 }
             });
+            */
 
             return req;
         } catch (Exception e) {
-            logInfo("CONNECTION RESET by {}: {}", e.getMessage(), resolved, e);
+            tcpLogError(null, srcAddr, srcPort, dstAddr, dstPort, "CONNECTION RESET by {}: {}", e.getMessage(), resolved, e);
             return null;
         }
     }
@@ -894,22 +907,22 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
     private static final int TCP_STATE_MASK = 0xF;
     private static final int TCP_ACTION_FIN = 1 << (TcpState.TCP_CLOSE.ordinal());
-    private static final int[] new_state = new int[16];
+    private static final int[] NEW_STATE = new int[16];
 
     {
 //        new_state[0 /* (Invalid) */] = State.TCP_CLOSE.ordinal();
-        new_state[TcpState.TCP_ESTABLISHED.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
-        new_state[TcpState.TCP_SYN_SENT.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
-        new_state[TcpState.TCP_SYN_RECV.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
-        new_state[TcpState.TCP_FIN_WAIT1.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal();
-        new_state[TcpState.TCP_FIN_WAIT2.ordinal() + 1] = TcpState.TCP_FIN_WAIT2.ordinal();
-        new_state[TcpState.TCP_TIME_WAIT.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
-        new_state[TcpState.TCP_CLOSE.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
-        new_state[TcpState.TCP_CLOSE_WAIT.ordinal() + 1] = TcpState.TCP_LAST_ACK.ordinal() | TCP_ACTION_FIN;
-        new_state[TcpState.TCP_LAST_ACK.ordinal() + 1] = TcpState.TCP_LAST_ACK.ordinal();
-        new_state[TCP_LISTEN.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
-        new_state[TcpState.TCP_CLOSING.ordinal() + 1] = TcpState.TCP_CLOSING.ordinal();
-        new_state[TcpState.TCP_NEW_SYN_RECV.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal(); /* should not happen ! */
+        NEW_STATE[TcpState.TCP_ESTABLISHED.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
+        NEW_STATE[TcpState.TCP_SYN_SENT.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
+        NEW_STATE[TcpState.TCP_SYN_RECV.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal() | TCP_ACTION_FIN;
+        NEW_STATE[TcpState.TCP_FIN_WAIT1.ordinal() + 1] = TcpState.TCP_FIN_WAIT1.ordinal();
+        NEW_STATE[TcpState.TCP_FIN_WAIT2.ordinal() + 1] = TcpState.TCP_FIN_WAIT2.ordinal();
+        NEW_STATE[TcpState.TCP_TIME_WAIT.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
+        NEW_STATE[TcpState.TCP_CLOSE.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
+        NEW_STATE[TcpState.TCP_CLOSE_WAIT.ordinal() + 1] = TcpState.TCP_LAST_ACK.ordinal() | TCP_ACTION_FIN;
+        NEW_STATE[TcpState.TCP_LAST_ACK.ordinal() + 1] = TcpState.TCP_LAST_ACK.ordinal();
+        NEW_STATE[TCP_LISTEN.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal();
+        NEW_STATE[TcpState.TCP_CLOSING.ordinal() + 1] = TcpState.TCP_CLOSING.ordinal();
+        NEW_STATE[TcpState.TCP_NEW_SYN_RECV.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal(); /* should not happen ! */
     }
 
     /**
@@ -926,17 +939,17 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         /* If we've already sent a FIN, or it's a closed state, skip this. */
         if (0 != ((1 << state.get().ordinal()) & (TcpConstants.TCPF_ESTABLISHED | TcpConstants.TCPF_CLOSE_WAIT))) {
             /* Clear out any half completed packets.  FIN if needed. */
-            if (tcp_close_state()) {
+            if (tcp_close_state(this)) {
                 output.tcp_send_fin(this);
             }
         }
     }
 
-    private boolean tcp_close_state() {
-        int next = new_state[state.get().ordinal() + 1];
+    private boolean tcp_close_state(SockCommon sk) {
+        int next = NEW_STATE[sk.state.get().ordinal() + 1];
         int ns = next & TCP_STATE_MASK;
 
-        state.set(TcpState.values()[ns]);
+        sk.state.set(TcpState.values()[ns]);
         return 0 != (next & TCP_ACTION_FIN);
     }
 
@@ -972,7 +985,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
             return;
         }
 
-        if (tcp_close_state()) {
+        if (tcp_close_state(sk)) {
             output.tcp_send_fin(sk);
         }
 
@@ -1318,10 +1331,16 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
                 }
             }
         });
+
+        // CHECK child close.
+
         tp.child.closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
-
+                tcpLogInfo(null, tp.srcAddr, tp.srcPort.valueAsInt(), tp.dstAddr, tp.dstPort.valueAsInt(), "DISCONNECTED: {}", tp.dstAddr.getHostAddress());
+                if (tcp_close_state(tp)) {
+                    output.tcp_send_fin(tp);
+                }
             }
 
         });
@@ -1557,7 +1576,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
                 // FIXME
                 if (null != child && child.isOpen()) {
                     child.close();
-                } else if (tcp_close_state()) {
+                } else if (tcp_close_state(sk)) {
                     output.tcp_send_fin(TcpDemultiplexer.this);
                 }
 
@@ -1710,23 +1729,21 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         int last_oow_ack_time;
         int rcv_nxt;
         int syn_tos;
-
-        Channel child;
     }
 
-    private static void logInfo(String traceId,
+    private static void tcpLogInfo(String traceId,
                                 InetAddress srcAddr, int srcPort,
                                 InetAddress dstAddr, int dstPort,
-                                String message) {
+                                String message, final Object... args) {
         final String prefix = logPrefix(traceId, srcAddr.getHostAddress(), srcPort, dstAddr.getHostAddress(), dstPort);
-        log.info("{} {}", prefix, message);
+        log.error(prefix + " " + message, args);
     }
 
-    private static void logError(String traceId,
+    private static void tcpLogError(String traceId,
                                 InetAddress srcAddr, int srcPort,
                                 InetAddress dstAddr, int dstPort,
-                                String message, Throwable e) {
+                                String message, Object... args) {
         final String prefix = logPrefix(traceId, srcAddr.getHostAddress(), srcPort, dstAddr.getHostAddress(), dstPort);
-        log.error("{} {}", prefix, message, e);
+        log.error(prefix + " " + message, args);
     }
 }
