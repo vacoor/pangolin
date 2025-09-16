@@ -1,10 +1,12 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.determineEndSeq;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.secureSeq;
 import static org.pcap4j.packet.IpPacket.IpHeader;
 import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
@@ -141,16 +143,51 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1722">tcp_v4_conn_request</a>
      */
     @Override
-    protected tcp_request_sock conn_request(TcpDemultiplexer<IpV4Packet> sock, final IpV4Packet ih, final TcpPacket skb) {
-        return super.conn_request(sock, ih, skb);
+    protected tcp_request_sock conn_request(TcpDemultiplexer<IpV4Packet> p, final IpV4Packet ih, final TcpPacket skb) {
+        return TcpHandshaker.tcp_conn_request(
+                new tcp_request_sock_ops() {
+
+                    @Override
+                    public void send_ack() {
+
+                    }
+
+                    @Override
+                    public void send_reset() {
+
+                    }
+                }, new tcp_request_sock_ipv4_ops() {
+
+                    /**
+                     * @param ipHdr
+                     * @param tcpHdr
+                     * @return
+                     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L103">tcp_v4_init_seq</a>
+                     * @see <a href="https://github.com/torvalds/linux/blob/master/net/core/secure_seq.c#L136">secure_tcp_seq</a>
+                     */
+                    public int init_seq(final IpHeader ipHdr, final TcpPacket.TcpHeader tcpHdr) {
+                        // return tcpHdr.getSequenceNumber();
+                        return secureSeq(
+                                ipHdr.getSrcAddr().getAddress(), tcpHdr.getSrcPort().value(),
+                                ipHdr.getDstAddr().getAddress(), tcpHdr.getDstPort().value()
+                        );
+                    }
+
+                    @Override
+                    public long init_ts_off(TcpPacket skb) {
+                        return 0;
+                    }
+
+                    @Override
+                    public void send_synack(TcpSock p, tcp_request_sock req, IpHeader ipHdr, TcpPacket skb) {
+                        tcp_v4_send_synack(p, req, ipHdr, skb);
+                    }
+                }, p, ih, skb,
+                dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, output
+        );
     }
 
-    @Override
-    protected void send_synack(final TcpDemultiplexer<IpV4Packet> p, final tcp_request_sock req, final IpHeader ih, final TcpPacket syn_skb) {
-        tcp_v4_send_synack(p, req, ih, syn_skb);
-    }
-
-    protected void tcp_v4_send_synack(TcpDemultiplexer<IpV4Packet> p, tcp_request_sock req, final IpHeader iphdr, final TcpPacket syn_skb) {
+    protected void tcp_v4_send_synack(TcpSock p, tcp_request_sock req, final IpHeader iphdr, final TcpPacket syn_skb) {
         final IpV4Header iph = (IpV4Header) iphdr;
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
         final TcpPacket.Builder skb = output.tcp_make_synack(p, req, iph, syn_skb)

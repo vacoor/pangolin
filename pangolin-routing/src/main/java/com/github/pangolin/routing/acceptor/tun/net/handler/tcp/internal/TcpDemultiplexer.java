@@ -15,14 +15,10 @@ import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.UnknownPacket;
-import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.io.IOException;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
@@ -33,9 +29,6 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 
 @Slf4j
 public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
-
-    static final short IP_HEADER_SIZE = 20;
-    private static final short TCP_HEADER_SIZE = 20;
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L943
     public static final int TCPCB_SACKED_ACKED = (1 << 0);    /* SKB ACK'd by a SACK block	*/
@@ -61,15 +54,15 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
      *
      */
     protected final Channel parent;
-    private final DnsEngine dnsEngine;
-    private final EventLoopGroup childGroup;
-    private final SocketChannelFactory socketChannelFactory;
+    final DnsEngine dnsEngine;
+    final EventLoopGroup childGroup;
+    final SocketChannelFactory socketChannelFactory;
 
     //    volatile Channel child;
-    private int connTimeoutMs = 10 * 1000;
+    int connTimeoutMs = 10 * 1000;
 
     TcpInput<T> input;
-    TcpOutput<T> output;
+    TcpOutput output;
     private tcp_request_sock request_sock;
 
     protected TcpDemultiplexer(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
@@ -159,250 +152,10 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
     /* ************** Initialize Connection Request [[ ************ */
 
-    protected tcp_request_sock conn_request(TcpDemultiplexer<T> p, final T ih, final TcpPacket skb) {
-        return tcp_conn_request(
-                new tcp_request_sock_ops(), new tcp_request_sock_ipv4_ops(), p, ih, skb,
-                dnsEngine, socketChannelFactory, connTimeoutMs, childGroup
-                );
-    }
-
-    /**
-     * @param skb
-     * @return
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
-     */
-    public tcp_request_sock tcp_conn_request(tcp_request_sock_ops rsk_ops, tcp_request_sock_ipv4_ops af_ops,
-                                             TcpDemultiplexer<T> listenSock,
-                                             final T pkg, final TcpPacket skb,
-                                             DnsEngine dnsEngine,
-                                             SocketChannelFactory socketChannelFactory,
-                                             int connTimeoutMs, EventLoopGroup childGroup) {
-        final IpHeader ipHdr = pkg.getHeader();
-        /*-
-         * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
-         * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
-         */
-        tcp_request_sock req = inet_reqsk_alloc(ipHdr, skb, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup);
-        if (null == req) {
-            return null;
-        }
-
-        req.ts_off = 0;
-        req.req_usec_ts = false;
-
-
-        final int user_mss = 0; // FIXME parent.rx_opt.user_mss;// setsockopt(sockfd, IPPROTO_TCP, TCP_MAXSEG, &mss, sizeof(mss))
-
-        final tcp_options_received opt_rx = new tcp_options_received();
-        opt_rx.mss_clamp = af_ops.mss_clamp;
-        opt_rx.user_mss = user_mss;
-
-        input.tcp_parse_options(listenSock, opt_rx, skb, false);
-        tcp_openreq_init(req, opt_rx, skb);
-
-        // ...
-
-        // FIXME
-        final boolean opt_tstamp_ok = opt_rx.tstamp_ok;
-        if (opt_tstamp_ok) {
-            req.req_usec_ts = false;    // FIXME dst_tcp_usec_ts
-            req.ts_off = init_ts_off(skb);
-        }
-
-        int isn = af_ops.init_seq(ipHdr, skb.getHeader());
-        req.snt_isn = isn;
-
-        // init rwin
-        tcp_openreq_init_rwin(listenSock, req, skb);
-
-        // send_synack
-        af_ops.send_synack(listenSock, req, ipHdr, skb);
-
-        return req;
-    }
-
-
-    private tcp_request_sock inet_reqsk_alloc(IpHeader ipHeader, TcpPacket skb,
-                                              DnsEngine dnsEngine,
-                                              SocketChannelFactory socketChannelFactory,
-                                              int connTimeoutMs, EventLoopGroup childGroup) {
-        final InetAddress srcAddr = ipHeader.getSrcAddr();
-        final InetAddress dstAddr = ipHeader.getDstAddr();
-        final TcpPort tcpSrcPort = skb.getHeader().getSrcPort();
-        final TcpPort tcpDstPort = skb.getHeader().getDstPort();
-        final int srcPort = tcpSrcPort.valueAsInt();
-        final int dstPort = tcpDstPort.valueAsInt();
-
-        final tcp_request_sock req = new tcp_request_sock();
-        req.srcAddr = ipHeader.getSrcAddr();
-        req.dstAddr = ipHeader.getDstAddr();
-
-        final String dstHostname;
-        if (dnsEngine.isFakeAddress(dstAddr.getAddress())) {
-            dstHostname = dnsEngine.getHostByAddress(dstAddr.getAddress());
-            if (null == dstHostname || dstHostname.isEmpty()) {
-                tcpLogError(null, srcAddr, srcPort, dstAddr, dstPort, "Can't resolve fake IP: {}", dstAddr.getHostAddress());
-                return null;
-            }
-        } else {
-            dstHostname = null;
-        }
-
-        final InetSocketAddress resolved = null != dstHostname
-                ? InetSocketAddress.createUnresolved(dstHostname, dstPort)
-                : new InetSocketAddress(dstAddr, dstPort);
-
-        final long sinceMs = System.currentTimeMillis();
-
-        if (log.isInfoEnabled()) {
-            tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "ESTABLISHING -> {}", resolved);
-        }
-
-
-        final AtomicBoolean initialized = new AtomicBoolean(false);
-        final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
-            @Override
-            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-                try {
-                    if (initialized.compareAndSet(false, true)) {
-                        tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "First Response elapsed: {}ms", System.currentTimeMillis() - sinceMs);
-                    }
-                    if (true) {
-                        ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
-                        return;
-                    }
-                } finally {
-                    ReferenceCountUtil.release(msg);
-                }
-            }
-
-            /*
-            @Override
-            public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                logError("Exception caught: {}", cause.getMessage(), cause);
-                send_reset(ipHeader, new TcpPacket.Builder()
-                        .srcAddr(ipHeader.getSrcAddr())
-                        .dstAddr(ipHeader.getDstAddr())
-                        .srcPort(tcpSrcPort)
-                        .dstPort(tcpDstPort)
-                        .ack(true)
-                        .acknowledgmentNumber(rcv_nxt)
-                        .build(), -1);
-                try {
-                    if (ctx.channel().isOpen()) {
-                        ctx.channel().close();
-                    }
-                } finally {
-                    tcp_done();
-                }
-            }
-             */
-        });
-
-        try {
-            req.child = cf.sync().channel();
-//            state.set(TcpState.TCP_SYN_RECV);
-
-            final long elapsedMs = System.currentTimeMillis() - sinceMs;
-            tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "ESTABLISHED: {} elapsed: {}ms", resolved, elapsedMs);
-
-            /*
-            req.child.closeFuture().addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(final ChannelFuture future) throws Exception {
-                    tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "DISCONNECTED: {}", resolved);
-                    if (tcp_close_state(req)) {
-                        output.tcp_send_fin(TcpDemultiplexer.this);
-                    }
-//                    shutdown(SEND_SHUTDOWN);
-                }
-            });
-            */
-
-            return req;
-        } catch (Exception e) {
-            tcpLogError(null, srcAddr, srcPort, dstAddr, dstPort, "CONNECTION RESET by {}: {}", e.getMessage(), resolved, e);
-            return null;
-        }
-    }
+    protected abstract tcp_request_sock conn_request(TcpDemultiplexer<T> p, final T ih, final TcpPacket skb);
 
 
     protected abstract void send_reset(IpHeader request, TcpPacket skb, int err);
-
-    /**
-     * @param skb
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7068">tcp_openreq_init</a>
-     * @see <a href="https://www.cnblogs.com/wanpengcoder/p/11751292.html">TCP MSS</a>
-     */
-    private void tcp_openreq_init(tcp_request_sock req, tcp_options_received rx_opt, final TcpPacket skb) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7068
-        final TcpHeader hdr = skb.getHeader();
-        req.rsk_rcv_wnd = 0;
-        req.rcv_isn = hdr.getSequenceNumber();
-        req.rcv_nxt = hdr.getSequenceNumber() + 1;
-
-        req.mss = rx_opt.mss_clamp;
-        req.snd_wscale = rx_opt.snd_wscale;
-        req.wscale_ok = rx_opt.wscale_ok;
-
-        req.srcPort = hdr.getSrcPort();
-        req.dstPort = hdr.getDstPort();
-    }
-
-    /**
-     * @param ipHdr
-     * @param tcpHdr
-     * @return
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L103">tcp_v4_init_seq</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/core/secure_seq.c#L136">secure_tcp_seq</a>
-     */
-    protected static int initSeq(final IpHeader ipHdr, final TcpHeader tcpHdr) {
-        // return tcpHdr.getSequenceNumber();
-        return secureSeq(
-                ipHdr.getSrcAddr().getAddress(), tcpHdr.getSrcPort().value(),
-                ipHdr.getDstAddr().getAddress(), tcpHdr.getDstPort().value()
-        );
-    }
-
-    private void tcp_openreq_init_rwin(TcpDemultiplexer<T> pSock, tcp_request_sock req, TcpPacket skb) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L422
-        int full_space = output.tcp_full_space(pSock);
-        final int mss = tcp_mss_clamp(pSock, dst_metric_advmss());
-
-        // FIXME
-        final int window_clamp = pSock.window_clamp;
-
-        AtomicInteger req_rsk_window_clamp_ref = new AtomicInteger(window_clamp > 0 ? window_clamp : dst_metric(TcpConstants.RTAX_WINDOW));
-        AtomicInteger req_rsk_rcv_wnd_ref = new AtomicInteger();
-
-
-        int rcv_wnd = 0; //...
-        if (rcv_wnd == 0) {
-            rcv_wnd = dst_metric(TcpConstants.RTAX_INITRWND);
-        } else if (full_space < rcv_wnd * mss) {
-            full_space = rcv_wnd * mss;
-        }
-        // ...
-
-        AtomicInteger rcv_wscale_ref = new AtomicInteger();
-        output.tcp_select_initial_window(
-                pSock,
-                full_space,
-                mss, // - stamp
-                req_rsk_rcv_wnd_ref,
-                req_rsk_window_clamp_ref,
-                req.wscale_ok,
-                rcv_wscale_ref,
-                rcv_wnd
-        );
-
-        req.rcv_wscale = rcv_wscale_ref.get();
-        req.rsk_rcv_wnd = req_rsk_rcv_wnd_ref.get();
-        req.rsk_window_clamp = req_rsk_window_clamp_ref.get();
-    }
-
-
-    protected abstract void send_synack(final TcpDemultiplexer<T> p, final tcp_request_sock req, final IpHeader ipHdr, final TcpPacket syn_skb);
 
 
     /* ************** ]] Initialize Connection Request ************ */
@@ -1040,11 +793,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     }
 
 
-    private long init_ts_off(TcpPacket skb) {
-        // return TimeUnit.NANOSECONDS.toMicros(System.nanoTime());
-        return 0;
-    }
-
 
     void sk_data_ready() {
 
@@ -1107,14 +855,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         return TimeUnit.NANOSECONDS.toMillis(skb_mstamp_ns);
     }
 
-    // https://github.com/torvalds/linux/blob/v6.13/include/linux/skbuff.h#L4322
-    void skb_set_delivery_time(TcpBuffer skb, long kt, String tstamp_type) {
-        // FIXME
-//        skb.tstamp = kt;
-        skb.skb_mstamp_ns = kt;
-        skb.tstamp = kt;
-    }
-
 
     /* *********** [[ ************** */
 
@@ -1124,20 +864,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
     /* *********** ]] ************** */
 
-
-    int dst_metric_advmss() {
-        // https://github.com/torvalds/linux/blob/master/include/net/dst.h#L182
-        return 1500 - IP_HEADER_SIZE - TCP_HEADER_SIZE;
-    }
-
-    int dst_metric(int metric) {
-        return 0;
-    }
-
-
-    long tcp_stamp_us_delta(long t1, long t0) {
-        return Math.max(t1 - t0, 0);
-    }
 
     /* ****************** */
     /* ****************** */
@@ -1216,25 +942,25 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3147">tcp_rearm_rto</a>
      */
-    protected void tcp_rearm_rto() {
+    protected static void tcp_rearm_rto(TcpSock tp) {
 
         // ...
 
-        if (packets_out <= 0) {
-            inet_csk_clear_xmit_timer(ICSK_TIME_RETRANS);
+        if (tp.packets_out <= 0) {
+            tp.inet_csk_clear_xmit_timer(ICSK_TIME_RETRANS);
         } else {
-            int rto = icsk_rto;
+            int rto = tp.icsk_rto;
 
             /* Offset the time elapsed after installing regular RTO */
-            if (icsk_pending == ICSK_TIME_REO_TIMEOUT
-                    || icsk_pending == ICSK_TIME_LOSS_PROBE) {
-                final long delta_us = tcp_rto_delta_us();
+            if (tp.icsk_pending == ICSK_TIME_REO_TIMEOUT
+                    || tp.icsk_pending == ICSK_TIME_LOSS_PROBE) {
+                final long delta_us = tp.tcp_rto_delta_us();
                 /* delta_us may not be positive if the socket is locked
                  * when the retrans timer fires and is rescheduled.
                  */
                 rto = (int) usecs_to_jiffies(Math.max(delta_us, 1));
             }
-            tcp_reset_xmit_timer(ICSK_TIME_RETRANS, rto, true);
+            tp.tcp_reset_xmit_timer(ICSK_TIME_RETRANS, rto, true);
         }
     }
 
@@ -1337,7 +1063,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         tp.child.closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                tcpLogInfo(null, tp.srcAddr, tp.srcPort.valueAsInt(), tp.dstAddr, tp.dstPort.valueAsInt(), "DISCONNECTED: {}", tp.dstAddr.getHostAddress());
+                TcpHandshaker.tcpLogInfo(null, tp.srcAddr, tp.srcPort.valueAsInt(), tp.dstAddr, tp.dstPort.valueAsInt(), "DISCONNECTED: {}", tp.dstAddr.getHostAddress());
                 if (tcp_close_state(tp)) {
                     output.tcp_send_fin(tp);
                 }
@@ -1679,71 +1405,5 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         return icsk_ack.timeout;
     }
 
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1705
-    static class tcp_request_sock_ops {
-        public void send_ack() {
 
-        }
-
-        public void send_reset() {
-
-        }
-    }
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1714
-    class tcp_request_sock_ipv4_ops {
-        public int mss_clamp = TCP_MSS_DEFAULT;
-
-        public int init_seq(IpHeader ipHdr, TcpHeader header) {
-            return initSeq(ipHdr, header);
-        }
-
-        public void send_synack(TcpDemultiplexer<T> p, tcp_request_sock req, IpHeader ipHdr, TcpPacket skb) {
-            p.send_synack(p, req, ipHdr, skb);
-        }
-    }
-
-    public static class request_sock extends SockCommon {
-        public int rsk_rcv_wnd;
-        public int rsk_window_clamp;
-
-    }
-
-    // https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69
-    public static class inet_request_sock extends request_sock {
-        public int snd_wscale;
-        public int rcv_wscale;
-        public boolean wscale_ok;
-    }
-
-
-    // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L149
-    public static class tcp_request_sock extends inet_request_sock {
-        int mss;
-        boolean req_usec_ts;
-        int rcv_isn;
-        int snt_isn;
-        long ts_off;
-        int snt_tsval_first;
-        int snt_tsval_last;
-        int last_oow_ack_time;
-        int rcv_nxt;
-        int syn_tos;
-    }
-
-    private static void tcpLogInfo(String traceId,
-                                InetAddress srcAddr, int srcPort,
-                                InetAddress dstAddr, int dstPort,
-                                String message, final Object... args) {
-        final String prefix = logPrefix(traceId, srcAddr.getHostAddress(), srcPort, dstAddr.getHostAddress(), dstPort);
-        log.error(prefix + " " + message, args);
-    }
-
-    private static void tcpLogError(String traceId,
-                                InetAddress srcAddr, int srcPort,
-                                InetAddress dstAddr, int dstPort,
-                                String message, Object... args) {
-        final String prefix = logPrefix(traceId, srcAddr.getHostAddress(), srcPort, dstAddr.getHostAddress(), dstPort);
-        log.error(prefix + " " + message, args);
-    }
 }

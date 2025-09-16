@@ -18,6 +18,9 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
  */
 @Slf4j
 public class TcpSock extends InetConnectionSock {
+    public static final short IP_HEADER_SIZE = 20;
+    public static final short TCP_HEADER_SIZE = 20;
+
     /*-
      *              |<------- TCP recv window ------->|
      *              |            (RCV.WND)            |
@@ -527,6 +530,27 @@ public class TcpSock extends InetConnectionSock {
 
     public int dst_mtu() {
         return 1500;
+    }
+
+    // https://github.com/torvalds/linux/blob/v6.13/include/linux/skbuff.h#L4322
+    public void skb_set_delivery_time(TcpBuffer skb, long kt, String tstamp_type) {
+        // FIXME
+//        skb.tstamp = kt;
+        skb.skb_mstamp_ns = kt;
+        skb.tstamp = kt;
+    }
+
+    public int dst_metric_advmss() {
+        // https://github.com/torvalds/linux/blob/master/include/net/dst.h#L182
+        return 1500 - IP_HEADER_SIZE - TCP_HEADER_SIZE;
+    }
+
+    public int dst_metric(int metric) {
+        return 0;
+    }
+
+    public long tcp_stamp_us_delta(long t1, long t0) {
+        return Math.max(t1 - t0, 0);
     }
 
 

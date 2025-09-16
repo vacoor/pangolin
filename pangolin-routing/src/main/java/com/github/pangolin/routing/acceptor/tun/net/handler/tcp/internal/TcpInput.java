@@ -636,7 +636,7 @@ class TcpInput<T extends IpPacket> {
     }
 
 
-    void tcp_parse_options(TcpDemultiplexer<T> tp, tcp_options_received opt_rx, final TcpPacket skb, final boolean estab) {
+    static void tcp_parse_options(TcpSock tp, tcp_options_received opt_rx, final TcpPacket skb, final boolean estab) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4183
         final TcpPacket.TcpHeader hdr = skb.getHeader();
         for (final TcpPacket.TcpOption option : hdr.getOptions()) {

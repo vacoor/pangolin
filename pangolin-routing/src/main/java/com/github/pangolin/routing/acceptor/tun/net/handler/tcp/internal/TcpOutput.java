@@ -82,7 +82,7 @@ class TcpOutput<T extends IpPacket> {
         tp.packets_out += tcp_skb_pcount(skb);
 
         if (prior_packets <= 0 || tp.icsk_pending == ICSK_TIME_LOSS_PROBE) {
-            tp.tcp_rearm_rto();
+            tcp_rearm_rto(tp);
         }
 
         tp.input.tcp_check_space();
@@ -1125,7 +1125,7 @@ class TcpOutput<T extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708
-    protected TcpBuffer tcp_make_synack(final TcpDemultiplexer<T> tp,
+    protected TcpBuffer tcp_make_synack(final TcpSock tp,
                                         final tcp_request_sock req,
                                         final IpPacket.IpHeader ipHdr, final TcpPacket skb) {
         int mss = tp.tcp_mss_clamp(tp, tp.dst_metric_advmss());
