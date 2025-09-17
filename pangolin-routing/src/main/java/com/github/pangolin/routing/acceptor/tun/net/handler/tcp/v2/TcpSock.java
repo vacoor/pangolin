@@ -471,7 +471,7 @@ public class TcpSock extends InetConnectionSock {
     }
 
     // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L597
-    public int tcp_mss_clamp(final TcpSock tp, final int mss) {
+    public static int tcp_mss_clamp(final TcpSock tp, final int mss) {
         final int user_mss = tp.rx_opt.user_mss;
         return user_mss > 0 && user_mss < mss ? user_mss : mss;
     }

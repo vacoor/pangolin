@@ -168,7 +168,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpDemultiplexer<T> tcp_check_req(tcp_request_sock req, final TcpPacket skb) {
+    protected TcpDemultiplexer<T> tcp_check_req(tcp_request_sock req, final TcpPacket skb) {
         TcpDemultiplexer<T> nsk = tcp_v4_syn_recv_sock(req, skb);
         return nsk;
     }
@@ -184,7 +184,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
         newsk.icsk_ext_hdr_len = 0;
         output.tcp_sync_mss(this, dst_mtu());
-        advmss = tcp_mss_clamp(newsk, dst_metric_advmss());
+        newsk.advmss = tcp_mss_clamp(newsk, dst_metric_advmss());
         tcp_initialize_rcv_mss(newsk);
         return newsk;
     }
@@ -241,6 +241,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         newtp.rcv_ssthresh = req.rsk_rcv_wnd;
         newtp.rcv_wnd = req.rsk_rcv_wnd;
         newtp.rx_opt.wscale_ok = req.wscale_ok;
+
         if (newtp.rx_opt.wscale_ok) {
             newtp.rx_opt.snd_wscale = (byte) req.snd_wscale;
             newtp.rx_opt.rcv_wscale = (byte) req.rcv_wscale;
@@ -277,7 +278,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1216">inet_csk_clone_lock</a>
      */
-    private TcpDemultiplexer<T> inet_csk_clone_lock(final TcpDemultiplexer<T> sk, tcp_request_sock req) {
+    private static <T extends IpPacket> TcpDemultiplexer<T> inet_csk_clone_lock(final TcpDemultiplexer<T> sk, tcp_request_sock req) {
         final TcpDemultiplexer<T> newsk = sk; // sk_clone_lock
 
 //         newsk.inet_dport = req....
@@ -407,7 +408,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L622">tcp_initialize_rcv_mss</a>
      */
-    private void tcp_initialize_rcv_mss(final TcpSock tp) {
+    private static void tcp_initialize_rcv_mss(final TcpSock tp) {
         int hint = Math.min(tp.advmss, tp.mss_cache);
         hint = Math.min(hint, tp.rcv_wnd / 2);
         hint = Math.min(hint, TcpConstants.TCP_MSS_DEFAULT);
@@ -1381,12 +1382,12 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L49">tcp_clamp_probe0_to_user_timeout</a>
      */
-    protected long tcp_clamp_probe0_to_user_timeout(long when) {
-        int user_timeout = icsk_user_timeout;
-        if (0 == user_timeout || 0 == icsk_probes_tstamp) {
+    protected static long tcp_clamp_probe0_to_user_timeout(TcpSock tp, long when) {
+        int user_timeout = tp.icsk_user_timeout;
+        if (0 == user_timeout || 0 == tp.icsk_probes_tstamp) {
             return when;
         }
-        long elapsed = tcp_jiffies32() - icsk_probes_tstamp;
+        long elapsed = tcp_jiffies32() - tp.icsk_probes_tstamp;
         if (elapsed < 0) {
             elapsed = 0;
         }

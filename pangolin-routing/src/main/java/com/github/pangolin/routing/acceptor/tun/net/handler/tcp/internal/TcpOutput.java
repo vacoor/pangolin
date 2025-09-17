@@ -1348,7 +1348,7 @@ class TcpOutput<T extends IpPacket> {
             timeout = TCP_RESOURCE_PROBE_INTERVAL;
         }
 
-        timeout = tp.tcp_clamp_probe0_to_user_timeout(timeout);
+        timeout = tp.tcp_clamp_probe0_to_user_timeout(tp, timeout);
         tp.tcp_reset_xmit_timer(TcpTimer.ICSK_TIME_PROBE0, timeout, true);
     }
 

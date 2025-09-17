@@ -558,7 +558,7 @@ class TcpInput<T extends IpPacket> {
              */
         } else {
             long when = tp.tcp_probe0_when(TCP_RTO_MAX);
-            when = tp.tcp_clamp_probe0_to_user_timeout(when);
+            when = tp.tcp_clamp_probe0_to_user_timeout(tp, when);
             tp.tcp_reset_xmit_timer(ICSK_TIME_PROBE0, when, true);
         }
     }
