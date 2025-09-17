@@ -11,7 +11,9 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
+import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
 import org.pcap4j.packet.TcpPacket;
+import org.pcap4j.packet.TcpWindowScaleOption;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.net.InetAddress;
@@ -19,6 +21,7 @@ import java.net.InetSocketAddress;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_MAX_WSCALE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.logPrefix;
 
 @Slf4j
@@ -56,7 +59,7 @@ public class TcpHandshaker {
         opt_rx.mss_clamp = af_ops.mss_clamp;
         opt_rx.user_mss = user_mss;
 
-        TcpInput.tcp_parse_options(listenSock, opt_rx, skb, false);
+        tcp_parse_options(listenSock, opt_rx, skb, false);
         tcp_openreq_init(req, opt_rx, skb);
 
         // ...
@@ -252,5 +255,24 @@ public class TcpHandshaker {
                                     String message, Object... args) {
         final String prefix = logPrefix(traceId, srcAddr.getHostAddress(), srcPort, dstAddr.getHostAddress(), dstPort);
         log.error(prefix + " " + message, args);
+    }
+
+    private static void tcp_parse_options(TcpSock tp, tcp_options_received opt_rx, final TcpPacket skb, final boolean estab) {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4183
+        final TcpPacket.TcpHeader hdr = skb.getHeader();
+        for (final TcpPacket.TcpOption option : hdr.getOptions()) {
+            if (option instanceof TcpMaximumSegmentSizeOption && hdr.getSyn() && !estab) {
+                int inMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
+                if (inMss > 0) {
+                    int user_mss = opt_rx.user_mss;
+                    inMss = user_mss > 0 && user_mss < inMss ? user_mss : inMss;
+                    opt_rx.mss_clamp = inMss;
+                }
+            } else if (option instanceof TcpWindowScaleOption && hdr.getSyn() && !estab && SysctlOptions.sysctl_tcp_window_scaling) {
+                final byte wscale = ((TcpWindowScaleOption) option).getShiftCount();
+                opt_rx.wscale_ok = true;
+                opt_rx.snd_wscale = wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale;
+            }
+        }
     }
 }

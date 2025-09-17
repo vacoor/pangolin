@@ -1,12 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_options_received;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
 import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.TcpWindowScaleOption;
 
 import java.io.IOException;
 import java.security.SecureRandom;
@@ -633,26 +630,6 @@ class TcpInput<T extends IpPacket> {
          */
         // cwnd = cwnd < ssthresh ? cwnd + sndMss : cwnd + sndMss / cwnd;
         return flag;
-    }
-
-
-    static void tcp_parse_options(TcpSock tp, tcp_options_received opt_rx, final TcpPacket skb, final boolean estab) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4183
-        final TcpPacket.TcpHeader hdr = skb.getHeader();
-        for (final TcpPacket.TcpOption option : hdr.getOptions()) {
-            if (option instanceof TcpMaximumSegmentSizeOption && hdr.getSyn() && !estab) {
-                int inMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
-                if (inMss > 0) {
-                    int user_mss = opt_rx.user_mss;
-                    inMss = user_mss > 0 && user_mss < inMss ? user_mss : inMss;
-                    opt_rx.mss_clamp = inMss;
-                }
-            } else if (option instanceof TcpWindowScaleOption && hdr.getSyn() && !estab && SysctlOptions.sysctl_tcp_window_scaling) {
-                final byte wscale = ((TcpWindowScaleOption) option).getShiftCount();
-                opt_rx.wscale_ok = true;
-                opt_rx.snd_wscale = wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale;
-            }
-        }
     }
 
 

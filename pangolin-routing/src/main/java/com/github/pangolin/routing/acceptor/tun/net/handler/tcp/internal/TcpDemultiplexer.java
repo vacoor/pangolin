@@ -214,9 +214,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         // rcv_wup = copied_seq = rcv_nxt = _seq;
         // newtp.segs_in = 1;
 
-        // FIXME
-        // snt_isn = req.snt_isn;
-
         _seq = req.snt_isn + 1;
         newtp.snd_sml = newtp.snd_una = _seq;
         newtp.snd_nxt = _seq;
@@ -1084,9 +1081,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         Sock sk = tp;
         InetConnectionSock icsk = tp;
         final TcpHeader th = skb.getHeader();
-//        ipHeader = ipPacket.getHeader();
-//        tcpSrcPort = th.getSrcPort();
-//        tcpDstPort = th.getDstPort();
 
         /*-
          * 握手处理.
