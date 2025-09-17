@@ -2,7 +2,9 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.google.common.collect.Maps;
+import io.netty.channel.Channel;
 import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 
@@ -126,11 +128,16 @@ public class TcpTimer<T extends IpPacket> {
         final long delay = expires - TcpClock.jiffies();
         final Future<?> future = timers.get(timer);
         if (null == future || future.isDone() || future.isCancelled() || future.cancel(true)) {
-            timers.put(timer, tp.child.eventLoop().schedule(timer, delay, TimeUnit.MILLISECONDS));
+            // timers.put(timer, tp.child.eventLoop().schedule(timer, delay, TimeUnit.MILLISECONDS));
+             timers.put(timer, schedule(tp.child, delay, TimeUnit.MILLISECONDS, timer));
         } else {
             log.warn("CANCEL FAILED: {}", tp.icsk_pending);
         }
         return 0;
+    }
+
+    private ScheduledFuture<?> schedule(Channel channel, long delay, TimeUnit unit, Runnable timer) {
+        return channel.pipeline().firstContext().executor().schedule(timer, delay, unit);
     }
 
     /* *********** DELAY ACK [[ ************** */
