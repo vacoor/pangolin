@@ -20,7 +20,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
-class TcpInput<T extends IpPacket> {
+public class TcpInput<T extends IpPacket> {
     /**
      * Incoming frame contained data.
      *
@@ -113,7 +113,7 @@ class TcpInput<T extends IpPacket> {
      * <p>
      * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5760.
      */
-    private void __tcp_ack_snd_check(final TcpDemultiplexer<T> tp) {
+    private void __tcp_ack_snd_check(final TcpSock tp) {
         if (
             // (tp.rcv_nxt - tp.rcv_wup > tp.icsk_ack.rcv_mss
             /* ... and right edge of window advances far enough.
@@ -334,9 +334,9 @@ class TcpInput<T extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4521
-    void tcp_done_with_error(final TcpDemultiplexer<T> tp, int err) {
+    public void tcp_done_with_error(final TcpSock tp, int err) {
         // sk->sk_err = err;
-        tp.logError("TCP DONE WITH ERROR: {}", err);
+        // logError("TCP DONE WITH ERROR: {}", err);
 
         // tcp_write_queue_purge(sk);
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4515
@@ -523,7 +523,7 @@ class TcpInput<T extends IpPacket> {
             seq_rtt_us = tp.tcp_stamp_us_delta(tp.tcp_mstamp, first_ackt);
             ca_rtt_us = tp.tcp_stamp_us_delta(tp.tcp_mstamp, last_ackt);
 
-            tp.logTrace("[RTT] Seq {} round-trip-time: {}us", first_ackseq, seq_rtt_us);
+//            tp.logTrace("[RTT] Seq {} round-trip-time: {}us", first_ackseq, seq_rtt_us);
         }
 
         /*-
@@ -1062,7 +1062,7 @@ class TcpInput<T extends IpPacket> {
         return a + random.nextInt(b - a);
     }
 
-    public void tcp_sack_compress_send_ack(TcpDemultiplexer<T> tp) {
+    public void tcp_sack_compress_send_ack(TcpSock tp) {
         // FIXME
     }
 }

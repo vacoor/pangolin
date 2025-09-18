@@ -87,7 +87,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         tcp_v4_send_reset(parent, request, skb, err);
     }
 
-    static void tcp_v4_send_reset(final Channel channel, IpV4Header request, TcpPacket skb, int err) {
+    static void tcp_v4_send_reset(final Channel net, IpV4Header request, TcpPacket skb, int err) {
         log.warn("SEND-RST: {}", err);
         // FIXME
         // send reset.
@@ -133,7 +133,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 .payloadBuilder(buf)
                 .build();
 
-        channel.writeAndFlush(arg.build());
+        net.writeAndFlush(arg.build());
     }
 
     /**
@@ -143,7 +143,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1722">tcp_v4_conn_request</a>
      */
     @Override
-    protected tcp_request_sock conn_request(TcpDemultiplexer<IpV4Packet> p, final IpV4Packet ih, final TcpPacket skb) {
+    protected tcp_request_sock conn_request(TcpSock p, final IpV4Packet ih, final TcpPacket skb) {
         return TcpHandshaker.tcp_conn_request(
                 new tcp_request_sock_ops() {
 
@@ -181,6 +181,16 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                     @Override
                     public void send_synack(TcpSock p, tcp_request_sock req, IpHeader ipHdr, TcpPacket skb) {
                         tcp_v4_send_synack(p, req, ipHdr, skb);
+                    }
+
+                    @Override
+                    public void destory() {
+                        Tcp4Demultiplexer.this.destroy0();
+                    }
+
+                    @Override
+                    public void INDIRECT_CALL_INET(TcpBuffer buffer) {
+                        Tcp4Demultiplexer.this.INDIRECT_CALL_INET(p, buffer);
                     }
                 }, p, ih, skb,
                 dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, output
@@ -220,9 +230,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         parent.writeAndFlush(ipPacket);
     }
 
-    @Override
-    protected void INDIRECT_CALL_INET(final TcpBuffer skb) {
-        final IpV4Header ipHdr = (IpV4Header) ipHeader;
+    protected void INDIRECT_CALL_INET(TcpSock tp, final TcpBuffer skb) {
+        final IpV4Header ipHdr = (IpV4Header) tp.ipHeader;
 
         TcpPacket.Builder buf = skb
                 .asBuilder()
@@ -248,5 +257,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         debug(ipPacket.getHeader(), buf.build(), false);
 //        parent.writeAndFlush(ipPacket).syncUninterruptibly();
         parent.writeAndFlush(ipPacket);
+    }
+
+    protected void destroy0() {
     }
 }

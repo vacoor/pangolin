@@ -11,11 +11,12 @@ import org.pcap4j.packet.IpPacket;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_CLOSE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_LISTEN;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_FIN_WAIT2;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.InetConnectionSock.TCP_RTO_MAX;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.InetConnectionSock.TCP_RTO_MIN;
 
 @Slf4j
 public class TcpTimer<T extends IpPacket> {
@@ -46,7 +47,7 @@ public class TcpTimer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L165">inet_csk_init_xmit_timers</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L755">inet_csk_init_xmit_timers</a>
      */
-    private void inet_csk_init_xmit_timers(final TcpDemultiplexer<T> tp,
+    private void inet_csk_init_xmit_timers(final TcpSock tp,
                                            final Runnable icsk_retransmit_handler,
                                            final Runnable icsk_delack_handler,
                                            final Runnable keepalive_handler) {
@@ -59,7 +60,7 @@ public class TcpTimer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c">inet_csk_clear_xmit_timers</a>
      */
-    private void inet_csk_clear_xmit_timers(final TcpDemultiplexer<T> tp) {
+    private void inet_csk_clear_xmit_timers(final TcpSock tp) {
         tp.icsk_pending = 0;
         tp.icsk_ack.pending = 0;
 
@@ -69,13 +70,13 @@ public class TcpTimer<T extends IpPacket> {
     }
 
 
-    void tcp_init_xmit_timers(TcpDemultiplexer<T> tp) {
+    void tcp_init_xmit_timers(TcpSock tp) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L883
         inet_csk_init_xmit_timers(tp, () -> this.tcp_write_timer(tp), () -> this.tcp_delack_timer(tp), () -> this.tcp_keepalive_timer(tp));
     }
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L702
-    void tcp_clear_xmit_timers(TcpDemultiplexer<T> tp) {
+    public void tcp_clear_xmit_timers(TcpSock tp) {
         inet_csk_clear_xmit_timers(tp);
     }
 
@@ -159,7 +160,7 @@ public class TcpTimer<T extends IpPacket> {
      * @see <a href="https://www.cnblogs.com/wanpengcoder/p/11749449.html">TCP定时器 之 延迟确认定时器</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L307">tcp_delack_timer_handler</a>
      */
-    private void tcp_delack_timer_handler(TcpDemultiplexer<T> tp) {
+    private void tcp_delack_timer_handler(TcpSock tp) {
         final int state = tp.state.get().ordinal();
         if (((1 << state) & (TCPF_CLOSE | TCPF_LISTEN)) != 0) {
             return;
@@ -213,7 +214,7 @@ public class TcpTimer<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L359">tcp_delack_timer</a>
      */
-    private void tcp_delack_timer(TcpDemultiplexer<T> tp) {
+    private void tcp_delack_timer(TcpSock tp) {
         // FIXME
         tcp_delack_timer_handler(tp);
     }
@@ -228,7 +229,7 @@ public class TcpTimer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L883">tcp_init_xmit_timers</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L760">inet_csk_init_xmit_timers</a>
      */
-    private void tcp_write_timer(TcpDemultiplexer<T> tp) {
+    private void tcp_write_timer(TcpSock tp) {
         if (tp.icsk_pending <= 0) {
             return;
         }
@@ -238,7 +239,7 @@ public class TcpTimer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L688">tcp_write_timer_handler</a>
      */
-    private void tcp_write_timer_handler(TcpDemultiplexer<T> tp) {
+    private void tcp_write_timer_handler(TcpSock tp) {
         if (0 != ((1 << tp.state.get().ordinal()) & (TCPF_CLOSE | TCPF_LISTEN))
                 || tp.icsk_pending <= 0) {
             return;
@@ -278,7 +279,7 @@ public class TcpTimer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L529">tcp_retransmit_timer</a>
      */
-    private void tcp_retransmit_timer(TcpDemultiplexer<T> tp) {
+    private void tcp_retransmit_timer(TcpSock tp) {
         if (tp.packets_out <= 0) {
             return;
         }
@@ -302,7 +303,7 @@ public class TcpTimer<T extends IpPacket> {
             }
 
             if (tcp_rtx_probe0_timed_out(tp, rtx_delta)) {
-                tp.logError("[RETRANSMIT] RTX PROBE0 TIMEOUT");
+//                tp.logError("[RETRANSMIT] RTX PROBE0 TIMEOUT");
                 tp.tcp_write_err();
                 return;
             }
@@ -358,7 +359,7 @@ public class TcpTimer<T extends IpPacket> {
     }
 
 
-    private void tcp_update_rto_stats(TcpDemultiplexer<T> tp) {
+    private void tcp_update_rto_stats(TcpSock tp) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L436
         if (0 == tp.icsk_retransmits) {
             tp.total_rto_recoveries++;
@@ -371,7 +372,7 @@ public class TcpTimer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L213">retransmits_timed_out</a>
      */
-    private boolean retransmits_timed_out(TcpDemultiplexer<T> tp, int boundary, long timeout) {
+    private boolean retransmits_timed_out(TcpSock tp, int boundary, long timeout) {
         if (tp.icsk_retransmits == 0) {
             return false;
         }
@@ -415,7 +416,7 @@ public class TcpTimer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L27">tcp_clamp_rto_to_user_timeout</a>
      */
-    private long tcp_clamp_rto_to_user_timeout(TcpDemultiplexer<T> tp) {
+    private long tcp_clamp_rto_to_user_timeout(TcpSock tp) {
         long user_timeout = tp.icsk_user_timeout;
         if (user_timeout == 0) {
             return tp.icsk_rto;
@@ -433,7 +434,7 @@ public class TcpTimer<T extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L241
-    private int tcp_write_timeout(TcpDemultiplexer<T> tp) {
+    private int tcp_write_timeout(TcpSock tp) {
         boolean expired = false;
         int retry_until = SysctlOptions.sysctl_tcp_retries2;
         int max_retransmits;
@@ -465,7 +466,7 @@ public class TcpTimer<T extends IpPacket> {
 
         if (expired) {
             /* Has it gone just too far? */
-            tp.logError("[RETRANSMIT] WRITE TIMEOUT");
+//            tp.logError("[RETRANSMIT] WRITE TIMEOUT");
             tp.tcp_write_err();
             return 1;
         }
@@ -476,7 +477,7 @@ public class TcpTimer<T extends IpPacket> {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L488">tcp_rtx_probe0_timed_out</a>
      */
-    private boolean tcp_rtx_probe0_timed_out(TcpDemultiplexer<T> tp, long rtx_delta) {
+    private boolean tcp_rtx_probe0_timed_out(TcpSock tp, long rtx_delta) {
         int user_timeout = tp.icsk_user_timeout;
         int timeout = tp.tcp_rto_max() << 1;
 
@@ -512,7 +513,7 @@ public class TcpTimer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L386">tcp_probe_timer</a>
      */
-    private void tcp_probe_timer(TcpDemultiplexer<T> tp) {
+    private void tcp_probe_timer(TcpSock tp) {
         final TcpBuffer skb = tp.tcp_send_head();
         if (tp.packets_out > 0 || null == skb) {
             tp.icsk_probes_out = 0;
@@ -533,7 +534,7 @@ public class TcpTimer<T extends IpPacket> {
         } else {
             final int user_timeout = tp.icsk_user_timeout;
             if (user_timeout > 0 && TcpClock.tcp_jiffies32() - tp.icsk_probes_tstamp >= TcpClock.msecs_to_jiffies(user_timeout)) {
-                tp.logWarn("PROBE TIMEOUT");
+//                tp.logWarn("PROBE TIMEOUT");
                 tp.tcp_write_err();
                 return;
             }
@@ -544,7 +545,7 @@ public class TcpTimer<T extends IpPacket> {
         // ...
 
         if (tp.icsk_probes_out >= max_probes) {
-            tp.logWarn("TOO MANY PROBES");
+//            tp.logWarn("TOO MANY PROBES");
             tp.tcp_write_err();
         } else {
             /* Only send another probe if we didn't close things up. */
@@ -554,14 +555,14 @@ public class TcpTimer<T extends IpPacket> {
 
     /* *********** ]] ZERO WINDOW PROBE ************** */
 
-    void tcp_reset_keepalive_timer(TcpDemultiplexer<T> tp, long len) {
+    public void tcp_reset_keepalive_timer(TcpSock tp, long len) {
         sk_reset_timer(tp, sk_timer, TcpClock.jiffies() + len);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L779">tcp_keepalive_timer</a>
      */
-    private void tcp_keepalive_timer(TcpDemultiplexer<T> tp) {
+    private void tcp_keepalive_timer(TcpSock tp) {
         final TcpState state = tp.state.get();
         if (TcpState.TCP_LISTEN.equals(state)) {
             log.error("Hmm... keepalive on a LISTEN ???");
@@ -623,7 +624,7 @@ public class TcpTimer<T extends IpPacket> {
         tcp_reset_keepalive_timer(tp, elapsed);
     }
 
-    private int keepalive_probes(TcpDemultiplexer<T> tp) {
+    private int keepalive_probes(TcpSock tp) {
         int val;
 
         /* Paired with WRITE_ONCE() in tcp_sock_set_keepcnt()
@@ -634,12 +635,12 @@ public class TcpTimer<T extends IpPacket> {
         return 0 != val ? val : SysctlOptions.sysctl_tcp_keepalive_probes;
     }
 
-    int keepalive_time_when(final TcpDemultiplexer<T> tp) {
+    int keepalive_time_when(final TcpSock tp) {
         // tp.keepalive_time;
         return SysctlOptions.sysctl_tcp_keepalive_time;
     }
 
-    int keepalive_intvl_when(final TcpDemultiplexer<T> tp) {
+    int keepalive_intvl_when(final TcpSock tp) {
         /*-
          * Paired with WRITE_ONCE() in tcp_sock_set_keepintvl()
          * and do_tcp_setsockopt().
@@ -648,7 +649,7 @@ public class TcpTimer<T extends IpPacket> {
         return 0 != val ? val : SysctlOptions.sysctl_tcp_keepalive_intvl;
     }
 
-    int keepalive_time_elapsed(final TcpDemultiplexer<T> tp) {
+    int keepalive_time_elapsed(final TcpSock tp) {
         return (int) Math.min(TcpClock.tcp_jiffies32() - tp.icsk_ack.lrcvtime, TcpClock.tcp_jiffies32() - tp.rcv_tstamp);
     }
 }

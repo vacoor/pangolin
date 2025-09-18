@@ -12,4 +12,5 @@ public class tcp_request_sock extends inet_request_sock {
     int last_oow_ack_time;
     int rcv_nxt;
     int syn_tos;
+
 }

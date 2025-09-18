@@ -5,26 +5,22 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.*;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
-import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.UnknownPacket;
 
 import java.io.IOException;
-import java.net.InetAddress;
-import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpHandshaker.tcpLogError;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
@@ -61,8 +57,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     //    volatile Channel child;
     int connTimeoutMs = 10 * 1000;
 
-    TcpInput<T> input;
-    TcpOutput output;
     private tcp_request_sock request_sock;
 
     protected TcpDemultiplexer(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
@@ -71,65 +65,12 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
-        this.output = new TcpOutput<T>();
-        this.input = new TcpInput<>(this.output);
         init();
-        this.listen();
+        state.set(TCP_LISTEN);
     }
 
     protected void init() {
         tcp_init_sock(this);
-    }
-
-    private TcpDemultiplexer<T> listen() {
-        inet_listen(100);
-        return this;
-    }
-
-    /**
-     * Move a socket into listening state.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L230">inet_listen</a>
-     */
-    private int inet_listen(int backlog) {
-        return __inet_listen_sk(backlog);
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L191">__inet_listen_sk</a>
-     */
-    private int __inet_listen_sk(int backlog) {
-        TcpState s = this.state.get();
-        int st = s.ordinal();
-        if (0 == ((1 << st) & (TcpConstants.TCPF_CLOSE | TcpConstants.TCPF_LISTEN))) {
-            // return -EINVAL;
-            return -1;
-        }
-
-        /* Really, if the socket is already in listen state
-         * we can only allow the backlog to be adjusted.
-         */
-        if (!TCP_LISTEN.equals(s)) {
-            // ...
-            int err = inet_csk_listen_start();
-            if (err != 0) {
-                return err;
-            }
-            // ...
-        }
-
-        return 0;
-    }
-
-    /**
-     * https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1342.
-     */
-    private int inet_csk_listen_start() {
-        // reqsk_queue_alloc(&icsk->icsk_accept_queue);
-
-        // inet_csk_delack_init
-        state.compareAndSet(TcpState.TCP_CLOSE, TCP_LISTEN);
-        return 0;
     }
 
     public void handler(final T ipHeader, final TcpPacket tcpPacket) {
@@ -152,7 +93,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
     /* ************** Initialize Connection Request [[ ************ */
 
-    protected abstract tcp_request_sock conn_request(TcpDemultiplexer<T> p, final T ih, final TcpPacket skb);
+    protected abstract tcp_request_sock conn_request(TcpSock p, final T ih, final TcpPacket skb);
 
 
     protected abstract void send_reset(IpHeader request, TcpPacket skb, int err);
@@ -185,6 +126,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         newsk.icsk_ext_hdr_len = 0;
         output.tcp_sync_mss(this, dst_mtu());
         newsk.advmss = tcp_mss_clamp(newsk, dst_metric_advmss());
+
         tcp_initialize_rcv_mss(newsk);
         return newsk;
     }
@@ -195,7 +137,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpDemultiplexer<T> tcp_create_openreq_child(TcpDemultiplexer<T> sk, tcp_request_sock req, final TcpPacket skb) {
+    private <T extends IpPacket> TcpDemultiplexer<T> tcp_create_openreq_child(TcpDemultiplexer<T> sk, tcp_request_sock req, final TcpPacket skb) {
         /*-
          * 第一步调用 <code>inet_csk_clone_lock<code/> 基于原 TCP_NEW_SYN_RECV sock clone时会将状态设置为 TCP_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1247"></a>
@@ -217,7 +159,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         _seq = req.snt_isn + 1;
         newtp.snd_sml = newtp.snd_una = _seq;
         newtp.snd_nxt = _seq;
-//        snd_sml = snd_una = snd_nxt = snd_up = _seq;
         newtp.snd_up = _seq;
 
         newtp.tcp_init_wl(req.rcv_isn);
@@ -268,19 +209,23 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         // newtp.tsoffset = req.ts_off;
 
         newtp.rx_opt.mss_clamp = req.mss;
+
         newtp.child = req.child;
+        newtp.destroy = req.destroy;
+        newtp.INDIRECT_CALL_INET = req.INDIRECT_CALL_INET;
         return newtp;
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1216">inet_csk_clone_lock</a>
      */
-    private static <T extends IpPacket> TcpDemultiplexer<T> inet_csk_clone_lock(final TcpDemultiplexer<T> sk, tcp_request_sock req) {
-        final TcpDemultiplexer<T> newsk = sk; // sk_clone_lock
+    private static <T extends TcpSock> T inet_csk_clone_lock(final T sk, tcp_request_sock req) {
+        final T newsk = sk; // sk_clone_lock
 
 //         newsk.inet_dport = req....
 //         newsk.inet_sport = ...
 
+        newsk.ipHeader = req.ipHeader;
         newsk.srcAddr = req.srcAddr;
         newsk.dstAddr = req.dstAddr;
         newsk.srcPort = req.srcPort;
@@ -300,7 +245,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
     // FIXME TODO tcp_init_sock https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L422
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2492
-    protected void tcp_init_sock(final TcpDemultiplexer<T> sk) {
+    protected static void tcp_init_sock(final TcpSock sk) {
         // ...
 
 //        timer.tcp_init_xmit_timers(sk);
@@ -342,7 +287,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 //        scaling_ratio = TCP_DEFAULT_SCALING_RATIO;
     }
 
-    private void tcp_scaling_ratio_init(final TcpSock sk) {
+    private static void tcp_scaling_ratio_init(final TcpSock sk) {
 //        sk.scaling_ratio = TCP_DEFAULT_SCALING_RATIO;
     }
 
@@ -359,306 +304,19 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
     static final int EPIPE = 32;
 
-    static final int ECONNREFUSED = 61;
-    static final int ECONNRESET = 104;
-    static final int ETIMEOUT = 110;
-
-
-    protected void inet_csk_destroy_sock() {
-        if (!TCP_CLOSE.equals(state.get())) {
-            // ...
-        }
-
-        if (null != child && child.isOpen()) {
-            child.close();
-        }
-        destroy0();
-    }
-
-    protected void destroy0() {
-
-    }
+    public static final int ECONNREFUSED = 61;
+    public static final int ECONNRESET = 104;
+    public static final int ETIMEOUT = 110;
 
 
     /* *************** */
     /* *************** */
     /* *************** */
 
-    void tcp_measure_rcv_mss(TcpPacket skb) {
-        // FIXME
-        final int lss = icsk_ack.last_seg_size;
 
-        icsk_ack.last_seg_size = 0;
-        final int len = skb.length() - skb.getHeader().length();
-        if (len >= icsk_ack.rcv_mss) {
-            /*
-            if (len != icsk_ack.rcv_mss) {
-                len << TCP_RMEM_TO_WIN_SCALE‎;
-            }
-            */
-
-            icsk_ack.rcv_mss = Math.min(len, advmss);
-        }
-    }
-
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L622">tcp_initialize_rcv_mss</a>
-     */
-    private static void tcp_initialize_rcv_mss(final TcpSock tp) {
-        int hint = Math.min(tp.advmss, tp.mss_cache);
-        hint = Math.min(hint, tp.rcv_wnd / 2);
-        hint = Math.min(hint, TcpConstants.TCP_MSS_DEFAULT);
-        hint = Math.max(hint, TcpConstants.TCP_MIN_MSS);
-        tp.icsk_ack.rcv_mss = hint;
-    }
-
-    /**
-     * Receiver "autotuning" code.
-     * <p>
-     * The algorithm for RTT estimation w/o timestamps is based on
-     * Dynamic Right-Sizing (DRS) by Wu Feng and Mike Fisk of LANL.
-     * <https://public.lanl.gov/radiant/pubs.html#DRS>
-     * <p>
-     * More detail on this code can be found at
-     * <http://staff.psc.edu/jheffner/>,
-     * though this reference is out of date.  A new paper
-     * is pending.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L652">tcp_rcv_rtt_update</a>
-     */
-    private void tcp_rcv_rtt_update(long sample, int win_dep) {
-        long new_sample = rcv_rtt_est.rtt_us;
-        long m = sample;
-
-        if (new_sample != 0) {
-            /* If we sample in larger samples in the non-timestamp
-             * case, we could grossly overestimate the RTT especially
-             * with chatty applications or bulk transfer apps which
-             * are stalled on filesystem I/O.
-             *
-             * Also, since we are only going for a minimum in the
-             * non-timestamp case, we do not smooth things out
-             * else with timestamps disabled convergence takes too
-             * long.
-             */
-            if (0 == win_dep) {
-                m -= (new_sample >> 3);
-                new_sample += m;
-            } else {
-                m <<= 3;
-                if (m < new_sample) {
-                    new_sample = m;
-                }
-            }
-        } else {
-            /* No previous measure. */
-            new_sample = m << 3;
-        }
-
-        rcv_rtt_est.rtt_us = new_sample;
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L684">tcp_rcv_rtt_measure</a>
-     */
-    void tcp_rcv_rtt_measure() {
-        if (rcv_rtt_est.time != 0) {
-            if (before(rcv_nxt, rcv_rtt_est.seq)) {
-                return;
-            }
-            long delta_us = tcp_stamp_us_delta(tcp_mstamp, rcv_rtt_est.time);
-            if (delta_us == 0) {
-                delta_us = 1;
-            }
-            tcp_rcv_rtt_update(delta_us, 1);
-        }
-
-        rcv_rtt_est.seq = rcv_nxt + rcv_wnd;
-        rcv_rtt_est.time = tcp_mstamp;
-    }
-
-
-    /* Called to compute a smoothed rtt estimate. The data fed to this
-     * routine either comes from timestamps, or from segments that were
-     * known _not_ to have been retransmitted [see Karn/Partridge
-     * Proceedings SIGCOMM 87]. The algorithm is from the SIGCOMM 88
-     * piece by Van Jacobson.
-     * NOTE: the next three routines used to be one big routine.
-     * To save cycles in the RFC 1323 implementation it was better to break
-     * it up into three procedures. -- erics
-     */
-    private void tcp_rtt_estimator(long mrtt_us) {
-        long m = mrtt_us; /* RTT */
-        long srtt = srtt_us;
-
-        /*	The following amusing code comes from Jacobson's
-         *	article in SIGCOMM '88.  Note that rtt and mdev
-         *	are scaled versions of rtt and mean deviation.
-         *	This is designed to be as fast as possible
-         *	m stands for "measurement".
-         *
-         *	On a 1990 paper the rto value is changed to:
-         *	RTO = rtt + 4 * mdev
-         *
-         * Funny. This algorithm seems to be very broken.
-         * These formulae increase RTO, when it should be decreased, increase
-         * too slowly, when it should be increased quickly, decrease too quickly
-         * etc. I guess in BSD RTO takes ONE value, so that it is absolutely
-         * does not matter how to _calculate_ it. Seems, it was trap
-         * that VJ failed to avoid. 8)
-         */
-        if (srtt != 0) {
-            m -= (srtt >> 3);    /* m is now error in rtt est */
-            srtt += m;        /* rtt = 7/8 rtt + 1/8 new */
-            if (m < 0) {
-                m = -m;        /* m is now abs(error) */
-                m -= (mdev_us >> 2);   /* similar update on mdev */
-                /* This is similar to one of Eifel findings.
-                 * Eifel blocks mdev updates when rtt decreases.
-                 * This solution is a bit different: we use finer gain
-                 * for mdev in this case (alpha*beta).
-                 * Like Eifel it also prevents growth of rto,
-                 * but also it limits too fast rto decreases,
-                 * happening in pure Eifel.
-                 */
-                if (m > 0) {
-                    m >>= 3;
-                }
-            } else {
-                m -= (mdev_us >> 2);   /* similar update on mdev */
-            }
-            mdev_us += m;        /* mdev = 3/4 mdev + 1/4 new */
-            if (mdev_us > mdev_max_us) {
-                mdev_max_us = mdev_us;
-                if (mdev_max_us > rttvar_us) {
-                    rttvar_us = mdev_max_us;
-                }
-            }
-            if (after(snd_una, rtt_seq)) {
-                if (mdev_max_us < rttvar_us) {
-                    rttvar_us -= (rttvar_us - mdev_max_us) >> 2;
-                }
-                rtt_seq = snd_nxt;
-                mdev_max_us = tcp_rto_min_us();
-
-                // tcp_bpf_rtt(sk, mrtt_us, srtt);
-            }
-        } else {
-            /* no previous measure. */
-            srtt = m << 3;        /* take the measured time to be rtt */
-            mdev_us = m << 1;    /* make sure rto = 3*rtt */
-            rttvar_us = Math.max(mdev_us, tcp_rto_min_us());
-            mdev_max_us = rttvar_us;
-            rtt_seq = snd_nxt;
-
-            // tcp_bpf_rtt(sk, mrtt_us, srtt);
-        }
-        srtt_us = Math.max(1, srtt);
-        logTrace("[RTT] Compute a smoothed rtt: {}us", srtt_us >> 3);
-    }
-
-    /**
-     * Calculate rto without backoff.  This is the second half of Van Jacobson's
-     * routine referred to above.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L980">tcp_set_rto</a>
-     */
-    private void tcp_set_rto() {
-        /* Old crap is replaced with new one. 8)
-         *
-         * More seriously:
-         * 1. If rtt variance happened to be less 50msec, it is hallucination.
-         *    It cannot be less due to utterly erratic ACK generation made
-         *    at least by solaris and freebsd. "Erratic ACKs" has _nothing_
-         *    to do with delayed acks, because at cwnd>2 true delack timeout
-         *    is invisible. Actually, Linux-2.4 also generates erratic
-         *    ACKs in some circumstances.
-         */
-        icsk_rto = (int) __tcp_set_rto();
-
-        /* 2. Fixups made earlier cannot be right.
-         *    If we do not estimate RTO correctly without them,
-         *    all the algo is pure shit and should be replaced
-         *    with correct one. It is exactly, which we pretend to do.
-         */
-
-        /* NOTE: clamping at TCP_RTO_MIN is not required, current algo
-         * guarantees that rto is higher.
-         */
-        tcp_bound_rto();
-        logTrace("[RTO] Set retransmission timeout: {}ms", icsk_rto);
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L1001">tcp_init_cwnd</a>
-     */
-    private int tcp_init_cwnd() {
-        // __u32 cwnd = (dst ? dst_metric(dst, RTAX_INITCWND) : 0);
-        int cwnd = 0;
-
-        if (0 == cwnd) {
-            cwnd = TcpConstants.TCP_INIT_CWND;
-        }
-        return Math.min(cwnd, snd_cwnd_clamp);
-    }
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L665
-    private void tcp_mark_push(final TcpPacket.Builder skb) {
-        skb.psh(true);
-        pushed_seq = write_seq;
-    }
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L671
-    private boolean forced_push() {
-        // ???
-        return after(write_seq, pushed_seq + (max_window >> 1));
-    }
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L676
-    void tcp_skb_entail(TcpBuffer skb) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L676
-        skb.sequenceNumber(write_seq);
-        skb.ack(true);
-        sk_write_queue.offer(skb);
-    }
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L719
-    void tcp_push(int flags, int mss_now, int nonagle, int size_goal) {
-        // FIXME ....
-    }
-
-    private void tcp_sendmsg() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L1353
-        // lock
-        tcp_sendmsg_locked();
-        // unlock
-    }
-
-    private void tcp_sendmsg_locked() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L1052
-
-        // restart:
-        final int mss_now = tcp_send_mss(this);
-    }
-
-    private synchronized void tcp_sendmsg2(final TcpDemultiplexer<T> tp, TcpBuffer skb, boolean flush) {
-        skb.sequenceNumber(tp.write_seq);
-        skb.dstPort(tp.srcPort).srcPort(tp.dstPort);
-        tcp_skb_entail(skb);
-
-        final Packet.Builder payload = skb.payloadBuilder();
-        if (null != payload) {
-            tp.write_seq += payload.build().length();
-        }
-        if (flush) {
-            tcp_push_pending_frames(tp);
-        }
-    }
-
-    private static final int TCP_STATE_MASK = 0xF;
-    private static final int TCP_ACTION_FIN = 1 << (TcpState.TCP_CLOSE.ordinal());
-    private static final int[] NEW_STATE = new int[16];
+    public static final int TCP_STATE_MASK = 0xF;
+    public static final int TCP_ACTION_FIN = 1 << (TcpState.TCP_CLOSE.ordinal());
+    public static final int[] NEW_STATE = new int[16];
 
     {
 //        new_state[0 /* (Invalid) */] = State.TCP_CLOSE.ordinal();
@@ -676,182 +334,9 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         NEW_STATE[TcpState.TCP_NEW_SYN_RECV.ordinal() + 1] = TcpState.TCP_CLOSE.ordinal(); /* should not happen ! */
     }
 
-    /**
-     * Shutdown the sending side of a connection. Much like close except
-     * that we don't receive shut down or sock_set_flag(sk, SOCK_DEAD).
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L2979">tcp_shutdown</a>
-     */
-    void tcp_shutdown(final int how) {
-        if (0 == (how & TcpConstants.SEND_SHUTDOWN)) {
-            return;
-        }
-
-        /* If we've already sent a FIN, or it's a closed state, skip this. */
-        if (0 != ((1 << state.get().ordinal()) & (TcpConstants.TCPF_ESTABLISHED | TcpConstants.TCPF_CLOSE_WAIT))) {
-            /* Clear out any half completed packets.  FIN if needed. */
-            if (tcp_close_state(this)) {
-                output.tcp_send_fin(this);
-            }
-        }
-    }
-
-    private boolean tcp_close_state(SockCommon sk) {
-        int next = NEW_STATE[sk.state.get().ordinal() + 1];
-        int ns = next & TCP_STATE_MASK;
-
-        sk.state.set(TcpState.values()[ns]);
-        return 0 != (next & TCP_ACTION_FIN);
-    }
-
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3240">tcp_close</a>
-     */
-    private void tcp_close(TcpDemultiplexer<T> sk, long timeout) {
-        __tcp_close(sk, timeout);
-        // release_sock();
-        // ...
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3066">__tcp_close</a>
-     */
-    private void __tcp_close(TcpDemultiplexer<T> sk, long timeout) {
-        // FIXME
-        sk.sk_shutdown = TcpConstants.SHUTDOWN_MASK;
-
-        TcpState state = sk.state.get();
-        if (TCP_LISTEN.equals(state)) {
-            sk.state.set(TCP_CLOSE);
-            adjudge_to_death(sk);
-            return;
-        }
-
-        // ...
-
-        /* If socket has been already reset (e.g. in tcp_reset()) - kill it. */
-        if (TCP_CLOSE.equals(state)) {
-            adjudge_to_death(sk);
-            return;
-        }
-
-        if (tcp_close_state(sk)) {
-            output.tcp_send_fin(sk);
-        }
-
-        adjudge_to_death(sk);
-    }
-
-    private void adjudge_to_death(TcpDemultiplexer<T> sk) {
-        final TcpState state = this.state.get();
-        if (TCP_FIN_WAIT2.equals(state)) {
-            final int tmo = sk.tcp_fin_time();
-            if (tmo > TcpConstants.TCP_TIMEWAIT_LEN) {
-                sk.timer.tcp_reset_keepalive_timer(sk, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
-            } else {
-                tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
-                return;
-            }
-        }
-
-        if (!TcpState.TCP_CLOSE.equals(state)) {
-            // TODO
-        }
-
-        // ...
-    }
-
-    void tcp_time_wait(TcpSock tp, TcpState state, long timeout) {
-        tp.state.set(state);
-
-        if (TCP_TIME_WAIT.equals(state)) {
-            tp.state.set(TCP_CLOSE);
-            tcp_done(tp);
-        }
-
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2102">tcp_push_pending_frames</a>
-     */
-    protected void tcp_push_pending_frames(final TcpDemultiplexer<T> tp) {
-        if (null != tcp_send_head()) {
-            output.__tcp_push_pending_frames(tp, output.tcp_current_mss(tp), tp.nonagle);
-        }
-    }
-
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L75">tcp_write_err</a>
-     */
-    void tcp_write_err() {
-        log.warn("TCP WRITE ERROR");
-        input.tcp_done_with_error(this, sk_err_soft != 0 ? sk_err_soft : ETIMEOUT);
-    }
-
-
-
-    void sk_data_ready() {
-
-    }
-
-    void consume(final TcpPacket skb) {
-        if (null != child && child.isOpen()) {
-            final TcpHeader hdr = skb.getHeader();
-            final byte[] bytes = skb.getPayload().getRawData();
-
-            final int offset = rcv_nxt - hdr.getSequenceNumber();
-            final int length = Math.min(output.tcp_receive_window(this), bytes.length - offset);
-            child.writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
-        }
-    }
-
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L4939">tcp_done</a>
-     */
-    void tcp_done(TcpSock tp) {
-        // ... fastopen
-
-        tp.state.set(TcpState.TCP_CLOSE);
-        tp.timer.tcp_clear_xmit_timers(this);
-
-        // ... fastopen...
-
-        tp.sk_shutdown = TcpConstants.SHUTDOWN_MASK;
-
-//        if (!sock_flag(tp, SOCK_DEAD)) {
-//            sk->sk_state_change(tp);
-//        } else
-        //
-        inet_csk_destroy_sock();
-    }
 
 
     /*       MSS    */
-
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2190
-    void tcp_enter_loss() {
-
-    }
-
-
-    int tcp_skb_pcount(TcpBuffer skb) {
-        return 1;
-    }
-
-    long tcp_skb_timestamp_ts(int usec_ts, TcpBuffer skb) {
-        // FIXME
-        long skb_mstamp_ns = skb.skb_mstamp_ns;
-        if (usec_ts != 0) {
-            // skb_mstamp_ns / NSEC_PER_USEC;
-            return TimeUnit.NANOSECONDS.toMicros(skb_mstamp_ns);
-        }
-        // skb_mstamp_ns / NSEC_PER_MSEC
-        return TimeUnit.NANOSECONDS.toMillis(skb_mstamp_ns);
-    }
 
 
     /* *********** [[ ************** */
@@ -872,99 +357,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /* ************* */
     /* ************* */
     /* ************* */
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3186
-    void tcp_update_rtt_min(long rtt_us, int flag) {
-        // int wlen = READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_min_rtt_wlen) * HZ;
-        int wlen = 1 * HZ;
-
-//        if ((flag & FLAG_ACK_MAYBE_DELAYED) && rtt_us > tcp_min_rtt()) {
-        /* If the remote keeps returning delayed ACKs, eventually
-         * the min filter would pick it up and overestimate the
-         * prop. delay when it expires. Skip suspected delayed ACKs.
-         */
-//            return;
-//        }
-
-        // FIXME
-        // minmax_running_min(rtt_min, wlen, tcp_jiffies32(), 0 != rtt_us ? rtt_us : jiffies_to_usecs(1));
-    }
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3202
-    boolean tcp_ack_update_rtt(int flag, long seq_rtt_us,
-                               long sack_rtt_us, long ca_rtt_us/*,
-                                       struct rate_sample *rs*/) {
-
-        /* Prefer RTT measured from ACK's timing to TS-ECR. This is because
-         * broken middle-boxes or peers may corrupt TS-ECR fields. But
-         * Karn's algorithm forbids taking RTT if some retransmitted data
-         * is acked (RFC6298).
-         */
-        if (seq_rtt_us < 0) {
-            seq_rtt_us = sack_rtt_us;
-        }
-
-        /* RTTM Rule: A TSecr value received in a segment is used to
-         * update the averaged RTT measurement only if the segment
-         * acknowledges some new data, i.e., only if it advances the
-         * left edge of the send window.
-         * See draft-ietf-tcplw-high-performance-00, section 3.3.
-         */
-//        if (seq_rtt_us < 0 && tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr && flag & FLAG_ACKED)
-//            seq_rtt_us = ca_rtt_us = tcp_rtt_tsopt_us(tp);
-
-        // rs->rtt_us = ca_rtt_us; /* RTT of last (S)ACKed packet (or -1) */
-        if (seq_rtt_us < 0) {
-            return false;
-        }
-
-        /* ca_rtt_us >= 0 is counting on the invariant that ca_rtt_us is
-         * always taken together with ACK, SACK, or TS-opts. Any negative
-         * values will be skipped with the seq_rtt_us < 0 check above.
-         */
-        tcp_update_rtt_min(ca_rtt_us, flag);
-        tcp_rtt_estimator(seq_rtt_us);
-
-        // 116.228.111.118 180.168.255.18
-        // TODO OPEN ME
-        tcp_set_rto();
-
-        /* RFC6298: only reset backoff on valid RTT measurement. */
-        icsk_backoff = 0;
-        return true;
-    }
-
-    /**
-     * Restart timer after forward progress on connection.
-     * RFC2988 recommends to restart timer to now+rto.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3147">tcp_rearm_rto</a>
-     */
-    protected static void tcp_rearm_rto(TcpSock tp) {
-
-        // ...
-
-        if (tp.packets_out <= 0) {
-            tp.inet_csk_clear_xmit_timer(ICSK_TIME_RETRANS);
-        } else {
-            int rto = tp.icsk_rto;
-
-            /* Offset the time elapsed after installing regular RTO */
-            if (tp.icsk_pending == ICSK_TIME_REO_TIMEOUT
-                    || tp.icsk_pending == ICSK_TIME_LOSS_PROBE) {
-                final long delta_us = tp.tcp_rto_delta_us();
-                /* delta_us may not be positive if the socket is locked
-                 * when the retrans timer fires and is rescheduled.
-                 */
-                rto = (int) usecs_to_jiffies(Math.max(delta_us, 1));
-            }
-            tp.tcp_reset_xmit_timer(ICSK_TIME_RETRANS, rto, true);
-        }
-    }
-
-    void tcp_ack_tstamp() {
-
-    }
 
 
     private void tcp_rcv_established(final TcpPacket skb) throws IOException {
@@ -1037,7 +429,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                logError("Exception caught: {}", cause.getMessage(), cause);
+                tcpLogError(null, tp.srcAddr, tp.srcPort.valueAsInt(), tp.dstAddr, tp.dstPort.valueAsInt(), "Exception caught: {}", cause.getMessage(), cause);
                 send_reset(ipHeader, new TcpPacket.Builder()
                         .srcAddr(tp.srcAddr)
                         .dstAddr(tp.dstAddr)
@@ -1165,7 +557,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
             /* accept old ack during closing */
             if (reason < 0) {
-                tcp_send_challenge_ack();
+                tp.tcp_send_challenge_ack();
                 reason = -reason;
                 return discard(skb, reason);
             }
@@ -1319,85 +711,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
     private void tcp_drop_reason(final TcpPacket skb, final int reason) {
 
-    }
-
-    protected abstract void INDIRECT_CALL_INET(final TcpBuffer skb);
-
-
-    int tcp_send_mss(final TcpDemultiplexer<T> tp) {
-        return output.tcp_current_mss(tp);
-    }
-
-    void logTrace(final String format, final Object... args) {
-        log.trace(format(format), args);
-    }
-
-    void logDebug(final String format, final Object... args) {
-        log.debug(format(format), args);
-    }
-
-    void logInfo(final String format, final Object... args) {
-        log.info(format(format), args);
-    }
-
-    void logWarn(final String format, final Object... args) {
-        log.warn(format(format), args);
-    }
-
-    void logError(final String format, final Object... args) {
-        log.error(format(format), args);
-    }
-
-    private String format(final String format) {
-        final InetAddress srcAddr = ipHeader.getSrcAddr();
-        final InetAddress dstAddr = ipHeader.getDstAddr();
-
-        final int srcPort = this.srcPort.valueAsInt();
-        final int dstPort = this.dstPort.valueAsInt();
-
-        final String srcHostAddr = srcAddr.getHostAddress();
-        final String dstHostAddr = dstAddr.getHostAddress();
-
-
-        final StringBuilder buff = new StringBuilder();
-        buff.append(TcpUtils.logPrefix(null != child ? child.id() : null, srcHostAddr, srcPort, dstHostAddr, dstPort));
-        buff.append(" ");
-
-        buff.append(format);
-        return buff.toString();
-    }
-
-    protected void debug(final IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
-        final String message = TcpUtils.logify(null != child ? child.id() : null, ipHeader, tcpPacket, inbound ? rx_opt.rcv_wscale : rx_opt.snd_wscale);
-        log.debug(message);
-    }
-
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L49">tcp_clamp_probe0_to_user_timeout</a>
-     */
-    protected static long tcp_clamp_probe0_to_user_timeout(TcpSock tp, long when) {
-        int user_timeout = tp.icsk_user_timeout;
-        if (0 == user_timeout || 0 == tp.icsk_probes_tstamp) {
-            return when;
-        }
-        long elapsed = tcp_jiffies32() - tp.icsk_probes_tstamp;
-        if (elapsed < 0) {
-            elapsed = 0;
-        }
-        long remaining = user_timeout - elapsed;
-        remaining = Math.max(remaining, TcpConstants.TCP_TIMEOUT_MIN);
-        return Math.min(remaining, when);
-    }
-
-
-    void tcp_send_challenge_ack() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3649
-    }
-
-    public long icsk_delack_timeout() {
-        // FIXME
-        return icsk_ack.timeout;
     }
 
 

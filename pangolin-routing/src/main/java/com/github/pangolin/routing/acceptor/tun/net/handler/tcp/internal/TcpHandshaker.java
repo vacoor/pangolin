@@ -48,8 +48,10 @@ public class TcpHandshaker {
         if (null == req) {
             return null;
         }
+        req.destroy = af_ops::destory;
+        req.INDIRECT_CALL_INET = af_ops::INDIRECT_CALL_INET;
 
-        req.ts_off = 0;
+                req.ts_off = 0;
         req.req_usec_ts = false;
 
 
@@ -95,6 +97,7 @@ public class TcpHandshaker {
         final int dstPort = tcpDstPort.valueAsInt();
 
         final tcp_request_sock req = new tcp_request_sock();
+        req.ipHeader = ipHeader;
         req.srcAddr = ipHeader.getSrcAddr();
         req.dstAddr = ipHeader.getDstAddr();
 
@@ -249,7 +252,7 @@ public class TcpHandshaker {
         log.error(prefix + " " + message, args);
     }
 
-    private static void tcpLogError(String traceId,
+    public static void tcpLogError(String traceId,
                                     InetAddress srcAddr, int srcPort,
                                     InetAddress dstAddr, int dstPort,
                                     String message, Object... args) {
