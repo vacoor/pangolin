@@ -339,26 +339,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     /*       MSS    */
 
 
-    /* *********** [[ ************** */
-
-
-
-
-
-    /* *********** ]] ************** */
-
-
-    /* ****************** */
-    /* ****************** */
-    /* ****************** */
-    /* ****************** */
-
-
-    /* ************* */
-    /* ************* */
-    /* ************* */
-
-
     private void tcp_rcv_established(final TcpPacket skb) throws IOException {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6110
 
