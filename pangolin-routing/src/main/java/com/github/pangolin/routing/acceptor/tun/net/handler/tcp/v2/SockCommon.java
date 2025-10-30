@@ -24,7 +24,7 @@ public class SockCommon {
     public TcpPort srcPort;
     public TcpPort dstPort;
     public Channel child;
-    public Runnable destroy;
+    public volatile Runnable destroy;
     public Consumer<TcpBuffer> INDIRECT_CALL_INET;
 
     /**

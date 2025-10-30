@@ -1156,7 +1156,9 @@ public class TcpSock extends InetConnectionSock {
         if (null != child && child.isOpen()) {
             child.close();
         }
-        this.destroy.run();
+        if (null != this.destroy) {
+            this.destroy.run();
+        }
     }
 
 
