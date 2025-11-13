@@ -14,6 +14,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import java.lang.reflect.Type;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.Collection;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
@@ -37,6 +38,10 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
         this.socketChannelFactory = factory;
         final Type type = Types.resolveType(TcpDemultiplexHandler.class.getTypeParameters()[0], getClass());
         Preconditions.checkState(type instanceof Class<?>, "Can't resolve %s IpPacket Class", TcpDemultiplexHandler.class.getName());
+    }
+
+    public Collection<TcpDemultiplexer> getConnections() {
+        return sessionMap.values();
     }
 
     @Override

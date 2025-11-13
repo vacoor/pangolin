@@ -70,10 +70,11 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
             if (0 != err) {
                 tcp_v4_send_reset(ih.getHeader(), skb, err);
                 inet_csk_destroy_sock();
+                destroy0();
             }
         } catch (final Throwable cause) {
-            cause.printStackTrace();
             inet_csk_destroy_sock();
+            destroy0();
         }
     }
 
