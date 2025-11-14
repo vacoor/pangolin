@@ -34,10 +34,11 @@ public class TcpTimer<T extends IpPacket> {
     /* Reordering timer */
     public static final int ICSK_TIME_REO_TIMEOUT = 6;
 
-    public Runnable icsk_retransmit_timer;
-    public Runnable icsk_delack_timer;
-    public Runnable sk_timer;
+    private final TcpDemultiplexer demultiplexer;
 
+    public TcpTimer(TcpDemultiplexer demultiplexer) {
+        this.demultiplexer = demultiplexer;
+    }
 
     /**
      * Using different timers for retransmit, delayed acks and probes
@@ -51,9 +52,9 @@ public class TcpTimer<T extends IpPacket> {
                                            final Runnable icsk_retransmit_handler,
                                            final Runnable icsk_delack_handler,
                                            final Runnable keepalive_handler) {
-        icsk_retransmit_timer = icsk_retransmit_handler;
-        icsk_delack_timer = icsk_delack_handler;
-        sk_timer = keepalive_handler;
+        tp.icsk_retransmit_timer = icsk_retransmit_handler;
+        tp.icsk_delack_timer = icsk_delack_handler;
+        tp.sk_timer = keepalive_handler;
         tp.icsk_pending = tp.icsk_ack.pending = 0;
     }
 
@@ -64,9 +65,9 @@ public class TcpTimer<T extends IpPacket> {
         tp.icsk_pending = 0;
         tp.icsk_ack.pending = 0;
 
-        sk_stop_timer(icsk_retransmit_timer);
-        sk_stop_timer(icsk_delack_timer);
-        sk_stop_timer(sk_timer);
+        sk_stop_timer(tp.icsk_retransmit_timer);
+        sk_stop_timer(tp.icsk_delack_timer);
+        sk_stop_timer(tp.sk_timer);
     }
 
 
@@ -94,11 +95,11 @@ public class TcpTimer<T extends IpPacket> {
                 what == ICSK_TIME_LOSS_PROBE || what == ICSK_TIME_REO_TIMEOUT) {
             tp.icsk_pending = what;
             tp.icsk_timeout = when; // FIXME
-            sk_reset_timer(tp, icsk_retransmit_timer, when);
+            sk_reset_timer(tp, tp.icsk_retransmit_timer, when);
         } else if (what == ICSK_TIME_DACK) {
             tp.icsk_ack.pending |= ICSK_ACK_TIMER;
             tp.icsk_ack.timeout = when; // FIXME
-            sk_reset_timer(tp, icsk_delack_timer, when);
+            sk_reset_timer(tp, tp.icsk_delack_timer, when);
         } else {
             log.warn("BUG: unknown timer value");
         }
@@ -138,7 +139,7 @@ public class TcpTimer<T extends IpPacket> {
     }
 
     private ScheduledFuture<?> schedule(Channel channel, long delay, TimeUnit unit, Runnable timer) {
-        return channel.pipeline().firstContext().executor().schedule(timer, delay, unit);
+        return channel.eventLoop().schedule(timer, delay, unit);
     }
 
     /* *********** DELAY ACK [[ ************** */
@@ -168,8 +169,8 @@ public class TcpTimer<T extends IpPacket> {
 
         /* Handling the sack compression case */
         if (tp.compressed_ack) {
-            tp.output.tcp_mstamp_refresh(tp);
-            tp.input.tcp_sack_compress_send_ack(tp);
+            demultiplexer.output.tcp_mstamp_refresh(tp);
+            demultiplexer.input.tcp_sack_compress_send_ack(tp);
             return;
         }
 
@@ -178,7 +179,7 @@ public class TcpTimer<T extends IpPacket> {
         }
 
         if (time_after(tp.icsk_delack_timeout(), TcpClock.jiffies())) {
-            sk_reset_timer(tp, icsk_delack_timer, tp.icsk_delack_timeout());
+            sk_reset_timer(tp, tp.icsk_delack_timer, tp.icsk_delack_timeout());
             return;
         }
 
@@ -196,8 +197,8 @@ public class TcpTimer<T extends IpPacket> {
                 tp.icsk_ack.ato = TcpConstants.TCP_ATO_MIN;
             }
 
-            tp.output.tcp_mstamp_refresh(tp);
-            tp.output.tcp_send_ack(tp);
+            demultiplexer.output.tcp_mstamp_refresh(tp);
+            demultiplexer.output.tcp_send_ack(tp);
         }
     }
 
@@ -245,11 +246,11 @@ public class TcpTimer<T extends IpPacket> {
             return;
         }
         if (tp.icsk_timeout > TcpClock.jiffies()) {
-            sk_reset_timer(tp, icsk_retransmit_timer, tp.icsk_timeout);
+            sk_reset_timer(tp, tp.icsk_retransmit_timer, tp.icsk_timeout);
             return;
         }
 
-        tp.output.tcp_mstamp_refresh(tp);
+        demultiplexer.output.tcp_mstamp_refresh(tp);
 
         int event = tp.icsk_pending;
         switch (event) {
@@ -258,7 +259,7 @@ public class TcpTimer<T extends IpPacket> {
                 // tcp_rack_reo_timeout(sk);
                 break;
             case ICSK_TIME_LOSS_PROBE:
-                tp.output.tcp_send_loss_probe();
+                demultiplexer.output.tcp_send_loss_probe();
                 break;
             case ICSK_TIME_RETRANS:
                 tp.icsk_pending = 0;
@@ -304,12 +305,12 @@ public class TcpTimer<T extends IpPacket> {
 
             if (tcp_rtx_probe0_timed_out(tp, rtx_delta)) {
 //                tp.logError("[RETRANSMIT] RTX PROBE0 TIMEOUT");
-                tp.tcp_write_err();
+                demultiplexer.tcp_write_err(tp);
                 return;
             }
 
             tp.tcp_enter_loss();
-            tp.output.tcp_retransmit_skb(tp, skb, 1);
+            demultiplexer.output.tcp_retransmit_skb(tp, skb, 1);
             // __sk_dst_reset
         } else {
             //....
@@ -324,11 +325,11 @@ public class TcpTimer<T extends IpPacket> {
             tp.tcp_enter_loss();
             tcp_update_rto_stats(tp);
 
-            if (tp.output.tcp_retransmit_skb(tp, tp.tcp_rtx_queue_head(), 1) > 0) {
+            if (demultiplexer.output.tcp_retransmit_skb(tp, tp.tcp_rtx_queue_head(), 1) > 0) {
                 /* Retransmission failed because of local congestion,
                  * Let senders fight for local resources conservatively.
                  */
-                tp.tcp_reset_xmit_timer(ICSK_TIME_RETRANS, TcpConstants.TCP_RESOURCE_PROBE_INTERVAL, false);
+                tp.tcp_reset_xmit_timer(this, ICSK_TIME_RETRANS, TcpConstants.TCP_RESOURCE_PROBE_INTERVAL, false);
                 return;
             }
         }
@@ -350,8 +351,7 @@ public class TcpTimer<T extends IpPacket> {
          */
         // ...
 
-        tp.tcp_reset_xmit_timer(ICSK_TIME_RETRANS, tcp_clamp_rto_to_user_timeout(tp), false);
-        ;
+        tp.tcp_reset_xmit_timer(this, ICSK_TIME_RETRANS, tcp_clamp_rto_to_user_timeout(tp), false);
 //        if (retransmits_timed_out(sysctl_tcp_retries1 + 1, 0)) {
         // 重置路由缓存
         // __sk_dst_reset(sk);
@@ -467,7 +467,7 @@ public class TcpTimer<T extends IpPacket> {
         if (expired) {
             /* Has it gone just too far? */
 //            tp.logError("[RETRANSMIT] WRITE TIMEOUT");
-            tp.tcp_write_err();
+            demultiplexer.tcp_write_err(tp);
             return 1;
         }
         return 0;
@@ -535,7 +535,7 @@ public class TcpTimer<T extends IpPacket> {
             final int user_timeout = tp.icsk_user_timeout;
             if (user_timeout > 0 && TcpClock.tcp_jiffies32() - tp.icsk_probes_tstamp >= TcpClock.msecs_to_jiffies(user_timeout)) {
 //                tp.logWarn("PROBE TIMEOUT");
-                tp.tcp_write_err();
+                demultiplexer.tcp_write_err(tp);
                 return;
             }
         }
@@ -546,17 +546,17 @@ public class TcpTimer<T extends IpPacket> {
 
         if (tp.icsk_probes_out >= max_probes) {
 //            tp.logWarn("TOO MANY PROBES");
-            tp.tcp_write_err();
+            demultiplexer.tcp_write_err(tp);
         } else {
             /* Only send another probe if we didn't close things up. */
-            tp.output.tcp_send_probe0(tp);
+            demultiplexer.output.tcp_send_probe0(tp);
         }
     }
 
     /* *********** ]] ZERO WINDOW PROBE ************** */
 
     public void tcp_reset_keepalive_timer(TcpSock tp, long len) {
-        sk_reset_timer(tp, sk_timer, TcpClock.jiffies() + len);
+        sk_reset_timer(tp, tp.sk_timer, TcpClock.jiffies() + len);
     }
 
     /**
@@ -569,18 +569,18 @@ public class TcpTimer<T extends IpPacket> {
             return;
         }
 
-        tp.output.tcp_mstamp_refresh(tp);
+        demultiplexer.output.tcp_mstamp_refresh(tp);
 
         if (TCP_FIN_WAIT2.equals(state)) {
             if (tp.linger2 >= 0) {
                 final int tmo = tp.tcp_fin_time() - TcpConstants.TCP_TIMEWAIT_LEN;
                 if (tmo > 0) {
-                    tp.tcp_time_wait(tp, TCP_FIN_WAIT2, tmo);
+                    demultiplexer.tcp_time_wait(tp, TCP_FIN_WAIT2, tmo);
                     return;
                 }
             }
-            tp.output.tcp_send_active_reset(tp, "SK_RST_REASON_TCP_STATE");
-            tp.tcp_done(tp);
+            demultiplexer.output.tcp_send_active_reset(tp, "SK_RST_REASON_TCP_STATE");
+            demultiplexer.tcp_done(tp);
             return;
         }
 
@@ -603,12 +603,12 @@ public class TcpTimer<T extends IpPacket> {
              */
             if ((user_timeout != 0 && elapsed >= TcpClock.msecs_to_jiffies(user_timeout) && tp.icsk_probes_out > 0)
                     || (user_timeout == 0 && tp.icsk_probes_out >= keepalive_probes(tp))) {
-                tp.output.tcp_send_active_reset(tp, "SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT");
-                tp.tcp_write_err();
+                demultiplexer.output.tcp_send_active_reset(tp, "SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT");
+                demultiplexer.tcp_write_err(tp);
                 return;
             }
 
-            if (tp.output.tcp_write_wakeup(tp, 1) <= 0) {
+            if (demultiplexer.output.tcp_write_wakeup(tp, 1) <= 0) {
                 tp.icsk_probes_out++;
                 elapsed = keepalive_intvl_when(tp);
             } else {

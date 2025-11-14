@@ -3,6 +3,9 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.IpPacketHandler;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.SockCommon;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
@@ -31,6 +34,8 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
     private final EventLoopGroup childGroup = new NioEventLoopGroup();
 
     private final Map<String, TcpDemultiplexer> sessionMap = Maps.newConcurrentMap();
+    private final Map<String, tcp_request_sock> requestMap = Maps.newConcurrentMap();
+    private final Map<String, TcpSock> establishedMap = Maps.newConcurrentMap();
 
     public TcpDemultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
         super(IpNumber.TCP);
@@ -64,16 +69,47 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
 
 
         final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
+
+
+        final String listenKey = "";
         if (!tcpHeader.getRst() && !tcpHeader.getAck() && tcpHeader.getSyn()) {
-            sessionMap.putIfAbsent(sockKey, create(ctx.channel(), childGroup, dnsEngine, socketChannelFactory, () -> {
-                    log.info("[{}] Destroy: {}", ctx.channel().id(), sockKey);
-                    sessionMap.remove(sockKey);
+            sessionMap.putIfAbsent(listenKey, create(ctx.channel(), childGroup, dnsEngine, socketChannelFactory, () -> {
+                    log.info("[{}] Destroy: {}", ctx.channel().id(), listenKey);
+//                    sessionMap.remove(listenKey);
+                establishedMap.remove(sockKey);
             }));
         }
-        TcpDemultiplexer<T> tcpDemultiplexer = sessionMap.get(sockKey);
+        TcpDemultiplexer<T> tcpDemultiplexer = sessionMap.get(listenKey);
+
+        SockCommon sk = establishedMap.get(sockKey);
+        if (null != sk) {
+            int a = 0;
+        }
+        if (null != sk) {
+            log.info("[X!ESTABLISHED] -> {}", sockKey);
+        } else {
+            sk = requestMap.get(sockKey);
+            if (null != sk) {
+                log.info("[X!ESTABLISHING] -> {}", sockKey);
+
+                tcp_request_sock request_sock = (tcp_request_sock) sk;
+                TcpSock tcpSock = tcpDemultiplexer.tcp_check_req(request_sock, tcpPacket);
+                // TODO add to established.
+                moveEstablished(request_sock, tcpSock);
+                sk = tcpSock;
+                // moveToEstablished(request_sock, tcpSock);
+            } else {
+                sk = tcpDemultiplexer;
+                if (null != sk) {
+                    log.info("[X!HANDSHAKE] -> {}", sockKey);
+                }
+            }
+        }
+
         if (null != tcpDemultiplexer) {
+            SockCommon finalTcpSock = sk;
             childGroup.execute(() -> {
-                tcpDemultiplexer.handler(ipPacket, tcpPacket);
+                tcpDemultiplexer.handler(finalTcpSock, ipPacket, tcpPacket);
             });
         }
 
@@ -89,6 +125,9 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
 
     protected InetAddress resolveDstAddress(final InetAddress address) throws UnknownHostException {
         final byte[] addr = address.getAddress();
+        if (false) {
+            return InetAddress.getByAddress("www.baidu.com", addr);
+        }
         if (dnsEngine.isFakeAddress(addr)) {
             final String hostname = dnsEngine.getHostByAddress(addr);
             if (null != hostname && !hostname.isEmpty()) {
@@ -100,6 +139,27 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
     }
 
     protected abstract TcpDemultiplexer<T> create(Channel parent, EventLoopGroup childGroup, DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory, Runnable destroyCallback);
+
+    protected void addHalfQueue(final TcpSock parent, final tcp_request_sock request) {
+        InetAddress srcAddr = request.srcAddr;
+        TcpPort tcpSrcPort = request.srcPort;
+        InetAddress dstAddr = request.dstAddr;
+        TcpPort tcpDstPort = request.dstPort;
+        final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
+        requestMap.putIfAbsent(sockKey, request);
+    }
+
+    protected void moveEstablished(final tcp_request_sock request, final TcpSock child) {
+        InetAddress srcAddr = request.srcAddr;
+        TcpPort tcpSrcPort = request.srcPort;
+        InetAddress dstAddr = request.dstAddr;
+        TcpPort tcpDstPort = request.dstPort;
+        final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
+        requestMap.remove(sockKey, request);
+
+        establishedMap.put(sockKey, child);
+//        sessionMap.remove(sockKey);
+    }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {

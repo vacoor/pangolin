@@ -16,6 +16,8 @@ public interface tcp_request_sock_ipv4_ops {
 
     void send_synack(TcpSock p, tcp_request_sock req, IpPacket.IpHeader ipHdr, TcpPacket skb);
 
+    void addToHalfQueue(TcpSock p, tcp_request_sock req);
+
     void destory();
 
     void INDIRECT_CALL_INET(TcpBuffer buffer);

@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_MAX_WSCALE;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_NEW_SYN_RECV;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.logPrefix;
 
 @Slf4j
@@ -45,6 +46,7 @@ public class TcpHandshaker {
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
          */
         tcp_request_sock req = inet_reqsk_alloc(ipHdr, skb, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup);
+        req.parentSock = listenSock;
         if (null == req) {
             return null;
         }
@@ -78,6 +80,10 @@ public class TcpHandshaker {
 
         // init rwin
         tcp_openreq_init_rwin(listenSock, output, req, skb);
+
+        req.state.set(TCP_NEW_SYN_RECV);
+
+        af_ops.addToHalfQueue(listenSock, req);
 
         // send_synack
         af_ops.send_synack(listenSock, req, ipHdr, skb);

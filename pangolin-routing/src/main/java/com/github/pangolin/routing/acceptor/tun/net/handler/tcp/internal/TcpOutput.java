@@ -29,6 +29,12 @@ import static org.pcap4j.packet.TcpPacket.TcpOption;
 @Slf4j
 public class TcpOutput<T extends IpPacket> {
 
+    private final TcpDemultiplexer demultiplexer;
+
+    public TcpOutput(TcpDemultiplexer demultiplexer) {
+        this.demultiplexer = demultiplexer;
+    }
+
     /**
      * Refresh clocks of a TCP socket,
      * ensuring monotically increasing values.
@@ -85,10 +91,10 @@ public class TcpOutput<T extends IpPacket> {
         tp.packets_out += tcp_skb_pcount(skb);
 
         if (prior_packets <= 0 || tp.icsk_pending == ICSK_TIME_LOSS_PROBE) {
-            tcp_rearm_rto(tp);
+            tcp_rearm_rto(demultiplexer.timer, tp);
         }
 
-        tp.input.tcp_check_space();
+        // tp.input.tcp_check_space();
     }
 
     /**
@@ -105,7 +111,7 @@ public class TcpOutput<T extends IpPacket> {
          * 如果最后一个收到的包也 ACK 了, 快速ACK次数 - 1, 不需要再执行延迟 ACK.
          */
         tp.tcp_dec_quickack_mode();
-        tp.inet_csk_clear_xmit_timer(TcpTimer.ICSK_TIME_DACK);
+        tp.inet_csk_clear_xmit_timer(demultiplexer.timer, TcpTimer.ICSK_TIME_DACK);
     }
 
     /**
@@ -986,7 +992,7 @@ public class TcpOutput<T extends IpPacket> {
             return;
         }
         if (tcp_write_xmit(tp, mss, nonagle, 0)) {
-            tp.tcp_check_probe_timer();
+            tp.tcp_check_probe_timer(demultiplexer.timer);
         }
     }
 
@@ -1220,7 +1226,7 @@ public class TcpOutput<T extends IpPacket> {
 
         if (tp.icsk_delack_timeout() != timeout) {
             tp.icsk_ack.timeout = tp.icsk_delack_timeout();
-            tp.timer.sk_reset_timer(tp, tp.timer.icsk_delack_timer, timeout);
+            demultiplexer.timer.sk_reset_timer(tp, tp.icsk_delack_timer, timeout);
         }
     }
 
@@ -1352,7 +1358,7 @@ public class TcpOutput<T extends IpPacket> {
         }
 
         timeout = tp.tcp_clamp_probe0_to_user_timeout(tp, timeout);
-        tp.tcp_reset_xmit_timer(TcpTimer.ICSK_TIME_PROBE0, timeout, true);
+        tp.tcp_reset_xmit_timer(demultiplexer.timer, TcpTimer.ICSK_TIME_PROBE0, timeout, true);
     }
 
     private TcpBuffer tcp_init_nondata_skb(TcpSock tp, int seq, int flags) {

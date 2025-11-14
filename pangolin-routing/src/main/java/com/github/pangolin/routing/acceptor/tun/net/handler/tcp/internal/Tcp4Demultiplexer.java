@@ -6,6 +6,7 @@ import static org.pcap4j.packet.IpPacket.IpHeader;
 import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.SockCommon;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.Channel;
@@ -28,8 +29,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
     }
 
     @Override
-    protected synchronized void tcp_rcv(final IpV4Packet ip, final TcpPacket tcpPacket) {
-        tcp_v4_rcv(ip, tcpPacket);
+    protected synchronized void tcp_rcv(SockCommon sock, final IpV4Packet ip, final TcpPacket tcpPacket) {
+        tcp_v4_rcv(sock, ip, tcpPacket);
     }
 
     @Override
@@ -47,14 +48,14 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
      * @param skb
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a>
      */
-    private void tcp_v4_rcv(final IpV4Packet ih, TcpPacket skb) {
-        tcp_v4_do_rcv(ih, skb);
+    private void tcp_v4_rcv(SockCommon sock, final IpV4Packet ih, TcpPacket skb) {
+        tcp_v4_do_rcv(sock, ih, skb);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1897">tcp_v4_do_rcv</a>
      */
-    private void tcp_v4_do_rcv(final IpV4Packet ih, TcpPacket skb) {
+    private void tcp_v4_do_rcv(final SockCommon sock, final IpV4Packet ih, TcpPacket skb) {
         // https://www.cnblogs.com/wanpengcoder/p/11750747.html
 
         /*
@@ -64,16 +65,16 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         }
         */
 
-        debug(ih.getHeader(), skb, true);
+        debug(sock,  ih.getHeader(), skb, true);
         try {
-            int err = tcp_rcv_state_process(this, ih, skb);
+            int err = tcp_rcv_state_process(sock, ih, skb);
             if (0 != err) {
                 tcp_v4_send_reset(ih.getHeader(), skb, err);
-                inet_csk_destroy_sock();
+                inet_csk_destroy_sock(sock);
                 destroy0();
             }
         } catch (final Throwable cause) {
-            inet_csk_destroy_sock();
+            inet_csk_destroy_sock(sock);
             destroy0();
         }
     }
@@ -185,6 +186,11 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                     }
 
                     @Override
+                    public void addToHalfQueue(TcpSock p, tcp_request_sock req) {
+                        Tcp4Demultiplexer.this.addToHalfQueue(p, req);
+                    }
+
+                    @Override
                     public void destory() {
                         Tcp4Demultiplexer.this.destroy0();
                     }
@@ -226,7 +232,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 .payloadBuilder(skb)
                 .build();
 
-        debug(ipPacket.getHeader(), skb.build(), false);
+        debug(p, ipPacket.getHeader(), skb.build(), false);
 
         parent.writeAndFlush(ipPacket);
     }
@@ -255,7 +261,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 .payloadBuilder(buf)
                 .build();
 
-        debug(ipPacket.getHeader(), buf.build(), false);
+        debug(tp, ipPacket.getHeader(), buf.build(), false);
 //        parent.writeAndFlush(ipPacket).syncUninterruptibly();
         parent.writeAndFlush(ipPacket);
     }

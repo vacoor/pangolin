@@ -3,6 +3,8 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.Tcp4Demultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
@@ -64,6 +66,18 @@ public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler<IpV4Packet> {
             @Override
             protected void destroy0() {
                 destroyCallback.run();
+            }
+
+            @Override
+            protected void addToHalfQueue(TcpSock sk, tcp_request_sock sock) {
+//                super.addToHalfQueue(sk, sock);
+                addHalfQueue(sk, sock);
+            }
+
+            @Override
+            protected void moveToEstablished(tcp_request_sock req, TcpSock sock) {
+//                super.moveToEstablished(req, sock);
+                moveEstablished(req, sock);
             }
         };
     }

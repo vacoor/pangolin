@@ -141,8 +141,8 @@ public class TcpSock extends InetConnectionSock {
     /**
      * 已发送未ACK的数据包数量.
      *
-     * @see TcpOutput#tcp_event_new_data_sent(TcpDemultiplexer, TcpBuffer)
-     * @see TcpInput#tcp_clean_rtx_queue(TcpDemultiplexer, int)
+     * x@see TcpOutput#tcp_event_new_data_sent(TcpDemultiplexer, TcpBuffer)
+     * x@see TcpInput#tcp_clean_rtx_queue(TcpDemultiplexer, int)
      */
     public int packets_out;
     /**
@@ -195,21 +195,24 @@ public class TcpSock extends InetConnectionSock {
     public boolean compressed_ack;
     public int keepalive_probes;
 
+    public long ipv4_sysctl_tcp_invalid_ratelimit = HZ / 2;
+    public int ipv4_sysctl_tcp_challenge_ack_limit = HZ / 2;
+    public long ipv4_tcp_challenge_timestamp;
+    public int ipv4_tcp_challenge_count;
+
     public ConcurrentLinkedQueue<TcpBuffer> sk_write_queue = new ConcurrentLinkedQueue<>();
     public ConcurrentLinkedQueue<TcpBuffer> tcp_rtx_queue = new ConcurrentLinkedQueue<>();
 
-    public TcpOutput output = new TcpOutput();
-    public TcpInput input = new TcpInput(output);
-    public TcpTimer timer;
 
-    public TcpSock() {
-        this.timer = new TcpTimer<>();
-    }
+    public Runnable icsk_retransmit_timer;
+    public Runnable icsk_delack_timer;
+    public Runnable sk_timer;
+
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L622">tcp_initialize_rcv_mss</a>
      */
-    protected static void tcp_initialize_rcv_mss(final TcpSock tp) {
+    public static void tcp_initialize_rcv_mss(final TcpSock tp) {
         int hint = Math.min(tp.advmss, tp.mss_cache);
         hint = Math.min(hint, tp.rcv_wnd / 2);
         hint = Math.min(hint, TcpConstants.TCP_MSS_DEFAULT);
@@ -223,12 +226,12 @@ public class TcpSock extends InetConnectionSock {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3147">tcp_rearm_rto</a>
      */
-    public static void tcp_rearm_rto(TcpSock tp) {
+    public static void tcp_rearm_rto(TcpTimer timer, TcpSock tp) {
 
         // ...
 
         if (tp.packets_out <= 0) {
-            tp.inet_csk_clear_xmit_timer(ICSK_TIME_RETRANS);
+            tp.inet_csk_clear_xmit_timer(timer, ICSK_TIME_RETRANS);
         } else {
             int rto = tp.icsk_rto;
 
@@ -241,7 +244,7 @@ public class TcpSock extends InetConnectionSock {
                  */
                 rto = (int) usecs_to_jiffies(Math.max(delta_us, 1));
             }
-            tp.tcp_reset_xmit_timer(ICSK_TIME_RETRANS, rto, true);
+            tp.tcp_reset_xmit_timer(timer, ICSK_TIME_RETRANS, rto, true);
         }
     }
 
@@ -496,17 +499,17 @@ public class TcpSock extends InetConnectionSock {
         return TcpClock.usecs_to_jiffies((srtt_us >> 3) + rttvar_us);
     }
 
-    public void inet_csk_clear_xmit_timer(int what) {
+    public void inet_csk_clear_xmit_timer(TcpTimer timer, int what) {
         // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L195
         if (ICSK_TIME_RETRANS == what || TcpTimer.ICSK_TIME_PROBE0 == what) {
             icsk_pending = 0;
             // stop icsk_retransmit_timer
-            timer.sk_stop_timer(timer.icsk_retransmit_timer);
+            timer.sk_stop_timer(icsk_retransmit_timer);
         }
         if (TcpTimer.ICSK_TIME_DACK == what) {
             icsk_ack.pending = 0;
             icsk_ack.retry = 0;
-            timer.sk_stop_timer(timer.icsk_delack_timer);
+            timer.sk_stop_timer(icsk_delack_timer);
         }
     }
 
@@ -545,16 +548,16 @@ public class TcpSock extends InetConnectionSock {
      * @see <a href="https://www.cnblogs.com/aiwz/p/6333260.html">零窗口探测/坚持/持续定时器</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1526">tcp_check_probe_timer</a>
      */
-    public void tcp_check_probe_timer() {
+    public void tcp_check_probe_timer(TcpTimer timer) {
         if (0 == packets_out && 0 == icsk_pending) {
-            tcp_reset_xmit_timer(ICSK_TIME_PROBE0, tcp_probe0_base(), true);
+            tcp_reset_xmit_timer(timer, ICSK_TIME_PROBE0, tcp_probe0_base(), true);
         }
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1423">tcp_reset_xmit_timer</a>
      */
-    public void tcp_reset_xmit_timer(final int what, long when, final boolean pace_delay) {
+    public void tcp_reset_xmit_timer(TcpTimer timer, final int what, long when, final boolean pace_delay) {
         if (pace_delay) {
             when += tcp_pacing_delay();
         }
@@ -640,20 +643,20 @@ public class TcpSock extends InetConnectionSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L684">tcp_rcv_rtt_measure</a>
      */
-    public void tcp_rcv_rtt_measure() {
-        if (rcv_rtt_est.time != 0) {
-            if (before(rcv_nxt, rcv_rtt_est.seq)) {
+    public void tcp_rcv_rtt_measure(TcpSock sk) {
+        if (sk.rcv_rtt_est.time != 0) {
+            if (before(sk.rcv_nxt, sk.rcv_rtt_est.seq)) {
                 return;
             }
-            long delta_us = tcp_stamp_us_delta(tcp_mstamp, rcv_rtt_est.time);
+            long delta_us = tcp_stamp_us_delta(sk.tcp_mstamp, sk.rcv_rtt_est.time);
             if (delta_us == 0) {
                 delta_us = 1;
             }
-            tcp_rcv_rtt_update(delta_us, 1);
+            tcp_rcv_rtt_update(sk, delta_us, 1);
         }
 
-        rcv_rtt_est.seq = rcv_nxt + rcv_wnd;
-        rcv_rtt_est.time = tcp_mstamp;
+        sk.rcv_rtt_est.seq = sk.rcv_nxt + sk.rcv_wnd;
+        sk.rcv_rtt_est.time = sk.tcp_mstamp;
     }
 
     /* Called to compute a smoothed rtt estimate. The data fed to this
@@ -770,7 +773,7 @@ public class TcpSock extends InetConnectionSock {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L1001">tcp_init_cwnd</a>
      */
-    protected int tcp_init_cwnd() {
+    public int tcp_init_cwnd() {
         // __u32 cwnd = (dst ? dst_metric(dst, RTAX_INITCWND) : 0);
         int cwnd = 0;
 
@@ -793,192 +796,14 @@ public class TcpSock extends InetConnectionSock {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L676
-    void tcp_skb_entail(TcpBuffer skb) {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L676
-        skb.sequenceNumber(write_seq);
-        skb.ack(true);
-        sk_write_queue.offer(skb);
-    }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L719
     void tcp_push(int flags, int mss_now, int nonagle, int size_goal) {
         // FIXME ....
     }
 
-    private void tcp_sendmsg() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L1353
-        // lock
-        tcp_sendmsg_locked();
-        // unlock
-    }
 
-    private void tcp_sendmsg_locked() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L1052
 
-        // restart:
-        final int mss_now = tcp_send_mss(this);
-    }
-
-    protected synchronized void tcp_sendmsg2(final TcpDemultiplexer tp, TcpBuffer skb, boolean flush) {
-        skb.sequenceNumber(tp.write_seq);
-        skb.dstPort(tp.srcPort).srcPort(tp.dstPort);
-        tcp_skb_entail(skb);
-
-        final Packet.Builder payload = skb.payloadBuilder();
-        if (null != payload) {
-            tp.write_seq += payload.build().length();
-        }
-        if (flush) {
-            tcp_push_pending_frames(tp);
-        }
-    }
-
-    /**
-     * Shutdown the sending side of a connection. Much like close except
-     * that we don't receive shut down or sock_set_flag(sk, SOCK_DEAD).
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L2979">tcp_shutdown</a>
-     */
-    void tcp_shutdown(final int how) {
-        if (0 == (how & TcpConstants.SEND_SHUTDOWN)) {
-            return;
-        }
-
-        /* If we've already sent a FIN, or it's a closed state, skip this. */
-        if (0 != ((1 << state.get().ordinal()) & (TcpConstants.TCPF_ESTABLISHED | TcpConstants.TCPF_CLOSE_WAIT))) {
-            /* Clear out any half completed packets.  FIN if needed. */
-            if (tcp_close_state(this)) {
-                output.tcp_send_fin(this);
-            }
-        }
-    }
-
-    protected boolean tcp_close_state(SockCommon sk) {
-        int next = TcpDemultiplexer.NEW_STATE[sk.state.get().ordinal() + 1];
-        int ns = next & TcpDemultiplexer.TCP_STATE_MASK;
-
-        sk.state.set(TcpState.values()[ns]);
-        return 0 != (next & TcpDemultiplexer.TCP_ACTION_FIN);
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3240">tcp_close</a>
-     */
-    private void tcp_close(TcpDemultiplexer sk, long timeout) {
-        __tcp_close(sk, timeout);
-        // release_sock();
-        // ...
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3066">__tcp_close</a>
-     */
-    private void __tcp_close(TcpDemultiplexer sk, long timeout) {
-        // FIXME
-        sk.sk_shutdown = TcpConstants.SHUTDOWN_MASK;
-
-        TcpState state = sk.state.get();
-        if (TCP_LISTEN.equals(state)) {
-            sk.state.set(TCP_CLOSE);
-            adjudge_to_death(sk);
-            return;
-        }
-
-        // ...
-
-        /* If socket has been already reset (e.g. in tcp_reset()) - kill it. */
-        if (TCP_CLOSE.equals(state)) {
-            adjudge_to_death(sk);
-            return;
-        }
-
-        if (tcp_close_state(sk)) {
-            output.tcp_send_fin(sk);
-        }
-
-        adjudge_to_death(sk);
-    }
-
-    private void adjudge_to_death(TcpDemultiplexer sk) {
-        final TcpState state = this.state.get();
-        if (TCP_FIN_WAIT2.equals(state)) {
-            final int tmo = sk.tcp_fin_time();
-            if (tmo > TcpConstants.TCP_TIMEWAIT_LEN) {
-                sk.timer.tcp_reset_keepalive_timer(sk, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
-            } else {
-                tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
-                return;
-            }
-        }
-
-        if (!TcpState.TCP_CLOSE.equals(state)) {
-            // TODO
-        }
-
-        // ...
-    }
-
-    public void tcp_time_wait(TcpSock tp, TcpState state, long timeout) {
-        tp.state.set(state);
-
-        if (TCP_TIME_WAIT.equals(state)) {
-            tp.state.set(TCP_CLOSE);
-            tcp_done(tp);
-        }
-
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2102">tcp_push_pending_frames</a>
-     */
-    public void tcp_push_pending_frames(final TcpDemultiplexer tp) {
-        if (null != tcp_send_head()) {
-            output.__tcp_push_pending_frames(tp, output.tcp_current_mss(tp), tp.nonagle);
-        }
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L75">tcp_write_err</a>
-     */
-    public void tcp_write_err() {
-        log.warn("TCP WRITE ERROR");
-        input.tcp_done_with_error(this, sk_err_soft != 0 ? sk_err_soft : TcpDemultiplexer.ETIMEOUT);
-    }
-
-    void sk_data_ready() {
-
-    }
-
-    public void consume(final TcpPacket skb) {
-        if (null != child && child.isOpen()) {
-            final TcpPacket.TcpHeader hdr = skb.getHeader();
-            final byte[] bytes = skb.getPayload().getRawData();
-
-            final int offset = rcv_nxt - hdr.getSequenceNumber();
-            final int length = Math.min(output.tcp_receive_window(this), bytes.length - offset);
-            child.writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
-        }
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L4939">tcp_done</a>
-     */
-    public void tcp_done(TcpSock tp) {
-        // ... fastopen
-
-        tp.state.set(TcpState.TCP_CLOSE);
-        tp.timer.tcp_clear_xmit_timers(tp);
-
-        // ... fastopen...
-
-        tp.sk_shutdown = TcpConstants.SHUTDOWN_MASK;
-
-//        if (!sock_flag(tp, SOCK_DEAD)) {
-//            sk->sk_state_change(tp);
-//        } else
-        //
-        inet_csk_destroy_sock();
-    }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3186
     void tcp_update_rtt_min(long rtt_us, int flag) {
@@ -1045,9 +870,6 @@ public class TcpSock extends InetConnectionSock {
 
     }
 
-    int tcp_send_mss(final TcpSock tp) {
-        return output.tcp_current_mss(tp);
-    }
 
     void logTrace(final String format, final Object... args) {
         log.trace(format(format), args);
@@ -1088,8 +910,9 @@ public class TcpSock extends InetConnectionSock {
         return buff.toString();
     }
 
-    protected void debug(final IpPacket.IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
-        final String message = TcpUtils.logify(null != child ? child.id() : null, ipHeader, tcpPacket, inbound ? rx_opt.rcv_wscale : rx_opt.snd_wscale);
+    protected void debug(final SockCommon sk, final IpPacket.IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
+        tcp_options_received rx_opt = sk instanceof TcpSock ? ((TcpSock) sk).rx_opt : new tcp_options_received();
+        final String message = TcpUtils.logify(null != sk.child ? sk.child.id() : null, ipHeader, tcpPacket, inbound ? rx_opt.rcv_wscale : rx_opt.snd_wscale);
         log.debug(message);
     }
 
@@ -1116,8 +939,8 @@ public class TcpSock extends InetConnectionSock {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L652">tcp_rcv_rtt_update</a>
      */
-    private void tcp_rcv_rtt_update(long sample, int win_dep) {
-        long new_sample = rcv_rtt_est.rtt_us;
+    private void tcp_rcv_rtt_update(TcpSock sk, long sample, int win_dep) {
+        long new_sample = sk.rcv_rtt_est.rtt_us;
         long m = sample;
 
         if (new_sample != 0) {
@@ -1145,20 +968,7 @@ public class TcpSock extends InetConnectionSock {
             new_sample = m << 3;
         }
 
-        rcv_rtt_est.rtt_us = new_sample;
-    }
-
-    public void inet_csk_destroy_sock() {
-        if (!TCP_CLOSE.equals(state.get())) {
-            // ...
-        }
-
-        if (null != child && child.isOpen()) {
-            child.close();
-        }
-        if (null != this.destroy) {
-            this.destroy.run();
-        }
+        sk.rcv_rtt_est.rtt_us = new_sample;
     }
 
 
