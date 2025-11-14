@@ -3,6 +3,7 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.IpPacketHandler;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.SockCommon;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
@@ -68,7 +69,7 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
         final TcpPort tcpDstPort = tcpHeader.getDstPort();
 
 
-        final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
+        final String sockKey = srcAddr.getHostAddress() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr.getHostAddress() + ":" + tcpDstPort.valueAsInt();
 
 
         final String listenKey = "";
@@ -86,22 +87,23 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
             int a = 0;
         }
         if (null != sk) {
-            log.info("[X!ESTABLISHED] -> {}", sockKey);
+//            log.info("[X!ESTABLISHED] -> {}", sockKey);
         } else {
             sk = requestMap.get(sockKey);
             if (null != sk) {
-                log.info("[X!ESTABLISHING] -> {}", sockKey);
+//                log.info("[X!ESTABLISHING] -> {}", sockKey);
 
                 tcp_request_sock request_sock = (tcp_request_sock) sk;
                 TcpSock tcpSock = tcpDemultiplexer.tcp_check_req(request_sock, tcpPacket);
                 // TODO add to established.
+                tcpSock.state.set(TcpState.TCP_SYN_RECV);
                 moveEstablished(request_sock, tcpSock);
                 sk = tcpSock;
                 // moveToEstablished(request_sock, tcpSock);
             } else {
                 sk = tcpDemultiplexer;
                 if (null != sk) {
-                    log.info("[X!HANDSHAKE] -> {}", sockKey);
+//                    log.info("[X!HANDSHAKE] -> {}", sockKey);
                 }
             }
         }
@@ -109,6 +111,8 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
         if (null != tcpDemultiplexer) {
             SockCommon finalTcpSock = sk;
             childGroup.execute(() -> {
+                TcpDemultiplexHandler t = TcpDemultiplexHandler.this;
+                log.trace("{}", t);
                 tcpDemultiplexer.handler(finalTcpSock, ipPacket, tcpPacket);
             });
         }
@@ -145,7 +149,8 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
         TcpPort tcpSrcPort = request.srcPort;
         InetAddress dstAddr = request.dstAddr;
         TcpPort tcpDstPort = request.dstPort;
-        final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
+//        final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
+        final String sockKey = srcAddr.getHostAddress() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr.getHostAddress() + ":" + tcpDstPort.valueAsInt();
         requestMap.putIfAbsent(sockKey, request);
     }
 
@@ -154,7 +159,7 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
         TcpPort tcpSrcPort = request.srcPort;
         InetAddress dstAddr = request.dstAddr;
         TcpPort tcpDstPort = request.dstPort;
-        final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
+        final String sockKey = srcAddr.getHostAddress() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr.getHostAddress() + ":" + tcpDstPort.valueAsInt();
         requestMap.remove(sockKey, request);
 
         establishedMap.put(sockKey, child);

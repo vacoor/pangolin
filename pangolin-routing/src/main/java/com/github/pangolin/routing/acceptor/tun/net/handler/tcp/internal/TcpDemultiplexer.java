@@ -460,7 +460,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     }
 
     protected void moveToEstablished(final tcp_request_sock req, final TcpSock sock) {
-        sock.state.set(TcpState.TCP_SYN_RECV);
     }
 
     /**
@@ -528,6 +527,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
                 tcp_request_sock request_sock = (tcp_request_sock) sk;
                 TcpSock tcpSock = tcp_check_req(request_sock, skb);
                 // TODO add to established.
+                tcpSock.state.set(TcpState.TCP_SYN_RECV);
                 moveToEstablished(request_sock, tcpSock);
                 sk = tcpSock;
                 return discard(skb, TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED);
