@@ -17,15 +17,20 @@ import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 
+import java.util.Map;
+
 /**
  */
 @Slf4j
 public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
 
-    public Tcp4Demultiplexer(final Channel parent,
+    public Tcp4Demultiplexer(
+            Map<String, tcp_request_sock> requestMap,
+            Map<String, TcpSock> establishedMap,
+            final Channel parent,
                              final EventLoopGroup childGroup,
                              final DnsEngine dnsEngine, final SocketChannelFactory factory) {
-        super(parent, childGroup, dnsEngine, factory);
+        super(requestMap, establishedMap, parent, childGroup, dnsEngine, factory);
     }
 
     @Override

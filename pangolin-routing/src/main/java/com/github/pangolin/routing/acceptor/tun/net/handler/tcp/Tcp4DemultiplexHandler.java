@@ -10,6 +10,8 @@ import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
 import java.net.Inet4Address;
 import java.net.UnknownHostException;
+import java.util.Map;
+
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.IpV4Packet.IpV4Header;
@@ -61,23 +63,14 @@ public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler<IpV4Packet> {
     }
 
     @Override
-    protected TcpDemultiplexer<IpV4Packet> create(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory, final Runnable destroyCallback) {
-        return new Tcp4Demultiplexer(parent, childGroup, dnsEngine, socketChannelFactory) {
+    protected TcpDemultiplexer<IpV4Packet> create(
+            Map<String, tcp_request_sock> requestMap,
+            Map<String, TcpSock> establishedMap,
+            final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory, final Runnable destroyCallback) {
+        return new Tcp4Demultiplexer(requestMap, establishedMap, parent, childGroup, dnsEngine, socketChannelFactory) {
             @Override
             protected void destroy0() {
                 destroyCallback.run();
-            }
-
-            @Override
-            protected void addToHalfQueue(TcpSock sk, tcp_request_sock sock) {
-//                super.addToHalfQueue(sk, sock);
-                addHalfQueue(sk, sock);
-            }
-
-            @Override
-            protected void moveToEstablished(tcp_request_sock req, TcpSock sock) {
-//                super.moveToEstablished(req, sock);
-                moveEstablished(req, sock);
             }
         };
     }

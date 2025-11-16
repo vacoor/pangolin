@@ -18,8 +18,11 @@ import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
 import org.pcap4j.packet.UnknownPacket;
+import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.util.Map;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
@@ -64,9 +67,16 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
     public TcpTimer timer = new TcpTimer(this);
 
 //    protected TcpSock serverSock = new TcpSock();
+    private Map<String, tcp_request_sock> requestSockMap;
+    private Map<String, TcpSock> establishedMap;
 
-    protected TcpDemultiplexer(final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+    protected TcpDemultiplexer(
+            Map<String, tcp_request_sock> requestMap,
+            Map<String, TcpSock> establishedMap,
+            final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         super();
+        this.requestSockMap = requestMap;
+        this.establishedMap = establishedMap;
         this.parent = parent;
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
@@ -80,9 +90,43 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
         tcp_init_sock(this);
     }
 
-    public void handler(final SockCommon sock, final T ipHeader, final TcpPacket tcpPacket) {
+    public void handler(final T ipHeader, final TcpPacket tcpPacket) {
+        TcpPort tcpSrcPort = tcpPacket.getHeader().getSrcPort();
+        TcpPort tcpDstPort = tcpPacket.getHeader().getDstPort();
+        InetAddress srcAddr = ipHeader.getHeader().getSrcAddr();
+        InetAddress dstAddr = ipHeader.getHeader().getDstAddr();
+
+        final String sockKey = srcAddr.getHostAddress() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr.getHostAddress() + ":" + tcpDstPort.valueAsInt();
+
+        SockCommon sock = establishedMap.get(sockKey);
+        if (null != sock) {
+            int a = 0;
+        }
+        if (null != sock) {
+//            log.info("[X!ESTABLISHED] -> {}", sockKey);
+        } else {
+            sock = requestSockMap.get(sockKey);
+            if (null != sock) {
+//                log.info("[X!ESTABLISHING] -> {}", sockKey);
+
+                tcp_request_sock request_sock = (tcp_request_sock) sock;
+                TcpSock tcpSock = tcp_check_req(request_sock, tcpPacket);
+                // TODO add to established.
+                tcpSock.state.set(TcpState.TCP_SYN_RECV);
+                moveToEstablished(request_sock, tcpSock);
+                sock = tcpSock;
+                // moveToEstablished(request_sock, tcpSock);
+            } else {
+                sock = this;
+                if (null != sock) {
+//                    log.info("[X!HANDSHAKE] -> {}", sockKey);
+                }
+            }
+        }
+
         if (null != sock.child && sock.child.isOpen()) {
-            sock.child.eventLoop().execute(() -> tcp_rcv(sock, ipHeader, tcpPacket));
+            SockCommon finalSock = sock;
+            sock.child.eventLoop().execute(() -> tcp_rcv(finalSock, ipHeader, tcpPacket));
         } else {
             tcp_rcv(sock, ipHeader, tcpPacket);
         }
@@ -456,10 +500,25 @@ public abstract class TcpDemultiplexer<T extends IpPacket> extends TcpSock {
 
     protected void addToHalfQueue(final TcpSock sk, final tcp_request_sock sock) {
         sk.state(TcpState.TCP_NEW_SYN_RECV);
-        this.request_sock = sock;
+//        this.request_sock = sock;
+
+        InetAddress srcAddr = sock.srcAddr;
+        TcpPort tcpSrcPort = sock.srcPort;
+        InetAddress dstAddr = sock.dstAddr;
+        TcpPort tcpDstPort = sock.dstPort;
+//        final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
+        final String sockKey = srcAddr.getHostAddress() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr.getHostAddress() + ":" + tcpDstPort.valueAsInt();
+        requestSockMap.putIfAbsent(sockKey, sock);
     }
 
     protected void moveToEstablished(final tcp_request_sock req, final TcpSock sock) {
+        InetAddress srcAddr = req.srcAddr;
+        TcpPort tcpSrcPort = req.srcPort;
+        InetAddress dstAddr = req.dstAddr;
+        TcpPort tcpDstPort = req.dstPort;
+        final String sockKey = srcAddr.getHostAddress() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr.getHostAddress() + ":" + tcpDstPort.valueAsInt();
+        requestSockMap.remove(sockKey, req);
+        establishedMap.put(sockKey, sock);
     }
 
     /**
