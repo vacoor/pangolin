@@ -4,10 +4,7 @@ import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_options_received;
 import com.github.pangolin.routing.support.SocketChannelFactory;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
@@ -29,23 +26,25 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 public class TcpHandshaker {
 
     /**
-     * @param skb
+     * @param tcpPacket
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
-    public static tcp_request_sock tcp_conn_request(tcp_request_sock_ops rsk_ops, tcp_request_sock_ipv4_ops af_ops,
+    public static tcp_request_sock tcp_conn_request(tcp_request_sock_ops rsk_ops,
+                                                    tcp_request_sock_ipv4_ops af_ops,
                                                     TcpSock listenSock,
-                                                    final IpPacket pkg, final TcpPacket skb,
+                                                    final IpPacket ipPacket,
+                                                    final TcpPacket tcpPacket,
                                                     DnsEngine dnsEngine,
                                                     SocketChannelFactory socketChannelFactory,
                                                     int connTimeoutMs, EventLoopGroup childGroup,
                                                     TcpOutput output) {
-        final IpPacket.IpHeader ipHdr = pkg.getHeader();
+        final IpPacket.IpHeader ipHdr = ipPacket.getHeader();
         /*-
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
          */
-        tcp_request_sock req = inet_reqsk_alloc(ipHdr, skb, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup);
+        tcp_request_sock req = inet_reqsk_alloc(ipHdr, tcpPacket, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup);
         req.parentSock = listenSock;
         if (null == req) {
             return null;
@@ -53,7 +52,7 @@ public class TcpHandshaker {
         req.destroy = af_ops::destory;
         req.INDIRECT_CALL_INET = af_ops::INDIRECT_CALL_INET;
 
-                req.ts_off = 0;
+        req.ts_off = 0;
         req.req_usec_ts = false;
 
 
@@ -63,8 +62,8 @@ public class TcpHandshaker {
         opt_rx.mss_clamp = af_ops.mss_clamp;
         opt_rx.user_mss = user_mss;
 
-        tcp_parse_options(listenSock, opt_rx, skb, false);
-        tcp_openreq_init(req, opt_rx, skb);
+        tcp_parse_options(listenSock, opt_rx, tcpPacket, false);
+        tcp_openreq_init(req, opt_rx, tcpPacket);
 
         // ...
 
@@ -72,21 +71,34 @@ public class TcpHandshaker {
         final boolean opt_tstamp_ok = opt_rx.tstamp_ok;
         if (opt_tstamp_ok) {
             req.req_usec_ts = false;    // FIXME dst_tcp_usec_ts
-            req.ts_off = af_ops.init_ts_off(skb);
+            req.ts_off = af_ops.init_ts_off(tcpPacket);
         }
 
-        int isn = af_ops.init_seq(ipHdr, skb.getHeader());
+        int isn = af_ops.init_seq(ipHdr, tcpPacket.getHeader());
         req.snt_isn = isn;
 
         // init rwin
-        tcp_openreq_init_rwin(listenSock, output, req, skb);
+        tcp_openreq_init_rwin(listenSock, output, req, tcpPacket);
 
         req.state.set(TCP_NEW_SYN_RECV);
 
+        req.child.addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture channelFuture) throws Exception {
+                if (channelFuture.isSuccess()) {
+                    af_ops.send_synack(listenSock, req, ipHdr, tcpPacket);
+                } else {
+                    rsk_ops.send_reset();
+                }
+
+            }
+        });
+
         af_ops.addToHalfQueue(listenSock, req);
 
+
         // send_synack
-        af_ops.send_synack(listenSock, req, ipHdr, skb);
+        // af_ops.send_synack(listenSock, req, ipHdr, skb);
 
         return req;
     }
@@ -102,10 +114,13 @@ public class TcpHandshaker {
         final int srcPort = tcpSrcPort.valueAsInt();
         final int dstPort = tcpDstPort.valueAsInt();
 
+
         final tcp_request_sock req = new tcp_request_sock();
-        req.ipHeader = ipHeader;
-        req.srcAddr = ipHeader.getSrcAddr();
-        req.dstAddr = ipHeader.getDstAddr();
+        req.rawIpHeader = ipHeader;
+        req.srcAddr = srcAddr;
+        req.dstAddr = dstAddr;
+        req.srcPort = tcpSrcPort;
+        req.dstPort = tcpDstPort;
 
         final String dstHostname;
         if (dnsEngine.isFakeAddress(dstAddr.getAddress())) {
@@ -134,44 +149,19 @@ public class TcpHandshaker {
                     if (initialized.compareAndSet(false, true)) {
                         tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "First Response elapsed: {}ms", System.currentTimeMillis() - sinceMs);
                     }
-                    if (true) {
-                        ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
-                        return;
-                    }
+                    ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
                 } finally {
                     ReferenceCountUtil.release(msg);
                 }
             }
-
-            /*
-            @Override
-            public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                logError("Exception caught: {}", cause.getMessage(), cause);
-                send_reset(ipHeader, new TcpPacket.Builder()
-                        .srcAddr(ipHeader.getSrcAddr())
-                        .dstAddr(ipHeader.getDstAddr())
-                        .srcPort(tcpSrcPort)
-                        .dstPort(tcpDstPort)
-                        .ack(true)
-                        .acknowledgmentNumber(rcv_nxt)
-                        .build(), -1);
-                try {
-                    if (ctx.channel().isOpen()) {
-                        ctx.channel().close();
-                    }
-                } finally {
-                    tcp_done();
-                }
-            }
-             */
         });
 
         try {
-            req.child = cf.sync().channel();
+            req.child = cf;
 //            state.set(TcpState.TCP_SYN_RECV);
 
-            final long elapsedMs = System.currentTimeMillis() - sinceMs;
-            tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "ESTABLISHED: {} elapsed: {}ms", resolved, elapsedMs);
+//            final long elapsedMs = System.currentTimeMillis() - sinceMs;
+//            tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "ESTABLISHED: {} elapsed: {}ms", resolved, elapsedMs);
 
             /*
             req.child.closeFuture().addListener(new ChannelFutureListener() {
@@ -259,9 +249,9 @@ public class TcpHandshaker {
     }
 
     public static void tcpLogError(String traceId,
-                                    InetAddress srcAddr, int srcPort,
-                                    InetAddress dstAddr, int dstPort,
-                                    String message, Object... args) {
+                                   InetAddress srcAddr, int srcPort,
+                                   InetAddress dstAddr, int dstPort,
+                                   String message, Object... args) {
         final String prefix = logPrefix(traceId, srcAddr.getHostAddress(), srcPort, dstAddr.getHostAddress(), dstPort);
         log.error(prefix + " " + message, args);
     }

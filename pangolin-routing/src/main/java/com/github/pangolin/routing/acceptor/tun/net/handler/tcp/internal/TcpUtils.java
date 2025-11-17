@@ -5,6 +5,7 @@ import java.net.InetAddress;
 import org.bouncycastle.crypto.macs.SipHash;
 import org.bouncycastle.crypto.params.KeyParameter;
 import org.pcap4j.packet.IpPacket.IpHeader;
+import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
 
@@ -128,7 +129,7 @@ public abstract class TcpUtils {
         new SecureRandom().nextBytes(key);
     }
 
-    static int secureSeq(final byte[] srcAddress, final short srcPort,
+    public static int secureSeq(final byte[] srcAddress, final short srcPort,
                          final byte[] dstAddress, final short dstPort) {
         final SipHash sipHash = new SipHash();
         sipHash.init(new KeyParameter(key));
@@ -240,5 +241,18 @@ public abstract class TcpUtils {
         }
         */
         return buff.toString();
+    }
+
+    public static String uniqueKey(final IpHeader ipHeader, final TcpHeader tcpHeader) {
+        return uniqueKey(
+                ipHeader.getSrcAddr().getHostAddress(),
+                tcpHeader.getSrcPort().valueAsInt(),
+                ipHeader.getDstAddr().getHostAddress(),
+                tcpHeader.getDstPort().valueAsInt()
+        );
+    }
+
+    public static String uniqueKey(final String srcAddr, final int srcPort, final String dstAddr, final int dstPort) {
+        return srcAddr + ":" + srcPort + " => " + dstAddr + ":" + dstPort;
     }
 }

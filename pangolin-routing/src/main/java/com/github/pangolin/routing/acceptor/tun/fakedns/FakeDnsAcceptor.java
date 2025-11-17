@@ -31,7 +31,7 @@ public class FakeDnsAcceptor implements Acceptor {
             context.attr(DnsEngine.class.getName(), fakeDns);
         }
 
-        final Predicate<String> domainFakePredicate = domain -> !isDirect(context, domain);
+        final Predicate<String> domainFakePredicate = domain -> !isDirect(context, domain); // && domain.contains("google");
         return FakeDnsServer.startFakeDns(fakeDns, domainFakePredicate);
     }
 

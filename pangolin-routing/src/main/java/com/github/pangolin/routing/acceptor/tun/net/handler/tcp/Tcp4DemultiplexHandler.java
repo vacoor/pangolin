@@ -64,15 +64,10 @@ public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler<IpV4Packet> {
 
     @Override
     protected TcpDemultiplexer<IpV4Packet> create(
-            Map<String, tcp_request_sock> requestMap,
-            Map<String, TcpSock> establishedMap,
-            final Channel parent, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory, final Runnable destroyCallback) {
-        return new Tcp4Demultiplexer(requestMap, establishedMap, parent, childGroup, dnsEngine, socketChannelFactory) {
-            @Override
-            protected void destroy0() {
-                destroyCallback.run();
-            }
-        };
+            Map<String, tcp_request_sock> handshakeRegistry,
+            Map<String, TcpSock> establishedRegistry,
+            final Channel tun, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+        return new Tcp4Demultiplexer(handshakeRegistry, establishedRegistry, tun, childGroup, dnsEngine, socketChannelFactory);
     }
 
 }

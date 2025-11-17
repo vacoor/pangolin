@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.Packet;
@@ -903,16 +904,20 @@ public class TcpSock extends InetConnectionSock {
 
 
         final StringBuilder buff = new StringBuilder();
-        buff.append(TcpUtils.logPrefix(null != child ? child.id() : null, srcHostAddr, srcPort, dstHostAddr, dstPort));
+        buff.append(TcpUtils.logPrefix(null != child ? innerChannel(this).id() : null, srcHostAddr, srcPort, dstHostAddr, dstPort));
         buff.append(" ");
 
         buff.append(format);
         return buff.toString();
     }
 
-    protected void debug(final SockCommon sk, final IpPacket.IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
+    private static Channel innerChannel(SockCommon sock) {
+        return sock.child.channel();
+    }
+
+    public static void debug(final SockCommon sk, final IpPacket.IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
         tcp_options_received rx_opt = sk instanceof TcpSock ? ((TcpSock) sk).rx_opt : new tcp_options_received();
-        final String message = TcpUtils.logify(null != sk.child ? sk.child.id() : null, ipHeader, tcpPacket, inbound ? rx_opt.rcv_wscale : rx_opt.snd_wscale);
+        final String message = TcpUtils.logify(null != sk.child ? innerChannel(sk).id() : null, ipHeader, tcpPacket, inbound ? rx_opt.rcv_wscale : rx_opt.snd_wscale);
         log.debug(message);
     }
 

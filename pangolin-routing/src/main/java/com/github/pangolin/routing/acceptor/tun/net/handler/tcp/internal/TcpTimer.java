@@ -131,7 +131,7 @@ public class TcpTimer<T extends IpPacket> {
         final Future<?> future = timers.get(timer);
         if (null == future || future.isDone() || future.isCancelled() || future.cancel(true)) {
             // timers.put(timer, tp.child.eventLoop().schedule(timer, delay, TimeUnit.MILLISECONDS));
-             timers.put(timer, schedule(tp.child, delay, TimeUnit.MILLISECONDS, timer));
+             timers.put(timer, schedule(tp.child.channel(), delay, TimeUnit.MILLISECONDS, timer));
         } else {
             log.warn("CANCEL FAILED: {}", tp.icsk_pending);
         }

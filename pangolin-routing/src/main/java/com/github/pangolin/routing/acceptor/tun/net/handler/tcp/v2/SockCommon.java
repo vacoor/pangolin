@@ -3,12 +3,12 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState;
-import io.netty.channel.Channel;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils;
+import io.netty.channel.ChannelFuture;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.net.InetAddress;
-import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -17,15 +17,19 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 // https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
 public class SockCommon {
     public final AtomicReference<TcpState> state = new AtomicReference<>(TcpState.TCP_CLOSE);
-    public IpPacket.IpHeader ipHeader;
+    public IpPacket.IpHeader rawIpHeader;
     public InetAddress srcAddr;
     public InetAddress dstAddr;
 
     public TcpPort srcPort;
     public TcpPort dstPort;
-    public Channel child;
+    public ChannelFuture child;
     public volatile Runnable destroy;
     public Consumer<TcpBuffer> INDIRECT_CALL_INET;
+
+    public String uniqueKey() {
+        return TcpUtils.uniqueKey(srcAddr.getHostAddress(), srcPort.valueAsInt(), dstAddr.getHostAddress(), dstPort.valueAsInt());
+    }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L49">tcp_clamp_probe0_to_user_timeout</a>

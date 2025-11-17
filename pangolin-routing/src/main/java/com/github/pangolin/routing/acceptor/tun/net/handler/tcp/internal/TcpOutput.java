@@ -1134,10 +1134,10 @@ public class TcpOutput<T extends IpPacket> {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708
-    protected TcpBuffer tcp_make_synack(final TcpSock tp,
+    protected TcpBuffer tcp_make_synack(final TcpSock listeSock,
                                         final tcp_request_sock req,
                                         final IpPacket.IpHeader ipHdr, final TcpPacket skb) {
-        int mss = tp.tcp_mss_clamp(tp, tp.dst_metric_advmss());
+        int mss = listeSock.tcp_mss_clamp(listeSock, listeSock.dst_metric_advmss());
         long now = TcpClock.tcp_clock_ns();
 
         final TcpBuffer current = new TcpBuffer()
@@ -1150,9 +1150,9 @@ public class TcpOutput<T extends IpPacket> {
                 .acknowledgmentNumber(req.rcv_nxt)
                 .window((short) Math.min(req.rsk_rcv_wnd, U16_MAX));
 
-        tp.skb_set_delivery_time(current, now, "SKB_CLOCK_MONOTONIC");
+        listeSock.skb_set_delivery_time(current, now, "SKB_CLOCK_MONOTONIC");
 
-        current.options(tcp_synack_options(tp, req, mss));
+        current.options(tcp_synack_options(listeSock, req, mss));
 
 
         return current;
