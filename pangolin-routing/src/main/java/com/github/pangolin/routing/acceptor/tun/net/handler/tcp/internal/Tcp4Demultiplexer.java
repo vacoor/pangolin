@@ -1,10 +1,5 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock.debug;
-import static org.pcap4j.packet.IpPacket.IpHeader;
-import static org.pcap4j.packet.IpV4Packet.IpV4Header;
-
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.SockCommon;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
@@ -12,6 +7,7 @@ import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
+import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
@@ -19,7 +15,13 @@ import org.pcap4j.packet.namednumber.IpVersion;
 
 import java.util.Map;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock.debug;
+import static org.pcap4j.packet.IpPacket.IpHeader;
+import static org.pcap4j.packet.IpV4Packet.IpV4Header;
+
 /**
+ *
  */
 @Slf4j
 public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
@@ -28,14 +30,14 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
             Map<String, tcp_request_sock> requestMap,
             Map<String, TcpSock> establishedMap,
             final Channel parent,
-                             final EventLoopGroup childGroup,
-                             final DnsEngine dnsEngine, final SocketChannelFactory factory) {
+            final EventLoopGroup childGroup,
+            final DnsEngine dnsEngine, final SocketChannelFactory factory) {
         super(requestMap, establishedMap, parent, childGroup, dnsEngine, factory);
     }
 
     @Override
-    public void tcp_rcv(final IpV4Packet ipPacket, final TcpPacket tcpPacket) {
-        tcp_v4_rcv(ipPacket, tcpPacket);
+    public void tcp_rcv(final Channel net, final IpV4Packet ipPacket) {
+        tcp_v4_rcv(net, ipPacket);
     }
 
     @Override
@@ -49,40 +51,47 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
     }
 
     /**
-     *
      * @param ipPacket
-     * @param tcpPacket
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a>
      */
-    private void tcp_v4_rcv(final IpV4Packet ipPacket, TcpPacket tcpPacket) {
-        final String sockKey = uniqueKey(ipPacket.getHeader(), tcpPacket.getHeader());
-
-        SockCommon sock = establishedMap.get(sockKey);
-
-        if (null != sock) {
-//            log.info("[TCP] {} Lookup from ESTABLISHED => {}", sockKey, sock);
-        } else if (null != (sock = requestSockMap.get(sockKey))) {
-//            log.info("[TCP] {} Handshake STEP-3 => {}", sockKey, sock);
-
-            final tcp_request_sock request = (tcp_request_sock) sock;
-            final TcpSock childSock = tcp_check_req(request, tcpPacket);
-            childSock.state.set(TcpState.TCP_SYN_RECV);
-            moveToEstablished(request, childSock);
-            sock = childSock;
-
-//            log.info("[TCP] {} Handshake successful => {}", sockKey, childSock);
-        } else {
-            sock = listenSock;
-//            log.info("[TCP] {} Handshake STEP-1", sockKey);
+    private void tcp_v4_rcv(final Channel net, final IpPacket ipPacket) {
+        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
+        if (null == tcpPacket) {
+            log.debug("TCP packet not found, discard it");
+            return;
         }
 
-        final SockCommon sockToUse = sock;
-        if (null != sock.child) {
+        final TcpPacket.TcpHeader th = tcpPacket.getHeader();
+
+        SockCommon sk = __inet_lookup_skb(ipPacket, th.getSrcPort().valueAsInt(), th.getDstPort().valueAsInt());
+        if (null == sk) {
+            log.debug("NO_TCP_SOCKET");
+            return;
+        }
+
+        // tcp_request_sock
+        if (TcpState.TCP_NEW_SYN_RECV.equals(sk.state.get())) {
+            final tcp_request_sock request = (tcp_request_sock) sk;
+            final TcpSock nsk = tcp_check_req(ipPacket, tcpPacket, request);
+            nsk.state.set(TcpState.TCP_SYN_RECV);
+            moveToEstablished(request, nsk);
+            sk = nsk;
+        }
+
+        final SockCommon sockToUse = sk;
+        if (null != sockToUse.child) {
 //            log.info("[TCP] {} => {}", sockKey, sock.child);
-            innerChannel(sock).eventLoop().execute(() -> tcp_v4_do_rcv(sockToUse, ipPacket, tcpPacket));
+            innerChannel(sockToUse).eventLoop().execute(() -> tcp_v4_do_rcv(sockToUse, (IpV4Packet) ipPacket, tcpPacket));
         } else {
-            tcp_v4_do_rcv(sockToUse, ipPacket, tcpPacket);
+            tcp_v4_do_rcv(sockToUse, (IpV4Packet) ipPacket, tcpPacket);
         }
+    }
+
+    protected SockCommon __inet_lookup_skb(final IpPacket ipPacket, final int sport, final int dport) {
+        final IpHeader iph = ipPacket.getHeader();
+        final String lookupKey = uniqueKey(iph.getSrcAddr().getHostAddress(), sport, iph.getDstAddr().getHostAddress(), dport);
+        SockCommon sk = establishedMap.get(lookupKey);
+        return (null == sk && null == (sk = requestSockMap.get(lookupKey))) ? listenSock : sk;
     }
 
     /**
@@ -99,7 +108,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         */
         final String sockKey = uniqueKey(ipPacket.getHeader(), tcpPacket.getHeader());
 
-        debug(sock,  ipPacket.getHeader(), tcpPacket, true);
+        debug(sock, ipPacket.getHeader(), tcpPacket, true);
         try {
             int err = tcp_rcv_state_process(sock, ipPacket, tcpPacket);
             if (0 != err) {
@@ -247,8 +256,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 .srcAddr(iph.getDstAddr())
                 .dstAddr(iph.getSrcAddr())
                 .srcPort(syn_skb.getHeader().getDstPort())
-                .dstPort(syn_skb.getHeader().getSrcPort())
-                ;
+                .dstPort(syn_skb.getHeader().getSrcPort());
 
         final IpV4Packet ipPacket = new IpV4Packet.Builder()
                 .version(IpVersion.IPV4)
@@ -302,7 +310,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
     }
 
     protected void destroy0(String sockKey) {
-            requestSockMap.remove(sockKey);
-            establishedMap.remove(sockKey);
+        requestSockMap.remove(sockKey);
+        establishedMap.remove(sockKey);
     }
 }

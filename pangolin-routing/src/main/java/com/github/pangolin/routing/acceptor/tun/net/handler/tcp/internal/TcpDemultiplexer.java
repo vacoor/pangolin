@@ -81,7 +81,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 //        tcp_init_sock(this);
     }
 
-    public abstract void tcp_rcv(final T ipHeader, final TcpPacket tcpPacket);
+    public abstract void tcp_rcv(final Channel net, final T ipPacket);
 
     // ...
 
@@ -109,8 +109,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    public TcpSock tcp_check_req(tcp_request_sock request, final TcpPacket skb) {
-        TcpSock nsk = tcp_v4_syn_recv_sock(request, skb);
+    public TcpSock tcp_check_req(IpPacket ipPacket, final TcpPacket tcpPacket, tcp_request_sock request) {
+        TcpSock nsk = tcp_v4_syn_recv_sock(request, tcpPacket);
         return nsk;
     }
 
@@ -222,8 +222,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      */
     private static TcpSock inet_csk_clone_lock(final TcpSock sk, tcp_request_sock req) {
         // final T newsk = sk; // sk_clone_lock
-        final TcpSock newsk = new TcpSock();
-        tcp_init_sock(newsk);
+        final TcpSock newsk = tcp_init_sock(new TcpSock());
 
 //         newsk.inet_dport = req....
 //         newsk.inet_sport = ...
@@ -543,7 +542,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
                  * 这里暂时没有采用父子关系, 上面直接建立了连接所以直接转换为 TCP_SYNC_RECV.
                  */
                 tcp_request_sock request_sock = (tcp_request_sock) sk;
-                TcpSock tcpSock = tcp_check_req(request_sock, tcpPacket);
+                TcpSock tcpSock = tcp_check_req(ipPacket, tcpPacket, request_sock);
                 // TODO add to established.
                 tcpSock.state.set(TcpState.TCP_SYN_RECV);
                 moveToEstablished(request_sock, tcpSock);

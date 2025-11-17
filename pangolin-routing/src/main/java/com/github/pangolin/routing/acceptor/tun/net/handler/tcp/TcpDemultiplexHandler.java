@@ -56,11 +56,10 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
             ctx.channel().writeAndFlush(newReset(rawIpPacket));
             return;
         }
-        final TcpPacket tcpPacket = (TcpPacket) ipPacket.getPayload();
 
         if (null != demultiplexer) {
             childGroup.execute(() -> {
-                demultiplexer.tcp_rcv(ipPacket, tcpPacket);
+                demultiplexer.tcp_rcv(ctx.channel(), ipPacket);
             });
         }
 
