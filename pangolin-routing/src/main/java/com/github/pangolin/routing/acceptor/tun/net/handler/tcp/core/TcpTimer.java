@@ -1,5 +1,6 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.google.common.collect.Maps;
 import io.netty.channel.Channel;
@@ -34,9 +35,9 @@ public class TcpTimer<T extends IpPacket> {
     /* Reordering timer */
     public static final int ICSK_TIME_REO_TIMEOUT = 6;
 
-    private final TcpDemultiplexer demultiplexer;
+    private final TcpDemultiplexer<T> demultiplexer;
 
-    public TcpTimer(TcpDemultiplexer demultiplexer) {
+    public TcpTimer(TcpDemultiplexer<T> demultiplexer) {
         this.demultiplexer = demultiplexer;
     }
 
@@ -162,7 +163,7 @@ public class TcpTimer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L307">tcp_delack_timer_handler</a>
      */
     private void tcp_delack_timer_handler(TcpSock tp) {
-        final int state = tp.state.get().ordinal();
+        final int state = tp.state().ordinal();
         if (((1 << state) & (TCPF_CLOSE | TCPF_LISTEN)) != 0) {
             return;
         }
@@ -241,7 +242,7 @@ public class TcpTimer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L688">tcp_write_timer_handler</a>
      */
     private void tcp_write_timer_handler(TcpSock tp) {
-        if (0 != ((1 << tp.state.get().ordinal()) & (TCPF_CLOSE | TCPF_LISTEN))
+        if (0 != ((1 << tp.state().ordinal()) & (TCPF_CLOSE | TCPF_LISTEN))
                 || tp.icsk_pending <= 0) {
             return;
         }
@@ -292,7 +293,7 @@ public class TcpTimer<T extends IpPacket> {
 
         if (tp.snd_wnd > 0
                 // && !sock_flag(sk, SOCK_DEAD)
-                && ((1 << tp.state.get().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV)) != 0) {
+                && ((1 << tp.state().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV)) != 0) {
 
             long us_or_ms1 = tp.tcp_time_stamp_ts();
             long retrans_stamp0 = tp.retrans_stamp != 0 ? tp.retrans_stamp : tp.tcp_skb_timestamp_ts(tp.tcp_usec_ts, skb);
@@ -380,7 +381,7 @@ public class TcpTimer<T extends IpPacket> {
         long start_ts = tp.retrans_stamp;
         if (timeout == 0) {
             long rto_base = TCP_RTO_MIN;
-            if (0 != ((1 << tp.state.get().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV))) {
+            if (0 != ((1 << tp.state().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV))) {
                 rto_base = tcp_timeout_init();
             }
             timeout = tcp_model_timeout(boundary, rto_base);
@@ -439,7 +440,7 @@ public class TcpTimer<T extends IpPacket> {
         int retry_until = SysctlOptions.sysctl_tcp_retries2;
         int max_retransmits;
 
-        if (0 != ((1 << tp.state.get().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV))) {
+        if (0 != ((1 << tp.state().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV))) {
             retry_until = tp.icsk_syn_retries > 0 ? tp.icsk_syn_retries : SysctlOptions.sysctl_tcp_syn_retries;
 
             max_retransmits = retry_until;
@@ -563,7 +564,7 @@ public class TcpTimer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L779">tcp_keepalive_timer</a>
      */
     private void tcp_keepalive_timer(TcpSock tp) {
-        final TcpState state = tp.state.get();
+        final TcpState state = tp.state();
         if (TcpState.TCP_LISTEN.equals(state)) {
             log.error("Hmm... keepalive on a LISTEN ???");
             return;

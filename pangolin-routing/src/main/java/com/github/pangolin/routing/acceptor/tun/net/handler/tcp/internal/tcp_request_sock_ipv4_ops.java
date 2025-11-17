@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.TcpPacket;
 

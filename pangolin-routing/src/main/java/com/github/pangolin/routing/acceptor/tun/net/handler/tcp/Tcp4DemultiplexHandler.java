@@ -1,9 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.Tcp4Demultiplexer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.Tcp4Demultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.Channel;
@@ -66,8 +66,8 @@ public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler<IpV4Packet> {
     protected TcpDemultiplexer<IpV4Packet> create(
             Map<String, tcp_request_sock> handshakeRegistry,
             Map<String, TcpSock> establishedRegistry,
-            final Channel tun, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
-        return new Tcp4Demultiplexer(handshakeRegistry, establishedRegistry, tun, childGroup, dnsEngine, socketChannelFactory);
+            final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+        return new Tcp4Demultiplexer(handshakeRegistry, establishedRegistry, childGroup, dnsEngine, socketChannelFactory);
     }
 
 }

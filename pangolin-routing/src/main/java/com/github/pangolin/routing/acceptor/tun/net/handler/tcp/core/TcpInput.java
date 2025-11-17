@@ -1,5 +1,8 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
@@ -10,13 +13,13 @@ import java.security.SecureRandom;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.jiffies;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.tcp_jiffies32;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_SYN_RECV;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_ACK_NOW;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.ICSK_TIME_PROBE0;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.ICSK_ACK_NOW;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.ICSK_TIME_PROBE0;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 
 @Slf4j
@@ -357,7 +360,7 @@ public class TcpInput<T extends IpPacket> {
         int err;
 
         /* We want the right error as BSD sees it (and indeed as we do). */
-        switch (tp.state.get()) {
+        switch (tp.state()) {
             case TCP_SYN_SENT:
                 err = ECONNREFUSED;
                 break;
@@ -381,12 +384,12 @@ public class TcpInput<T extends IpPacket> {
         tp.sk_shutdown |= RCV_SHUTDOWN;
         // sock_set_flag(sk, SOCK_DONE)
 
-        final TcpState state = tp.state.get();
+        final TcpState state = tp.state();
         switch (state) {
             case TCP_SYN_RECV:
             case TCP_ESTABLISHED:
                 /* Move to CLOSE_WAIT */
-                tp.state.set(TcpState.TCP_CLOSE_WAIT);
+                tp.state(TcpState.TCP_CLOSE_WAIT);
                 tp.inet_csk_enter_pingpong_mode();
                 break;
             case TCP_CLOSE_WAIT:
@@ -403,7 +406,7 @@ public class TcpInput<T extends IpPacket> {
                  * enter the CLOSING state.
                  */
                 output.tcp_send_ack(tp);
-                tp.state.set(TcpState.TCP_CLOSING);
+                tp.state(TcpState.TCP_CLOSING);
                 break;
             case TCP_FIN_WAIT2:
                 /* Received a FIN -- send ACK and enter TIME_WAIT. */
@@ -652,7 +655,7 @@ public class TcpInput<T extends IpPacket> {
     private boolean tcp_reset_check(TcpSock tp, final TcpPacket skb) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5939
         final int seq = skb.getHeader().getSequenceNumber();
-        return seq == tp.rcv_nxt - 1 && 0 != ((1 << tp.state.get().ordinal()) | (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
+        return seq == tp.rcv_nxt - 1 && 0 != ((1 << tp.state().ordinal()) | (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
     }
 
     /**
@@ -769,7 +772,7 @@ public class TcpInput<T extends IpPacket> {
          * RFC 5961 4.2 : Send a challenge ack
          */
         if (th.getSyn()) {
-            TcpState tcpState = tp.state.get();
+            TcpState tcpState = tp.state();
             if (TCP_SYN_RECV.equals(tcpState)
                     && th.getAck()
                     && seq + 1 == end_seq
@@ -895,11 +898,11 @@ public class TcpInput<T extends IpPacket> {
                 if (0 == (flag & FLAG_NO_CHALLENGE_ACK)) {
                     tcp_send_challenge_ack(tp);
                 }
-                log.warn("TOO OLD ACK on {}: ACK({}) < SND.UNA({}), {}", tp.state.get(), ack, prior_snd_una, tcpHdr);
+                log.warn("TOO OLD ACK on {}: ACK({}) < SND.UNA({}), {}", tp.state(), ack, prior_snd_una, tcpHdr);
                 return -TcpDropReason.SKB_DROP_REASON_TCP_TOO_OLD_ACK;
             }
             // goto old_ack.
-            log.warn("OLD ACK on {}: ACK({}) < SND.UNA({}), {}", tp.state.get(), ack, prior_snd_una, tcpHdr);
+            log.warn("OLD ACK on {}: ACK({}) < SND.UNA({}), {}", tp.state(), ack, prior_snd_una, tcpHdr);
             return 0;
         }
 

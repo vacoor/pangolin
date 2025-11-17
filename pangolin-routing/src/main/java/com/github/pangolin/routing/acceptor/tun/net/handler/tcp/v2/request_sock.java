@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.SockCommon;
 

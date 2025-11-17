@@ -1,19 +1,19 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.SockCommon;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.inet_request_sock;
 
 // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L149
 public class tcp_request_sock extends inet_request_sock {
-    int mss;
-    boolean req_usec_ts;
-    int rcv_isn;
-    int snt_isn;
-    long ts_off;
+    public int mss;
+    public boolean req_usec_ts;
+    public int rcv_isn;
+    public int snt_isn;
+    public long ts_off;
     int snt_tsval_first;
     int snt_tsval_last;
     int last_oow_ack_time;
-    int rcv_nxt;
+    public int rcv_nxt;
     int syn_tos;
 
     public TcpSock parentSock;

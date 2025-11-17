@@ -1,6 +1,8 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
 import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.*;
@@ -12,10 +14,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.tcp_jiffies32;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer.TCPCB_EVER_RETRANS;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer.TCPCB_RETRANS;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.TCPCB_EVER_RETRANS;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.TCPCB_RETRANS;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_CLOSE;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpTimer.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock.IP_HEADER_SIZE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock.tcp_rearm_rto;
@@ -988,7 +990,7 @@ public class TcpOutput<T extends IpPacket> {
          * In time closedown will finish, we empty the write queue and
          * all will be happy.
          */
-        if (TCP_CLOSE.equals(tp.state.get())) {
+        if (TCP_CLOSE.equals(tp.state())) {
             return;
         }
         if (tcp_write_xmit(tp, mss, nonagle, 0)) {
@@ -1235,7 +1237,7 @@ public class TcpOutput<T extends IpPacket> {
      */
     private void __tcp_send_ack(final TcpSock tp, final int rcv_nxt, int flags) {
         /* If we have been reset, we may not send again. */
-        if (TCP_CLOSE.equals(tp.state.get())) {
+        if (TCP_CLOSE.equals(tp.state())) {
             return;
         }
 
@@ -1281,7 +1283,7 @@ public class TcpOutput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4328">tcp_write_wakeup</a>
      */
     protected int tcp_write_wakeup(TcpSock tp, int mib) {
-        if (TCP_CLOSE.equals(tp.state.get())) {
+        if (TCP_CLOSE.equals(tp.state())) {
             return -1;
         }
 

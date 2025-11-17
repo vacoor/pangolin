@@ -1,9 +1,11 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.InetConnectionSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.SockCommon;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
@@ -26,7 +28,7 @@ import java.util.Map;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpHandshaker.tcpLogError;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpHandshaker.tcpLogError;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock.tcp_initialize_rcv_mss;
@@ -48,12 +50,11 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     /**
      *
      */
-    protected final Channel net;
     final DnsEngine dnsEngine;
     final EventLoopGroup childGroup;
     final SocketChannelFactory socketChannelFactory;
 
-    int connTimeoutMs = 10 * 1000;
+    int connTimeoutMs = 5 * 1000;
 
 
     public TcpOutput output = new TcpOutput(this);
@@ -66,11 +67,10 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     protected TcpDemultiplexer(
             Map<String, tcp_request_sock> requestMap,
             Map<String, TcpSock> establishedMap,
-            final Channel net, final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+            final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
         super();
         this.requestSockMap = requestMap;
         this.establishedMap = establishedMap;
-        this.net = net;
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
@@ -93,10 +93,10 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 
     /* ************** Initialize Connection Request [[ ************ */
 
-    protected abstract tcp_request_sock conn_request(TcpSock listenSock, final T ipPacket, final TcpPacket tcpPacket);
+    protected abstract tcp_request_sock conn_request(final Channel net, TcpSock listenSock, final T ipPacket, final TcpPacket tcpPacket);
 
 
-    protected abstract void send_reset(final IpHeader ipHeader, final TcpPacket tcpPacket, int err);
+    protected abstract void send_reset(final Channel net, final IpHeader ipHeader, final TcpPacket tcpPacket, int err);
 
 
     /* ************** ]] Initialize Connection Request ************ */
@@ -212,7 +212,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         newtp.rx_opt.mss_clamp = req.mss;
 
         newtp.child = req.child;
-        newtp.destroy = req.destroy;
         newtp.INDIRECT_CALL_INET = req.INDIRECT_CALL_INET;
         return newtp;
     }
@@ -359,7 +358,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6299">tcp_init_transfer</a>
      */
-    private void tcp_init_transfer(TcpSock tp, TcpPacket skb) {
+    private void tcp_init_transfer(Channel net, TcpSock tp, TcpPacket skb) {
         output.tcp_mtup_init();
         tcp_init_metrics();
 
@@ -414,7 +413,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
             @Override
             public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
                 tcpLogError(null, tp.srcAddr, tp.srcPort.valueAsInt(), tp.dstAddr, tp.dstPort.valueAsInt(), "Exception caught: {}", cause.getMessage(), cause);
-                send_reset(tp.rawIpHeader, new TcpPacket.Builder()
+                send_reset(net, tp.rawIpHeader, new TcpPacket.Builder()
                         .srcAddr(tp.srcAddr)
                         .dstAddr(tp.dstAddr)
                         .srcPort(tp.srcPort)
@@ -481,7 +480,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      * @throws IOException
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6676">tcp_rcv_state_process</a>
      */
-    protected int tcp_rcv_state_process(SockCommon sk, final T ipPacket, final TcpPacket tcpPacket) throws IOException {
+    protected int tcp_rcv_state_process(final Channel net, SockCommon sk, final T ipPacket, final TcpPacket tcpPacket) throws IOException {
         final TcpHeader th = tcpPacket.getHeader();
 
         /*-
@@ -518,7 +517,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 //                    sk.srcPort = tcpPacket.getHeader().getSrcPort();
 //                    sk.dstPort = tcpPacket.getHeader().getDstPort();
 
-                    tcp_request_sock tcpRequestSock = conn_request((TcpSock) sk, ipPacket, tcpPacket);
+                    tcp_request_sock tcpRequestSock = conn_request(net, (TcpSock) sk, ipPacket, tcpPacket);
                     if (null == tcpRequestSock) {
                         return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
                     }
@@ -544,7 +543,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
                 tcp_request_sock request_sock = (tcp_request_sock) sk;
                 TcpSock tcpSock = tcp_check_req(ipPacket, tcpPacket, request_sock);
                 // TODO add to established.
-                tcpSock.state.set(TcpState.TCP_SYN_RECV);
+                tcpSock.state(TcpState.TCP_SYN_RECV);
                 moveToEstablished(request_sock, tcpSock);
                 sk = tcpSock;
                 return discard(tcpPacket, TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED);
@@ -587,7 +586,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         switch (sk.state()) {
             case TCP_SYN_RECV:
                 tp.delivered++; /* SYN-ACK delivery isn't tracked in tcp_ack */
-                tcp_init_transfer(tp, tcpPacket);
+                tcp_init_transfer(net, tp, tcpPacket);
 
                 sk.state(TcpState.TCP_ESTABLISHED);
 
@@ -744,7 +743,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         }
 
         /* If we've already sent a FIN, or it's a closed state, skip this. */
-        if (0 != ((1 << sk.state.get().ordinal()) & (TcpConstants.TCPF_ESTABLISHED | TcpConstants.TCPF_CLOSE_WAIT))) {
+        if (0 != ((1 << sk.state().ordinal()) & (TcpConstants.TCPF_ESTABLISHED | TcpConstants.TCPF_CLOSE_WAIT))) {
             /* Clear out any half completed packets.  FIN if needed. */
             if (tcp_close_state(sk)) {
                 output.tcp_send_fin(sk);
@@ -758,7 +757,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     public void tcp_done(TcpSock tp) {
         // ... fastopen
 
-        tp.state.set(TcpState.TCP_CLOSE);
+        tp.state(TcpState.TCP_CLOSE);
         timer.tcp_clear_xmit_timers(tp);
 
         // ... fastopen...
@@ -773,15 +772,12 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     }
 
     public void inet_csk_destroy_sock(SockCommon sk) {
-        if (!TCP_CLOSE.equals(sk.state.get())) {
+        if (!TCP_CLOSE.equals(sk.state())) {
             // ...
         }
 
         if (null != sk.child) {
             innerChannel(sk).close();
-        }
-        if (null != sk.destroy) {
-            sk.destroy.run();
         }
     }
 
@@ -807,10 +803,10 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     }
 
     public boolean tcp_close_state(SockCommon sk) {
-        int next = TcpDemultiplexer.NEW_STATE[sk.state.get().ordinal() + 1];
+        int next = TcpDemultiplexer.NEW_STATE[sk.state().ordinal() + 1];
         int ns = next & TcpDemultiplexer.TCP_STATE_MASK;
 
-        sk.state.set(TcpState.values()[ns]);
+        sk.state(TcpState.values()[ns]);
         return 0 != (next & TcpDemultiplexer.TCP_ACTION_FIN);
     }
 
@@ -830,9 +826,9 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         // FIXME
         sk.sk_shutdown = TcpConstants.SHUTDOWN_MASK;
 
-        TcpState state = sk.state.get();
+        TcpState state = sk.state();
         if (TCP_LISTEN.equals(state)) {
-            sk.state.set(TCP_CLOSE);
+            sk.state(TCP_CLOSE);
             adjudge_to_death(sk);
             return;
         }
@@ -853,7 +849,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     }
 
     private void adjudge_to_death(TcpSock sk) {
-        final TcpState state = sk.state.get();
+        final TcpState state = sk.state();
         if (TCP_FIN_WAIT2.equals(state)) {
             final int tmo = sk.tcp_fin_time();
             if (tmo > TcpConstants.TCP_TIMEWAIT_LEN) {
@@ -872,10 +868,10 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     }
 
     public void tcp_time_wait(TcpSock tp, TcpState state, long timeout) {
-        tp.state.set(state);
+        tp.state(state);
 
         if (TCP_TIME_WAIT.equals(state)) {
-            tp.state.set(TCP_CLOSE);
+            tp.state(TCP_CLOSE);
             tcp_done(tp);
         }
 

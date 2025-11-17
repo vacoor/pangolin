@@ -16,7 +16,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 
 // https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
 public class SockCommon {
-    public final AtomicReference<TcpState> state = new AtomicReference<>(TcpState.TCP_CLOSE);
+    private TcpState state = TcpState.TCP_CLOSE;
     public IpPacket.IpHeader rawIpHeader;
     public InetAddress srcAddr;
     public InetAddress dstAddr;
@@ -24,7 +24,6 @@ public class SockCommon {
     public TcpPort srcPort;
     public TcpPort dstPort;
     public ChannelFuture child;
-    public volatile Runnable destroy;
     public Consumer<TcpBuffer> INDIRECT_CALL_INET;
 
     public String uniqueKey() {
@@ -49,10 +48,10 @@ public class SockCommon {
     }
 
     public TcpState state() {
-        return state.get();
+        return state;
     }
 
     public void state(final TcpState state) {
-        this.state.set(state);
+        this.state = state;
     }
 }

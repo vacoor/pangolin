@@ -2,8 +2,8 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.IpPacketHandler;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDemultiplexer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.google.common.base.Preconditions;
@@ -15,7 +15,6 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 
 import java.lang.reflect.Type;
@@ -29,8 +28,8 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
     private final SocketChannelFactory socketChannelFactory;
     private final EventLoopGroup childGroup = new NioEventLoopGroup();
 
-    private final Map<String, tcp_request_sock> requestMap = Maps.newConcurrentMap();
-    private final Map<String, TcpSock> establishedMap = Maps.newConcurrentMap();
+    private final Map<String, tcp_request_sock> requestRegistry = Maps.newConcurrentMap();
+    private final Map<String, TcpSock> establishedRegistry = Maps.newConcurrentMap();
     private TcpDemultiplexer<T> demultiplexer;
 
     public TcpDemultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
@@ -39,12 +38,8 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
         this.socketChannelFactory = factory;
         final Type type = Types.resolveType(TcpDemultiplexHandler.class.getTypeParameters()[0], getClass());
         Preconditions.checkState(type instanceof Class<?>, "Can't resolve %s IpPacket Class", TcpDemultiplexHandler.class.getName());
-    }
 
-    @Override
-    public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
-        super.channelRegistered(ctx);
-        demultiplexer = create(requestMap, establishedMap, ctx.channel(), childGroup, dnsEngine, socketChannelFactory);
+        demultiplexer = create(requestRegistry, establishedRegistry, childGroup, dnsEngine, socketChannelFactory);
     }
 
     @Override
@@ -87,7 +82,7 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
     protected abstract TcpDemultiplexer<T> create(
             Map<String, tcp_request_sock> handshakeRegistry,
             Map<String, TcpSock> establishedRegistry,
-            Channel tun, EventLoopGroup childGroup,
+            EventLoopGroup childGroup,
             DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory);
 
     @Override

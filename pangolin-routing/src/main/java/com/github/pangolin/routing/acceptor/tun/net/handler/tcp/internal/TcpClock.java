@@ -5,7 +5,7 @@ import java.util.concurrent.TimeUnit;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
 
 public class TcpClock {
-    protected static long tcp_clock_ns() {
+    public static long tcp_clock_ns() {
         return System.nanoTime();
     }
 

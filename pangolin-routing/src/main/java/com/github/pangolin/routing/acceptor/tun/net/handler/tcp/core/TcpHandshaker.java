@@ -1,8 +1,10 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_options_received;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
@@ -49,7 +51,6 @@ public class TcpHandshaker {
         if (null == req) {
             return null;
         }
-        req.destroy = af_ops::destory;
         req.INDIRECT_CALL_INET = af_ops::INDIRECT_CALL_INET;
 
         req.ts_off = 0;
@@ -80,7 +81,7 @@ public class TcpHandshaker {
         // init rwin
         tcp_openreq_init_rwin(listenSock, output, req, tcpPacket);
 
-        req.state.set(TCP_NEW_SYN_RECV);
+        req.state(TCP_NEW_SYN_RECV);
 
         req.child.addListener(new ChannelFutureListener() {
             @Override

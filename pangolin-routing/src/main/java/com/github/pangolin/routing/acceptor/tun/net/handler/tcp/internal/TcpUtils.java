@@ -45,7 +45,7 @@ public abstract class TcpUtils {
         return (((len) + ((align) - 1)) & ~((align) - 1));
     }
 
-    static boolean time_after(long a, long b) {
+    public static boolean time_after(long a, long b) {
         return (b - a) < 0;
     }
 
@@ -53,11 +53,11 @@ public abstract class TcpUtils {
         return (a - b) >= 0;
     }
 
-    static boolean time_before(long a, long b) {
+    public static boolean time_before(long a, long b) {
         return time_after(b, a);
     }
 
-    static boolean time_before_eq(long a, long b) {
+    public static boolean time_before_eq(long a, long b) {
         return time_after_eq(b, a);
     }
 
@@ -70,7 +70,7 @@ public abstract class TcpUtils {
     }
 
 
-    static int _ilog2(int x) {
+    public static int _ilog2(int x) {
         int i = 0;
         while (x >= 2) {
             x = x >> 1;  // 右移一位相当于除以2
@@ -80,7 +80,7 @@ public abstract class TcpUtils {
     }
 
 
-    static int clamp(int value, int min, int max) {
+    public static int clamp(int value, int min, int max) {
         if (value < min) {
             return min;
         }
@@ -107,7 +107,7 @@ public abstract class TcpUtils {
         return endSeq + skb.length() - hdr.length();
     }
 
-    static int determineEndSeq(final TcpBuffer skb) {
+    public static int determineEndSeq(final TcpBuffer skb) {
         int endSeq = skb.sequenceNumber();
         if (skb.syn()) {
             endSeq++;
@@ -120,7 +120,7 @@ public abstract class TcpUtils {
         return endSeq + len;
     }
 
-    static int rounddown(int a, int b) {
+    public static int rounddown(int a, int b) {
         return a - (a % b);
     }
 
