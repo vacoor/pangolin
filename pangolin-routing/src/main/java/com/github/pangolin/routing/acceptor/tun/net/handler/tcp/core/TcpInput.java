@@ -4,13 +4,19 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuff
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.channel.*;
+import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.TcpPacket;
+import org.pcap4j.packet.UnknownPacket;
 
 import java.io.IOException;
 import java.security.SecureRandom;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpHandshaker.tcpLogError;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.jiffies;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.tcp_jiffies32;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.*;
@@ -1069,5 +1075,113 @@ public class TcpInput<T extends IpPacket> {
 
     public void tcp_sack_compress_send_ack(TcpSock tp) {
         // FIXME
+    }
+
+    void tcp_rcv_established(final TcpPacket skb) throws IOException {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6110
+
+        // step5
+//        input.tcp_ack(this, skb, 0);
+
+        /* step 7: process the segment text */
+//        input.tcp_data_queue(this, skb);
+
+//        input.tcp_data_snd_check(this);
+        // tcp_ack_snd_check();
+    }
+
+    /**
+     * @param net
+     * @param sk
+     * @param skb
+     * @param tcpDemultiplexer
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6299">tcp_init_transfer</a>
+     */
+    void tcp_init_transfer(Channel net, TcpSock sk, TcpPacket skb, TcpDemultiplexer tcpDemultiplexer) {
+        tcpDemultiplexer.output.tcp_mtup_init();
+        tcpDemultiplexer.tcp_init_metrics(sk);
+
+        sk.tcp_snd_cwnd_set(sk.tcp_init_cwnd());
+
+        sk.snd_cwnd_stamp = tcp_jiffies32();
+
+        tcpDemultiplexer.tcp_init_congestion_control(sk);
+
+        // child.
+        innerChannel(sk).pipeline().addLast(new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+                try {
+//                    logTrace("Read from {}", resolved);
+                    final ByteBuf buf = (ByteBuf) msg;
+                    final byte[] payload = ByteBufUtil.getBytes(buf);
+
+                    // tcp data len = tcp snd.mss - tcp options.len
+                    // 超过 tcp data len 不切割, 会使用TSO功能通过网卡来分段.
+                    /*
+                    tcp_sendmsg2(new TcpBuffer()
+                            .ack(true)
+                            .psh(true)
+                            .payloadBuilder(
+                                    UnknownPacket.newPacket(payload, 0, payload.length).getBuilder()
+                            ), true);
+                            */
+
+                    final int mss = tcpDemultiplexer.output.tcp_current_mss(sk);
+                    for (int offset = 0; offset < payload.length; ) {
+                        final int len = payload.length - offset;
+                        if (len <= mss) {
+                            final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, len).getBuilder();
+                            tcpDemultiplexer.tcp_sendmsg2(sk, new TcpBuffer().ack(true)
+                                    //.psh(true)
+                                    .payloadBuilder(builder), true);
+                            offset += len;
+                        } else {
+                            UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, mss).getBuilder();
+                            tcpDemultiplexer.tcp_sendmsg2(sk, new TcpBuffer().ack(true)
+                                    // .psh(true)
+                                    .payloadBuilder(builder), false);
+                            offset += mss;
+                        }
+                    }
+                } finally {
+                    ReferenceCountUtil.release(msg);
+                }
+            }
+
+            @Override
+            public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
+                tcpLogError(null, sk.srcAddr, sk.srcPort.valueAsInt(), sk.dstAddr, sk.dstPort.valueAsInt(), "Exception caught: {}", cause.getMessage(), cause);
+                tcpDemultiplexer.send_reset(net, sk.rawIpHeader, new TcpPacket.Builder()
+                        .srcAddr(sk.srcAddr)
+                        .dstAddr(sk.dstAddr)
+                        .srcPort(sk.srcPort)
+                        .dstPort(sk.dstPort)
+                        .ack(true)
+                        .acknowledgmentNumber(sk.rcv_nxt)
+                        .build(), -1);
+                try {
+                    if (ctx.channel().isOpen()) {
+                        ctx.channel().close();
+                    }
+                } finally {
+                    tcpDemultiplexer.tcp_done(sk);
+                }
+            }
+        });
+
+        // CHECK child close.
+
+        innerChannel(sk).closeFuture().addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture channelFuture) throws Exception {
+                TcpHandshaker.tcpLogInfo(null, sk.srcAddr, sk.srcPort.valueAsInt(), sk.dstAddr, sk.dstPort.valueAsInt(), "DISCONNECTED: {}", sk.dstAddr.getHostAddress());
+                if (tcpDemultiplexer.tcp_close_state(sk)) {
+                    tcpDemultiplexer.output.tcp_send_fin(sk);
+                }
+            }
+
+        });
+        innerChannel(sk).config().setAutoRead(true);
     }
 }

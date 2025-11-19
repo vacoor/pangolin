@@ -2,33 +2,26 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.InetConnectionSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.SockCommon;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.*;
 import com.github.pangolin.routing.support.SocketChannelFactory;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
-import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
-import org.pcap4j.packet.UnknownPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.Map;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpHandshaker.tcpLogInfo;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpHandshaker.tcpLogError;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock.tcp_initialize_rcv_mss;
@@ -295,11 +288,11 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     }
 
 
-    private void tcp_init_metrics() {
+    void tcp_init_metrics(final Sock sk) {
     }
 
 
-    private void tcp_init_congestion_control() {
+    void tcp_init_congestion_control(final Sock sk) {
     }
 
 
@@ -342,110 +335,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     /*       MSS    */
 
 
-    private void tcp_rcv_established(final TcpPacket skb) throws IOException {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6110
-
-        // step5
-//        input.tcp_ack(this, skb, 0);
-
-        /* step 7: process the segment text */
-//        input.tcp_data_queue(this, skb);
-
-//        input.tcp_data_snd_check(this);
-        // tcp_ack_snd_check();
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6299">tcp_init_transfer</a>
-     */
-    private void tcp_init_transfer(Channel net, TcpSock tp, TcpPacket skb) {
-        output.tcp_mtup_init();
-        tcp_init_metrics();
-
-        tp.tcp_snd_cwnd_set(tp.tcp_init_cwnd());
-
-        tp.snd_cwnd_stamp = tcp_jiffies32();
-
-        tcp_init_congestion_control();
-
-        // child.
-        innerChannel(tp).pipeline().addLast(new ChannelInboundHandlerAdapter() {
-            @Override
-            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-                try {
-//                    logTrace("Read from {}", resolved);
-                    final ByteBuf buf = (ByteBuf) msg;
-                    final byte[] payload = ByteBufUtil.getBytes(buf);
-
-                    // tcp data len = tcp snd.mss - tcp options.len
-                    // 超过 tcp data len 不切割, 会使用TSO功能通过网卡来分段.
-                    /*
-                    tcp_sendmsg2(new TcpBuffer()
-                            .ack(true)
-                            .psh(true)
-                            .payloadBuilder(
-                                    UnknownPacket.newPacket(payload, 0, payload.length).getBuilder()
-                            ), true);
-                            */
-
-                    final int mss = output.tcp_current_mss(tp);
-                    for (int offset = 0; offset < payload.length; ) {
-                        final int len = payload.length - offset;
-                        if (len <= mss) {
-                            final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, len).getBuilder();
-                            tcp_sendmsg2(tp, new TcpBuffer().ack(true)
-                                    //.psh(true)
-                                    .payloadBuilder(builder), true);
-                            offset += len;
-                        } else {
-                            UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, mss).getBuilder();
-                            tcp_sendmsg2(tp, new TcpBuffer().ack(true)
-                                    // .psh(true)
-                                    .payloadBuilder(builder), false);
-                            offset += mss;
-                        }
-                    }
-                } finally {
-                    ReferenceCountUtil.release(msg);
-                }
-            }
-
-            @Override
-            public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                tcpLogError(null, tp.srcAddr, tp.srcPort.valueAsInt(), tp.dstAddr, tp.dstPort.valueAsInt(), "Exception caught: {}", cause.getMessage(), cause);
-                send_reset(net, tp.rawIpHeader, new TcpPacket.Builder()
-                        .srcAddr(tp.srcAddr)
-                        .dstAddr(tp.dstAddr)
-                        .srcPort(tp.srcPort)
-                        .dstPort(tp.dstPort)
-                        .ack(true)
-                        .acknowledgmentNumber(tp.rcv_nxt)
-                        .build(), -1);
-                try {
-                    if (ctx.channel().isOpen()) {
-                        ctx.channel().close();
-                    }
-                } finally {
-                    tcp_done(tp);
-                }
-            }
-        });
-
-        // CHECK child close.
-
-        innerChannel(tp).closeFuture().addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                TcpHandshaker.tcpLogInfo(null, tp.srcAddr, tp.srcPort.valueAsInt(), tp.dstAddr, tp.dstPort.valueAsInt(), "DISCONNECTED: {}", tp.dstAddr.getHostAddress());
-                if (tcp_close_state(tp)) {
-                    output.tcp_send_fin(tp);
-                }
-            }
-
-        });
-        innerChannel(tp).config().setAutoRead(true);
-    }
-
     public static Channel innerChannel(SockCommon sock) {
         return sock.child.channel();
     }
@@ -455,21 +344,11 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 //        this.request_sock = sock;
 
         sock.state(TcpState.TCP_NEW_SYN_RECV);
-        InetAddress srcAddr = sock.srcAddr;
-        TcpPort tcpSrcPort = sock.srcPort;
-        InetAddress dstAddr = sock.dstAddr;
-        TcpPort tcpDstPort = sock.dstPort;
-//        final String sockKey = srcAddr.toString() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr + ":" + tcpDstPort.valueAsInt();
-        final String sockKey = srcAddr.getHostAddress() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr.getHostAddress() + ":" + tcpDstPort.valueAsInt();
-        requestSockMap.putIfAbsent(sockKey, sock);
+        requestSockMap.putIfAbsent(sock.uniqueKey(), sock);
     }
 
     protected void moveToEstablished(final tcp_request_sock req, final TcpSock sock) {
-        InetAddress srcAddr = req.srcAddr;
-        TcpPort tcpSrcPort = req.srcPort;
-        InetAddress dstAddr = req.dstAddr;
-        TcpPort tcpDstPort = req.dstPort;
-        final String sockKey = srcAddr.getHostAddress() + ":" + tcpSrcPort.valueAsInt() + " => " + dstAddr.getHostAddress() + ":" + tcpDstPort.valueAsInt();
+        final String sockKey = req.uniqueKey();
         requestSockMap.remove(sockKey, req);
         establishedMap.put(sockKey, sock);
     }
@@ -521,6 +400,16 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
                     if (null == tcpRequestSock) {
                         return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
                     }
+
+                    tcpRequestSock.child.channel().closeFuture().addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(final ChannelFuture future) throws Exception {
+//                            if (tcp_close_state(tcpRequestSock)) {
+//                                output.tcp_send_fin(tcpRequestSock);
+//                            }
+//                    shutdown(SEND_SHUTDOWN);
+                        }
+                    });
 
 //                    tcpRequestSock.state.set(TCP_NEW_SYN_RECV);
 //                    addToHalfQueue((TcpSock) sk, tcpRequestSock);
@@ -586,7 +475,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         switch (sk.state()) {
             case TCP_SYN_RECV:
                 tp.delivered++; /* SYN-ACK delivery isn't tracked in tcp_ack */
-                tcp_init_transfer(net, tp, tcpPacket);
+                input.tcp_init_transfer(net, tp, tcpPacket, this);
 
                 sk.state(TcpState.TCP_ESTABLISHED);
 

@@ -164,18 +164,6 @@ public class TcpHandshaker {
 //            final long elapsedMs = System.currentTimeMillis() - sinceMs;
 //            tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "ESTABLISHED: {} elapsed: {}ms", resolved, elapsedMs);
 
-            /*
-            req.child.closeFuture().addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(final ChannelFuture future) throws Exception {
-                    tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "DISCONNECTED: {}", resolved);
-                    if (tcp_close_state(req)) {
-                        output.tcp_send_fin(TcpDemultiplexer.this);
-                    }
-//                    shutdown(SEND_SHUTDOWN);
-                }
-            });
-            */
 
             return req;
         } catch (Exception e) {
