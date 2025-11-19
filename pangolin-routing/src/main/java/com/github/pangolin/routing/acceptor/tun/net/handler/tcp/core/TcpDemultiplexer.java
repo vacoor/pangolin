@@ -12,19 +12,15 @@ import org.pcap4j.packet.IpPacket.IpHeader;
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
-import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.util.Map;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpHandshaker.tcpLogInfo;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock.tcp_initialize_rcv_mss;
 
 @Slf4j
 public abstract class TcpDemultiplexer<T extends IpPacket> {
@@ -121,7 +117,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         output.tcp_sync_mss(newsk, parent.dst_mtu());
         newsk.advmss = parent.tcp_mss_clamp(newsk, parent.dst_metric_advmss());
 
-        tcp_initialize_rcv_mss(newsk);
+        input.tcp_initialize_rcv_mss(newsk);
         return newsk;
     }
 
@@ -450,12 +446,12 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
             return discard(tcpPacket, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
         }
 
-        if (!input.tcp_validate_incoming(tp, tcpPacket)) {
+        if (!input.tcp_validate_incoming(tp, ipPacket, tcpPacket)) {
             return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
         }
 
         /* step 5: check the ACK field */
-        int reason = input.tcp_ack(tp, tcpPacket, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
+        int reason = input.tcp_ack(tp, ipPacket, tcpPacket, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {
             if (TcpState.TCP_SYN_RECV.equals(sk.state())) {
                 // send one RST
@@ -475,7 +471,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         switch (sk.state()) {
             case TCP_SYN_RECV:
                 tp.delivered++; /* SYN-ACK delivery isn't tracked in tcp_ack */
-                input.tcp_init_transfer(net, tp, tcpPacket, this);
+                input.tcp_init_transfer(net, tp, ipPacket, tcpPacket);
 
                 sk.state(TcpState.TCP_ESTABLISHED);
 
@@ -487,7 +483,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 
                 /* Prevent spurious tcp_cwnd_restart() on first data packet */
                 tp.lsndtime = tcp_jiffies32();
-                tcp_initialize_rcv_mss(tp);
+                input.tcp_initialize_rcv_mss(tp);
 
                 break;
             case TCP_FIN_WAIT1:
@@ -576,13 +572,13 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
                     int seq = th.getSequenceNumber();
                     int end_seq = determineEndSeq(tcpPacket);
                     if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), tp.rcv_nxt)) {
-                        input.tcp_reset(tp, tcpPacket);
+                        input.tcp_reset(tp, ipPacket, tcpPacket);
                         return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                     }
                 }
                 // fallthrough
             case TCP_ESTABLISHED:
-                input.tcp_data_queue(tp, tcpPacket);
+                input.tcp_data_queue(tp, ipPacket, tcpPacket);
                 queued = true;
                 break;
         }

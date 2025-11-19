@@ -7,7 +7,6 @@ import io.netty.channel.Channel;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpPacket;
 
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -15,12 +14,12 @@ import java.util.concurrent.TimeUnit;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_CLOSE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_LISTEN;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_FIN_WAIT2;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.time_after;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.InetConnectionSock.TCP_RTO_MAX;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.InetConnectionSock.TCP_RTO_MIN;
 
 @Slf4j
-public class TcpTimer<T extends IpPacket> {
+public class TcpTimer {
     /**
      * https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L144
      */
@@ -35,9 +34,9 @@ public class TcpTimer<T extends IpPacket> {
     /* Reordering timer */
     public static final int ICSK_TIME_REO_TIMEOUT = 6;
 
-    private final TcpDemultiplexer<T> demultiplexer;
+    private final TcpDemultiplexer demultiplexer;
 
-    public TcpTimer(TcpDemultiplexer<T> demultiplexer) {
+    public TcpTimer(TcpDemultiplexer demultiplexer) {
         this.demultiplexer = demultiplexer;
     }
 
@@ -132,7 +131,7 @@ public class TcpTimer<T extends IpPacket> {
         final Future<?> future = timers.get(timer);
         if (null == future || future.isDone() || future.isCancelled() || future.cancel(true)) {
             // timers.put(timer, tp.child.eventLoop().schedule(timer, delay, TimeUnit.MILLISECONDS));
-             timers.put(timer, schedule(tp.child.channel(), delay, TimeUnit.MILLISECONDS, timer));
+            timers.put(timer, schedule(tp.child.channel(), delay, TimeUnit.MILLISECONDS, timer));
         } else {
             log.warn("CANCEL FAILED: {}", tp.icsk_pending);
         }
@@ -186,7 +185,7 @@ public class TcpTimer<T extends IpPacket> {
 
         tp.icsk_ack.pending &= ~ICSK_ACK_TIMER;
         if (tp.inet_csk_ack_scheduled()) {
-            if (!tp.inet_csk_in_pingpong_model()) {
+            if (!tp.inet_csk_in_pingpong_model(tp)) {
                 /* Delayed ACK missed: inflate ATO. */
                 tp.icsk_ack.ato = Math.min(tp.icsk_ack.ato << 1, tp.icsk_rto);
             } else {
@@ -194,7 +193,7 @@ public class TcpTimer<T extends IpPacket> {
                  * Delayed ACK missed: leave pingpong mode and deflate ATO.
                  * ping-pong 模式触发了延迟ACK, 说明ATO周期内没有数据要发送, 退出 ping-pong 模式.
                  */
-                tp.inet_csk_exit_pingpong_mode();
+                tp.inet_csk_exit_pingpong_mode(tp);
                 tp.icsk_ack.ato = TcpConstants.TCP_ATO_MIN;
             }
 
@@ -213,7 +212,6 @@ public class TcpTimer<T extends IpPacket> {
      * of this socket expires. Calls tcp_delack_timer_handler() to do the actual work.
      * <p>
      * Returns: Nothing (void)
-     *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L359">tcp_delack_timer</a>
      */
     private void tcp_delack_timer(TcpSock tp) {
@@ -310,7 +308,7 @@ public class TcpTimer<T extends IpPacket> {
                 return;
             }
 
-            tp.tcp_enter_loss();
+            demultiplexer.input.tcp_enter_loss();
             demultiplexer.output.tcp_retransmit_skb(tp, skb, 1);
             // __sk_dst_reset
         } else {
@@ -323,7 +321,7 @@ public class TcpTimer<T extends IpPacket> {
                 // ...
             }
 
-            tp.tcp_enter_loss();
+            demultiplexer.input.tcp_enter_loss();
             tcp_update_rto_stats(tp);
 
             if (demultiplexer.output.tcp_retransmit_skb(tp, tp.tcp_rtx_queue_head(), 1) > 0) {

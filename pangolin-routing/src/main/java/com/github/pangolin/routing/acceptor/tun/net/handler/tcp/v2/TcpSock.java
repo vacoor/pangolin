@@ -207,45 +207,6 @@ public class TcpSock extends InetConnectionSock {
     public Runnable sk_timer;
 
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L622">tcp_initialize_rcv_mss</a>
-     */
-    public static void tcp_initialize_rcv_mss(final TcpSock tp) {
-        int hint = Math.min(tp.advmss, tp.mss_cache);
-        hint = Math.min(hint, tp.rcv_wnd / 2);
-        hint = Math.min(hint, TcpConstants.TCP_MSS_DEFAULT);
-        hint = Math.max(hint, TcpConstants.TCP_MIN_MSS);
-        tp.icsk_ack.rcv_mss = hint;
-    }
-
-    /**
-     * Restart timer after forward progress on connection.
-     * RFC2988 recommends to restart timer to now+rto.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3147">tcp_rearm_rto</a>
-     */
-    public static void tcp_rearm_rto(TcpTimer timer, TcpSock tp) {
-
-        // ...
-
-        if (tp.packets_out <= 0) {
-            tp.inet_csk_clear_xmit_timer(timer, ICSK_TIME_RETRANS);
-        } else {
-            int rto = tp.icsk_rto;
-
-            /* Offset the time elapsed after installing regular RTO */
-            if (tp.icsk_pending == ICSK_TIME_REO_TIMEOUT
-                    || tp.icsk_pending == ICSK_TIME_LOSS_PROBE) {
-                final long delta_us = tp.tcp_rto_delta_us();
-                /* delta_us may not be positive if the socket is locked
-                 * when the retrans timer fires and is rescheduled.
-                 */
-                rto = (int) usecs_to_jiffies(Math.max(delta_us, 1));
-            }
-            tp.tcp_reset_xmit_timer(timer, ICSK_TIME_RETRANS, rto, true);
-        }
-    }
-
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1356">tcp_left_out</a>
@@ -351,12 +312,6 @@ public class TcpSock extends InetConnectionSock {
         return TimeUnit.MICROSECONDS.toMillis(tcp_mstamp);
     }
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L172">inet_csk_schedule_ack</a>
-     */
-    public void inet_csk_schedule_ack() {
-        icsk_ack.pending |= TcpTimer.ICSK_ACK_SCHED;
-    }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L177">inet_csk_ack_scheduled</a>
@@ -373,22 +328,6 @@ public class TcpSock extends InetConnectionSock {
         icsk_ack.pingpong = SysctlOptions.sysctl_tcp_pingpong_thresh;
     }
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L335">inet_csk_exit_pingpong_mode</a>
-     */
-    public void inet_csk_exit_pingpong_mode() {
-        if (inet_csk_in_pingpong_model()) {
-            log.trace("[PING-PONG] exit PING-PONG mode");
-        }
-        icsk_ack.pingpong = 0;
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L340">inet_csk_in_pingpong_model</a>
-     */
-    public boolean inet_csk_in_pingpong_model() {
-        return icsk_ack.pingpong >= SysctlOptions.sysctl_tcp_pingpong_thresh;
-    }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L346">inet_csk_inc_pingpong_cnt</a>
@@ -418,15 +357,6 @@ public class TcpSock extends InetConnectionSock {
                 icsk_ack.quick -= pkts;
             }
         }
-    }
-
-    public int tcp_rto_min() {
-        // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L783
-        return icsk_rto_min;
-    }
-
-    public long tcp_rto_min_us() {
-        return jiffies_to_usecs(tcp_rto_min());
     }
 
     public long icsk_timeout() {
@@ -481,21 +411,6 @@ public class TcpSock extends InetConnectionSock {
         return tcp_rtx_queue.peek();
     }
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L759">tcp_bound_rto</a>
-     */
-    public void tcp_bound_rto() {
-        if (icsk_rto > TCP_RTO_MAX) {
-            icsk_rto = TCP_RTO_MAX;
-        }
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L765">__tcp_set_rto</a>
-     */
-    public long __tcp_set_rto() {
-        return TcpClock.usecs_to_jiffies((srtt_us >> 3) + rttvar_us);
-    }
 
     public void inet_csk_clear_xmit_timer(TcpTimer timer, int what) {
         // https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L195
@@ -597,15 +512,6 @@ public class TcpSock extends InetConnectionSock {
         return 0;
     }
 
-    public long tcp_stamp_us_delta(long t1, long t0) {
-        return Math.max(t1 - t0, 0);
-    }
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2190
-    public void tcp_enter_loss() {
-
-    }
-
     public int tcp_skb_pcount(TcpBuffer skb) {
         return 1;
     }
@@ -621,165 +527,7 @@ public class TcpSock extends InetConnectionSock {
         return TimeUnit.NANOSECONDS.toMillis(skb_mstamp_ns);
     }
 
-    public void tcp_measure_rcv_mss(TcpPacket skb) {
-        // FIXME
-        final int lss = icsk_ack.last_seg_size;
 
-        icsk_ack.last_seg_size = 0;
-        final int len = skb.length() - skb.getHeader().length();
-        if (len >= icsk_ack.rcv_mss) {
-            /*
-            if (len != icsk_ack.rcv_mss) {
-                len << TCP_RMEM_TO_WIN_SCALE‎;
-            }
-            */
-
-            icsk_ack.rcv_mss = Math.min(len, advmss);
-        }
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L684">tcp_rcv_rtt_measure</a>
-     */
-    public void tcp_rcv_rtt_measure(TcpSock sk) {
-        if (sk.rcv_rtt_est.time != 0) {
-            if (before(sk.rcv_nxt, sk.rcv_rtt_est.seq)) {
-                return;
-            }
-            long delta_us = tcp_stamp_us_delta(sk.tcp_mstamp, sk.rcv_rtt_est.time);
-            if (delta_us == 0) {
-                delta_us = 1;
-            }
-            tcp_rcv_rtt_update(sk, delta_us, 1);
-        }
-
-        sk.rcv_rtt_est.seq = sk.rcv_nxt + sk.rcv_wnd;
-        sk.rcv_rtt_est.time = sk.tcp_mstamp;
-    }
-
-    /* Called to compute a smoothed rtt estimate. The data fed to this
-     * routine either comes from timestamps, or from segments that were
-     * known _not_ to have been retransmitted [see Karn/Partridge
-     * Proceedings SIGCOMM 87]. The algorithm is from the SIGCOMM 88
-     * piece by Van Jacobson.
-     * NOTE: the next three routines used to be one big routine.
-     * To save cycles in the RFC 1323 implementation it was better to break
-     * it up into three procedures. -- erics
-     */
-    private void tcp_rtt_estimator(long mrtt_us) {
-        long m = mrtt_us; /* RTT */
-        long srtt = srtt_us;
-
-        /*	The following amusing code comes from Jacobson's
-         *	article in SIGCOMM '88.  Note that rtt and mdev
-         *	are scaled versions of rtt and mean deviation.
-         *	This is designed to be as fast as possible
-         *	m stands for "measurement".
-         *
-         *	On a 1990 paper the rto value is changed to:
-         *	RTO = rtt + 4 * mdev
-         *
-         * Funny. This algorithm seems to be very broken.
-         * These formulae increase RTO, when it should be decreased, increase
-         * too slowly, when it should be increased quickly, decrease too quickly
-         * etc. I guess in BSD RTO takes ONE value, so that it is absolutely
-         * does not matter how to _calculate_ it. Seems, it was trap
-         * that VJ failed to avoid. 8)
-         */
-        if (srtt != 0) {
-            m -= (srtt >> 3);    /* m is now error in rtt est */
-            srtt += m;        /* rtt = 7/8 rtt + 1/8 new */
-            if (m < 0) {
-                m = -m;        /* m is now abs(error) */
-                m -= (mdev_us >> 2);   /* similar update on mdev */
-                /* This is similar to one of Eifel findings.
-                 * Eifel blocks mdev updates when rtt decreases.
-                 * This solution is a bit different: we use finer gain
-                 * for mdev in this case (alpha*beta).
-                 * Like Eifel it also prevents growth of rto,
-                 * but also it limits too fast rto decreases,
-                 * happening in pure Eifel.
-                 */
-                if (m > 0) {
-                    m >>= 3;
-                }
-            } else {
-                m -= (mdev_us >> 2);   /* similar update on mdev */
-            }
-            mdev_us += m;        /* mdev = 3/4 mdev + 1/4 new */
-            if (mdev_us > mdev_max_us) {
-                mdev_max_us = mdev_us;
-                if (mdev_max_us > rttvar_us) {
-                    rttvar_us = mdev_max_us;
-                }
-            }
-            if (after(snd_una, rtt_seq)) {
-                if (mdev_max_us < rttvar_us) {
-                    rttvar_us -= (rttvar_us - mdev_max_us) >> 2;
-                }
-                rtt_seq = snd_nxt;
-                mdev_max_us = tcp_rto_min_us();
-
-                // tcp_bpf_rtt(sk, mrtt_us, srtt);
-            }
-        } else {
-            /* no previous measure. */
-            srtt = m << 3;        /* take the measured time to be rtt */
-            mdev_us = m << 1;    /* make sure rto = 3*rtt */
-            rttvar_us = Math.max(mdev_us, tcp_rto_min_us());
-            mdev_max_us = rttvar_us;
-            rtt_seq = snd_nxt;
-
-            // tcp_bpf_rtt(sk, mrtt_us, srtt);
-        }
-        srtt_us = Math.max(1, srtt);
-        logTrace("[RTT] Compute a smoothed rtt: {}us", srtt_us >> 3);
-    }
-
-    /**
-     * Calculate rto without backoff.  This is the second half of Van Jacobson's
-     * routine referred to above.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L980">tcp_set_rto</a>
-     */
-    private void tcp_set_rto() {
-        /* Old crap is replaced with new one. 8)
-         *
-         * More seriously:
-         * 1. If rtt variance happened to be less 50msec, it is hallucination.
-         *    It cannot be less due to utterly erratic ACK generation made
-         *    at least by solaris and freebsd. "Erratic ACKs" has _nothing_
-         *    to do with delayed acks, because at cwnd>2 true delack timeout
-         *    is invisible. Actually, Linux-2.4 also generates erratic
-         *    ACKs in some circumstances.
-         */
-        icsk_rto = (int) __tcp_set_rto();
-
-        /* 2. Fixups made earlier cannot be right.
-         *    If we do not estimate RTO correctly without them,
-         *    all the algo is pure shit and should be replaced
-         *    with correct one. It is exactly, which we pretend to do.
-         */
-
-        /* NOTE: clamping at TCP_RTO_MIN is not required, current algo
-         * guarantees that rto is higher.
-         */
-        tcp_bound_rto();
-        logTrace("[RTO] Set retransmission timeout: {}ms", icsk_rto);
-    }
-
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L1001">tcp_init_cwnd</a>
-     */
-    public int tcp_init_cwnd() {
-        // __u32 cwnd = (dst ? dst_metric(dst, RTAX_INITCWND) : 0);
-        int cwnd = 0;
-
-        if (0 == cwnd) {
-            cwnd = TcpConstants.TCP_INIT_CWND;
-        }
-        return Math.min(cwnd, snd_cwnd_clamp);
-    }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L665
     private void tcp_mark_push(final TcpPacket.Builder skb) {
@@ -803,66 +551,6 @@ public class TcpSock extends InetConnectionSock {
 
 
 
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3186
-    void tcp_update_rtt_min(long rtt_us, int flag) {
-        // int wlen = READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_min_rtt_wlen) * HZ;
-        int wlen = 1 * HZ;
-
-//        if ((flag & FLAG_ACK_MAYBE_DELAYED) && rtt_us > tcp_min_rtt()) {
-        /* If the remote keeps returning delayed ACKs, eventually
-         * the min filter would pick it up and overestimate the
-         * prop. delay when it expires. Skip suspected delayed ACKs.
-         */
-//            return;
-//        }
-
-        // FIXME
-        // minmax_running_min(rtt_min, wlen, tcp_jiffies32(), 0 != rtt_us ? rtt_us : jiffies_to_usecs(1));
-    }
-
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3202
-    public boolean tcp_ack_update_rtt(int flag, long seq_rtt_us,
-                                      long sack_rtt_us, long ca_rtt_us/*,
-                                       struct rate_sample *rs*/) {
-
-        /* Prefer RTT measured from ACK's timing to TS-ECR. This is because
-         * broken middle-boxes or peers may corrupt TS-ECR fields. But
-         * Karn's algorithm forbids taking RTT if some retransmitted data
-         * is acked (RFC6298).
-         */
-        if (seq_rtt_us < 0) {
-            seq_rtt_us = sack_rtt_us;
-        }
-
-        /* RTTM Rule: A TSecr value received in a segment is used to
-         * update the averaged RTT measurement only if the segment
-         * acknowledges some new data, i.e., only if it advances the
-         * left edge of the send window.
-         * See draft-ietf-tcplw-high-performance-00, section 3.3.
-         */
-//        if (seq_rtt_us < 0 && tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr && flag & FLAG_ACKED)
-//            seq_rtt_us = ca_rtt_us = tcp_rtt_tsopt_us(tp);
-
-        // rs->rtt_us = ca_rtt_us; /* RTT of last (S)ACKed packet (or -1) */
-        if (seq_rtt_us < 0) {
-            return false;
-        }
-
-        /* ca_rtt_us >= 0 is counting on the invariant that ca_rtt_us is
-         * always taken together with ACK, SACK, or TS-opts. Any negative
-         * values will be skipped with the seq_rtt_us < 0 check above.
-         */
-        tcp_update_rtt_min(ca_rtt_us, flag);
-        tcp_rtt_estimator(seq_rtt_us);
-
-        // 116.228.111.118 180.168.255.18
-        // TODO OPEN ME
-        tcp_set_rto();
-
-        /* RFC6298: only reset backoff on valid RTT measurement. */
-        icsk_backoff = 0;
-        return true;
-    }
 
     public void tcp_ack_tstamp() {
 
@@ -927,51 +615,6 @@ public class TcpSock extends InetConnectionSock {
         return icsk_ack.timeout;
     }
 
-    /**
-     * Receiver "autotuning" code.
-     * <p>
-     * The algorithm for RTT estimation w/o timestamps is based on
-     * Dynamic Right-Sizing (DRS) by Wu Feng and Mike Fisk of LANL.
-     * <https://public.lanl.gov/radiant/pubs.html#DRS>
-     * <p>
-     * More detail on this code can be found at
-     * <http://staff.psc.edu/jheffner/>,
-     * though this reference is out of date.  A new paper
-     * is pending.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L652">tcp_rcv_rtt_update</a>
-     */
-    private void tcp_rcv_rtt_update(TcpSock sk, long sample, int win_dep) {
-        long new_sample = sk.rcv_rtt_est.rtt_us;
-        long m = sample;
-
-        if (new_sample != 0) {
-            /* If we sample in larger samples in the non-timestamp
-             * case, we could grossly overestimate the RTT especially
-             * with chatty applications or bulk transfer apps which
-             * are stalled on filesystem I/O.
-             *
-             * Also, since we are only going for a minimum in the
-             * non-timestamp case, we do not smooth things out
-             * else with timestamps disabled convergence takes too
-             * long.
-             */
-            if (0 == win_dep) {
-                m -= (new_sample >> 3);
-                new_sample += m;
-            } else {
-                m <<= 3;
-                if (m < new_sample) {
-                    new_sample = m;
-                }
-            }
-        } else {
-            /* No previous measure. */
-            new_sample = m << 3;
-        }
-
-        sk.rcv_rtt_est.rtt_us = new_sample;
-    }
 
 
     public class RcvRttEst {

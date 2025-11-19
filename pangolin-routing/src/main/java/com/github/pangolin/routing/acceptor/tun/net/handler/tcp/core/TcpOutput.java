@@ -1,6 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
 import com.google.common.collect.Lists;
@@ -12,15 +15,15 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.tcp_jiffies32;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.TCPCB_EVER_RETRANS;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.TCPCB_RETRANS;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_CLOSE;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpInput.tcp_rearm_rto;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.tcp_jiffies32;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_CLOSE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock.IP_HEADER_SIZE;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock.tcp_rearm_rto;
 import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
 import static com.sun.jna.platform.linux.ErrNo.EINVAL;
 import static org.pcap4j.packet.TcpPacket.TcpOption;
@@ -29,7 +32,7 @@ import static org.pcap4j.packet.TcpPacket.TcpOption;
  * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_output.c</a>
  */
 @Slf4j
-public class TcpOutput<T extends IpPacket> {
+public class TcpOutput {
 
     private final TcpDemultiplexer demultiplexer;
 
@@ -93,7 +96,7 @@ public class TcpOutput<T extends IpPacket> {
         tp.packets_out += tcp_skb_pcount(skb);
 
         if (prior_packets <= 0 || tp.icsk_pending == ICSK_TIME_LOSS_PROBE) {
-            tcp_rearm_rto(demultiplexer.timer, tp);
+            tcp_rearm_rto(tp, demultiplexer.timer);
         }
 
         // tp.input.tcp_check_space();
@@ -133,8 +136,6 @@ public class TcpOutput<T extends IpPacket> {
         }
         return tp.tcp_wnd_end();
     }
-
-
 
 
     /**
@@ -476,7 +477,7 @@ public class TcpOutput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1802">tcp_output.c</a>
      */
-    void tcp_mtup_init() {
+    void tcp_mtup_init(final TcpSock sk) {
         // TODO
     }
 
@@ -1162,9 +1163,9 @@ public class TcpOutput<T extends IpPacket> {
 
     private int tcp_delack_max(final TcpSock tp) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4172
-        int tcp_rto_min = tp.tcp_rto_min();
+        int _tcp_rto_min = demultiplexer.input.tcp_rto_min(tp);
         int icsk_delack_max = tp.icsk_delack_max;
-        int delack_from_rto_min = Math.max(tcp_rto_min, 2) - 1;
+        int delack_from_rto_min = Math.max(_tcp_rto_min, 2) - 1;
         return Math.min(icsk_delack_max, delack_from_rto_min);
     }
 
@@ -1179,7 +1180,7 @@ public class TcpOutput<T extends IpPacket> {
             /*-
              * ping-pong 模式应该使用最大容忍度的超时时间.
              */
-            if (tp.inet_csk_in_pingpong_model() || 0 != (tp.icsk_ack.pending & TcpTimer.ICSK_ACK_PUSHED)) {
+            if (tp.inet_csk_in_pingpong_model(tp) || 0 != (tp.icsk_ack.pending & TcpTimer.ICSK_ACK_PUSHED)) {
                 max_ato = TCP_DELACK_MAX;
             }
 

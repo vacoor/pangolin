@@ -1,10 +1,15 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions;
+import lombok.extern.slf4j.Slf4j;
+
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
 
 /**
  * https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L78
  */
+@Slf4j
 public class InetConnectionSock extends Sock {
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L146
@@ -69,4 +74,27 @@ public class InetConnectionSock extends Sock {
 
     }
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L335">inet_csk_exit_pingpong_mode</a>
+     */
+    public static void inet_csk_exit_pingpong_mode(final InetConnectionSock sk) {
+        if (inet_csk_in_pingpong_model(sk)) {
+            log.trace("[PING-PONG] exit PING-PONG mode");
+        }
+        sk.icsk_ack.pingpong = 0;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L340">inet_csk_in_pingpong_model</a>
+     */
+    public static boolean inet_csk_in_pingpong_model(final InetConnectionSock sk) {
+        return sk.icsk_ack.pingpong >= SysctlOptions.sysctl_tcp_pingpong_thresh;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L172">inet_csk_schedule_ack</a>
+     */
+    public static void inet_csk_schedule_ack(final InetConnectionSock sk) {
+        sk.icsk_ack.pending |= TcpTimer.ICSK_ACK_SCHED;
+    }
 }
