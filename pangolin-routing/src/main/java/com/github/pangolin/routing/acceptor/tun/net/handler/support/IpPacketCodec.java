@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler;
+package com.github.pangolin.routing.acceptor.tun.net.handler.support;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
@@ -18,7 +18,8 @@ public class IpPacketCodec extends ByteToMessageCodec<IpPacket> {
      * {@inheritDoc}
      */
     @Override
-    protected void encode(final ChannelHandlerContext ctx, final IpPacket msg, final ByteBuf out) throws Exception {
+    protected void encode(final ChannelHandlerContext ctx,
+                          final IpPacket msg, final ByteBuf out) throws Exception {
         out.writeBytes(msg.getRawData());
     }
 
@@ -26,13 +27,14 @@ public class IpPacketCodec extends ByteToMessageCodec<IpPacket> {
      * {@inheritDoc}
      */
     @Override
-    protected void decode(final ChannelHandlerContext ctx, final ByteBuf packet, final List<Object> out) throws Exception {
-        byte[] bytes = new byte[packet.readableBytes()];
+    protected void decode(final ChannelHandlerContext ctx,
+                          final ByteBuf packet, final List<Object> out) throws Exception {
+        final byte[] bytes = new byte[packet.readableBytes()];
         packet.readBytes(bytes);
         out.add(parsePacket(bytes));
     }
 
-    private static IpPacket parsePacket(final byte [] bytes) throws IllegalRawDataException {
+    private static IpPacket parsePacket(final byte[] bytes) throws IllegalRawDataException {
         return (IpPacket) IpSelector.newPacket(bytes, 0, bytes.length);
     }
 

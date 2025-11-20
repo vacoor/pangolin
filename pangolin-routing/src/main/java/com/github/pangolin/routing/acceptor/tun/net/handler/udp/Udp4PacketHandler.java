@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.udp;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.IpPacketHandler;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketHandler;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;

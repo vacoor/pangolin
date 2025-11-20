@@ -1,19 +1,25 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util;
 
 import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
 
-public class TcpClock {
+public abstract class TcpClock {
+    private static final int MSEC_PER_SEC = 1000;
+    private static final long USEC_PER_SEC = 1000 * 1000;
+
+    private TcpClock() {
+    }
+
     public static long tcp_clock_ns() {
         return System.nanoTime();
     }
 
-    protected static long tcp_clock_us() {
+    public static long tcp_clock_us() {
         return TimeUnit.NANOSECONDS.toMicros(tcp_clock_ns());
     }
 
-    protected static long tcp_clock_ms() {
+    public static long tcp_clock_ms() {
         return TimeUnit.NANOSECONDS.toMillis(tcp_clock_ns());
     }
 
@@ -26,7 +32,6 @@ public class TcpClock {
      */
     public static long jiffies() {
         return msecs_to_jiffies(TimeUnit.NANOSECONDS.toMillis(System.nanoTime()));
-        // return msecs_to_jiffies(System.currentTimeMillis());
     }
 
     public static long usecs_to_jiffies(long us) {
@@ -38,7 +43,6 @@ public class TcpClock {
     }
 
     public static long msecs_to_jiffies(long ms) {
-        int MSEC_PER_SEC = 1000;
         if (0 == (HZ % MSEC_PER_SEC)) {
             return (HZ / MSEC_PER_SEC) * ms;
         }
@@ -46,7 +50,6 @@ public class TcpClock {
     }
 
     public static long jiffies_to_usecs(long jiffies) {
-        long USEC_PER_SEC = 1000 * 1000;
         if (0 == (USEC_PER_SEC % HZ)) {
             return USEC_PER_SEC / HZ * jiffies;
         }

@@ -2,11 +2,12 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
 import com.google.common.collect.Lists;
+import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.*;
 
@@ -19,11 +20,12 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpD
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.TCPCB_RETRANS;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpInput.tcp_rearm_rto;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.tcp_jiffies32;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_clock_ns;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_CLOSE;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock.IP_HEADER_SIZE;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock.IP_HEADER_SIZE;
 import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
 import static com.sun.jna.platform.linux.ErrNo.EINVAL;
 import static org.pcap4j.packet.TcpPacket.TcpOption;
@@ -34,9 +36,9 @@ import static org.pcap4j.packet.TcpPacket.TcpOption;
 @Slf4j
 public class TcpOutput {
 
-    private final TcpDemultiplexer demultiplexer;
+    private final TcpDemultiplexer<?> demultiplexer;
 
-    public TcpOutput(TcpDemultiplexer demultiplexer) {
+    public TcpOutput(TcpDemultiplexer<?> demultiplexer) {
         this.demultiplexer = demultiplexer;
     }
 
@@ -47,7 +49,7 @@ public class TcpOutput {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L55">tcp_mstamp_refresh</a>
      */
     void tcp_mstamp_refresh(final TcpSock tp) {
-        final long ns = TcpClock.tcp_clock_ns();
+        final long ns = tcp_clock_ns();
         tp.tcp_clock_cache = ns;
         tp.tcp_mstamp = TimeUnit.NANOSECONDS.toMicros(ns);
     }
@@ -330,7 +332,7 @@ public class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1290">__tcp_transmit_skb</a>
      */
-    private int __tcp_transmit_skb(final TcpSock tp, final TcpBuffer skb, final boolean clone, int rcv_nxt) {
+    private int __tcp_transmit_skb(final Channel net, final TcpSock tp, final TcpBuffer skb, final boolean clone, int rcv_nxt) {
         BUG_ON(null == skb || tcp_skb_pcount(skb) == 0);
 
         long prior_wstamp = tp.tcp_wstamp_ns;
@@ -414,8 +416,8 @@ public class TcpOutput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1486">tcp_transmit_skb</a>
      */
-    private int tcp_transmit_skb(final TcpSock tp, final TcpBuffer skb, final boolean clone) {
-        return __tcp_transmit_skb(tp, skb, clone, tp.rcv_nxt);
+    private int tcp_transmit_skb(final Channel net, final TcpSock tp, final TcpBuffer skb, final boolean clone) {
+        return __tcp_transmit_skb(net, tp, skb, clone, tp.rcv_nxt);
     }
 
     /**
@@ -578,7 +580,7 @@ public class TcpOutput {
      * @return overflow window (continue push)
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2739">tcp_write_xmit</a>
      */
-    private boolean tcp_write_xmit(TcpSock tp, int mss_now, final int nonagle, final int push_one) {
+    private boolean tcp_write_xmit(Channel net, TcpSock tp, int mss_now, final int nonagle, final int push_one) {
         int sent_pkts = 0;
         boolean is_cwnd_limited = false;
         boolean is_rwnd_limited = false;
@@ -671,7 +673,7 @@ public class TcpOutput {
             }
 
             // FIXME
-            if (0 != tcp_transmit_skb(tp, skb, true)) {
+            if (0 != tcp_transmit_skb(net, tp, skb, true)) {
                 break;
             }
 
@@ -985,7 +987,7 @@ public class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3005">__tcp_push_pending_frames</a>
      */
-    public void __tcp_push_pending_frames(final TcpSock tp, int mss, int nonagle) {
+    public void __tcp_push_pending_frames(final Channel net, final TcpSock tp, int mss, int nonagle) {
         /*-
          * If we are closed, the bytes will have to remain here.
          * In time closedown will finish, we empty the write queue and
@@ -994,7 +996,7 @@ public class TcpOutput {
         if (TCP_CLOSE.equals(tp.state())) {
             return;
         }
-        if (tcp_write_xmit(tp, mss, nonagle, 0)) {
+        if (tcp_write_xmit(net, tp, mss, nonagle, 0)) {
             tp.tcp_check_probe_timer(demultiplexer.timer);
         }
     }
@@ -1010,7 +1012,7 @@ public class TcpOutput {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3321">__tcp_retransmit_skb</a>
      */
-    private int __tcp_retransmit_skb(final TcpSock tp, final TcpBuffer skb, int segs) {
+    private int __tcp_retransmit_skb(final Channel net, final TcpSock tp, final TcpBuffer skb, int segs) {
         // ...
         // start
         int seq = skb.sequenceNumber();
@@ -1075,7 +1077,7 @@ public class TcpOutput {
         if (false) {
             // ...
         } else {
-            err = tcp_transmit_skb(tp, skb, true);
+            err = tcp_transmit_skb(net , tp, skb, true);
         }
 
         /* To avoid taking spuriously low RTT samples based on a timestamp
@@ -1087,8 +1089,8 @@ public class TcpOutput {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3448
-    int tcp_retransmit_skb(final TcpSock tp, final TcpBuffer skb, int segs) {
-        int err = __tcp_retransmit_skb(tp, skb, segs);
+    int tcp_retransmit_skb(final Channel net, final TcpSock tp, final TcpBuffer skb, int segs) {
+        int err = __tcp_retransmit_skb(net, tp, skb, segs);
         if (0 == err) {
             skb.sacked |= TCPCB_RETRANS;
             tp.retrans_out += tcp_skb_pcount(skb);
@@ -1112,22 +1114,22 @@ public class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3578">tcp_send_fin</a>
      */
-    public void tcp_send_fin(final TcpSock tp) {
+    public void tcp_send_fin(final Channel net, final TcpSock tp) {
         final TcpBuffer skb = tcp_init_nondata_skb(tp, tp.write_seq, TcpConstants.ACK | TcpConstants.FIN);
         tcp_queue_skb(tp, skb);
-        __tcp_push_pending_frames(tp, tcp_current_mss(tp), TCP_NAGLE_OFF);
+        __tcp_push_pending_frames(net, tp, tcp_current_mss(tp), TCP_NAGLE_OFF);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3640">tcp_send_active_reset</a>
      */
-    void tcp_send_active_reset(final TcpSock tp, final String reason) {
+    void tcp_send_active_reset(final Channel net, final TcpSock tp, final String reason) {
         //
         TcpBuffer skb = tcp_init_nondata_skb(tp, tcp_acceptable_seq(tp), TcpConstants.ACK | TcpConstants.RST);
         tcp_mstamp_refresh(tp);
 
         /* Send it off. */
-        if (0 < tcp_transmit_skb(tp, skb, false)) {
+        if (0 < tcp_transmit_skb(net, tp, skb, false)) {
             log.warn("LINUX_MIB_TCPABORTFAILED");
         }
         /* skb of trace_tcp_send_reset() keeps the skb that caused RST,
@@ -1141,7 +1143,7 @@ public class TcpOutput {
                                         final tcp_request_sock req,
                                         final IpPacket.IpHeader ipHdr, final TcpPacket skb) {
         int mss = listeSock.tcp_mss_clamp(listeSock, listeSock.dst_metric_advmss());
-        long now = TcpClock.tcp_clock_ns();
+        long now = tcp_clock_ns();
 
         final TcpBuffer current = new TcpBuffer()
                 .srcAddr(ipHdr.getDstAddr())
@@ -1172,7 +1174,7 @@ public class TcpOutput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4183">tcp_send_delayed_ack</a>
      */
-    void tcp_send_delayed_ack(final TcpSock tp) {
+    void tcp_send_delayed_ack(final Channel net, final TcpSock tp) {
         long ato = tp.icsk_ack.ato;
         if (ato > TCP_DELACK_MIN) {
             int max_ato = TcpConstants.HZ / 2;
@@ -1215,7 +1217,7 @@ public class TcpOutput {
             long icsk_delack_timeout = tp.icsk_delack_timeout();
             if (time_before_eq(icsk_delack_timeout, TcpClock.jiffies() + (ato >> 2))) {
                 // send now.
-                tcp_send_ack(tp);
+                tcp_send_ack(net, tp);
                 return;
             }
 
@@ -1236,7 +1238,7 @@ public class TcpOutput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4237">__tcp_send_ack</a>
      */
-    private void __tcp_send_ack(final TcpSock tp, final int rcv_nxt, int flags) {
+    private void __tcp_send_ack(final Channel net, final TcpSock tp, final int rcv_nxt, int flags) {
         /* If we have been reset, we may not send again. */
         if (TCP_CLOSE.equals(tp.state())) {
             return;
@@ -1253,21 +1255,21 @@ public class TcpOutput {
         TcpBuffer buf = tcp_init_nondata_skb(tp, tcp_acceptable_seq(tp), TcpConstants.ACK);
 
         /* Send it off, this clears delayed acks for us. */
-        __tcp_transmit_skb(tp, buf, false, rcv_nxt);
+        __tcp_transmit_skb(net, tp, buf, false, rcv_nxt);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4279">tcp_send_ack</a>
      */
-    protected void tcp_send_ack(final TcpSock tp) {
-        __tcp_send_ack(tp, tp.rcv_nxt, 0);
+    protected void tcp_send_ack(final Channel net, final TcpSock tp) {
+        __tcp_send_ack(net, tp, tp.rcv_nxt, 0);
     }
 
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4295">tcp_xmit_probe_skb</a>
      */
-    private int tcp_xmit_probe_skb(final TcpSock tp, int urgent, int mib) {
+    private int tcp_xmit_probe_skb(final Channel net, final TcpSock tp, int urgent, int mib) {
         /*-
          * Use a previous sequence.  This should cause the other
          * end to send an ack.  Don't queue or clone SKB, just
@@ -1275,7 +1277,7 @@ public class TcpOutput {
          */
         final int seq = tp.snd_una - (0 == urgent ? 1 : 0);
         final TcpBuffer skb = tcp_init_nondata_skb(tp, seq, ACK);
-        return tcp_transmit_skb(tp, skb, false);
+        return tcp_transmit_skb(net, tp, skb, false);
     }
 
     /**
@@ -1283,7 +1285,7 @@ public class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4328">tcp_write_wakeup</a>
      */
-    protected int tcp_write_wakeup(TcpSock tp, int mib) {
+    protected int tcp_write_wakeup(final Channel net, TcpSock tp, int mib) {
         if (TCP_CLOSE.equals(tp.state())) {
             return -1;
         }
@@ -1314,7 +1316,7 @@ public class TcpOutput {
 
             skb.psh(true);
 
-            int err = tcp_transmit_skb(tp, skb, true);
+            int err = tcp_transmit_skb(net, tp, skb, true);
             if (0 == err) {
                 tcp_event_new_data_sent(tp, skb);
             }
@@ -1322,9 +1324,9 @@ public class TcpOutput {
         } else {
             // XXX ????
             if (between(tp.snd_up, tp.snd_una + 1, tp.snd_una + 0xFFFF)) {
-                tcp_xmit_probe_skb(tp, 1, mib);
+                tcp_xmit_probe_skb(net, tp, 1, mib);
             }
-            return tcp_xmit_probe_skb(tp, 0, mib);
+            return tcp_xmit_probe_skb(net, tp, 0, mib);
         }
     }
 
@@ -1334,9 +1336,9 @@ public class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4374">tcp_send_probe0</a>
      */
-    protected void tcp_send_probe0(final TcpSock tp) {
+    protected void tcp_send_probe0(final Channel net, final TcpSock tp) {
         // LINUX_MIB_TCPWINPROBE
-        int err = tcp_write_wakeup(tp, 0);
+        int err = tcp_write_wakeup(net, tp, 0);
 
         if (tp.packets_out > 0 || tp.tcp_write_queue_empty()) {
             /* Cancel probe timer, if it is not required. */

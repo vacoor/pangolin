@@ -2,9 +2,9 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_options_received;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_options_received;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_MAX_WSCALE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_NEW_SYN_RECV;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.logPrefix;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.logPrefix;
 
 @Slf4j
 public class TcpHandshaker {
@@ -89,7 +89,7 @@ public class TcpHandshaker {
                 if (channelFuture.isSuccess()) {
                     af_ops.send_synack(listenSock, req, ipHdr, tcpPacket);
                 } else {
-                    rsk_ops.send_reset();
+                    rsk_ops.send_reset(listenSock, ipPacket, -88);
                 }
 
             }

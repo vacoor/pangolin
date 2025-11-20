@@ -4,7 +4,7 @@ import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.acceptor.tun.fakedns.FakeNameService;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
-import com.github.pangolin.routing.acceptor.tun.net.handler.IpPacketCodec;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.Tcp4DemultiplexHandler;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.support.StandardSocketChannelFactory;

@@ -1,7 +1,6 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions;
 import lombok.extern.slf4j.Slf4j;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;

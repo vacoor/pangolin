@@ -3,20 +3,16 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.Tcp4Demultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
-import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
+import lombok.extern.slf4j.Slf4j;
+import org.pcap4j.packet.IpV4Packet;
+
 import java.net.Inet4Address;
 import java.net.UnknownHostException;
 import java.util.Map;
-
-import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpV4Packet;
-import org.pcap4j.packet.IpV4Packet.IpV4Header;
-import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.TcpPacket.TcpHeader;
 
 @Slf4j
 public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler<IpV4Packet> {
@@ -26,47 +22,17 @@ public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler<IpV4Packet> {
     }
 
     @Override
-    protected IpV4Packet newReset(IpV4Packet ipPacket) {
-        final IpV4Header ih = ipPacket.getHeader();
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        final TcpHeader th = tcpPacket.getHeader();
-        final TcpPacket.Builder rstPacket = new TcpPacket.Builder()
-            .srcAddr(ih.getDstAddr())
-            .srcPort(th.getDstPort())
-            .dstAddr(ih.getSrcAddr())
-            .dstPort(th.getSrcPort())
-            .sequenceNumber(th.getAcknowledgmentNumber())
-//            .ack(true)
-//            .acknowledgmentNumber(TcpUtils.determineEndSeq(tcpPacket))
-            .rst(true)
-            .paddingAtBuild(true)
-            .correctChecksumAtBuild(true)
-            .correctLengthAtBuild(true);
-
-        return new IpV4Packet.Builder()
-            .protocol(ih.getProtocol())
-            .version(ih.getVersion())
-            .tos(ih.getTos())
-            .srcAddr(ih.getDstAddr())
-            .dstAddr(ih.getSrcAddr())
-            .payloadBuilder(rstPacket)
-            .paddingAtBuild(true)
-            .correctLengthAtBuild(true)
-            .correctChecksumAtBuild(true)
-            .build();
-    }
-
-    @Override
-    protected IpV4Packet prepare(IpV4Packet ipPacket) throws UnknownHostException {
+    protected IpV4Packet prepare(final IpV4Packet ipPacket) throws UnknownHostException {
         final Inet4Address dstAddr = ipPacket.getHeader().getDstAddr();
         return ipPacket.getBuilder().dstAddr((Inet4Address) resolveDstAddress(dstAddr)).build();
     }
 
     @Override
     protected TcpDemultiplexer<IpV4Packet> create(
-            Map<String, tcp_request_sock> handshakeRegistry,
-            Map<String, TcpSock> establishedRegistry,
-            final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+            final Map<String, tcp_request_sock> handshakeRegistry,
+            final Map<String, TcpSock> establishedRegistry,
+            final EventLoopGroup childGroup, final DnsEngine dnsEngine,
+            final SocketChannelFactory socketChannelFactory) {
         return new Tcp4Demultiplexer(handshakeRegistry, establishedRegistry, childGroup, dnsEngine, socketChannelFactory);
     }
 

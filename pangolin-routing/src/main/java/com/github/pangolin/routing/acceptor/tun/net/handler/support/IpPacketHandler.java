@@ -1,6 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler;
-
-import static org.pcap4j.packet.IpPacket.IpHeader;
+package com.github.pangolin.routing.acceptor.tun.net.handler.support;
 
 import com.google.common.base.Preconditions;
 import freework.reflect.Types;
@@ -12,24 +10,27 @@ import org.pcap4j.packet.namednumber.IpNumber;
 
 import java.lang.reflect.Type;
 
+import static org.pcap4j.packet.IpPacket.IpHeader;
+
 /**
  *
  */
 public abstract class IpPacketHandler<T extends IpPacket> extends ChannelDuplexHandler {
-    private final Class<T> ipPacketType;
     private final IpNumber ipProtocol;
+    private final Class<T> ipPacketType;
 
     @SuppressWarnings("unchecked")
     public IpPacketHandler(final IpNumber ipProtocol) {
         final Type type = Types.resolveType(IpPacketHandler.class.getTypeParameters()[0], getClass());
         Preconditions.checkState(type instanceof Class<?>, "Can't resolve %s IpPacket Class", IpPacketHandler.class.getName());
-        this.ipPacketType = (Class<T>) type;
+
         this.ipProtocol = ipProtocol;
+        this.ipPacketType = (Class<T>) type;
     }
 
-    public IpPacketHandler(final Class<T> ipPacketType, final IpNumber ipProtocol) {
-        this.ipPacketType = ipPacketType;
+    public IpPacketHandler(final IpNumber ipProtocol, final Class<T> ipPacketType) {
         this.ipProtocol = ipProtocol;
+        this.ipPacketType = ipPacketType;
     }
 
     protected boolean accept(final Object msg) {

@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 public abstract class Sock extends SockCommon {
 

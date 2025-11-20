@@ -1,7 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState;
 import com.google.common.collect.Maps;
 import io.netty.channel.Channel;
 import io.netty.util.concurrent.Future;
@@ -14,9 +16,9 @@ import java.util.concurrent.TimeUnit;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_CLOSE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_LISTEN;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_FIN_WAIT2;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.time_after;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.InetConnectionSock.TCP_RTO_MAX;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.InetConnectionSock.TCP_RTO_MIN;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.time_after;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.InetConnectionSock.TCP_RTO_MAX;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.InetConnectionSock.TCP_RTO_MIN;
 
 @Slf4j
 public class TcpTimer {
@@ -71,9 +73,9 @@ public class TcpTimer {
     }
 
 
-    void tcp_init_xmit_timers(TcpSock tp) {
+    void tcp_init_xmit_timers(Channel net, TcpSock tp) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L883
-        inet_csk_init_xmit_timers(tp, () -> this.tcp_write_timer(tp), () -> this.tcp_delack_timer(tp), () -> this.tcp_keepalive_timer(tp));
+        inet_csk_init_xmit_timers(tp, () -> this.tcp_write_timer(net, tp), () -> this.tcp_delack_timer(net, tp), () -> this.tcp_keepalive_timer(net, tp));
     }
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L702
@@ -161,7 +163,7 @@ public class TcpTimer {
      * @see <a href="https://www.cnblogs.com/wanpengcoder/p/11749449.html">TCP定时器 之 延迟确认定时器</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L307">tcp_delack_timer_handler</a>
      */
-    private void tcp_delack_timer_handler(TcpSock tp) {
+    private void tcp_delack_timer_handler(Channel net, TcpSock tp) {
         final int state = tp.state().ordinal();
         if (((1 << state) & (TCPF_CLOSE | TCPF_LISTEN)) != 0) {
             return;
@@ -198,7 +200,7 @@ public class TcpTimer {
             }
 
             demultiplexer.output.tcp_mstamp_refresh(tp);
-            demultiplexer.output.tcp_send_ack(tp);
+            demultiplexer.output.tcp_send_ack(net, tp);
         }
     }
 
@@ -214,9 +216,9 @@ public class TcpTimer {
      * Returns: Nothing (void)
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L359">tcp_delack_timer</a>
      */
-    private void tcp_delack_timer(TcpSock tp) {
+    private void tcp_delack_timer(Channel net, TcpSock tp) {
         // FIXME
-        tcp_delack_timer_handler(tp);
+        tcp_delack_timer_handler(net, tp);
     }
 
     /* *********** ]] DELAY ACK ************** */
@@ -229,17 +231,17 @@ public class TcpTimer {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L883">tcp_init_xmit_timers</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L760">inet_csk_init_xmit_timers</a>
      */
-    private void tcp_write_timer(TcpSock tp) {
+    private void tcp_write_timer(Channel net, TcpSock tp) {
         if (tp.icsk_pending <= 0) {
             return;
         }
-        tcp_write_timer_handler(tp);
+        tcp_write_timer_handler(net, tp);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L688">tcp_write_timer_handler</a>
      */
-    private void tcp_write_timer_handler(TcpSock tp) {
+    private void tcp_write_timer_handler(Channel net, TcpSock tp) {
         if (0 != ((1 << tp.state().ordinal()) & (TCPF_CLOSE | TCPF_LISTEN))
                 || tp.icsk_pending <= 0) {
             return;
@@ -262,11 +264,11 @@ public class TcpTimer {
                 break;
             case ICSK_TIME_RETRANS:
                 tp.icsk_pending = 0;
-                tcp_retransmit_timer(tp);
+                tcp_retransmit_timer(net, tp);
                 break;
             case ICSK_TIME_PROBE0:
                 tp.icsk_pending = 0;
-                tcp_probe_timer(tp);
+                tcp_probe_timer(net, tp);
                 break;
         }
     }
@@ -279,7 +281,7 @@ public class TcpTimer {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L529">tcp_retransmit_timer</a>
      */
-    private void tcp_retransmit_timer(TcpSock tp) {
+    private void tcp_retransmit_timer(Channel net, TcpSock tp) {
         if (tp.packets_out <= 0) {
             return;
         }
@@ -309,7 +311,7 @@ public class TcpTimer {
             }
 
             demultiplexer.input.tcp_enter_loss();
-            demultiplexer.output.tcp_retransmit_skb(tp, skb, 1);
+            demultiplexer.output.tcp_retransmit_skb(net, tp, skb, 1);
             // __sk_dst_reset
         } else {
             //....
@@ -324,7 +326,7 @@ public class TcpTimer {
             demultiplexer.input.tcp_enter_loss();
             tcp_update_rto_stats(tp);
 
-            if (demultiplexer.output.tcp_retransmit_skb(tp, tp.tcp_rtx_queue_head(), 1) > 0) {
+            if (demultiplexer.output.tcp_retransmit_skb(net, tp, tp.tcp_rtx_queue_head(), 1) > 0) {
                 /* Retransmission failed because of local congestion,
                  * Let senders fight for local resources conservatively.
                  */
@@ -512,7 +514,7 @@ public class TcpTimer {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L386">tcp_probe_timer</a>
      */
-    private void tcp_probe_timer(TcpSock tp) {
+    private void tcp_probe_timer(Channel net, TcpSock tp) {
         final TcpBuffer skb = tp.tcp_send_head();
         if (tp.packets_out > 0 || null == skb) {
             tp.icsk_probes_out = 0;
@@ -548,7 +550,7 @@ public class TcpTimer {
             demultiplexer.tcp_write_err(tp);
         } else {
             /* Only send another probe if we didn't close things up. */
-            demultiplexer.output.tcp_send_probe0(tp);
+            demultiplexer.output.tcp_send_probe0(net, tp);
         }
     }
 
@@ -561,7 +563,7 @@ public class TcpTimer {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L779">tcp_keepalive_timer</a>
      */
-    private void tcp_keepalive_timer(TcpSock tp) {
+    private void tcp_keepalive_timer(Channel net, TcpSock tp) {
         final TcpState state = tp.state();
         if (TcpState.TCP_LISTEN.equals(state)) {
             log.error("Hmm... keepalive on a LISTEN ???");
@@ -578,7 +580,7 @@ public class TcpTimer {
                     return;
                 }
             }
-            demultiplexer.output.tcp_send_active_reset(tp, "SK_RST_REASON_TCP_STATE");
+            demultiplexer.output.tcp_send_active_reset(net, tp, "SK_RST_REASON_TCP_STATE");
             demultiplexer.tcp_done(tp);
             return;
         }
@@ -602,12 +604,12 @@ public class TcpTimer {
              */
             if ((user_timeout != 0 && elapsed >= TcpClock.msecs_to_jiffies(user_timeout) && tp.icsk_probes_out > 0)
                     || (user_timeout == 0 && tp.icsk_probes_out >= keepalive_probes(tp))) {
-                demultiplexer.output.tcp_send_active_reset(tp, "SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT");
+                demultiplexer.output.tcp_send_active_reset(net, tp, "SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT");
                 demultiplexer.tcp_write_err(tp);
                 return;
             }
 
-            if (demultiplexer.output.tcp_write_wakeup(tp, 1) <= 0) {
+            if (demultiplexer.output.tcp_write_wakeup(net, tp, 1) <= 0) {
                 tp.icsk_probes_out++;
                 elapsed = keepalive_intvl_when(tp);
             } else {

@@ -1,7 +1,7 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
@@ -11,11 +11,11 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.sysctl_tcp_fin_timeout;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_OFF;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
 
 /**
  * https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L194

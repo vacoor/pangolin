@@ -1,7 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
-
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.inet_request_sock;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L149
 public class tcp_request_sock extends inet_request_sock {

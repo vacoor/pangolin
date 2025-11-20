@@ -1,7 +1,8 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.TcpPacket;
 
@@ -19,7 +20,6 @@ public interface tcp_request_sock_ipv4_ops {
 
     void addToHalfQueue(TcpSock p, tcp_request_sock req);
 
-    void destory();
 
     void INDIRECT_CALL_INET(TcpBuffer buffer);
 

@@ -1,18 +1,14 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import io.netty.channel.ChannelFuture;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.net.InetAddress;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.tcp_jiffies32;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32;
 
 // https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
 public class SockCommon {

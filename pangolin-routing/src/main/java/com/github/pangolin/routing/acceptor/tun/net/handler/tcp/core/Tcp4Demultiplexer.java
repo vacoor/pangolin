@@ -2,9 +2,6 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.SockCommon;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.tcp_request_sock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
@@ -17,8 +14,8 @@ import org.pcap4j.packet.namednumber.IpVersion;
 
 import java.util.Map;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.TcpSock.debug;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock.debug;
 import static org.pcap4j.packet.IpPacket.IpHeader;
 import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 
@@ -67,13 +64,14 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         SockCommon sk = __inet_lookup_skb(ipPacket, th.getSrcPort().valueAsInt(), th.getDstPort().valueAsInt());
         if (null == sk) {
             log.debug("NO_TCP_SOCKET");
+            send_reset(net, ipPacket.getHeader(), tcpPacket, -99);
             return;
         }
 
         // tcp_request_sock
         if (TcpState.TCP_NEW_SYN_RECV.equals(sk.state())) {
             final tcp_request_sock request = (tcp_request_sock) sk;
-            final TcpSock nsk = tcp_check_req(ipPacket, tcpPacket, request);
+            final TcpSock nsk = tcp_check_req(net, ipPacket, tcpPacket, request);
             nsk.state(TcpState.TCP_SYN_RECV);
             moveToEstablished(request, nsk);
             sk = nsk;
@@ -125,7 +123,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
     }
 
     @Override
-    protected void send_reset(final Channel net, final IpHeader ipHeader, final TcpPacket tcpPacket, int err) {
+    public void send_reset(final Channel net, final IpHeader ipHeader, final TcpPacket tcpPacket, int err) {
         tcp_v4_send_reset(net, (IpV4Header) ipHeader, tcpPacket, err);
     }
 
@@ -140,7 +138,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         /*-
          * Swap the send and the receive.
          */
-        buf.dstPort(th.getSrcPort())
+        buf.srcAddr(rawRequest.getDstAddr())
                 .srcPort(th.getDstPort())
                 .rst(true);
 
@@ -152,7 +150,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         }
 
         buf.dstAddr(rawRequest.getSrcAddr())
-                .srcAddr(rawRequest.getSrcAddr())
+                .dstPort(th.getSrcPort())
+                .dstAddr(rawRequest.getSrcAddr())
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true);
@@ -191,14 +190,16 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 new tcp_request_sock_ops() {
 
                     @Override
-                    public void send_ack() {
-
+                    public void send_ack(TcpSock sk, IpPacket ipPacket, request_sock req) {
+                        // FIXME
+                        // tcp_v4_reqsk_send_ack
                     }
 
                     @Override
-                    public void send_reset() {
-                        tcp_v4_send_reset(net, ipPacket.getHeader(), tcpPacket, -1);
+                    public void send_reset(TcpSock sk, IpPacket ipPacket, int reason) {
+                        tcp_v4_send_reset(net, (IpV4Header) ipPacket.getHeader(), tcpPacket, -1);
                     }
+
                 }, new tcp_request_sock_ipv4_ops() {
 
                     /**
@@ -229,11 +230,6 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                     @Override
                     public void addToHalfQueue(TcpSock listenSock, tcp_request_sock req) {
                         Tcp4Demultiplexer.this.addToHalfQueue(listenSock, req);
-                    }
-
-                    @Override
-                    public void destory() {
-                        Tcp4Demultiplexer.this.destroy0(sockKey);
                     }
 
                     @Override

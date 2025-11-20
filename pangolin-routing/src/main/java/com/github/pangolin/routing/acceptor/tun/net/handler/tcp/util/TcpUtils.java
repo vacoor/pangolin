@@ -1,7 +1,8 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util;
 
 import java.net.InetAddress;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
 import org.bouncycastle.crypto.macs.SipHash;
 import org.bouncycastle.crypto.params.KeyParameter;
 import org.pcap4j.packet.IpPacket.IpHeader;
@@ -20,7 +21,6 @@ import org.pcap4j.packet.TcpPacket.TcpHeader;
  *
  */
 public abstract class TcpUtils {
-    private static final AtomicLong TIME_COUNTER = new AtomicLong(System.nanoTime());
 
     private TcpUtils() {
     }

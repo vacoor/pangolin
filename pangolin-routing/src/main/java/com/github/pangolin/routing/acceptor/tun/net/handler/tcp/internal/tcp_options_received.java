@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 // https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L111
 public class tcp_options_received {

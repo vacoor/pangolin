@@ -2,7 +2,6 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.v2.*;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
@@ -16,11 +15,11 @@ import org.pcap4j.packet.TcpPacket.TcpHeader;
 import java.io.IOException;
 import java.util.Map;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpClock.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpUtils.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
 
 @Slf4j
 public abstract class TcpDemultiplexer<T extends IpPacket> {
@@ -85,7 +84,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     protected abstract tcp_request_sock conn_request(final Channel net, TcpSock listenSock, final T ipPacket, final TcpPacket tcpPacket);
 
 
-    protected abstract void send_reset(final Channel net, final IpHeader ipHeader, final TcpPacket tcpPacket, int err);
+    public abstract void send_reset(final Channel net, final IpHeader ipHeader, final TcpPacket tcpPacket, int err);
 
 
     /* ************** ]] Initialize Connection Request ************ */
@@ -98,8 +97,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    public TcpSock tcp_check_req(IpPacket ipPacket, final TcpPacket tcpPacket, tcp_request_sock request) {
-        TcpSock nsk = tcp_v4_syn_recv_sock(request, tcpPacket);
+    public TcpSock tcp_check_req(final Channel net, IpPacket ipPacket, final TcpPacket tcpPacket, tcp_request_sock request) {
+        TcpSock nsk = tcp_v4_syn_recv_sock(net, request, tcpPacket);
         return nsk;
     }
 
@@ -109,9 +108,9 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpSock tcp_v4_syn_recv_sock(tcp_request_sock req, final TcpPacket skb) {
+    private TcpSock tcp_v4_syn_recv_sock(Channel net, tcp_request_sock req, final TcpPacket skb) {
         TcpSock parent = req.parentSock;
-        TcpSock newsk = tcp_create_openreq_child(parent, req, skb);
+        TcpSock newsk = tcp_create_openreq_child(net, parent, req, skb);
 
         newsk.icsk_ext_hdr_len = 0;
         output.tcp_sync_mss(newsk, parent.dst_mtu());
@@ -127,7 +126,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private <T extends IpPacket> TcpSock tcp_create_openreq_child(TcpSock sk, tcp_request_sock req, final TcpPacket skb) {
+    private <T extends IpPacket> TcpSock tcp_create_openreq_child(Channel net, TcpSock sk, tcp_request_sock req, final TcpPacket skb) {
         /*-
          * 第一步调用 <code>inet_csk_clone_lock<code/> 基于原 TCP_NEW_SYN_RECV sock clone时会将状态设置为 TCP_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1247"></a>
@@ -159,7 +158,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         newsk.lsndtime = tcp_jiffies32();
         // newsk.total_retrans = req->num_retrans;
 
-        timer.tcp_init_xmit_timers(newsk);
+        timer.tcp_init_xmit_timers(net, newsk);
         newtp.write_seq = newtp.pushed_seq = req.snt_isn + 1;
 
         // ... keepopen
@@ -426,7 +425,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
                  * 这里暂时没有采用父子关系, 上面直接建立了连接所以直接转换为 TCP_SYNC_RECV.
                  */
                 tcp_request_sock request_sock = (tcp_request_sock) sk;
-                TcpSock tcpSock = tcp_check_req(ipPacket, tcpPacket, request_sock);
+                TcpSock tcpSock = tcp_check_req(net, ipPacket, tcpPacket, request_sock);
                 // TODO add to established.
                 tcpSock.state(TcpState.TCP_SYN_RECV);
                 moveToEstablished(request_sock, tcpSock);
@@ -446,12 +445,12 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
             return discard(tcpPacket, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
         }
 
-        if (!input.tcp_validate_incoming(tp, ipPacket, tcpPacket)) {
+        if (!input.tcp_validate_incoming(net, tp, ipPacket, tcpPacket)) {
             return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
         }
 
         /* step 5: check the ACK field */
-        int reason = input.tcp_ack(tp, ipPacket, tcpPacket, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
+        int reason = input.tcp_ack(net, tp, ipPacket, tcpPacket, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {
             if (TcpState.TCP_SYN_RECV.equals(sk.state())) {
                 // send one RST
@@ -578,22 +577,22 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
                 }
                 // fallthrough
             case TCP_ESTABLISHED:
-                input.tcp_data_queue(tp, ipPacket, tcpPacket);
+                input.tcp_data_queue(net, tp, ipPacket, tcpPacket);
                 queued = true;
                 break;
         }
 
         /* tcp_data could move socket to TIME-WAIT */
         if (!TcpState.TCP_CLOSE.equals(sk.state())) {
-            input.tcp_data_snd_check(tp);
-            input.tcp_ack_snd_check(tp);
+            input.tcp_data_snd_check(net, tp);
+            input.tcp_ack_snd_check(net, tp);
 
             if (TcpState.TCP_CLOSE_WAIT.equals(sk.state())) {
                 // FIXME
                 if (null != sk.child) {
                     innerChannel(sk).close();
                 } else if (tcp_close_state(sk)) {
-                    output.tcp_send_fin(tp);
+                    output.tcp_send_fin(net, tp);
                 }
 
             }
@@ -622,7 +621,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L2979">tcp_shutdown</a>
      */
-    void tcp_shutdown(final TcpSock sk, final int how) {
+    void tcp_shutdown(final Channel net, final TcpSock sk, final int how) {
         if (0 == (how & TcpConstants.SEND_SHUTDOWN)) {
             return;
         }
@@ -631,7 +630,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         if (0 != ((1 << sk.state().ordinal()) & (TcpConstants.TCPF_ESTABLISHED | TcpConstants.TCPF_CLOSE_WAIT))) {
             /* Clear out any half completed packets.  FIN if needed. */
             if (tcp_close_state(sk)) {
-                output.tcp_send_fin(sk);
+                output.tcp_send_fin(net, sk);
             }
         }
     }
@@ -666,7 +665,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         }
     }
 
-    public synchronized void tcp_sendmsg2(final TcpSock tp, TcpBuffer skb, boolean flush) {
+    public synchronized void tcp_sendmsg2(final Channel net, final TcpSock tp, TcpBuffer skb, boolean flush) {
         skb.sequenceNumber(tp.write_seq);
         skb.dstPort(tp.srcPort).srcPort(tp.dstPort);
         tcp_skb_entail(tp, skb);
@@ -676,7 +675,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
             tp.write_seq += payload.build().length();
         }
         if (flush) {
-            tcp_push_pending_frames(tp);
+            tcp_push_pending_frames(net, tp);
         }
     }
 
@@ -698,8 +697,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3240">tcp_close</a>
      */
-    private void tcp_close(TcpSock sk, long timeout) {
-        __tcp_close(sk, timeout);
+    private void tcp_close(Channel net, TcpSock sk, long timeout) {
+        __tcp_close(net, sk, timeout);
         // release_sock();
         // ...
     }
@@ -707,7 +706,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L3066">__tcp_close</a>
      */
-    private void __tcp_close(TcpSock sk, long timeout) {
+    private void __tcp_close(Channel net, TcpSock sk, long timeout) {
         // FIXME
         sk.sk_shutdown = TcpConstants.SHUTDOWN_MASK;
 
@@ -727,7 +726,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         }
 
         if (tcp_close_state(sk)) {
-            output.tcp_send_fin(sk);
+            output.tcp_send_fin(net, sk);
         }
 
         adjudge_to_death(sk);
@@ -765,9 +764,9 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2102">tcp_push_pending_frames</a>
      */
-    public void tcp_push_pending_frames(final TcpSock tp) {
+    public void tcp_push_pending_frames(final Channel net, final TcpSock tp) {
         if (null != tp.tcp_send_head()) {
-            output.__tcp_push_pending_frames(tp, output.tcp_current_mss(tp), tp.nonagle);
+            output.__tcp_push_pending_frames(net, tp, output.tcp_current_mss(tp), tp.nonagle);
         }
     }
 
