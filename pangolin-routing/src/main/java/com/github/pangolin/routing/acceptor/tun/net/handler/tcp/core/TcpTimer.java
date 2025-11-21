@@ -580,6 +580,7 @@ public class TcpTimer {
                     return;
                 }
             }
+            log.warn("KEEPALIVE RESET");
             demultiplexer.output.tcp_send_active_reset(net, tp, "SK_RST_REASON_TCP_STATE");
             demultiplexer.tcp_done(tp);
             return;
