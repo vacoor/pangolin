@@ -32,8 +32,9 @@ public class TcpHandshaker {
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
-    public static tcp_request_sock tcp_conn_request(tcp_request_sock_ops rsk_ops,
-                                                    tcp_request_sock_ipv4_ops af_ops,
+    public static tcp_request_sock tcp_conn_request(Channel net,
+                                                    request_sock_ops rsk_ops,
+                                                    tcp_request_sock_ops af_ops,
                                                     TcpSock listenSock,
                                                     final IpPacket ipPacket,
                                                     final TcpPacket tcpPacket,
@@ -87,9 +88,9 @@ public class TcpHandshaker {
             @Override
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
                 if (channelFuture.isSuccess()) {
-                    af_ops.send_synack(listenSock, req, ipHdr, tcpPacket);
+                    af_ops.send_synack(net, listenSock, req, ipHdr, tcpPacket);
                 } else {
-                    rsk_ops.send_reset(listenSock, ipPacket, -88);
+                    rsk_ops.send_reset(net, listenSock, ipPacket, tcpPacket, -88);
                 }
 
             }

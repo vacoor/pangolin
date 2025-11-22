@@ -14,8 +14,8 @@ import org.pcap4j.packet.namednumber.IpVersion;
 
 import java.util.Map;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock.debug;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
 import static org.pcap4j.packet.IpPacket.IpHeader;
 import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 
@@ -30,7 +30,20 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
             Map<String, TcpSock> establishedMap,
             final EventLoopGroup childGroup,
             final DnsEngine dnsEngine, final SocketChannelFactory factory) {
-        super(requestMap, establishedMap, childGroup, dnsEngine, factory);
+        super(requestMap, establishedMap, childGroup, dnsEngine, factory, new request_sock_ops() {
+
+            @Override
+            public void send_ack(Channel net, TcpSock sk, IpPacket ipPacket, request_sock req) {
+                // FIXME
+                // tcp_v4_reqsk_send_ack
+            }
+
+            @Override
+            public void send_reset(Channel net, TcpSock sk, IpPacket ipPacket, TcpPacket tcpPacket, int reason) {
+                tcp_v4_send_reset(net, (IpV4Header) ipPacket.getHeader(), tcpPacket, -1);
+            }
+
+        });
     }
 
     @Override
@@ -109,7 +122,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
 
         debug(sock, ipPacket.getHeader(), tcpPacket, true);
         try {
-            int err = tcp_rcv_state_process(net, sock, ipPacket, tcpPacket);
+            int err = input.tcp_rcv_state_process(net, sock, ipPacket, tcpPacket);
             if (0 != err) {
                 destroy0(sockKey);
                 tcp_v4_send_reset(net, ipPacket.getHeader(), tcpPacket, err);
@@ -184,23 +197,9 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
      */
     @Override
     protected tcp_request_sock conn_request(Channel net, TcpSock listenSock, final IpV4Packet ipPacket, final TcpPacket tcpPacket) {
-        final String sockKey = uniqueKey(ipPacket.getHeader(), tcpPacket.getHeader());
-
         return TcpHandshaker.tcp_conn_request(
+                net, requestSockOps,
                 new tcp_request_sock_ops() {
-
-                    @Override
-                    public void send_ack(TcpSock sk, IpPacket ipPacket, request_sock req) {
-                        // FIXME
-                        // tcp_v4_reqsk_send_ack
-                    }
-
-                    @Override
-                    public void send_reset(TcpSock sk, IpPacket ipPacket, int reason) {
-                        tcp_v4_send_reset(net, (IpV4Header) ipPacket.getHeader(), tcpPacket, -1);
-                    }
-
-                }, new tcp_request_sock_ipv4_ops() {
 
                     /**
                      * @param ipHdr
@@ -223,20 +222,21 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                     }
 
                     @Override
-                    public void send_synack(TcpSock listenSock, tcp_request_sock req, IpHeader ipHdr, TcpPacket skb) {
+                    public void send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, IpHeader ipHdr, TcpPacket skb) {
                         tcp_v4_send_synack(net, listenSock, req, ipHdr, skb);
                     }
 
                     @Override
                     public void addToHalfQueue(TcpSock listenSock, tcp_request_sock req) {
-                        Tcp4Demultiplexer.this.addToHalfQueue(listenSock, req);
+                        Tcp4Demultiplexer.super.addToHalfQueue(listenSock, req);
                     }
 
                     @Override
                     public void INDIRECT_CALL_INET(TcpBuffer buffer) {
-                        Tcp4Demultiplexer.this.INDIRECT_CALL_INET(net, listenSock, ipPacket.getHeader(), buffer);
+                        _INDIRECT_CALL_INET(net, listenSock, ipPacket.getHeader(), buffer);
                     }
-                }, listenSock, ipPacket, tcpPacket,
+                }
+                , listenSock, ipPacket, tcpPacket,
                 dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, output
         );
     }
@@ -273,7 +273,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         net.writeAndFlush(ipPacket);
     }
 
-    protected void INDIRECT_CALL_INET(Channel net, TcpSock tp, final IpHeader ipHeader, final TcpBuffer skb) {
+    protected static void _INDIRECT_CALL_INET(Channel net, TcpSock tp, final IpHeader ipHeader, final TcpBuffer skb) {
         final IpV4Header ipHdr = (IpV4Header) ipHeader;
 
         TcpPacket.Builder buf = skb

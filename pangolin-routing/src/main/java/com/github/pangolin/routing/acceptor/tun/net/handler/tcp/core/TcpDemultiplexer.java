@@ -10,16 +10,12 @@ import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.TcpPacket.TcpHeader;
 
-import java.io.IOException;
 import java.util.Map;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.SKB_DROP_REASON_TCP_ABORT_ON_DATA;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
 
 @Slf4j
 public abstract class TcpDemultiplexer<T extends IpPacket> {
@@ -52,16 +48,25 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     protected Map<String, tcp_request_sock> requestSockMap;
     protected Map<String, TcpSock> establishedMap;
 
+    protected request_sock_ops requestSockOps;
+    protected tcp_request_sock_ops tcpRequestSockOps;
+
     protected TcpDemultiplexer(
             Map<String, tcp_request_sock> requestMap,
             Map<String, TcpSock> establishedMap,
-            final EventLoopGroup childGroup, final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+            final EventLoopGroup childGroup,
+            final DnsEngine dnsEngine,
+            final SocketChannelFactory socketChannelFactory,
+            final request_sock_ops requestSockOps/*,
+            final tcp_request_sock_ops tcpRequestSockOps*/) {
         super();
         this.requestSockMap = requestMap;
         this.establishedMap = establishedMap;
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
+        this.requestSockOps = requestSockOps;
+//        this.tcpRequestSockOps = tcpRequestSockOps;
         init();
     }
 
@@ -348,272 +353,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         establishedMap.put(sockKey, sock);
     }
 
-    /**
-     * @param tcpPacket
-     * @return error code
-     * @throws IOException
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6676">tcp_rcv_state_process</a>
-     */
-    protected int tcp_rcv_state_process(final Channel net, SockCommon sk, final T ipPacket, final TcpPacket tcpPacket) throws IOException {
-        final TcpHeader th = tcpPacket.getHeader();
-
-        /*-
-         * 握手处理.
-         */
-        switch (sk.state()) {
-            case TCP_CLOSE:
-                log.warn("[TCP_CLOSE]");
-                return discard(tcpPacket, TcpDropReason.SKB_DROP_REASON_TCP_CLOSE);
-            case TCP_LISTEN:
-                if (th.getAck()) {
-                    log.warn("TCP_LISTEN ACK");
-                    // Send one RST
-                    return TcpDropReason.SKB_DROP_REASON_TCP_FLAGS;
-                }
-                if (th.getRst()) {
-                    log.warn("TCP_LISTEN RST");
-                    return discard(tcpPacket, TcpDropReason.SKB_DROP_REASON_TCP_RESET);
-                }
-
-                /* handshake */
-                if (th.getSyn()) {
-                    if (th.getFin()) {
-                        log.warn("TCP_LISTEN SYN FIN");
-                        return discard(tcpPacket, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
-                    }
-
-                    /*-
-                     * Linux此处为创建状态为TCP_NEW_SYN_RECV的请求套接字(request_sock)放入半连接队列即可结束,
-                     * 此处调整为直接创建连接.
-                     */
-                    // for log
-//                    sk.ipHeader = ipPacket.getHeader();
-//                    sk.srcPort = tcpPacket.getHeader().getSrcPort();
-//                    sk.dstPort = tcpPacket.getHeader().getDstPort();
-
-                    tcp_request_sock tcpRequestSock = conn_request(net, (TcpSock) sk, ipPacket, tcpPacket);
-                    if (null == tcpRequestSock) {
-                        return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
-                    }
-
-                    tcpRequestSock.child.channel().closeFuture().addListener(new ChannelFutureListener() {
-                        @Override
-                        public void operationComplete(final ChannelFuture future) throws Exception {
-//                            if (tcp_close_state(tcpRequestSock)) {
-//                                output.tcp_send_fin(tcpRequestSock);
-//                            }
-//                    shutdown(SEND_SHUTDOWN);
-                        }
-                    });
-
-//                    tcpRequestSock.state.set(TCP_NEW_SYN_RECV);
-//                    addToHalfQueue((TcpSock) sk, tcpRequestSock);
-                    return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
-                }
-
-                return discard(tcpPacket, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
-            case TCP_SYN_SENT:
-                /*-
-                 * XXX client mode not supported.
-                 */
-                return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
-            // 临时处理.
-            case TCP_NEW_SYN_RECV:
-                /*-
-                 * 原本应该是收到第三次握手的ACK请求后，查找半连接队列, 如果查找到状态为 TCP_NEW_SYN_RECV 的请求套接字,
-                 * 调用 tcp_check_req, 转换为 TCP_SYN_RECV 的子套接字, 并完成握手后迁移到全连接队列.
-                 * 这里暂时没有采用父子关系, 上面直接建立了连接所以直接转换为 TCP_SYNC_RECV.
-                 */
-                tcp_request_sock request_sock = (tcp_request_sock) sk;
-                TcpSock tcpSock = tcp_check_req(net, ipPacket, tcpPacket, request_sock);
-                // TODO add to established.
-                tcpSock.state(TcpState.TCP_SYN_RECV);
-                moveToEstablished(request_sock, tcpSock);
-                sk = tcpSock;
-                return discard(tcpPacket, TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED);
-        }
-
-        TcpSock tp = (TcpSock) sk;
-        InetConnectionSock icsk = (InetConnectionSock) tp;
-        /*-
-         * 刷新最近发送/接收时间戳.
-         */
-        output.tcp_mstamp_refresh(tp);
-        tp.rx_opt.saw_tstmap = 0;
-
-        if (!th.getAck() && !th.getRst() && !th.getSyn()) {
-            return discard(tcpPacket, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
-        }
-
-        if (!input.tcp_validate_incoming(net, tp, ipPacket, tcpPacket)) {
-            return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
-        }
-
-        /* step 5: check the ACK field */
-        int reason = input.tcp_ack(net, tp, ipPacket, tcpPacket, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
-        if (reason <= 0) {
-            if (TcpState.TCP_SYN_RECV.equals(sk.state())) {
-                // send one RST
-                return 0 == reason ? TcpDropReason.SKB_DROP_REASON_TCP_OLD_ACK : -reason;
-            }
-
-            /* accept old ack during closing */
-            if (reason < 0) {
-                tp.tcp_send_challenge_ack();
-                reason = -reason;
-                return discard(tcpPacket, reason);
-            }
-        }
-
-        boolean queued = false;
-        reason = TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
-        switch (sk.state()) {
-            case TCP_SYN_RECV:
-                tp.delivered++; /* SYN-ACK delivery isn't tracked in tcp_ack */
-                input.tcp_init_transfer(net, tp, ipPacket, tcpPacket);
-
-                sk.state(TcpState.TCP_ESTABLISHED);
-
-                tp.snd_una = th.getAcknowledgmentNumber();
-                tp.snd_wnd = th.getWindowAsInt() << tp.rx_opt.snd_wscale;
-                tp.tcp_init_wl(th.getSequenceNumber());
-
-                // ...
-
-                /* Prevent spurious tcp_cwnd_restart() on first data packet */
-                tp.lsndtime = tcp_jiffies32();
-                input.tcp_initialize_rcv_mss(tp);
-
-                break;
-            case TCP_FIN_WAIT1:
-                // ... fastopen
-
-                if (tp.snd_una != tp.write_seq) {
-                    break;
-                }
-                sk.state(TCP_FIN_WAIT2);
-                tp.sk_shutdown |= TcpConstants.SEND_SHUTDOWN;
-
-//                if (!sock_flag(sk, SOCK_DEAD) {
-//                   sk_state_change
-//                   break;
-//                }
-
-                if (tp.linger2 < 0) {
-                    tcp_done(tp);
-                    return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
-                }
-
-                final int seq = th.getSequenceNumber();
-                final int end_seq = determineEndSeq(tcpPacket);
-                if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), tp.rcv_nxt)) {
-                    tcp_done(tp);
-                    return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
-                }
-
-                final int tmo = tp.tcp_fin_time();
-                if (tmo > TcpConstants.TCP_TIMEWAIT_LEN) {
-                    /*-
-                     * FIN_WAIT2 开始的总超时时间 > TIME_WAIT 的 2MSL, 则在进入 TIME_WAIT 前保证连接存活.
-                     */
-                    timer.tcp_reset_keepalive_timer(tp, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
-                } else if (th.getFin()) {
-                    /* Bad case. We could lose such FIN otherwise.
-                     * It is not a big problem, but it looks confusing
-                     * and not so rare event. We still can lose it now,
-                     * if it spins in bh_lock_sock(), but it is really
-                     * marginal case.
-                     */
-                    timer.tcp_reset_keepalive_timer(tp, tmo);
-                } else {
-                    tcp_time_wait(tp, TCP_FIN_WAIT2, tmo);
-                    return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
-                }
-                break;
-            case TCP_CLOSING:
-                if (tp.snd_una == tp.write_seq) {
-                    tcp_time_wait(tp, TCP_TIME_WAIT, 0);
-                    return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
-                }
-                break;
-            case TCP_LAST_ACK:
-                if (tp.snd_una == tp.write_seq) {
-                    // tcp_update_metrics
-                    tcp_done(tp);
-                    return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
-                }
-                break;
-        }
-
-        /* step 6: check the URG bit */
-        // tcp_urg(sk, skb, th);
-
-        /* step 7: process the segment text */
-        switch (sk.state()) {
-            case TCP_CLOSE_WAIT:
-            case TCP_CLOSING:
-            case TCP_LAST_ACK:
-                if (!before(th.getSequenceNumber(), tp.rcv_nxt)) {
-                    /* If a subflow has been reset, the packet should not
-                     * continue to be processed, drop the packet.
-                     */
-                    // ... sk_is_mptcp
-                    break;
-                }
-                // fallthrough
-            case TCP_FIN_WAIT1:
-            case TCP_FIN_WAIT2:
-                /* RFC 793 says to queue data in these states,
-                 * RFC 1122 says we MUST send a reset.
-                 * BSD 4.4 also does reset.
-                 */
-                if (0 != (tp.sk_shutdown & TcpConstants.RCV_SHUTDOWN)) {
-                    int seq = th.getSequenceNumber();
-                    int end_seq = determineEndSeq(tcpPacket);
-                    if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), tp.rcv_nxt)) {
-                        input.tcp_reset(tp, ipPacket, tcpPacket);
-                        return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
-                    }
-                }
-                // fallthrough
-            case TCP_ESTABLISHED:
-                input.tcp_data_queue(net, tp, ipPacket, tcpPacket);
-                queued = true;
-                break;
-        }
-
-        /* tcp_data could move socket to TIME-WAIT */
-        if (!TcpState.TCP_CLOSE.equals(sk.state())) {
-            input.tcp_data_snd_check(net, tp);
-            input.tcp_ack_snd_check(net, tp);
-
-            if (TcpState.TCP_CLOSE_WAIT.equals(sk.state())) {
-                // FIXME
-                if (null != sk.child) {
-                    innerChannel(sk).close();
-                } else if (tcp_close_state(sk)) {
-                    output.tcp_send_fin(net, tp);
-                }
-
-            }
-        }
-
-        if (!queued) {
-            tcp_drop_reason(tcpPacket, reason);
-        }
-
-        return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
-    }
-
-
-    private int discard(final TcpPacket skb, final int reason) {
-        tcp_drop_reason(skb, reason);
-        return 0;
-    }
-
-    private void tcp_drop_reason(final TcpPacket skb, final int reason) {
-
-    }
 
     /**
      * Shutdown the sending side of a connection. Much like close except

@@ -55,29 +55,6 @@ public class TcpOutput {
     }
 
     /**
-     * Congestion state accounting after a packet has been sent.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L163">tcp_event_data_sent</a>
-     */
-    private void tcp_event_data_sent(final TcpSock tp) {
-        long now = tcp_jiffies32();
-
-        tp.lsndtime = now;
-
-        /*-
-         * If it is a reply for ato after last received
-         * packet, increase pingpong count.
-         *
-         * 如果本地对最后收到数据包的回复在ATO(ACK超时)之前,
-         * 本地可能在快速发送数据, 增加 ping-pong 次数,
-         * (后续延迟ACK使用最大容忍度的超时时间, 以便减少不必要的ACK发送更多数据).
-         */
-        if (now - tp.icsk_ack.lrcvtime < tp.icsk_ack.ato) {
-            tp.inet_csk_inc_pingpong_cnt();
-        }
-    }
-
-    /**
      * Account for new data that has been sent to the network.
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L67">tcp_event_new_data_sent</a>
@@ -105,23 +82,6 @@ public class TcpOutput {
     }
 
     /**
-     * Account for an ACK we sent.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L182">tcp_event_ack_sent</a>
-     */
-    private void tcp_event_ack_sent(final TcpSock tp, final int rcv_nxt) {
-        if (rcv_nxt != tp.rcv_nxt) {
-            return;
-        }
-
-        /*-
-         * 如果最后一个收到的包也 ACK 了, 快速ACK次数 - 1, 不需要再执行延迟 ACK.
-         */
-        tp.tcp_dec_quickack_mode();
-        tp.inet_csk_clear_xmit_timer(demultiplexer.timer, TcpTimer.ICSK_TIME_DACK);
-    }
-
-    /**
      * SND.NXT, if window was not shrunk or the amount of shrunk was less than one
      * window scaling factor due to loss of precision.
      * If window has been shrunk, what should we make? It is not clear at all.
@@ -137,6 +97,48 @@ public class TcpOutput {
             return tp.snd_nxt;
         }
         return tp.tcp_wnd_end();
+    }
+
+
+    /**
+     * Congestion state accounting after a packet has been sent.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L163">tcp_event_data_sent</a>
+     */
+    private void tcp_event_data_sent(final TcpSock tp) {
+        long now = tcp_jiffies32();
+
+        tp.lsndtime = now;
+
+        /*-
+         * If it is a reply for ato after last received
+         * packet, increase pingpong count.
+         *
+         * 如果本地对最后收到数据包的回复在ATO(ACK超时)之前,
+         * 本地可能在快速发送数据, 增加 ping-pong 次数,
+         * (后续延迟ACK使用最大容忍度的超时时间, 以便减少不必要的ACK发送更多数据).
+         */
+        if (now - tp.icsk_ack.lrcvtime < tp.icsk_ack.ato) {
+            tp.inet_csk_inc_pingpong_cnt();
+        }
+    }
+
+
+    /**
+     * Account for an ACK we sent.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L182">tcp_event_ack_sent</a>
+     */
+    private void tcp_event_ack_sent(final TcpSock tp, final int rcv_nxt) {
+        if (rcv_nxt != tp.rcv_nxt) {
+            return;
+        }
+
+        /*-
+         * 如果最后一个收到的包也 ACK 了, 快速ACK次数 - 1, 不需要再执行延迟 ACK.
+         */
+        tp.tcp_dec_quickack_mode();
+        tp.inet_csk_clear_xmit_timer(demultiplexer.timer, TcpTimer.ICSK_TIME_DACK);
     }
 
 
@@ -267,6 +269,18 @@ public class TcpOutput {
         return new_win;
     }
 
+    private TcpBuffer tcp_init_nondata_skb(TcpSock tp, int seq, int flags) {
+        TcpBuffer skb = new TcpBuffer();
+        skb.srcAddr(tp.dstAddr);
+        skb.dstAddr(tp.srcAddr);
+        skb.srcPort(tp.dstPort);
+        skb.dstPort(tp.srcPort);
+        skb.sequenceNumber(seq);
+        skb.syn(0 != (flags & TcpConstants.SYN));
+        skb.ack(0 != (flags & TcpConstants.ACK));
+        skb.fin(0 != (flags & TcpConstants.FIN));
+        return skb;
+    }
 
     /**
      * Compute TCP options for SYN packets. This is not the final
@@ -1366,18 +1380,6 @@ public class TcpOutput {
         tp.tcp_reset_xmit_timer(demultiplexer.timer, TcpTimer.ICSK_TIME_PROBE0, timeout, true);
     }
 
-    private TcpBuffer tcp_init_nondata_skb(TcpSock tp, int seq, int flags) {
-        TcpBuffer skb = new TcpBuffer();
-        skb.srcAddr(tp.dstAddr);
-        skb.dstAddr(tp.srcAddr);
-        skb.srcPort(tp.dstPort);
-        skb.dstPort(tp.srcPort);
-        skb.sequenceNumber(seq);
-        skb.syn(0 != (flags & TcpConstants.SYN));
-        skb.ack(0 != (flags & TcpConstants.ACK));
-        skb.fin(0 != (flags & TcpConstants.FIN));
-        return skb;
-    }
 
     public void tcp_send_loss_probe() {
 
