@@ -16,8 +16,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.TCPCB_EVER_RETRANS;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.TCPCB_RETRANS;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpInput.tcp_rearm_rto;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_clock_ns;
@@ -48,7 +47,7 @@ public class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L55">tcp_mstamp_refresh</a>
      */
-    void tcp_mstamp_refresh(final TcpSock tp) {
+    static void tcp_mstamp_refresh(final TcpSock tp) {
         final long ns = tcp_clock_ns();
         tp.tcp_clock_cache = ns;
         tp.tcp_mstamp = TimeUnit.NANOSECONDS.toMicros(ns);
@@ -59,12 +58,10 @@ public class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L67">tcp_event_new_data_sent</a>
      */
-    private void tcp_event_new_data_sent(final TcpSock tp, TcpBuffer skb) {
+    private void tcp_event_new_data_sent(final Channel net, final TcpSock tp, TcpBuffer skb) {
         final int prior_packets = tp.packets_out;
 
         tp.snd_nxt = determineEndSeq(skb);
-
-        // XXX unlink skb from sk_write_queue and append to tcp_rtx_queue.
 
         // __skb_unlink(skb, &sk->sk_write_queue);
         // tcp_rbtree_insert(&sk->tcp_rtx_queue, skb);
@@ -273,8 +270,8 @@ public class TcpOutput {
         TcpBuffer skb = new TcpBuffer();
         skb.srcAddr(tp.dstAddr);
         skb.dstAddr(tp.srcAddr);
-        skb.srcPort(tp.dstPort);
-        skb.dstPort(tp.srcPort);
+        skb.srcPort(tp.ir_num);
+        skb.dstPort(tp.ir_rmt_port);
         skb.sequenceNumber(seq);
         skb.syn(0 != (flags & TcpConstants.SYN));
         skb.ack(0 != (flags & TcpConstants.ACK));
@@ -384,8 +381,8 @@ public class TcpOutput {
 
         skb.srcAddr(tp.dstAddr);
         skb.dstAddr(tp.srcAddr);
-        skb.srcPort(tp.dstPort);
-        skb.dstPort(tp.srcPort);
+        skb.srcPort(tp.ir_num);
+        skb.dstPort(tp.ir_rmt_port);
         skb.acknowledgmentNumber(rcv_nxt);
 
         // TODO URG ...
@@ -634,8 +631,8 @@ public class TcpOutput {
 
             skb.srcAddr(tp.dstAddr);
             skb.dstAddr(tp.srcAddr);
-            skb.srcPort(tp.dstPort);
-            skb.dstPort(tp.srcPort);
+            skb.srcPort(tp.ir_num);
+            skb.dstPort(tp.ir_rmt_port);
 
             final int skbLen = skb.asBuilder().build().length();
             final int missing_bytes = cwnd_quota * mss_now - skbLen;
@@ -695,7 +692,7 @@ public class TcpOutput {
              * Advance the send_head.  This one is sent out.
              * This call will increment packets_out.
              */
-            tcp_event_new_data_sent(tp, skb);
+            tcp_event_new_data_sent(net, tp, skb);
             tcp_minshall_update(tp, mss_now, skb);
             sent_pkts += tcp_skb_pcount(skb);
 
@@ -1179,7 +1176,7 @@ public class TcpOutput {
 
     private int tcp_delack_max(final TcpSock tp) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4172
-        int _tcp_rto_min = demultiplexer.input.tcp_rto_min(tp);
+        int _tcp_rto_min = tcp_rto_min(tp);
         int icsk_delack_max = tp.icsk_delack_max;
         int delack_from_rto_min = Math.max(_tcp_rto_min, 2) - 1;
         return Math.min(icsk_delack_max, delack_from_rto_min);
@@ -1332,7 +1329,7 @@ public class TcpOutput {
 
             int err = tcp_transmit_skb(net, tp, skb, true);
             if (0 == err) {
-                tcp_event_new_data_sent(tp, skb);
+                tcp_event_new_data_sent(net, tp, skb);
             }
             return err;
         } else {

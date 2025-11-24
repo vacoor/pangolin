@@ -35,7 +35,7 @@ public class TcpHandshaker {
     public static tcp_request_sock tcp_conn_request(Channel net,
                                                     request_sock_ops rsk_ops,
                                                     tcp_request_sock_ops af_ops,
-                                                    TcpSock listenSock,
+                                                    TcpSock tp,
                                                     final IpPacket ipPacket,
                                                     final TcpPacket tcpPacket,
                                                     DnsEngine dnsEngine,
@@ -48,82 +48,59 @@ public class TcpHandshaker {
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
          */
         tcp_request_sock req = inet_reqsk_alloc(ipHdr, tcpPacket, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup);
-        req.parentSock = listenSock;
+        req.parentSock = tp;
         if (null == req) {
             return null;
         }
-        req.INDIRECT_CALL_INET = af_ops::INDIRECT_CALL_INET;
 
+        // req.syncookie = want_cookie;
+        req.af_specific = af_ops;
         req.ts_off = 0;
         req.req_usec_ts = false;
 
 
+        req.INDIRECT_CALL_INET = af_ops::INDIRECT_CALL_INET;
+
+
         final int user_mss = 0; // FIXME parent.rx_opt.user_mss;// setsockopt(sockfd, IPPROTO_TCP, TCP_MAXSEG, &mss, sizeof(mss))
 
-        final tcp_options_received opt_rx = new tcp_options_received();
-        opt_rx.mss_clamp = af_ops.mss_clamp;
-        opt_rx.user_mss = user_mss;
+        final tcp_options_received tmp_opt = new tcp_options_received();
+        tmp_opt.mss_clamp = af_ops.mss_clamp;
+        tmp_opt.user_mss = tp.rx_opt.user_mss;
 
-        tcp_parse_options(listenSock, opt_rx, tcpPacket, false);
-        tcp_openreq_init(req, opt_rx, tcpPacket);
+        tcp_parse_options(tp, tmp_opt, tcpPacket, false);
+
+        // want_cookie && !tmp_opt.saw_tstamp
+
+        tmp_opt.tstamp_ok = tmp_opt.saw_tstmap != 0;
+        tcp_openreq_init(req, tmp_opt, tcpPacket);
+
 
         // ...
 
         // FIXME
-        final boolean opt_tstamp_ok = opt_rx.tstamp_ok;
-        if (opt_tstamp_ok) {
+        if (tmp_opt.tstamp_ok) {
             req.req_usec_ts = false;    // FIXME dst_tcp_usec_ts
             req.ts_off = af_ops.init_ts_off(tcpPacket);
         }
 
+        // ...
         int isn = af_ops.init_seq(ipHdr, tcpPacket.getHeader());
+        // ...
+
         req.snt_isn = isn;
+        // ...
 
-        // init rwin
-        tcp_openreq_init_rwin(listenSock, output, req, tcpPacket);
+        tcp_openreq_init_rwin(tp, output, req, tcpPacket);
 
-        req.state(TCP_NEW_SYN_RECV);
+        // req.timeout =
 
-        req.child.addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                if (channelFuture.isSuccess()) {
-                    af_ops.send_synack(net, listenSock, req, ipHdr, tcpPacket);
-                } else {
-                    rsk_ops.send_reset(net, listenSock, ipPacket, tcpPacket, -88);
-                }
-
-            }
-        });
-
-        af_ops.addToHalfQueue(listenSock, req);
-
-
-        // send_synack
-        // af_ops.send_synack(listenSock, req, ipHdr, skb);
-
-        return req;
-    }
-
-    private static tcp_request_sock inet_reqsk_alloc(IpPacket.IpHeader ipHeader, TcpPacket skb,
-                                                     DnsEngine dnsEngine,
-                                                     SocketChannelFactory socketChannelFactory,
-                                                     int connTimeoutMs, EventLoopGroup childGroup) {
-        final InetAddress srcAddr = ipHeader.getSrcAddr();
-        final InetAddress dstAddr = ipHeader.getDstAddr();
-        final TcpPort tcpSrcPort = skb.getHeader().getSrcPort();
-        final TcpPort tcpDstPort = skb.getHeader().getDstPort();
+        final InetAddress srcAddr = ipPacket.getHeader().getSrcAddr();
+        final InetAddress dstAddr = ipPacket.getHeader().getDstAddr();
+        final TcpPort tcpSrcPort = tcpPacket.getHeader().getSrcPort();
+        final TcpPort tcpDstPort = tcpPacket.getHeader().getDstPort();
         final int srcPort = tcpSrcPort.valueAsInt();
         final int dstPort = tcpDstPort.valueAsInt();
-
-
-        final tcp_request_sock req = new tcp_request_sock();
-        req.rawIpHeader = ipHeader;
-        req.srcAddr = srcAddr;
-        req.dstAddr = dstAddr;
-        req.srcPort = tcpSrcPort;
-        req.dstPort = tcpDstPort;
-
         final String dstHostname;
         if (dnsEngine.isFakeAddress(dstAddr.getAddress())) {
             dstHostname = dnsEngine.getHostByAddress(dstAddr.getAddress());
@@ -166,11 +143,64 @@ public class TcpHandshaker {
 //            tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "ESTABLISHED: {} elapsed: {}ms", resolved, elapsedMs);
 
 
-            return req;
+//            return req;
         } catch (Exception e) {
             tcpLogError(null, srcAddr, srcPort, dstAddr, dstPort, "CONNECTION RESET by {}: {}", e.getMessage(), resolved, e);
             return null;
         }
+
+        req.child.addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture channelFuture) throws Exception {
+                if (channelFuture.isSuccess()) {
+                    af_ops.send_synack(net, tp, req, ipHdr, tcpPacket);
+                } else {
+                    rsk_ops.send_reset(net, tp, ipPacket, tcpPacket, -88);
+                }
+
+            }
+        });
+
+        af_ops.addToHalfQueue(tp, req);
+
+        // send_synack
+        // af_ops.send_synack(listenSock, req, ipHdr, skb);
+
+        return req;
+    }
+
+    private static tcp_request_sock inet_reqsk_alloc(IpPacket.IpHeader ipHeader, TcpPacket skb,
+                                                     DnsEngine dnsEngine,
+                                                     SocketChannelFactory socketChannelFactory,
+                                                     int connTimeoutMs, EventLoopGroup childGroup) {
+        tcp_request_sock req = reqsk_alloc(ipHeader, skb, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup);
+        if (null != req)  {
+            req.state(TCP_NEW_SYN_RECV);
+        }
+
+        return req;
+    }
+
+    private static tcp_request_sock reqsk_alloc( IpPacket.IpHeader ipHeader, TcpPacket skb,
+                DnsEngine dnsEngine,
+                SocketChannelFactory socketChannelFactory,
+                int connTimeoutMs, EventLoopGroup childGroup) {
+        final InetAddress srcAddr = ipHeader.getSrcAddr();
+        final InetAddress dstAddr = ipHeader.getDstAddr();
+        final TcpPort tcpSrcPort = skb.getHeader().getSrcPort();
+        final TcpPort tcpDstPort = skb.getHeader().getDstPort();
+        final int srcPort = tcpSrcPort.valueAsInt();
+        final int dstPort = tcpDstPort.valueAsInt();
+
+
+        final tcp_request_sock req = new tcp_request_sock();
+        req.rawIpHeader = ipHeader;
+        req.srcAddr = srcAddr;
+        req.dstAddr = dstAddr;
+//        req.ir_rmt_port = tcpSrcPort;
+//        req.ir_num = tcpDstPort;
+
+        return req;
     }
 
     /**
@@ -184,13 +214,16 @@ public class TcpHandshaker {
         req.rsk_rcv_wnd = 0;
         req.rcv_isn = hdr.getSequenceNumber();
         req.rcv_nxt = hdr.getSequenceNumber() + 1;
+        // req.snt_synack = 0;
+        // req.last_oow_ack_time = 0;
 
         req.mss = rx_opt.mss_clamp;
         req.snd_wscale = rx_opt.snd_wscale;
         req.wscale_ok = rx_opt.wscale_ok;
 
-        req.srcPort = hdr.getSrcPort();
-        req.dstPort = hdr.getDstPort();
+        req.ir_rmt_port = hdr.getSrcPort();
+        req.ir_num = hdr.getDstPort();
+
     }
 
     private static void tcp_openreq_init_rwin(TcpSock pSock, TcpOutput output, tcp_request_sock req, TcpPacket skb) {

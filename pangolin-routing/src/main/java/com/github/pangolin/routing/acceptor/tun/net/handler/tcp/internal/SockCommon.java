@@ -17,13 +17,13 @@ public class SockCommon {
     public InetAddress srcAddr;
     public InetAddress dstAddr;
 
-    public TcpPort srcPort;
-    public TcpPort dstPort;
+    public TcpPort ir_rmt_port;
+    public TcpPort ir_num;
     public ChannelFuture child;
     public Consumer<TcpBuffer> INDIRECT_CALL_INET;
 
     public String uniqueKey() {
-        return TcpUtils.uniqueKey(srcAddr.getHostAddress(), srcPort.valueAsInt(), dstAddr.getHostAddress(), dstPort.valueAsInt());
+        return TcpUtils.uniqueKey(srcAddr.getHostAddress(), ir_rmt_port.valueAsInt(), dstAddr.getHostAddress(), ir_num.valueAsInt());
     }
 
     /**

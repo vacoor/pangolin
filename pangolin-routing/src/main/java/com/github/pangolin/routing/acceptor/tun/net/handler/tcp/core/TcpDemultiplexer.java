@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
@@ -13,6 +14,7 @@ import org.pcap4j.packet.TcpPacket;
 
 import java.util.Map;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.InetConnectionSock.TCP_RTO_MAX;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
@@ -155,7 +157,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         newtp.snd_nxt = _seq;
         newtp.snd_up = _seq;
 
-        newtp.tcp_init_wl(req.rcv_isn);
+        tcp_init_wl(newtp, req.rcv_isn);
 
         // ...
         newsk.icsk_ack.lrcvtime = tcp_jiffies32();
@@ -216,15 +218,11 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         // final T newsk = sk; // sk_clone_lock
         final TcpSock newsk = tcp_init_sock(new TcpSock());
 
-//         newsk.inet_dport = req....
-//         newsk.inet_sport = ...
-//        tcp_init_sock();
-
         newsk.rawIpHeader = req.rawIpHeader;
         newsk.srcAddr = req.srcAddr;
         newsk.dstAddr = req.dstAddr;
-        newsk.srcPort = req.srcPort;
-        newsk.dstPort = req.dstPort;
+        newsk.ir_rmt_port = req.ir_rmt_port;
+        newsk.ir_num = req.ir_num;
 
 
         newsk.icsk_retransmits = 0;
@@ -236,7 +234,6 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 
         return newsk;
     }
-
 
     // FIXME TODO tcp_init_sock https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L422
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2492
@@ -406,11 +403,13 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 
     public synchronized void tcp_sendmsg2(final Channel net, final TcpSock tp, TcpBuffer skb, boolean flush) {
         skb.sequenceNumber(tp.write_seq);
-        skb.dstPort(tp.srcPort).srcPort(tp.dstPort);
+
         tcp_skb_entail(tp, skb);
 
         final Packet.Builder payload = skb.payloadBuilder();
         if (null != payload) {
+            // only for build.
+            skb.dstPort(tp.ir_rmt_port).srcPort(tp.ir_num);
             tp.write_seq += payload.build().length();
         }
         if (flush) {
@@ -549,5 +548,44 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     int tcp_send_mss(final TcpSock tp) {
         return output.tcp_current_mss(tp);
     }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1478">tcp_init_wl</a>
+     */
+    public static void tcp_init_wl(TcpSock tp, int seq) {
+        tp.snd_wl1 = seq;
+    }
+
+    /**
+     * Compute the actual rto_min value.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L783">tcp_rto_min</a>
+     */
+    public static int tcp_rto_min(final TcpSock sk) {
+        // TODO
+        return sk.icsk_rto_min;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L759">tcp_bound_rto</a>
+     */
+    public static void tcp_bound_rto(final TcpSock sk) {
+        if (sk.icsk_rto > TCP_RTO_MAX) {
+            sk.icsk_rto = TCP_RTO_MAX;
+        }
+    }
+
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L765">__tcp_set_rto</a>
+     */
+    public static long __tcp_set_rto(final TcpSock sk) {
+        return TcpClock.usecs_to_jiffies((sk.srtt_us >> 3) + sk.rttvar_us);
+    }
+
+    public static long tcp_rto_min_us(final TcpSock sk) {
+        return jiffies_to_usecs(tcp_rto_min(sk));
+    }
+
 
 }

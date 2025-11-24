@@ -90,7 +90,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
             sk = nsk;
         }
 
-        final SockCommon sockToUse = sk;
+        final TcpSock sockToUse = (TcpSock) sk;
         if (null != sockToUse.child) {
 //            log.info("[TCP] {} => {}", sockKey, sock.child);
             innerChannel(sockToUse).eventLoop().execute(() -> tcp_v4_do_rcv(net, sockToUse, (IpV4Packet) ipPacket, tcpPacket));
@@ -109,7 +109,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1897">tcp_v4_do_rcv</a>
      */
-    private void tcp_v4_do_rcv(final Channel net, final SockCommon sock, final IpV4Packet ipPacket, TcpPacket tcpPacket) {
+    private void tcp_v4_do_rcv(final Channel net, final TcpSock sock, final IpV4Packet ipPacket, TcpPacket tcpPacket) {
         // https://www.cnblogs.com/wanpengcoder/p/11750747.html
 
         /*

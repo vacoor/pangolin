@@ -450,12 +450,6 @@ public class TcpSock extends InetConnectionSock {
         snd_wl1 = ack_seq;
     }
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1478">tcp_init_wl</a>
-     */
-    public void tcp_init_wl(int seq) {
-        snd_wl1 = seq;
-    }
 
     /**
      * @see <a href="https://www.cnblogs.com/aiwz/p/6333260.html">零窗口探测/坚持/持续定时器</a>
@@ -581,8 +575,8 @@ public class TcpSock extends InetConnectionSock {
 //        final InetAddress srcAddr = ipHeader.getSrcAddr();
 //        final InetAddress dstAddr = ipHeader.getDstAddr();
 
-        final int srcPort = this.srcPort.valueAsInt();
-        final int dstPort = this.dstPort.valueAsInt();
+        final int srcPort = this.ir_rmt_port.valueAsInt();
+        final int dstPort = this.ir_num.valueAsInt();
 
         final String srcHostAddr = srcAddr.getHostAddress();
         final String dstHostAddr = dstAddr.getHostAddress();
@@ -604,10 +598,6 @@ public class TcpSock extends InetConnectionSock {
         tcp_options_received rx_opt = sk instanceof TcpSock ? ((TcpSock) sk).rx_opt : new tcp_options_received();
         final String message = TcpUtils.logify(null != sk.child ? innerChannel(sk).id() : null, ipHeader, tcpPacket, inbound ? rx_opt.rcv_wscale : rx_opt.snd_wscale);
         log.debug(message);
-    }
-
-    public void tcp_send_challenge_ack() {
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3649
     }
 
     public long icsk_delack_timeout() {

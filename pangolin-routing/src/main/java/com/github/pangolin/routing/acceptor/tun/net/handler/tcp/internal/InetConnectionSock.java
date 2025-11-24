@@ -1,6 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.inet_connection_sock_af_ops;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.request_sock_ops;
 import lombok.extern.slf4j.Slf4j;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
@@ -40,6 +42,8 @@ public class InetConnectionSock extends Sock {
 
     public long icsk_probes_tstamp;
     public int icsk_user_timeout;
+
+    public inet_connection_sock_af_ops icsk_af_ops;
 
 
     public static class IcskAck {
