@@ -1503,11 +1503,11 @@ public class TcpInput {
 
             @Override
             public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                tcpLogError(null, sk.srcAddr, sk.ir_rmt_port.valueAsInt(), sk.dstAddr, sk.ir_num.valueAsInt(), "Exception caught: {}", cause.getMessage(), cause);
+                tcpLogError(null, sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(), sk.ir_loc_addr, sk.ir_num.valueAsInt(), "Exception caught: {}", cause.getMessage(), cause);
                 demultiplexer.send_reset(net, sk.rawIpHeader, new TcpPacket.Builder()
 
-                        .srcAddr(sk.srcAddr)
-                        .dstAddr(sk.dstAddr)
+                        .srcAddr(sk.ir_rmt_addr)
+                        .dstAddr(sk.ir_loc_addr)
                         .srcPort(sk.ir_rmt_port)
                         .dstPort(sk.ir_num)
                         .ack(true)
@@ -1528,7 +1528,7 @@ public class TcpInput {
         innerChannel(sk).closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                TcpHandshaker.tcpLogInfo(null, sk.srcAddr, sk.ir_rmt_port.valueAsInt(), sk.dstAddr, sk.ir_num.valueAsInt(), "DISCONNECTED: {}", sk.dstAddr.getHostAddress());
+                TcpHandshaker.tcpLogInfo(null, sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(), sk.ir_loc_addr, sk.ir_num.valueAsInt(), "DISCONNECTED: {}", sk.ir_loc_addr.getHostAddress());
                 if (demultiplexer.tcp_close_state(sk)) {
                     demultiplexer.output.tcp_send_fin(net, sk);
                 }

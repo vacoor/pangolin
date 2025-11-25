@@ -22,7 +22,7 @@ public interface tcp_request_sock_ops {
     void addToHalfQueue(TcpSock p, tcp_request_sock req);
 
 
-    void INDIRECT_CALL_INET(TcpBuffer buffer);
+//    void INDIRECT_CALL_INET(TcpBuffer buffer);
 
 
 }

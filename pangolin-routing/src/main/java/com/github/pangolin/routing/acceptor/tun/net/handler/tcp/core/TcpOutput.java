@@ -268,8 +268,8 @@ public class TcpOutput {
 
     private TcpBuffer tcp_init_nondata_skb(TcpSock tp, int seq, int flags) {
         TcpBuffer skb = new TcpBuffer();
-        skb.srcAddr(tp.dstAddr);
-        skb.dstAddr(tp.srcAddr);
+        skb.srcAddr(tp.ir_loc_addr);
+        skb.dstAddr(tp.ir_rmt_addr);
         skb.srcPort(tp.ir_num);
         skb.dstPort(tp.ir_rmt_port);
         skb.sequenceNumber(seq);
@@ -379,10 +379,12 @@ public class TcpOutput {
 
         // skb_set_dst_pending_confirm(skb, READ_ONCE(sk->sk_dst_pending_confirm));
 
-        skb.srcAddr(tp.dstAddr);
-        skb.dstAddr(tp.srcAddr);
+        skb.srcAddr(tp.ir_loc_addr);
+        skb.dstAddr(tp.ir_rmt_addr);
+
         skb.srcPort(tp.ir_num);
         skb.dstPort(tp.ir_rmt_port);
+
         skb.acknowledgmentNumber(rcv_nxt);
 
         // TODO URG ...
@@ -400,8 +402,10 @@ public class TcpOutput {
         skb.options(options);
 
 
-        tp.INDIRECT_CALL_INET.accept(skb);
 
+        // tp.icsk_af_ops.send_check();
+        Tcp4Demultiplexer._INDIRECT_CALL_INET(net, tp, tp.rawIpHeader, skb);
+        // tp.INDIRECT_CALL_INET.accept(skb);
 
         if (skb.ack()) {
             tcp_event_ack_sent(tp, rcv_nxt);
@@ -629,8 +633,8 @@ public class TcpOutput {
 
             cwnd_quota = Math.min(cwnd_quota, max_segs);
 
-            skb.srcAddr(tp.dstAddr);
-            skb.dstAddr(tp.srcAddr);
+            skb.srcAddr(tp.ir_loc_addr);
+            skb.dstAddr(tp.ir_rmt_addr);
             skb.srcPort(tp.ir_num);
             skb.dstPort(tp.ir_rmt_port);
 
@@ -1067,8 +1071,8 @@ public class TcpOutput {
         }
 
         int skbLen = skb.asBuilder()
-                .srcAddr(tp.dstAddr)
-                .dstAddr(tp.srcAddr)
+                .srcAddr(tp.ir_loc_addr)
+                .dstAddr(tp.ir_rmt_addr)
                 .build().length();
         if (skbLen > len) {
             // TODO

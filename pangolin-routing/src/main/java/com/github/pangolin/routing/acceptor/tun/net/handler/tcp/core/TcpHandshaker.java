@@ -2,9 +2,6 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_options_received;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
@@ -59,7 +56,7 @@ public class TcpHandshaker {
         req.req_usec_ts = false;
 
 
-        req.INDIRECT_CALL_INET = af_ops::INDIRECT_CALL_INET;
+//        req.INDIRECT_CALL_INET = af_ops::INDIRECT_CALL_INET;
 
 
         final int user_mss = 0; // FIXME parent.rx_opt.user_mss;// setsockopt(sockfd, IPPROTO_TCP, TCP_MAXSEG, &mss, sizeof(mss))
@@ -75,6 +72,12 @@ public class TcpHandshaker {
         tmp_opt.tstamp_ok = tmp_opt.saw_tstmap != 0;
         tcp_openreq_init(req, tmp_opt, tcpPacket);
 
+        // dst = af_ops->route_req(sk, skb, &fl, req, isn)
+        // in af_ops->route_req [[
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1680
+        req.ir_loc_addr = ipHdr.getDstAddr();
+        req.ir_rmt_addr = ipHdr.getSrcAddr();
+        // ]] in af_ops->route_req
 
         // ...
 
@@ -95,10 +98,10 @@ public class TcpHandshaker {
 
         // req.timeout =
 
-        final InetAddress srcAddr = ipPacket.getHeader().getSrcAddr();
-        final InetAddress dstAddr = ipPacket.getHeader().getDstAddr();
-        final TcpPort tcpSrcPort = tcpPacket.getHeader().getSrcPort();
-        final TcpPort tcpDstPort = tcpPacket.getHeader().getDstPort();
+        final InetAddress srcAddr = req.ir_rmt_addr;
+        final InetAddress dstAddr = req.ir_loc_addr;
+        final TcpPort tcpSrcPort = req.ir_rmt_port;
+        final TcpPort tcpDstPort = req.ir_num;
         final int srcPort = tcpSrcPort.valueAsInt();
         final int dstPort = tcpDstPort.valueAsInt();
         final String dstHostname;
@@ -169,36 +172,29 @@ public class TcpHandshaker {
         return req;
     }
 
+    /**
+     * https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L891.
+     */
     private static tcp_request_sock inet_reqsk_alloc(IpPacket.IpHeader ipHeader, TcpPacket skb,
                                                      DnsEngine dnsEngine,
                                                      SocketChannelFactory socketChannelFactory,
                                                      int connTimeoutMs, EventLoopGroup childGroup) {
         tcp_request_sock req = reqsk_alloc(ipHeader, skb, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup);
-        if (null != req)  {
+        if (null != req) {
             req.state(TCP_NEW_SYN_RECV);
         }
 
         return req;
     }
 
-    private static tcp_request_sock reqsk_alloc( IpPacket.IpHeader ipHeader, TcpPacket skb,
-                DnsEngine dnsEngine,
-                SocketChannelFactory socketChannelFactory,
-                int connTimeoutMs, EventLoopGroup childGroup) {
-        final InetAddress srcAddr = ipHeader.getSrcAddr();
-        final InetAddress dstAddr = ipHeader.getDstAddr();
-        final TcpPort tcpSrcPort = skb.getHeader().getSrcPort();
-        final TcpPort tcpDstPort = skb.getHeader().getDstPort();
-        final int srcPort = tcpSrcPort.valueAsInt();
-        final int dstPort = tcpDstPort.valueAsInt();
-
+    private static tcp_request_sock reqsk_alloc(IpPacket.IpHeader ipHeader, TcpPacket skb,
+                                                DnsEngine dnsEngine,
+                                                SocketChannelFactory socketChannelFactory,
+                                                int connTimeoutMs, EventLoopGroup childGroup) {
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L891
 
         final tcp_request_sock req = new tcp_request_sock();
         req.rawIpHeader = ipHeader;
-        req.srcAddr = srcAddr;
-        req.dstAddr = dstAddr;
-//        req.ir_rmt_port = tcpSrcPort;
-//        req.ir_num = tcpDstPort;
 
         return req;
     }

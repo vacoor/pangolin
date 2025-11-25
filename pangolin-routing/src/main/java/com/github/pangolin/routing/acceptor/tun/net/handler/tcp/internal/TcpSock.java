@@ -572,14 +572,11 @@ public class TcpSock extends InetConnectionSock {
     }
 
     private String format(final String format) {
-//        final InetAddress srcAddr = ipHeader.getSrcAddr();
-//        final InetAddress dstAddr = ipHeader.getDstAddr();
-
         final int srcPort = this.ir_rmt_port.valueAsInt();
         final int dstPort = this.ir_num.valueAsInt();
 
-        final String srcHostAddr = srcAddr.getHostAddress();
-        final String dstHostAddr = dstAddr.getHostAddress();
+        final String srcHostAddr = ir_rmt_addr.getHostAddress();
+        final String dstHostAddr = ir_loc_addr.getHostAddress();
 
 
         final StringBuilder buff = new StringBuilder();

@@ -12,6 +12,7 @@ import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 
+import java.net.Inet4Address;
 import java.util.Map;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock.debug;
@@ -72,9 +73,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
             return;
         }
 
-        final TcpPacket.TcpHeader th = tcpPacket.getHeader();
-
-        SockCommon sk = __inet_lookup_skb(ipPacket, th.getSrcPort().valueAsInt(), th.getDstPort().valueAsInt());
+        SockCommon sk = __inet_lookup_skb(ipPacket);
         if (null == sk) {
             log.debug("NO_TCP_SOCKET");
             send_reset(net, ipPacket.getHeader(), tcpPacket, -99);
@@ -99,9 +98,10 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         }
     }
 
-    protected SockCommon __inet_lookup_skb(final IpPacket ipPacket, final int sport, final int dport) {
+    protected SockCommon __inet_lookup_skb(final IpPacket ipPacket) {
         final IpHeader iph = ipPacket.getHeader();
-        final String lookupKey = uniqueKey(iph.getSrcAddr().getHostAddress(), sport, iph.getDstAddr().getHostAddress(), dport);
+        final TcpPacket.TcpHeader th = ipPacket.get(TcpPacket.class).getHeader();
+        final String lookupKey = uniqueKey(iph, th);
         SockCommon sk = establishedMap.get(lookupKey);
         return (null == sk && null == (sk = requestSockMap.get(lookupKey))) ? listenSock : sk;
     }
@@ -231,10 +231,10 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                         Tcp4Demultiplexer.super.addToHalfQueue(listenSock, req);
                     }
 
-                    @Override
-                    public void INDIRECT_CALL_INET(TcpBuffer buffer) {
-                        _INDIRECT_CALL_INET(net, listenSock, ipPacket.getHeader(), buffer);
-                    }
+//                    @Override
+//                    public void INDIRECT_CALL_INET(TcpBuffer buffer) {
+//                        _INDIRECT_CALL_INET(net, listenSock, ipPacket.getHeader(), buffer);
+//                    }
                 }
                 , listenSock, ipPacket, tcpPacket,
                 dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, output
@@ -275,8 +275,12 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
 
     protected static void _INDIRECT_CALL_INET(Channel net, TcpSock tp, final IpHeader ipHeader, final TcpBuffer skb) {
         final IpV4Header ipHdr = (IpV4Header) ipHeader;
+        final Inet4Address dstAddr = (Inet4Address) tp.ir_loc_addr;
+        final Inet4Address srcAddr = (Inet4Address) tp.ir_rmt_addr;
 
         TcpPacket.Builder buf = skb
+                .srcAddr(dstAddr)
+                .dstAddr(srcAddr)
                 .asBuilder()
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
@@ -288,8 +292,10 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 .ttl(ipHdr.getTtl())
                 .identification(ipHdr.getIdentification())
                 .fragmentOffset(ipHdr.getFragmentOffset())
-                .srcAddr(ipHdr.getDstAddr())
-                .dstAddr(ipHdr.getSrcAddr())
+
+                .srcAddr(dstAddr)
+                .dstAddr(srcAddr)
+
                 .protocol(IpNumber.TCP)
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)

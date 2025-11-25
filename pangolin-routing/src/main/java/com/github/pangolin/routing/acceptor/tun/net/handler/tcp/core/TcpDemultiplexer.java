@@ -207,7 +207,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         newtp.rx_opt.mss_clamp = req.mss;
 
         newtp.child = req.child;
-        newtp.INDIRECT_CALL_INET = req.INDIRECT_CALL_INET;
+//        newtp.INDIRECT_CALL_INET = req.INDIRECT_CALL_INET;
         return newtp;
     }
 
@@ -219,8 +219,9 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         final TcpSock newsk = tcp_init_sock(new TcpSock());
 
         newsk.rawIpHeader = req.rawIpHeader;
-        newsk.srcAddr = req.srcAddr;
-        newsk.dstAddr = req.dstAddr;
+        newsk.ir_rmt_addr = req.ir_rmt_addr;
+        newsk.ir_loc_addr = req.ir_loc_addr;
+
         newsk.ir_rmt_port = req.ir_rmt_port;
         newsk.ir_num = req.ir_num;
 

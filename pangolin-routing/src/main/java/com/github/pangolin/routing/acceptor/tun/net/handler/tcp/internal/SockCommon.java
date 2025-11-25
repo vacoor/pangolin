@@ -14,16 +14,45 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpC
 public class SockCommon {
     private TcpState state = TcpState.TCP_CLOSE;
     public IpPacket.IpHeader rawIpHeader;
-    public InetAddress srcAddr;
-    public InetAddress dstAddr;
 
+    /**
+     * skc_daddr, Foreign IPv4 addr.
+     * https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
+     *
+     * ir_rmt_addr;
+     * https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69
+     */
+    public InetAddress ir_rmt_addr;
+    /**
+     * skc_rcv_saddr, Bound local IPv4 addr.
+     * https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
+     *
+     * ir_loc_addr;
+     * https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69
+     */
+    public InetAddress ir_loc_addr;
+
+    /**
+     * placeholder for inet_dport/tw_dport
+     * https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
+     *
+     * sk_dport
+     * https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69
+     */
     public TcpPort ir_rmt_port;
+    /**
+     * placeholder for inet_num/tw_num.
+     * https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
+     *
+     * sk_num
+     * https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69
+     */
     public TcpPort ir_num;
     public ChannelFuture child;
     public Consumer<TcpBuffer> INDIRECT_CALL_INET;
 
     public String uniqueKey() {
-        return TcpUtils.uniqueKey(srcAddr.getHostAddress(), ir_rmt_port.valueAsInt(), dstAddr.getHostAddress(), ir_num.valueAsInt());
+        return TcpUtils.uniqueKey(ir_rmt_addr.getHostAddress(), ir_rmt_port.valueAsInt(), ir_loc_addr.getHostAddress(), ir_num.valueAsInt());
     }
 
     /**

@@ -11,6 +11,8 @@ import org.pcap4j.packet.TcpPacket;
  */
 public interface inet_connection_sock_af_ops {
 
+    void send_check(final Channel net, TcpSock sk, final IpPacket ipPacket, final TcpPacket tcpPacket);
+
     tcp_request_sock conn_request(final Channel net, TcpSock listenSock, final IpPacket ipPacket);
 
 }
