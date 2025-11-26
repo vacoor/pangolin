@@ -29,11 +29,11 @@ public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler<IpV4Packet> {
 
     @Override
     protected TcpDemultiplexer<IpV4Packet> create(
-            final Map<String, tcp_request_sock> handshakeRegistry,
+            final Map<String, tcp_request_sock> synRegistry,
             final Map<String, TcpSock> establishedRegistry,
             final EventLoopGroup childGroup, final DnsEngine dnsEngine,
             final SocketChannelFactory socketChannelFactory) {
-        return new Tcp4Demultiplexer(handshakeRegistry, establishedRegistry, childGroup, dnsEngine, socketChannelFactory);
+        return new Tcp4Demultiplexer(synRegistry, establishedRegistry, childGroup, dnsEngine, socketChannelFactory);
     }
 
 }

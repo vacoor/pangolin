@@ -27,7 +27,7 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
     private final DnsEngine dnsEngine;
     private final EventLoopGroup childGroup = new NioEventLoopGroup();
 
-    private final Map<String, tcp_request_sock> requestRegistry = Maps.newConcurrentMap();
+    private final Map<String, tcp_request_sock> synRegistry = Maps.newConcurrentMap();
     private final Map<String, TcpSock> establishedRegistry = Maps.newConcurrentMap();
     private final TcpDemultiplexer<T> demultiplexer;
 
@@ -37,7 +37,7 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
         Preconditions.checkState(type instanceof Class<?>, "Can't resolve %s IpPacket Class", TcpDemultiplexHandler.class.getName());
 
         this.dnsEngine = dnsEngine;
-        this.demultiplexer = create(requestRegistry, establishedRegistry, childGroup, dnsEngine, factory);
+        this.demultiplexer = create(synRegistry, establishedRegistry, childGroup, dnsEngine, factory);
     }
 
     @Override
@@ -68,7 +68,7 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
     }
 
     protected abstract TcpDemultiplexer<T> create(
-            Map<String, tcp_request_sock> handshakeRegistry,
+            Map<String, tcp_request_sock> synRegistry,
             Map<String, TcpSock> establishedRegistry,
             EventLoopGroup childGroup,
             DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory);

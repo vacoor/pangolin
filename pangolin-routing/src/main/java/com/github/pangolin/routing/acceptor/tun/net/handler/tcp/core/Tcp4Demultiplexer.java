@@ -27,11 +27,11 @@ import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
 
     public Tcp4Demultiplexer(
-            Map<String, tcp_request_sock> requestMap,
-            Map<String, TcpSock> establishedMap,
+            Map<String, tcp_request_sock> synRegistry,
+            Map<String, TcpSock> establishedRegistry,
             final EventLoopGroup childGroup,
             final DnsEngine dnsEngine, final SocketChannelFactory factory) {
-        super(requestMap, establishedMap, childGroup, dnsEngine, factory, new request_sock_ops() {
+        super(synRegistry, establishedRegistry, childGroup, dnsEngine, factory, new request_sock_ops() {
 
             @Override
             public void send_ack(Channel net, TcpSock sk, IpPacket ipPacket, request_sock req) {
@@ -102,8 +102,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         final IpHeader iph = ipPacket.getHeader();
         final TcpPacket.TcpHeader th = ipPacket.get(TcpPacket.class).getHeader();
         final String lookupKey = uniqueKey(iph, th);
-        SockCommon sk = establishedMap.get(lookupKey);
-        return (null == sk && null == (sk = requestSockMap.get(lookupKey))) ? listenSock : sk;
+        SockCommon sk = establishedRegistry.get(lookupKey);
+        return (null == sk && null == (sk = synRegistry.get(lookupKey))) ? listenSock : sk;
     }
 
     /**

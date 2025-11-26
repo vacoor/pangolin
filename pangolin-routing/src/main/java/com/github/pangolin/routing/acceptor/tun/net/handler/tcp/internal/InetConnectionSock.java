@@ -11,7 +11,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
  * https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L78
  */
 @Slf4j
-public class InetConnectionSock extends Sock {
+public class InetConnectionSock extends inet_sock {
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L146
     public static final int TCP_RTO_MAX = 120 * HZ;

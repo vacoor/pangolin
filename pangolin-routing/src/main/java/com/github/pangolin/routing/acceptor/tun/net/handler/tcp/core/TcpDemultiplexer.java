@@ -47,23 +47,23 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     public TcpInput input = new TcpInput(this, output);
     public TcpTimer timer = new TcpTimer(this);
 
-    protected Map<String, tcp_request_sock> requestSockMap;
-    protected Map<String, TcpSock> establishedMap;
+    protected Map<String, tcp_request_sock> synRegistry;
+    protected Map<String, TcpSock> establishedRegistry;
 
     protected request_sock_ops requestSockOps;
     protected tcp_request_sock_ops tcpRequestSockOps;
 
     protected TcpDemultiplexer(
-            Map<String, tcp_request_sock> requestMap,
-            Map<String, TcpSock> establishedMap,
+            Map<String, tcp_request_sock> synRegistry,
+            Map<String, TcpSock> establishedRegistry,
             final EventLoopGroup childGroup,
             final DnsEngine dnsEngine,
             final SocketChannelFactory socketChannelFactory,
             final request_sock_ops requestSockOps/*,
             final tcp_request_sock_ops tcpRequestSockOps*/) {
         super();
-        this.requestSockMap = requestMap;
-        this.establishedMap = establishedMap;
+        this.synRegistry = synRegistry;
+        this.establishedRegistry = establishedRegistry;
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
@@ -343,13 +343,13 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 //        this.request_sock = sock;
 
         sock.state(TcpState.TCP_NEW_SYN_RECV);
-        requestSockMap.putIfAbsent(sock.uniqueKey(), sock);
+        synRegistry.putIfAbsent(sock.uniqueKey(), sock);
     }
 
     protected void moveToEstablished(final tcp_request_sock req, final TcpSock sock) {
         final String sockKey = req.uniqueKey();
-        requestSockMap.remove(sockKey, req);
-        establishedMap.put(sockKey, sock);
+        synRegistry.remove(sockKey, req);
+        establishedRegistry.put(sockKey, sock);
     }
 
 
@@ -402,8 +402,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
             innerChannel(sk).close();
         }
 
-        requestSockMap.remove(sk.uniqueKey());
-        establishedMap.remove(sk.uniqueKey());
+        synRegistry.remove(sk.uniqueKey());
+        establishedRegistry.remove(sk.uniqueKey());
     }
 
     public synchronized void tcp_sendmsg2(final Channel net, final TcpSock tp, TcpBuffer skb, boolean flush) {
