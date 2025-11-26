@@ -18,10 +18,10 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpT
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
 
 /**
- * https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L194
+ * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L200">struct tcp_sock</a>
  */
 @Slf4j
-public class TcpSock extends InetConnectionSock {
+public class TcpSock extends inet_connection_sock {
     public static final short IP_HEADER_SIZE = 20;
     public static final short TCP_HEADER_SIZE = 20;
 

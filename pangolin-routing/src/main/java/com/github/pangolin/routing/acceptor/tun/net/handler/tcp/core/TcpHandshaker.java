@@ -6,10 +6,7 @@ import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.TcpMaximumSegmentSizeOption;
-import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.TcpWindowScaleOption;
+import org.pcap4j.packet.*;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.net.InetAddress;
@@ -93,6 +90,8 @@ public class TcpHandshaker {
         // ...
 
         req.snt_isn = isn;
+        // ...
+        req.syn_tos = ((IpV4Packet.IpV4Header) ipHdr).getTos().value();
         // ...
 
         tcp_openreq_init_rwin(parent, output, req, tcpPacket);

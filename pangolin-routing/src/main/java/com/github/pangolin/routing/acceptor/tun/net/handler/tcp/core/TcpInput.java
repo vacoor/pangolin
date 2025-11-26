@@ -17,7 +17,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpD
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpHandshaker.tcpLogError;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpOutput.tcp_mstamp_refresh;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.InetConnectionSock.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock.inet_csk_schedule_ack;

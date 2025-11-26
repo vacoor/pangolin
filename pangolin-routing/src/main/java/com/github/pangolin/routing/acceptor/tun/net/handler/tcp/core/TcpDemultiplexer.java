@@ -14,7 +14,7 @@ import org.pcap4j.packet.TcpPacket;
 
 import java.util.Map;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.InetConnectionSock.TCP_RTO_MAX;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.TCP_RTO_MAX;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
@@ -218,6 +218,9 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     private static TcpSock inet_csk_clone_lock(final TcpSock sk, tcp_request_sock req) {
         // final T newsk = sk; // sk_clone_lock
         final TcpSock newsk = tcp_init_sock(new TcpSock());
+
+        newsk.sk_err = 0;
+        newsk.sk_err_soft = 0;
 
         newsk.rawIpHeader = req.rawIpHeader;
         newsk.ir_rmt_addr = req.ir_rmt_addr;

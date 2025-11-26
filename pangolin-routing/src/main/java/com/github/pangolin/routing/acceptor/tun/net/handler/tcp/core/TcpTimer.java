@@ -17,8 +17,8 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_LISTEN;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_FIN_WAIT2;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.time_after;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.InetConnectionSock.TCP_RTO_MAX;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.InetConnectionSock.TCP_RTO_MIN;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.TCP_RTO_MAX;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.TCP_RTO_MIN;
 
 @Slf4j
 public class TcpTimer {

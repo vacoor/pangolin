@@ -7,48 +7,74 @@ import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.net.InetAddress;
-import java.util.function.Consumer;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32;
 
-// https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
+/**
+ * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">struct sock_common</a>
+ */
 public class SockCommon {
-    private TcpState state = TcpState.TCP_CLOSE;
     public IpPacket.IpHeader rawIpHeader;
 
     /**
-     * skc_daddr, Foreign IPv4 addr.
-     * https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
+     * Foreign IPv4 addr.
      *
-     * ir_rmt_addr;
-     * https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_daddr</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock->sk_daddr</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69">inet_request_sock->ir_rmt_addr</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L212">inet_sock->inet_daddr</a>
      */
     public InetAddress ir_rmt_addr;
+
     /**
-     * skc_rcv_saddr, Bound local IPv4 addr.
-     * https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
+     * Bound local IPv4 addr.
      *
-     * ir_loc_addr;
-     * https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_rcv_saddr</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock->sk_rcv_saddr</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69">inet_request_sock->ir_loc_addr</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L212">inet_sock->inet_rcv_saddr</a>
      */
     public InetAddress ir_loc_addr;
 
     /**
-     * placeholder for inet_dport/tw_dport
-     * https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
+     * Placeholder for inet_dport/tw_dport.
      *
-     * sk_dport
-     * https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_dport</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock->sk_dport</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69">inet_request_sock->ir_rmt_port</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L212">inet_sock->inet_dport</a>
      */
     public TcpPort ir_rmt_port;
+
     /**
-     * placeholder for inet_num/tw_num.
-     * https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150
+     * Placeholder for inet_num/tw_num.
      *
-     * sk_num
-     * https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_num</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock->sk_num</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69">inet_request_sock->ir_num</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L212">inet_sock->inet_num</a>
      */
     public TcpPort ir_num;
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_state</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock->sk_state</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69">inet_request_sock->ireq_state</a>
+     */
+    private volatile TcpState state = TcpState.TCP_CLOSE;
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_state</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/request_sock.h#L51">request_sock->rsk_rcv_wnd</a>
+     */
+    public int rsk_rcv_wnd;
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_window_clamp</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/request_sock.h#L51">request_sock->rsk_window_clamp</a>
+     */
+    public int rsk_window_clamp;
+
     public ChannelFuture child;
     public ChannelFutureListener childCloseListener;
 
