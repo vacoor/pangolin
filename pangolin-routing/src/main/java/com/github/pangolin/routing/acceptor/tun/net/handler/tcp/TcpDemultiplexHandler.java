@@ -44,9 +44,7 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
     protected void channelRead0(final ChannelHandlerContext ctx, final T rawIpPacket) throws Exception {
         try {
             final T ipPacket = prepare(rawIpPacket);
-//            childGroup.execute(() -> {
-                demultiplexer.tcp_rcv(ctx.channel(), ipPacket);
-//            });
+            demultiplexer.tcp_rcv(ctx.channel(), ipPacket);
         } catch (final Exception ex) {
             demultiplexer.send_reset(ctx.channel(), rawIpPacket.getHeader(), rawIpPacket.get(TcpPacket.class), -77);
         }

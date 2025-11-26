@@ -1071,8 +1071,8 @@ public class TcpOutput {
         }
 
         int skbLen = skb.asBuilder()
-                .srcAddr(tp.ir_loc_addr)
-                .dstAddr(tp.ir_rmt_addr)
+                .srcAddr(tp.ir_loc_addr)    // XXX remove it.
+                .dstAddr(tp.ir_rmt_addr)    // XXX remove it.
                 .build().length();
         if (skbLen > len) {
             // TODO

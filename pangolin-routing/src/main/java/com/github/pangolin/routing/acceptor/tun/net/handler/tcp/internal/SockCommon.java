@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
 
@@ -49,7 +50,7 @@ public class SockCommon {
      */
     public TcpPort ir_num;
     public ChannelFuture child;
-    public Consumer<TcpBuffer> INDIRECT_CALL_INET;
+    public ChannelFutureListener childCloseListener;
 
     public String uniqueKey() {
         return TcpUtils.uniqueKey(ir_rmt_addr.getHostAddress(), ir_rmt_port.valueAsInt(), ir_loc_addr.getHostAddress(), ir_num.valueAsInt());

@@ -1459,19 +1459,37 @@ public class TcpInput {
 
         demultiplexer.tcp_init_congestion_control(sk);
 
-        // child.
-        innerChannel(sk).pipeline().addLast(new ChannelInboundHandlerAdapter() {
-            @Override
-            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-                try {
-//                    logTrace("Read from {}", resolved);
-                    final ByteBuf buf = (ByteBuf) msg;
-                    final byte[] payload = ByteBufUtil.getBytes(buf);
+        // innerChannel(sk).closeFuture().removeListener()
 
-                    // tcp data len = tcp snd.mss - tcp options.len
-                    // 超过 tcp data len 不切割, 会使用TSO功能通过网卡来分段.
-                    /*
-                    tcp_sendmsg2(new TcpBuffer()
+        // child.
+        // CHECK child close.
+        final ChannelFutureListener handshakeCloseListener = sk.childCloseListener;
+        sk.childCloseListener = new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture channelFuture) throws Exception {
+                TcpHandshaker.tcpLogInfo(null, sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(), sk.ir_loc_addr, sk.ir_num.valueAsInt(), "DISCONNECTED: {}", sk.ir_loc_addr.getHostAddress());
+                if (demultiplexer.tcp_close_state(sk)) {
+                    demultiplexer.output.tcp_send_fin(net, sk);
+                } else {
+                    // FIXME clean queue
+                }
+            }
+
+        };
+        innerChannel(sk)
+                .closeFuture()
+                .addListener(sk.childCloseListener)
+                .removeListener(handshakeCloseListener).channel().pipeline().addLast(new ChannelInboundHandlerAdapter() {
+                    @Override
+                    public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+                        try {
+                            final ByteBuf buf = (ByteBuf) msg;
+                            final byte[] payload = ByteBufUtil.getBytes(buf);
+
+                            // tcp data len = tcp snd.mss - tcp options.len
+                            // 超过 tcp data len 不切割, 会使用TSO功能通过网卡来分段.
+                            /*
+                            tcp_sendmsg2(new TcpBuffer()
                             .ack(true)
                             .psh(true)
                             .payloadBuilder(
@@ -1479,62 +1497,50 @@ public class TcpInput {
                             ), true);
                             */
 
-                    final int mss = demultiplexer.output.tcp_current_mss(sk);
-                    for (int offset = 0; offset < payload.length; ) {
-                        final int len = payload.length - offset;
-                        if (len <= mss) {
-                            final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, len).getBuilder();
-                            demultiplexer.tcp_sendmsg2(net, sk, new TcpBuffer().ack(true)
-                                    //.psh(true)
-                                    .payloadBuilder(builder), true);
-                            offset += len;
-                        } else {
-                            UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, mss).getBuilder();
-                            demultiplexer.tcp_sendmsg2(net, sk, new TcpBuffer().ack(true)
-                                    // .psh(true)
-                                    .payloadBuilder(builder), false);
-                            offset += mss;
+                            final int mss = demultiplexer.output.tcp_current_mss(sk);
+                            for (int offset = 0; offset < payload.length; ) {
+                                final int len = payload.length - offset;
+                                if (len <= mss) {
+                                    final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, len).getBuilder();
+                                    demultiplexer.tcp_sendmsg2(net, sk, new TcpBuffer().ack(true)
+                                            //.psh(true)
+                                            .payloadBuilder(builder), true);
+                                    offset += len;
+                                } else {
+                                    UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, mss).getBuilder();
+                                    demultiplexer.tcp_sendmsg2(net, sk, new TcpBuffer().ack(true)
+                                            // .psh(true)
+                                            .payloadBuilder(builder), false);
+                                    offset += mss;
+                                }
+                            }
+                        } finally {
+                            ReferenceCountUtil.release(msg);
                         }
                     }
-                } finally {
-                    ReferenceCountUtil.release(msg);
-                }
-            }
 
-            @Override
-            public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                tcpLogError(null, sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(), sk.ir_loc_addr, sk.ir_num.valueAsInt(), "Exception caught: {}", cause.getMessage(), cause);
-                demultiplexer.send_reset(net, sk.rawIpHeader, new TcpPacket.Builder()
-
-                        .srcAddr(sk.ir_rmt_addr)
-                        .dstAddr(sk.ir_loc_addr)
-                        .srcPort(sk.ir_rmt_port)
-                        .dstPort(sk.ir_num)
-                        .ack(true)
-                        .acknowledgmentNumber(sk.rcv_nxt)
-                        .build(), -1);
-                try {
-                    if (ctx.channel().isOpen()) {
-                        ctx.channel().close();
+                    @Override
+                    public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
+                        tcpLogError(null, sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(), sk.ir_loc_addr, sk.ir_num.valueAsInt(), "Exception caught: {}", cause.getMessage(), cause);
+                        demultiplexer.send_reset(net, sk.rawIpHeader, new TcpPacket.Builder()
+                                .srcAddr(sk.ir_rmt_addr)
+                                .dstAddr(sk.ir_loc_addr)
+                                .srcPort(sk.ir_rmt_port)
+                                .dstPort(sk.ir_num)
+                                .ack(true)
+                                .acknowledgmentNumber(sk.rcv_nxt)
+                                .build(), -1);
+                        demultiplexer.tcp_done(sk);
+//                        try {
+                            if (ctx.channel().isOpen()) {
+                                ctx.channel().close();
+                            }
+//                        } finally {
+//                            demultiplexer.tcp_done(sk);
+//                        }
                     }
-                } finally {
-                    demultiplexer.tcp_done(sk);
-                }
-            }
-        });
+                });
 
-        // CHECK child close.
-
-        innerChannel(sk).closeFuture().addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                TcpHandshaker.tcpLogInfo(null, sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(), sk.ir_loc_addr, sk.ir_num.valueAsInt(), "DISCONNECTED: {}", sk.ir_loc_addr.getHostAddress());
-                if (demultiplexer.tcp_close_state(sk)) {
-                    demultiplexer.output.tcp_send_fin(net, sk);
-                }
-            }
-
-        });
         innerChannel(sk).config().setAutoRead(true);
     }
 

@@ -30,6 +30,7 @@ public class TcpHandshaker {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
     public static tcp_request_sock tcp_conn_request(Channel net,
+                                                    TcpDemultiplexer demultiplexer,
                                                     request_sock_ops rsk_ops,
                                                     tcp_request_sock_ops af_ops,
                                                     TcpSock tp,
@@ -119,12 +120,23 @@ public class TcpHandshaker {
                 ? InetSocketAddress.createUnresolved(dstHostname, dstPort)
                 : new InetSocketAddress(dstAddr, dstPort);
 
-        final long sinceMs = System.currentTimeMillis();
 
         tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "ESTABLISHING -> {}", resolved);
 
-        final AtomicBoolean initialized = new AtomicBoolean(false);
-        final ChannelFuture cf = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
+        final long sinceMs = System.currentTimeMillis();
+        req.childCloseListener = new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture future) throws Exception {
+                // for TCP_NEW_SYN_RECV, TCP_SYN_RECV
+                // FIXME set reset.
+                rsk_ops.send_reset(net, tp, ipPacket, tcpPacket, -100);
+                // FIXME clean queue
+                demultiplexer.tcp_done(tp);
+            }
+        };
+        req.child = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
+            private final AtomicBoolean initialized = new AtomicBoolean(false);
+
             @Override
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                 try {
@@ -136,33 +148,18 @@ public class TcpHandshaker {
                     ReferenceCountUtil.release(msg);
                 }
             }
-        });
-
-        try {
-            req.child = cf;
-//            state.set(TcpState.TCP_SYN_RECV);
-
-//            final long elapsedMs = System.currentTimeMillis() - sinceMs;
-//            tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "ESTABLISHED: {} elapsed: {}ms", resolved, elapsedMs);
-
-
-//            return req;
-        } catch (Exception e) {
-            tcpLogError(null, srcAddr, srcPort, dstAddr, dstPort, "CONNECTION RESET by {}: {}", e.getMessage(), resolved, e);
-            return null;
-        }
-
-        req.child.addListener(new ChannelFutureListener() {
+        }).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
                 if (channelFuture.isSuccess()) {
                     af_ops.send_synack(net, tp, req, ipHdr, tcpPacket);
                 } else {
                     rsk_ops.send_reset(net, tp, ipPacket, tcpPacket, -88);
+                    // FIXME clean queue
                 }
 
             }
-        });
+        }).channel().closeFuture().addListener(req.childCloseListener);
 
         af_ops.addToHalfQueue(tp, req);
 

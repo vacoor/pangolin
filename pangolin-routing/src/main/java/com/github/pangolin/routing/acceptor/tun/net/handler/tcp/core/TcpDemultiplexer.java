@@ -207,6 +207,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         newtp.rx_opt.mss_clamp = req.mss;
 
         newtp.child = req.child;
+        newtp.childCloseListener = req.childCloseListener;
 //        newtp.INDIRECT_CALL_INET = req.INDIRECT_CALL_INET;
         return newtp;
     }
@@ -400,6 +401,9 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         if (null != sk.child) {
             innerChannel(sk).close();
         }
+
+        requestSockMap.remove(sk.uniqueKey());
+        establishedMap.remove(sk.uniqueKey());
     }
 
     public synchronized void tcp_sendmsg2(final Channel net, final TcpSock tp, TcpBuffer skb, boolean flush) {

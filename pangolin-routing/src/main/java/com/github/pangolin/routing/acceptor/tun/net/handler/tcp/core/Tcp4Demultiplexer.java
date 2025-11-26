@@ -118,20 +118,21 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
             return;
         }
         */
-        final String sockKey = uniqueKey(ipPacket.getHeader(), tcpPacket.getHeader());
 
         debug(sock, ipPacket.getHeader(), tcpPacket, true);
         try {
             int err = input.tcp_rcv_state_process(net, sock, ipPacket, tcpPacket);
             if (0 != err) {
-                destroy0(sockKey);
                 tcp_v4_send_reset(net, ipPacket.getHeader(), tcpPacket, err);
-                inet_csk_destroy_sock(sock);
+                if (!TcpState.TCP_LISTEN.equals(sock.state())) {
+                    inet_csk_destroy_sock(sock);
+                }
             }
         } catch (final Throwable cause) {
             cause.printStackTrace();
-            destroy0(sockKey);
-            inet_csk_destroy_sock(sock);
+            if (!TcpState.TCP_LISTEN.equals(sock.state())) {
+                inet_csk_destroy_sock(sock);
+            }
         }
     }
 
@@ -198,7 +199,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
     @Override
     protected tcp_request_sock conn_request(Channel net, TcpSock listenSock, final IpV4Packet ipPacket, final TcpPacket tcpPacket) {
         return TcpHandshaker.tcp_conn_request(
-                net, requestSockOps,
+                net, this,
+                requestSockOps,
                 new tcp_request_sock_ops() {
 
                     /**
@@ -308,8 +310,4 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         net.writeAndFlush(ipPacket);
     }
 
-    protected void destroy0(String sockKey) {
-        requestSockMap.remove(sockKey);
-        establishedMap.remove(sockKey);
-    }
 }
