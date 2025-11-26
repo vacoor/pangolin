@@ -33,7 +33,7 @@ public class TcpHandshaker {
                                                     TcpDemultiplexer demultiplexer,
                                                     request_sock_ops rsk_ops,
                                                     tcp_request_sock_ops af_ops,
-                                                    TcpSock tp,
+                                                    TcpSock parent,
                                                     final IpPacket ipPacket,
                                                     final TcpPacket tcpPacket,
                                                     DnsEngine dnsEngine,
@@ -46,7 +46,7 @@ public class TcpHandshaker {
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
          */
         tcp_request_sock req = inet_reqsk_alloc(ipHdr, tcpPacket, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup);
-        req.parentSock = tp;
+        req.parentSock = parent;
         if (null == req) {
             return null;
         }
@@ -64,9 +64,9 @@ public class TcpHandshaker {
 
         final tcp_options_received tmp_opt = new tcp_options_received();
         tmp_opt.mss_clamp = af_ops.mss_clamp;
-        tmp_opt.user_mss = tp.rx_opt.user_mss;
+        tmp_opt.user_mss = parent.rx_opt.user_mss;
 
-        tcp_parse_options(tp, tmp_opt, tcpPacket, false);
+        tcp_parse_options(parent, tmp_opt, tcpPacket, false);
 
         // want_cookie && !tmp_opt.saw_tstamp
 
@@ -95,7 +95,7 @@ public class TcpHandshaker {
         req.snt_isn = isn;
         // ...
 
-        tcp_openreq_init_rwin(tp, output, req, tcpPacket);
+        tcp_openreq_init_rwin(parent, output, req, tcpPacket);
 
         // req.timeout =
 
@@ -129,9 +129,9 @@ public class TcpHandshaker {
             public void operationComplete(ChannelFuture future) throws Exception {
                 // for TCP_NEW_SYN_RECV, TCP_SYN_RECV
                 // FIXME set reset.
-                rsk_ops.send_reset(net, tp, ipPacket, tcpPacket, -100);
+                rsk_ops.send_reset(net, parent, ipPacket, tcpPacket, -100);
                 // FIXME clean queue
-                demultiplexer.tcp_done(tp);
+                demultiplexer.inet_csk_destroy_sock(req);
             }
         };
         req.child = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
@@ -152,16 +152,17 @@ public class TcpHandshaker {
             @Override
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
                 if (channelFuture.isSuccess()) {
-                    af_ops.send_synack(net, tp, req, ipHdr, tcpPacket);
+                    af_ops.send_synack(net, parent, req, ipHdr, tcpPacket);
                 } else {
-                    rsk_ops.send_reset(net, tp, ipPacket, tcpPacket, -88);
+                    rsk_ops.send_reset(net, parent, ipPacket, tcpPacket, -88);
                     // FIXME clean queue
+                    demultiplexer.inet_csk_destroy_sock(req);
                 }
 
             }
         }).channel().closeFuture().addListener(req.childCloseListener);
 
-        af_ops.addToHalfQueue(tp, req);
+        af_ops.addToHalfQueue(parent, req);
 
         // send_synack
         // af_ops.send_synack(listenSock, req, ipHdr, skb);

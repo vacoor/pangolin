@@ -1565,7 +1565,7 @@ public class TcpInput {
 
         switch (sk.state()) {
             case TCP_CLOSE:
-                log.warn("[TCP_CLOSE]");
+                log.warn("[TCP_CLOSE]: " + sk.rawIpHeader + ", " + sk.ir_loc_addr + ", " + sk.ir_rmt_addr);
                 return discard(ipPacket, tcpPacket, TcpDropReason.SKB_DROP_REASON_TCP_CLOSE);
             case TCP_LISTEN:
                 if (th.getAck()) {
