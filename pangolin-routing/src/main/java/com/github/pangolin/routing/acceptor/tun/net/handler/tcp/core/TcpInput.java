@@ -27,7 +27,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpU
 import static org.pcap4j.packet.TcpPacket.TcpHeader;
 
 @Slf4j
-public class TcpInput {
+public class TcpInput<T extends IpPacket> {
     /**
      * Incoming frame contained data.
      *
@@ -67,10 +67,10 @@ public class TcpInput {
     private static final int CA_ACK_WIN_UPDATE = FLAG_WIN_UPDATE;
     private static final int CA_ACK_SLOWPATH = FLAG_SLOWPATH;
 
-    private TcpDemultiplexer demultiplexer;
+    private final TcpDemultiplexer<T> demultiplexer;
     private final TcpOutput output;
 
-    public TcpInput(TcpDemultiplexer demultiplexer, final TcpOutput output) {
+    public TcpInput(TcpDemultiplexer<T> demultiplexer, final TcpOutput output) {
         this.demultiplexer = demultiplexer;
         this.output = output;
     }
@@ -84,7 +84,7 @@ public class TcpInput {
      * @param tcpPacket
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L227">tcp_measure_rcv_mss</a>
      */
-    private void tcp_measure_rcv_mss(final TcpSock sk, final IpPacket ipPacket, final TcpPacket tcpPacket) {
+    private void tcp_measure_rcv_mss(final TcpSock sk, final T ipPacket, final TcpPacket tcpPacket) {
         // FIXME
         final int lss = sk.icsk_ack.last_seg_size;
 
@@ -254,7 +254,7 @@ public class TcpInput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L820">tcp_event_data_recv</a>
      */
-    private void tcp_event_data_recv(final TcpSock sk, final IpPacket ipPacket, final TcpPacket tcpPacket) {
+    private void tcp_event_data_recv(final TcpSock sk, final T ipPacket, final TcpPacket tcpPacket) {
         inet_csk_schedule_ack(sk);
         tcp_measure_rcv_mss(sk, ipPacket, tcpPacket);
         tcp_rcv_rtt_measure(sk);
@@ -694,7 +694,7 @@ public class TcpInput {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3696">tcp_ack_update_window</a>
      */
     private int tcp_ack_update_window(final TcpSock tp,
-                                      final IpPacket ipPacket, final TcpPacket tcpPacket,
+                                      final T ipPacket, final TcpPacket tcpPacket,
                                       final int ack, final int ack_seq) {
         final TcpPacket.TcpHeader tcpHdr = tcpPacket.getHeader();
         int flag = 0;
@@ -764,7 +764,7 @@ public class TcpInput {
      * endpoint is sending out-of-window SYNs or pure ACKs at a high rate.
      */
     private boolean tcp_oow_rate_limited(final TcpSock net/* FIXME */,
-                                         final IpPacket ipPacket, final TcpPacket tcpPacket,
+                                         final T ipPacket, final TcpPacket tcpPacket,
                                          final int mib_idx, final long last_oow_ack_time) {
         final TcpPacket.TcpHeader th = tcpPacket.getHeader();
         /* Data packets without SYNs are not likely part of an ACK loop. */
@@ -816,7 +816,7 @@ public class TcpInput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3805">tcp_ack</a>
      */
-    private int tcp_ack(final Channel net, final TcpSock tp, final IpPacket ipPacket, final TcpPacket tcpPacket, int flag) {
+    private int tcp_ack(final Channel net, final TcpSock tp, final T ipPacket, final TcpPacket tcpPacket, int flag) {
         final TcpPacket.TcpHeader tcpHdr = tcpPacket.getHeader();
         final int prior_snd_una = tp.snd_una;
         final int prior_packets_out = tp.packets_out;
@@ -952,7 +952,7 @@ public class TcpInput {
         return SKB_NOT_DROPPED_YET;
     }
 
-    private int tcp_disordered_ack_check(final TcpSock tp, final IpPacket ipPacket, final TcpPacket tcpPacket) {
+    private int tcp_disordered_ack_check(final TcpSock tp, final T ipPacket, final TcpPacket tcpPacket) {
         int reason = TCP_RFC7323_PAWS;
         TcpPacket.TcpHeader th = tcpPacket.getHeader();
         int seq = th.getSequenceNumber();
@@ -1001,7 +1001,7 @@ public class TcpInput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4430">tcp_reset</a>
      */
-    private void tcp_reset(final TcpSock tp, final IpPacket ipPacket, final TcpPacket tcpPacket) {
+    private void tcp_reset(final TcpSock tp, final T ipPacket, final TcpPacket tcpPacket) {
         // sk_is_mptcp
 
         int err;
@@ -1104,7 +1104,7 @@ public class TcpInput {
         // FIXME
     }
 
-    private void tcp_data_queue_ofo(final TcpSock sk, final IpPacket ipPacket, final TcpPacket skb) {
+    private void tcp_data_queue_ofo(final TcpSock sk, final T ipPacket, final TcpPacket skb) {
 
     }
 
@@ -1123,7 +1123,7 @@ public class TcpInput {
      * @param tcpPacket
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5229">tcp_input.c</a>
      */
-    public void tcp_data_queue(final Channel net, final TcpSock tp, final IpPacket ipPacket, final TcpPacket tcpPacket) throws IOException {
+    public void tcp_data_queue(final Channel net, final TcpSock tp, final T ipPacket, final TcpPacket tcpPacket) throws IOException {
         final TcpPacket.TcpHeader hdr = tcpPacket.getHeader();
         final int seq = hdr.getSequenceNumber();
         final int endSeq = determineEndSeq(tcpPacket);
@@ -1184,17 +1184,17 @@ public class TcpInput {
         }
     }
 
-    private void out_of_window(TcpSock tp, final IpPacket ipPacket, final TcpPacket tcpPacket, final int reason) {
+    private void out_of_window(TcpSock tp, final T ipPacket, final TcpPacket tcpPacket, final int reason) {
         tcp_enter_quickack_mode(tp, TCP_MAX_QUICKACKS);
         inet_csk_schedule_ack(tp);
         drop(tp, ipPacket, tcpPacket, reason);
     }
 
-    private void drop(final TcpSock tp, final IpPacket ipPacket, final TcpPacket tcpPacket, final int reason) {
+    private void drop(final TcpSock tp, final T ipPacket, final TcpPacket tcpPacket, final int reason) {
         // tcp_drop_reason(sk, skb, reason);
     }
 
-    private void queue_and_out(final Channel net, final TcpSock tp, final IpPacket ipPacket, final TcpPacket tcpPacket) throws IOException {
+    private void queue_and_out(final Channel net, final TcpSock tp, final T ipPacket, final TcpPacket tcpPacket) throws IOException {
         // queue_and_out;
         final TcpPacket.TcpHeader th = tcpPacket.getHeader();
 
@@ -1272,7 +1272,7 @@ public class TcpInput {
         __tcp_ack_snd_check(net, tp);
     }
 
-    private boolean tcp_reset_check(final TcpSock tp, final IpPacket ipPacket, final TcpPacket tcpPacket) {
+    private boolean tcp_reset_check(final TcpSock tp, final T ipPacket, final TcpPacket tcpPacket) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5939
         final int seq = tcpPacket.getHeader().getSequenceNumber();
         return seq == tp.rcv_nxt - 1 && 0 != ((1 << tp.state().ordinal()) | (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
@@ -1299,7 +1299,7 @@ public class TcpInput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5870">tcp_validate_incoming</a>
      */
-    private boolean tcp_validate_incoming(final Channel net, final TcpSock tp, final IpPacket ipPacket, final TcpPacket tcpPacket) {
+    private boolean tcp_validate_incoming(final Channel net, final TcpSock tp, final T ipPacket, final TcpPacket tcpPacket) {
         final TcpPacket.TcpHeader th = tcpPacket.getHeader();
         final int seq = th.getSequenceNumber();
         final int end_seq = determineEndSeq(tcpPacket);
@@ -1433,7 +1433,7 @@ public class TcpInput {
     private void tcp_drop_reason(final TcpSock tp, int reason) {
     }
 
-    public void tcp_rcv_established(final TcpSock sk, final IpPacket ipPacket, final TcpPacket tcpPacket) throws IOException {
+    public void tcp_rcv_established(final TcpSock sk, final T ipPacket, final TcpPacket tcpPacket) throws IOException {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6110
 
         // step5
@@ -1449,7 +1449,7 @@ public class TcpInput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6299">tcp_init_transfer</a>
      */
-    public void tcp_init_transfer(final Channel net, final TcpSock sk, final IpPacket ipPacket, final TcpPacket tcpPacket) {
+    public void tcp_init_transfer(final Channel net, final TcpSock sk, final T ipPacket, final TcpPacket tcpPacket) {
         output.tcp_mtup_init(sk);
         demultiplexer.tcp_init_metrics(sk);
 
@@ -1557,10 +1557,10 @@ public class TcpInput {
      * @param ipPacket the IP packet
      * @return error code
      * @throws IOException
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6676">tcp_rcv_state_process</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6910">tcp_rcv_state_process</a>
      */
     protected int tcp_rcv_state_process(final Channel net, TcpSock sk,
-                                        final IpPacket ipPacket, final TcpPacket tcpPacket) throws IOException {
+                                        final T ipPacket, final TcpPacket tcpPacket) throws IOException {
         final TcpHeader th = tcpPacket.getHeader();
 
         switch (sk.state()) {
@@ -1588,8 +1588,7 @@ public class TcpInput {
                      * Linux此处为创建状态为TCP_NEW_SYN_RECV的请求套接字(request_sock)放入半连接队列即可结束,
                      * 此处调整为直接创建连接.
                      */
-                    // FIXME sk.icsk_af_ops.conn_request(net, sk, ipPacket);
-                    tcp_request_sock tcpRequestSock = demultiplexer.conn_request(net, (TcpSock) sk, ipPacket, tcpPacket);
+                    tcp_request_sock tcpRequestSock = sk.icsk_af_ops.conn_request(net, sk, ipPacket);
 
                     if (null == tcpRequestSock) {
                         return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
@@ -1805,7 +1804,7 @@ public class TcpInput {
     }
 
 
-    private int discard(final IpPacket ipPacket, final TcpPacket skb, final int reason) {
+    private int discard(final T ipPacket, final TcpPacket skb, final int reason) {
         tcp_drop_reason(skb, reason);
         return 0;
     }

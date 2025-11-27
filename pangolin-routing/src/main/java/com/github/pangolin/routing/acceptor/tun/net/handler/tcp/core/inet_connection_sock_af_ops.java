@@ -9,10 +9,10 @@ import org.pcap4j.packet.TcpPacket;
 /**
  * https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L35
  */
-public interface inet_connection_sock_af_ops {
+public interface inet_connection_sock_af_ops<T extends IpPacket> {
 
-    void send_check(final Channel net, TcpSock sk, final IpPacket ipPacket, final TcpPacket tcpPacket);
+    void send_check(final Channel net, TcpSock sk, final T ipPacket, final TcpPacket tcpPacket);
 
-    tcp_request_sock conn_request(final Channel net, TcpSock listenSock, final IpPacket ipPacket);
+    tcp_request_sock conn_request(final Channel net, TcpSock listenSock, final T ipPacket);
 
 }

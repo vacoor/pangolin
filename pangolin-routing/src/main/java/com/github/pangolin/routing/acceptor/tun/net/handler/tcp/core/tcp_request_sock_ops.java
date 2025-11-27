@@ -9,6 +9,7 @@ import org.pcap4j.packet.TcpPacket;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_MSS_DEFAULT;
 
+// https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2379
 // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1714
 public interface tcp_request_sock_ops {
     public int mss_clamp = TCP_MSS_DEFAULT;

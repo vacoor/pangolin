@@ -21,7 +21,7 @@ import static org.pcap4j.packet.IpPacket.IpHeader;
 import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 
 /**
- *
+ * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c">tcp_ipv4.c</a>
  */
 @Slf4j
 public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
@@ -31,6 +31,9 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
             Map<String, TcpSock> establishedRegistry,
             final EventLoopGroup childGroup,
             final DnsEngine dnsEngine, final SocketChannelFactory factory) {
+        /**
+         * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1741.
+         */
         super(synRegistry, establishedRegistry, childGroup, dnsEngine, factory, new request_sock_ops() {
 
             @Override
@@ -53,13 +56,31 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
     }
 
     @Override
-    protected void init() {
-        tcp_v4_init_sock();
+    protected TcpSock init(TcpSock sk) {
+        tcp_v4_init_sock(sk);
+        return sk;
     }
 
-    private void tcp_v4_init_sock() {
-//        tcp_init_sock(this);
-        listenSock.state(TcpState.TCP_LISTEN);
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2523">tcp_v4_init_sock</a>
+     */
+    private void tcp_v4_init_sock(final TcpSock sk) {
+        tcp_init_sock(sk);
+        /*-
+         * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2483">ipv4_specific</a>
+         * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2523">tcp_v4_init_sock</a>
+         */
+        sk.icsk_af_ops = new inet_connection_sock_af_ops<IpV4Packet>() {
+            @Override
+            public void send_check(Channel net, TcpSock sk, IpV4Packet ipPacket, TcpPacket tcpPacket) {
+
+            }
+
+            @Override
+            public tcp_request_sock conn_request(Channel net, TcpSock listenSock, IpV4Packet ipPacket) {
+                return tcp_v4_conn_request(net, listenSock, ipPacket, ipPacket.get(TcpPacket.class));
+            }
+        };
     }
 
     /**
@@ -190,14 +211,18 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         net.writeAndFlush(arg.build());
     }
 
+//    @Override
+//    protected tcp_request_sock conn_request(Channel net, TcpSock listenSock, final IpV4Packet ipPacket, final TcpPacket tcpPacket) {
+//        return tcp_v4_conn_request(net, listenSock, ipPacket, tcpPacket);
+//    }
+
     /**
      * @param ipPacket
      * @param tcpPacket
      * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1722">tcp_v4_conn_request</a>
      */
-    @Override
-    protected tcp_request_sock conn_request(Channel net, TcpSock listenSock, final IpV4Packet ipPacket, final TcpPacket tcpPacket) {
+    protected tcp_request_sock tcp_v4_conn_request(Channel net, TcpSock listenSock, final IpV4Packet ipPacket, final TcpPacket tcpPacket) {
         return TcpHandshaker.tcp_conn_request(
                 net, this,
                 requestSockOps,

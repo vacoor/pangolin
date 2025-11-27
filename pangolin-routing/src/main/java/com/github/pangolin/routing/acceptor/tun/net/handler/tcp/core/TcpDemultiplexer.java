@@ -43,8 +43,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     int connTimeoutMs = 5 * 1000;
 
 
-    public TcpOutput output = new TcpOutput(this);
-    public TcpInput input = new TcpInput(this, output);
+    public TcpOutput<T> output = new TcpOutput<>(this);
+    public TcpInput<T> input = new TcpInput<>(this, output);
     public TcpTimer timer = new TcpTimer(this);
 
     protected Map<String, tcp_request_sock> synRegistry;
@@ -73,8 +73,10 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     }
 
     protected void init() {
-//        tcp_init_sock(this);
+        listenSock.state(TcpState.TCP_LISTEN);
     }
+
+    protected abstract TcpSock init(final TcpSock sk);
 
     public abstract void tcp_rcv(final Channel net, final T ipPacket);
 
@@ -88,7 +90,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 
     /* ************** Initialize Connection Request [[ ************ */
 
-    protected abstract tcp_request_sock conn_request(final Channel net, TcpSock listenSock, final T ipPacket, final TcpPacket tcpPacket);
+//    protected abstract tcp_request_sock conn_request(final Channel net, TcpSock listenSock, final T ipPacket, final TcpPacket tcpPacket);
 
 
     public abstract void send_reset(final Channel net, final IpHeader ipHeader, final TcpPacket tcpPacket, int err);
@@ -215,9 +217,9 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1216">inet_csk_clone_lock</a>
      */
-    private static TcpSock inet_csk_clone_lock(final TcpSock sk, tcp_request_sock req) {
+    private TcpSock inet_csk_clone_lock(final TcpSock sk, tcp_request_sock req) {
         // final T newsk = sk; // sk_clone_lock
-        final TcpSock newsk = tcp_init_sock(new TcpSock());
+        final TcpSock newsk = init(new TcpSock());
 
         newsk.sk_err = 0;
         newsk.sk_err_soft = 0;

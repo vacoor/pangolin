@@ -33,11 +33,11 @@ import static org.pcap4j.packet.TcpPacket.TcpOption;
  * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_output.c</a>
  */
 @Slf4j
-public class TcpOutput {
+public class TcpOutput<T extends IpPacket> {
 
-    private final TcpDemultiplexer<?> demultiplexer;
+    private final TcpDemultiplexer<T> demultiplexer;
 
-    public TcpOutput(TcpDemultiplexer<?> demultiplexer) {
+    public TcpOutput(TcpDemultiplexer<T> demultiplexer) {
         this.demultiplexer = demultiplexer;
     }
 
