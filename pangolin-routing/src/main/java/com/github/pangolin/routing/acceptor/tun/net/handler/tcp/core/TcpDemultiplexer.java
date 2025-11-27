@@ -31,7 +31,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     public static final int TCPCB_EVER_RETRANS = (1 << 7);    /* Ever retransmitted frame	*/
     public static final int TCPCB_RETRANS = (TCPCB_SACKED_RETRANS | TCPCB_EVER_RETRANS | TCPCB_REPAIRED);
 
-    protected TcpSock listenSock = TcpDemultiplexer.tcp_init_sock(new TcpSock());
+    protected TcpSock listenSock;
 
     /**
      *
@@ -73,6 +73,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     }
 
     protected void init() {
+        listenSock = init(new TcpSock());
         listenSock.state(TcpState.TCP_LISTEN);
     }
 
