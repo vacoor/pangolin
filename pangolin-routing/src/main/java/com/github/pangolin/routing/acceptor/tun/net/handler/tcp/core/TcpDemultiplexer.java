@@ -107,7 +107,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    public TcpSock tcp_check_req(final Channel net, IpPacket ipPacket, final TcpPacket tcpPacket, tcp_request_sock request) {
+    public TcpSock tcp_check_req(final Channel net, T ipPacket, tcp_request_sock request) {
+        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
         TcpSock nsk = tcp_v4_syn_recv_sock(net, request, tcpPacket);
         return nsk;
     }
@@ -136,7 +137,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private <T extends IpPacket> TcpSock tcp_create_openreq_child(Channel net, TcpSock sk, tcp_request_sock req, final TcpPacket skb) {
+    private TcpSock tcp_create_openreq_child(Channel net, TcpSock sk, tcp_request_sock req, final TcpPacket skb) {
         /*-
          * 第一步调用 <code>inet_csk_clone_lock<code/> 基于原 TCP_NEW_SYN_RECV sock clone时会将状态设置为 TCP_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1247"></a>

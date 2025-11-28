@@ -16,6 +16,7 @@ import java.net.Inet4Address;
 import java.util.Map;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock.debug;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
 import static org.pcap4j.packet.IpPacket.IpHeader;
 import static org.pcap4j.packet.IpV4Packet.IpV4Header;
@@ -87,35 +88,42 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
      * @param ipPacket
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a>
      */
-    private void tcp_v4_rcv(final Channel net, final IpPacket ipPacket) {
+    private void tcp_v4_rcv(final Channel net, final IpV4Packet ipPacket) {
         final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
+        log.trace(logFormat(ipPacket, "Packet received"), ipPacket.getHeader().getProtocol().name());
+
         if (null == tcpPacket) {
-            log.debug("TCP packet not found, discard it");
+            log.warn(logFormat(ipPacket, "TCP packet not found, discard it"));
             return;
         }
 
+        // ...
+
         SockCommon sk = __inet_lookup_skb(ipPacket);
         if (null == sk) {
-            log.debug("NO_TCP_SOCKET");
+            log.warn(logFormat(ipPacket, "NO_TCP_SOCKET"));
             send_reset(net, ipPacket.getHeader(), tcpPacket, -99);
             return;
         }
 
-        // tcp_request_sock
         if (TcpState.TCP_NEW_SYN_RECV.equals(sk.state())) {
+            log.info(logFormat(ipPacket, "Connection handshake 3/3: ACK"));
+
             final tcp_request_sock request = (tcp_request_sock) sk;
-            final TcpSock nsk = tcp_check_req(net, ipPacket, tcpPacket, request);
+            final TcpSock nsk = tcp_check_req(net, ipPacket, request);
+
             nsk.state(TcpState.TCP_SYN_RECV);
             moveToEstablished(request, nsk);
+
+            log.info(logFormat(ipPacket, "Connection ESTABLISHED"));
             sk = nsk;
         }
 
         final TcpSock sockToUse = (TcpSock) sk;
         if (null != sockToUse.child) {
-//            log.info("[TCP] {} => {}", sockKey, sock.child);
-            innerChannel(sockToUse).eventLoop().execute(() -> tcp_v4_do_rcv(net, sockToUse, (IpV4Packet) ipPacket, tcpPacket));
+            innerChannel(sockToUse).eventLoop().execute(() -> tcp_v4_do_rcv(net, sockToUse, ipPacket));
         } else {
-            tcp_v4_do_rcv(net, sockToUse, (IpV4Packet) ipPacket, tcpPacket);
+            tcp_v4_do_rcv(net, sockToUse, ipPacket);
         }
     }
 
@@ -130,7 +138,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1897">tcp_v4_do_rcv</a>
      */
-    private void tcp_v4_do_rcv(final Channel net, final TcpSock sock, final IpV4Packet ipPacket, TcpPacket tcpPacket) {
+    private void tcp_v4_do_rcv(final Channel net, final TcpSock sock, final IpV4Packet ipPacket) {
         // https://www.cnblogs.com/wanpengcoder/p/11750747.html
 
         /*
@@ -140,9 +148,9 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         }
         */
 
-        debug(sock, ipPacket.getHeader(), tcpPacket, true);
+        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
         try {
-            int err = input.tcp_rcv_state_process(net, sock, ipPacket, tcpPacket);
+            int err = input.tcp_rcv_state_process(net, sock, ipPacket);
             if (0 != err) {
                 tcp_v4_send_reset(net, ipPacket.getHeader(), tcpPacket, err);
                 if (!TcpState.TCP_LISTEN.equals(sock.state())) {
@@ -294,8 +302,6 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
 
                 .payloadBuilder(skb)
                 .build();
-
-        debug(listenSock, ipPacket.getHeader(), skb.build(), false);
 
         net.writeAndFlush(ipPacket);
     }

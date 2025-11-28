@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_MAX_WSCALE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_NEW_SYN_RECV;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.logPrefix;
 
 @Slf4j
@@ -120,19 +121,24 @@ public class TcpHandshaker {
                 : new InetSocketAddress(dstAddr, dstPort);
 
 
-        tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "ESTABLISHING -> {}", resolved);
-
         final long sinceMs = System.currentTimeMillis();
         req.childCloseListener = new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 // for TCP_NEW_SYN_RECV, TCP_SYN_RECV
+                log.info(logFormat(ipPacket, "Connection to {}:{} has been disconnected"), resolved.getHostString(), resolved.getPort());
+                log.info(logFormat(ipPacket, "Connection handshake: ABORT"));
+
+                af_ops.send_synack(net, parent, req, ipHdr, tcpPacket);
                 // FIXME set reset.
                 rsk_ops.send_reset(net, parent, ipPacket, tcpPacket, -100);
                 // FIXME clean queue
                 demultiplexer.inet_csk_destroy_sock(req);
             }
         };
+
+
+        log.info(logFormat(ipPacket, "ESTABLISHING connection to {}:{}"), resolved.getHostString(), resolved.getPort());
         req.child = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
             private final AtomicBoolean initialized = new AtomicBoolean(false);
 
@@ -140,7 +146,7 @@ public class TcpHandshaker {
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                 try {
                     if (initialized.compareAndSet(false, true)) {
-                        tcpLogInfo(null, srcAddr, srcPort, dstAddr, dstPort, "First Response elapsed: {}ms", System.currentTimeMillis() - sinceMs);
+//                        log.info(logFormat(ipPacket, "Connection ESTABLISHED to {}"), resolved.getHostString());
                     }
                     ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
                 } finally {
@@ -149,10 +155,13 @@ public class TcpHandshaker {
             }
         }).addListener(new ChannelFutureListener() {
             @Override
-            public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                if (channelFuture.isSuccess()) {
+            public void operationComplete(ChannelFuture future) throws Exception {
+                if (future.isSuccess()) {
+                    log.info(logFormat(ipPacket, "Connection ESTABLISHED to {}:{}"), resolved.getHostString(), resolved.getPort());
+                    log.info(logFormat(ipPacket, "Connection handshake 2/3: SYN-ACK"));
                     af_ops.send_synack(net, parent, req, ipHdr, tcpPacket);
                 } else {
+                    log.info(logFormat(ipPacket, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
                     rsk_ops.send_reset(net, parent, ipPacket, tcpPacket, -88);
                     // FIXME clean queue
                     demultiplexer.inet_csk_destroy_sock(req);
@@ -263,6 +272,7 @@ public class TcpHandshaker {
         final String prefix = logPrefix(traceId, srcAddr.getHostAddress(), srcPort, dstAddr.getHostAddress(), dstPort);
         log.error(prefix + " " + message, args);
     }
+
 
     public static void tcpLogError(String traceId,
                                    InetAddress srcAddr, int srcPort,

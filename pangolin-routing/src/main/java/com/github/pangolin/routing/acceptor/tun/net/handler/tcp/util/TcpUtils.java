@@ -1,21 +1,16 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util;
 
-import java.net.InetAddress;
-
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
 import org.bouncycastle.crypto.macs.SipHash;
 import org.bouncycastle.crypto.params.KeyParameter;
+import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.IpPacket.IpHeader;
-import org.pcap4j.packet.IpV4Packet;
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
-
-import java.nio.ByteBuffer;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
-import java.util.concurrent.atomic.AtomicLong;
 import org.pcap4j.packet.TcpPacket.TcpHeader;
+
+import java.net.InetAddress;
+import java.security.SecureRandom;
 
 /**
  *
@@ -125,12 +120,13 @@ public abstract class TcpUtils {
     }
 
     private static final byte[] key = new byte[128 / 8];
+
     static {
         new SecureRandom().nextBytes(key);
     }
 
     public static int secureSeq(final byte[] srcAddress, final short srcPort,
-                         final byte[] dstAddress, final short dstPort) {
+                                final byte[] dstAddress, final short dstPort) {
         final SipHash sipHash = new SipHash();
         sipHash.init(new KeyParameter(key));
         sipHash.update(dstAddress, 0, dstAddress.length);
@@ -142,13 +138,15 @@ public abstract class TcpUtils {
         sipHash.update((byte) ((srcPort >> 0) & 0xFF));
 
         final long hash64 = sipHash.doFinal();
-        final int hash32 = (int)(hash64 & 0xFFFFFFFFL);
+        final int hash32 = (int) (hash64 & 0xFFFFFFFFL);
         return seq_scale(hash32);
     }
 
     static int seq_scale(int seq) {
         return seq + (int) (System.nanoTime() >> 6);
     }
+
+
 
 
     public static String logPrefix(final Object id,
@@ -163,9 +161,9 @@ public abstract class TcpUtils {
         }
 
         buff.append(" ")
-            .append(srcAddr).append(":").append(srcPort)
-            .append(" -> ")
-            .append(dstAddr).append(":").append(dstPort);
+                .append(srcAddr).append(":").append(srcPort)
+                .append(" -> ")
+                .append(dstAddr).append(":").append(dstPort);
         return buff.toString();
     }
 
