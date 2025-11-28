@@ -1218,7 +1218,11 @@ public class TcpInput<T extends IpPacket> {
         }
 
         if (th.getFin()) {
-            log.info(logFormat(ipPacket, "(PASSIVE/ACTIVE) Connection handshake 1(3)/4: FIN"));
+            if (0 == (tp.sk_shutdown & RCV_SHUTDOWN)) {
+                log.info(logFormat(ipPacket, "(ACTIVE) Connection handshake 3/4: FIN"));
+            } else {
+                log.info(logFormat(ipPacket, "(PASSIVE) Connection handshake 1/4: FIN"));
+            }
             tcp_fin(net, tp);
         }
 
