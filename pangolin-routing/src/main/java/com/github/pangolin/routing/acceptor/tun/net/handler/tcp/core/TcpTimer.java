@@ -134,7 +134,12 @@ public class TcpTimer {
             // timers.put(timer, tp.child.eventLoop().schedule(timer, delay, TimeUnit.MILLISECONDS));
             timers.put(timer, schedule(tp.child.channel(), delay, TimeUnit.MILLISECONDS, timer));
         } else {
-            log.warn("CANCEL FAILED: {}", tp.icsk_pending);
+            log.warn(logFormat(
+                    "TCP",
+                    tp.ir_loc_addr, tp.ir_num.valueAsInt(),
+                    tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                    "CANCEL FAILED: {}"
+            ), tp.icsk_pending);
         }
         return 0;
     }

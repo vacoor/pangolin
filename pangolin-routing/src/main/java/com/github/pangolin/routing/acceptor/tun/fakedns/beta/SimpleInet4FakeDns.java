@@ -141,7 +141,7 @@ public class SimpleInet4FakeDns extends AbstractFakeDns<Inet4Address> {
 //        final int max = ipAddressToInt(NetUtil.createByteArrayFromIpAddressString("198.18.0.254"));
         final String definition = "198.18.0.1/24";
 
-        SimpleInet4FakeDns dns = SimpleInet4FakeDns.create(definition, 2);
+        SimpleInet4FakeDns dns = SimpleInet4FakeDns.create(definition, 60);
 
         for (int i = 0; ; i++) {
             final String key = "baidu" + i + ".com";
