@@ -36,7 +36,7 @@ public abstract class AbstractFakeDns<T extends InetAddress> {
         this.leases = createLeases(leaseTime);
         this.hostnames = Maps.newConcurrentMap();
         this.idles = new SimplePool<T>(createGenerator());
-        init();
+//        init();
     }
 
     protected abstract Generator<T> createGenerator();
@@ -119,7 +119,7 @@ public abstract class AbstractFakeDns<T extends InetAddress> {
     private void doRelease(final String hostname, final T address) {
         hostnames.remove(address);
         idles.release(address);
-        remove(hostname);
+//        remove(hostname);
     }
 
     private T doAcquire(final String hostname) {
@@ -128,7 +128,7 @@ public abstract class AbstractFakeDns<T extends InetAddress> {
             address = idles.acquire();
             if (null != address && null == hostnames.putIfAbsent(address, normalize(hostname))) {
                 // write to file
-                write(hostname, address);
+                // write(hostname, address);
                 return address;
             }
         } while (null != address);
