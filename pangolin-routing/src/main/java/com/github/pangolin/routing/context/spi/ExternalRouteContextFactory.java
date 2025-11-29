@@ -92,6 +92,7 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
 
     private Upstream applyQuiet(final String name, final String url) {
         try {
+            log.info("create upstream: {}", url);
             return apply(name, url);
         } catch (final IllegalStateException ex) {
             if (Throwables.causedBy(ex, UnknownHostException.class)) {

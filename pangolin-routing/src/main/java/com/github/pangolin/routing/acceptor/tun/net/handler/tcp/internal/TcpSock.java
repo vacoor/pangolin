@@ -10,12 +10,14 @@ import org.pcap4j.packet.TcpPacket;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.sysctl_tcp_fin_timeout;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_OFF;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.jiffies_to_usecs;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.nsecs_to_jiffies;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.after;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.ilog2;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L200">struct tcp_sock</a>
@@ -138,7 +140,7 @@ public class TcpSock extends inet_connection_sock {
     public long srtt_us;
     /**
      * 已发送未ACK的数据包数量.
-     *
+     * <p>
      * x@see TcpOutput#tcp_event_new_data_sent(TcpDemultiplexer, TcpBuffer)
      * x@see TcpInput#tcp_clean_rtx_queue(TcpDemultiplexer, int)
      */
@@ -205,7 +207,6 @@ public class TcpSock extends inet_connection_sock {
     public Runnable icsk_retransmit_timer;
     public Runnable icsk_delack_timer;
     public Runnable sk_timer;
-
 
 
     /**
@@ -522,7 +523,6 @@ public class TcpSock extends inet_connection_sock {
     }
 
 
-
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L665
     private void tcp_mark_push(final TcpPacket.Builder skb) {
         skb.psh(true);
@@ -543,65 +543,15 @@ public class TcpSock extends inet_connection_sock {
     }
 
 
-
-
-
     public void tcp_ack_tstamp() {
 
     }
 
 
-    void logTrace(final String format, final Object... args) {
-        log.trace(format(format), args);
-    }
-
-    void logDebug(final String format, final Object... args) {
-        log.debug(format(format), args);
-    }
-
-    void logInfo(final String format, final Object... args) {
-        log.info(format(format), args);
-    }
-
-    void logWarn(final String format, final Object... args) {
-        log.warn(format(format), args);
-    }
-
-    void logError(final String format, final Object... args) {
-        log.error(format(format), args);
-    }
-
-    private String format(final String format) {
-        final int srcPort = this.ir_rmt_port.valueAsInt();
-        final int dstPort = this.ir_num.valueAsInt();
-
-        final String srcHostAddr = ir_rmt_addr.getHostAddress();
-        final String dstHostAddr = ir_loc_addr.getHostAddress();
-
-
-        final StringBuilder buff = new StringBuilder();
-        buff.append(TcpUtils.logPrefix(null != child ? innerChannel(this).id() : null, srcHostAddr, srcPort, dstHostAddr, dstPort));
-        buff.append(" ");
-
-        buff.append(format);
-        return buff.toString();
-    }
-
-    private static Channel innerChannel(SockCommon sock) {
-        return sock.child.channel();
-    }
-
-    public static void debug(final SockCommon sk, final IpPacket.IpHeader ipHeader, final TcpPacket tcpPacket, boolean inbound) {
-        tcp_options_received rx_opt = sk instanceof TcpSock ? ((TcpSock) sk).rx_opt : new tcp_options_received();
-        final String message = TcpUtils.logify(null != sk.child ? innerChannel(sk).id() : null, ipHeader, tcpPacket, inbound ? rx_opt.rcv_wscale : rx_opt.snd_wscale);
-        log.debug(message);
-    }
-
     public long icsk_delack_timeout() {
         // FIXME
         return icsk_ack.timeout;
     }
-
 
 
     public class RcvRttEst {

@@ -15,8 +15,8 @@ import org.pcap4j.packet.namednumber.IpVersion;
 import java.net.Inet4Address;
 import java.util.Map;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock.debug;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logify;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
 import static org.pcap4j.packet.IpPacket.IpHeader;
 import static org.pcap4j.packet.IpV4Packet.IpV4Header;
@@ -90,7 +90,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
      */
     private void tcp_v4_rcv(final Channel net, final IpV4Packet ipPacket) {
         final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        log.trace(logFormat(ipPacket, "Packet received"), ipPacket.getHeader().getProtocol().name());
+        // log.trace(logFormat(ipPacket, "Packet received"), ipPacket.getHeader().getProtocol().name());
 
         if (null == tcpPacket) {
             log.warn(logFormat(ipPacket, "TCP packet not found, discard it"));
@@ -106,8 +106,10 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
             return;
         }
 
+        log.trace(logify(ipPacket, sk instanceof TcpSock ? ((TcpSock) sk).rx_opt.rcv_wscale : 0));
+
         if (TcpState.TCP_NEW_SYN_RECV.equals(sk.state())) {
-            log.info(logFormat(ipPacket, "Connection handshake 3/3: ACK"));
+            log.debug(logFormat(ipPacket, "Connection handshake 3/3: ACK"));
 
             final tcp_request_sock request = (tcp_request_sock) sk;
             final TcpSock nsk = tcp_check_req(net, ipPacket, request);
@@ -336,7 +338,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 .payloadBuilder(buf)
                 .build();
 
-        debug(tp, ipPacket.getHeader(), buf.build(), false);
+        log.trace(logify(ipPacket, tp.rx_opt.snd_wscale));
 //        parent.writeAndFlush(ipPacket).syncUninterruptibly();
         net.writeAndFlush(ipPacket);
     }

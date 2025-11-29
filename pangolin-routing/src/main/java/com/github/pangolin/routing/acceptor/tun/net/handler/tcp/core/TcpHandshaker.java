@@ -17,7 +17,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_MAX_WSCALE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_NEW_SYN_RECV;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.logPrefix;
 
 @Slf4j
 public class TcpHandshaker {
@@ -109,7 +108,7 @@ public class TcpHandshaker {
         if (dnsEngine.isFakeAddress(dstAddr.getAddress())) {
             dstHostname = dnsEngine.getHostByAddress(dstAddr.getAddress());
             if (null == dstHostname || dstHostname.isEmpty()) {
-                tcpLogError(null, srcAddr, srcPort, dstAddr, dstPort, "Can't resolve fake IP: {}", dstAddr.getHostAddress());
+                log.warn(logFormat(ipPacket, "Could not resolve FAKE-IP: {}"), dstAddr.getHostAddress());
                 return null;
             }
         } else {
@@ -126,10 +125,10 @@ public class TcpHandshaker {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 // for TCP_NEW_SYN_RECV, TCP_SYN_RECV
-                log.info(logFormat(ipPacket, "Connection to {}:{} has been disconnected"), resolved.getHostString(), resolved.getPort());
-                log.info(logFormat(ipPacket, "Connection handshake: ABORT"));
+                log.debug(logFormat(ipPacket, "Connection to {}:{} has been disconnected"), resolved.getHostString(), resolved.getPort());
+                log.debug(logFormat(ipPacket, "Connection handshake: ABORT"));
 
-                af_ops.send_synack(net, parent, req, ipHdr, tcpPacket);
+                // af_ops.send_synack(net, parent, req, ipHdr, tcpPacket);
                 // FIXME set reset.
                 rsk_ops.send_reset(net, parent, ipPacket, tcpPacket, -100);
                 // FIXME clean queue
@@ -157,11 +156,19 @@ public class TcpHandshaker {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
-                    log.info(logFormat(ipPacket, "Connection ESTABLISHED to {}:{}"), resolved.getHostString(), resolved.getPort());
-                    log.info(logFormat(ipPacket, "Connection handshake 2/3: SYN-ACK"));
+                    log.debug(logFormat(ipPacket, "Connection ESTABLISHED to {}:{}"), resolved.getHostString(), resolved.getPort());
+
+                    final IpPacket.IpHeader iph = ipPacket.getHeader();
+                    final TcpPacket.TcpHeader th = ipPacket.get(TcpPacket.class).getHeader();
+                    log.debug(logFormat(
+                            ipPacket.getHeader().getProtocol().name(),
+                            iph.getDstAddr(), th.getDstPort().valueAsInt(),
+                            iph.getSrcAddr(), th.getSrcPort().valueAsInt(),
+                            "Connection handshake 2/3: SYN-ACK"
+                    ));
                     af_ops.send_synack(net, parent, req, ipHdr, tcpPacket);
                 } else {
-                    log.info(logFormat(ipPacket, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
+                    log.warn(logFormat(ipPacket, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
                     rsk_ops.send_reset(net, parent, ipPacket, tcpPacket, -88);
                     // FIXME clean queue
                     demultiplexer.inet_csk_destroy_sock(req);
@@ -263,23 +270,6 @@ public class TcpHandshaker {
         req.rcv_wscale = rcv_wscale_ref.get();
         req.rsk_rcv_wnd = req_rsk_rcv_wnd_ref.get();
         req.rsk_window_clamp = req_rsk_window_clamp_ref.get();
-    }
-
-    static void tcpLogInfo(String traceId,
-                           InetAddress srcAddr, int srcPort,
-                           InetAddress dstAddr, int dstPort,
-                           String message, final Object... args) {
-        final String prefix = logPrefix(traceId, srcAddr.getHostAddress(), srcPort, dstAddr.getHostAddress(), dstPort);
-        log.error(prefix + " " + message, args);
-    }
-
-
-    public static void tcpLogError(String traceId,
-                                   InetAddress srcAddr, int srcPort,
-                                   InetAddress dstAddr, int dstPort,
-                                   String message, Object... args) {
-        final String prefix = logPrefix(traceId, srcAddr.getHostAddress(), srcPort, dstAddr.getHostAddress(), dstPort);
-        log.error(prefix + " " + message, args);
     }
 
     private static void tcp_parse_options(TcpSock tp, tcp_options_received opt_rx, final TcpPacket skb, final boolean estab) {

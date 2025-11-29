@@ -104,6 +104,7 @@ public class Application {
     }
 
     public RouteContext run(final URL configLocation) throws Exception {
+        log.info("Initializing context...");
         final RouteContext context = createParentContext(configLocation);
         final InheritableRouteContext contextToUse = new InheritableRouteContext(context);
         final Upstream[] embeddedUpstreams = new Upstream[]{
@@ -114,6 +115,7 @@ public class Application {
         for (final Upstream embeddedUpstream : embeddedUpstreams) {
             contextToUse.addUpstream(embeddedUpstream.name(), embeddedUpstream);
         }
+        log.info("Context initialized.");
 
         int port = 0;
         for (RouteContext ctx = contextToUse; null != ctx; ctx = ctx.parent()) {

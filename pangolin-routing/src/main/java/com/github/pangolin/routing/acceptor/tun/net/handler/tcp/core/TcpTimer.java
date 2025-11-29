@@ -2,8 +2,6 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState;
 import com.google.common.collect.Maps;
 import io.netty.channel.Channel;
 import io.netty.util.concurrent.Future;
@@ -16,9 +14,10 @@ import java.util.concurrent.TimeUnit;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_CLOSE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_LISTEN;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_FIN_WAIT2;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.time_after;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.TCP_RTO_MAX;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.TCP_RTO_MIN;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.time_after;
 
 @Slf4j
 public class TcpTimer {
@@ -306,6 +305,12 @@ public class TcpTimer {
 
             if (tcp_rtx_probe0_timed_out(tp, rtx_delta)) {
 //                tp.logError("[RETRANSMIT] RTX PROBE0 TIMEOUT");
+                log.info(logFormat(
+                        "TCP",
+                        tp.ir_loc_addr, tp.ir_num.valueAsInt(),
+                        tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                        "RTX PROBE0 TIMEOUT"
+                ));
                 demultiplexer.tcp_write_err(tp);
                 return;
             }
@@ -468,6 +473,12 @@ public class TcpTimer {
         if (expired) {
             /* Has it gone just too far? */
 //            tp.logError("[RETRANSMIT] WRITE TIMEOUT");
+            log.info(logFormat(
+                    "TCP",
+                    tp.ir_loc_addr, tp.ir_num.valueAsInt(),
+                    tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                    "RETRANSMIT WRITE TIMEOUT"
+            ));
             demultiplexer.tcp_write_err(tp);
             return 1;
         }
@@ -536,6 +547,12 @@ public class TcpTimer {
             final int user_timeout = tp.icsk_user_timeout;
             if (user_timeout > 0 && TcpClock.tcp_jiffies32() - tp.icsk_probes_tstamp >= TcpClock.msecs_to_jiffies(user_timeout)) {
 //                tp.logWarn("PROBE TIMEOUT");
+                log.info(logFormat(
+                        "TCP",
+                        tp.ir_loc_addr, tp.ir_num.valueAsInt(),
+                        tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                        "PROBE TIMEOUT"
+                ));
                 demultiplexer.tcp_write_err(tp);
                 return;
             }
@@ -547,6 +564,12 @@ public class TcpTimer {
 
         if (tp.icsk_probes_out >= max_probes) {
 //            tp.logWarn("TOO MANY PROBES");
+            log.info(logFormat(
+                    "TCP",
+                    tp.ir_loc_addr, tp.ir_num.valueAsInt(),
+                    tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                    "TOO MANY PROBES"
+            ));
             demultiplexer.tcp_write_err(tp);
         } else {
             /* Only send another probe if we didn't close things up. */
@@ -605,6 +628,12 @@ public class TcpTimer {
              */
             if ((user_timeout != 0 && elapsed >= TcpClock.msecs_to_jiffies(user_timeout) && tp.icsk_probes_out > 0)
                     || (user_timeout == 0 && tp.icsk_probes_out >= keepalive_probes(tp))) {
+                log.info(logFormat(
+                        "TCP",
+                        tp.ir_loc_addr, tp.ir_num.valueAsInt(),
+                        tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                        "KEEPALIVE TIMEOUT"
+                ));
                 demultiplexer.output.tcp_send_active_reset(net, tp, "SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT");
                 demultiplexer.tcp_write_err(tp);
                 return;

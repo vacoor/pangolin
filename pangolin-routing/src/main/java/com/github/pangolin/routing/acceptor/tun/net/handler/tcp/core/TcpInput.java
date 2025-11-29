@@ -1,7 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.*;
@@ -15,7 +14,6 @@ import java.io.IOException;
 import java.security.SecureRandom;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpHandshaker.tcpLogError;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpOutput.tcp_mstamp_refresh;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
@@ -1033,16 +1031,26 @@ public class TcpInput<T extends IpPacket> {
     /**
      * Process the FIN bit.
      */
-    private void tcp_fin(final Channel net, final TcpSock tp) {
+    private void tcp_fin(final Channel net, final TcpSock tp, T ipPacket) {
         inet_csk_schedule_ack(tp);
 
         tp.sk_shutdown |= RCV_SHUTDOWN;
         // sock_set_flag(sk, SOCK_DONE)
 
+        final IpPacket.IpHeader iph = ipPacket.getHeader();
+        final TcpHeader th = ipPacket.get(TcpPacket.class).getHeader();
         final TcpState state = tp.state();
         switch (state) {
             case TCP_SYN_RECV:
             case TCP_ESTABLISHED:
+                log.debug(logFormat(ipPacket, "(PASSIVE) Connection handshake 1/4: FIN"));
+
+                log.debug(logFormat(
+                        iph.getProtocol().name(),
+                        iph.getDstAddr(), th.getDstPort().valueAsInt(),
+                        iph.getSrcAddr(), th.getSrcPort().valueAsInt(),
+                        "(PASSIVE) Connection handshake 2/4: ACK"
+                ));
                 /* Move to CLOSE_WAIT */
                 tp.state(TcpState.TCP_CLOSE_WAIT);
                 tp.inet_csk_enter_pingpong_mode();
@@ -1065,6 +1073,16 @@ public class TcpInput<T extends IpPacket> {
                 break;
             case TCP_FIN_WAIT2:
                 /* Received a FIN -- send ACK and enter TIME_WAIT. */
+                log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 3/4: FIN"));
+
+//                final IpPacket.IpHeader iph = ipPacket.getHeader();
+//                final TcpHeader th = ipPacket.get(TcpPacket.class).getHeader();
+                log.debug(logFormat(
+                        iph.getProtocol().name(),
+                        iph.getDstAddr(), th.getDstPort().valueAsInt(),
+                        iph.getSrcAddr(), th.getSrcPort().valueAsInt(),
+                        "(ACTIVE) Connection handshake 4/4: ACK"
+                ));
                 output.tcp_send_ack(net, tp);
                 demultiplexer.tcp_time_wait(tp, TcpState.TCP_TIME_WAIT, 0);
                 break;
@@ -1218,12 +1236,7 @@ public class TcpInput<T extends IpPacket> {
         }
 
         if (th.getFin()) {
-            if (0 == (tp.sk_shutdown & RCV_SHUTDOWN)) {
-                log.info(logFormat(ipPacket, "(ACTIVE) Connection handshake 3/4: FIN"));
-            } else {
-                log.info(logFormat(ipPacket, "(PASSIVE) Connection handshake 1/4: FIN"));
-            }
-            tcp_fin(net, tp);
+            tcp_fin(net, tp, ipPacket);
         }
 
         // TODO ...
@@ -1485,12 +1498,22 @@ public class TcpInput<T extends IpPacket> {
             @Override
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
                 log.info(logFormat(ipPacket, "Connection to {}:{} has been disconnected"), sk.ir_loc_addr.getHostName(), sk.ir_num.valueAsInt());
-                // TcpHandshaker.tcpLogInfo(null, sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(), sk.ir_loc_addr, sk.ir_num.valueAsInt(), "DISCONNECTED: {}", sk.ir_loc_addr.getHostAddress());
+                TcpState state = sk.state();
                 if (demultiplexer.tcp_close_state(sk)) {
-                    if (0 != (sk.sk_shutdown & RCV_SHUTDOWN)) {
-                        log.info(logFormat(ipPacket, "(PASSIVE) Connection handshake 3/4: FIN"));
+                    if (TCP_CLOSE_WAIT.equals(state)) {
+                        log.debug(logFormat(
+                                ipPacket.getHeader().getProtocol().name(),
+                                sk.ir_loc_addr, sk.ir_num.valueAsInt(),
+                                sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(),
+                                "(PASSIVE) Connection handshake 3/4: FIN"
+                        ));
                     } else {
-                        log.info(logFormat(ipPacket, "(ACTIVE) Connection handshake 1/4: FIN"));
+                        log.debug(logFormat(
+                                ipPacket.getHeader().getProtocol().name(),
+                                sk.ir_loc_addr, sk.ir_num.valueAsInt(),
+                                sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(),
+                                "(ACTIVE) Connection handshake 1/4: FIN"
+                        ));
                     }
                     demultiplexer.output.tcp_send_fin(net, sk);
                 } else {
@@ -1544,7 +1567,7 @@ public class TcpInput<T extends IpPacket> {
 
                     @Override
                     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                        tcpLogError(null, sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(), sk.ir_loc_addr, sk.ir_num.valueAsInt(), "Exception caught: {}", cause.getMessage(), cause);
+                        log.warn(logFormat(ipPacket, "Connection aborted: {}"), cause.getMessage(), cause);
                         demultiplexer.send_reset(net, sk.rawIpHeader, new TcpPacket.Builder()
                                 .srcAddr(sk.ir_rmt_addr)
                                 .dstAddr(sk.ir_loc_addr)
@@ -1607,7 +1630,7 @@ public class TcpInput<T extends IpPacket> {
                         return discard(ipPacket, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
                     }
 
-                    log.info(logFormat(ipPacket, "Connection handshake 1/3: SYN"));
+                    log.debug(logFormat(ipPacket, "Connection handshake 1/3: SYN (req: {}, est: {})"), demultiplexer.synRegistry.size(), demultiplexer.establishedRegistry.size());
 
                     /*-
                      * Linux此处为创建状态为TCP_NEW_SYN_RECV的请求套接字(request_sock)放入半连接队列即可结束,
@@ -1716,7 +1739,7 @@ public class TcpInput<T extends IpPacket> {
                     break;
                 }
 
-                log.info(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4: ACK"));
+                log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4: ACK"));
                 sk.state(TCP_FIN_WAIT2);
                 sk.sk_shutdown |= TcpConstants.SEND_SHUTDOWN;
 
@@ -1726,6 +1749,7 @@ public class TcpInput<T extends IpPacket> {
 //                }
 
                 if (sk.linger2 < 0) {
+                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 3/4 aborted: linger2 < 0"));
                     demultiplexer.tcp_done(sk);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
@@ -1733,6 +1757,8 @@ public class TcpInput<T extends IpPacket> {
                 final int seq = th.getSequenceNumber();
                 final int end_seq = determineEndSeq(tcpPacket);
                 if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), sk.rcv_nxt)) {
+                    /* Receive out of order FIN after close() */
+                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 3/4 aborted: out of order FIN"));
                     demultiplexer.tcp_done(sk);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
@@ -1764,7 +1790,7 @@ public class TcpInput<T extends IpPacket> {
                 break;
             case TCP_LAST_ACK:
                 if (sk.snd_una == sk.write_seq) {
-                    log.info(logFormat(ipPacket, "(PASSIVE) Connection handshake 4/4: ACK"));
+                    log.debug(logFormat(ipPacket, "(PASSIVE) Connection handshake 4/4: ACK"));
                     // tcp_update_metrics
                     demultiplexer.tcp_done(sk);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
