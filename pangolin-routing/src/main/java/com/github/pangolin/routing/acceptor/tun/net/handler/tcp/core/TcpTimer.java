@@ -8,6 +8,8 @@ import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
@@ -130,8 +132,12 @@ public class TcpTimer {
 //        io.netty.util.concurrent.ScheduledFuture<?> nf = parent.eventLoop().schedule(timer, expires - jiffies(), TimeUnit.MILLISECONDS);
         final long delay = expires - TcpClock.jiffies();
         final Future<?> future = timers.get(timer);
+        if (null != future && !future.isDone() && !future.isCancelled()) {
+            future.cancel(true);
+        }
+        timers.put(timer, schedule(tp.child.channel(), delay, TimeUnit.MILLISECONDS, timer));
+        /*
         if (null == future || future.isDone() || future.isCancelled() || future.cancel(true)) {
-            // timers.put(timer, tp.child.eventLoop().schedule(timer, delay, TimeUnit.MILLISECONDS));
             timers.put(timer, schedule(tp.child.channel(), delay, TimeUnit.MILLISECONDS, timer));
         } else {
             log.warn(logFormat(
@@ -141,6 +147,7 @@ public class TcpTimer {
                     "CANCEL FAILED: {}"
             ), tp.icsk_pending);
         }
+         */
         return 0;
     }
 
@@ -362,7 +369,14 @@ public class TcpTimer {
          */
         // ...
 
-        tp.tcp_reset_xmit_timer(this, ICSK_TIME_RETRANS, tcp_clamp_rto_to_user_timeout(tp), false);
+        long l = tcp_clamp_rto_to_user_timeout(tp);
+        log.info(logFormat(
+                "TCP",
+                tp.ir_loc_addr, tp.ir_num.valueAsInt(),
+                tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                "next timeout: {}"
+        ), new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date(System.currentTimeMillis() + l)));
+        tp.tcp_reset_xmit_timer(this, ICSK_TIME_RETRANS, l, false);
 //        if (retransmits_timed_out(sysctl_tcp_retries1 + 1, 0)) {
         // 重置路由缓存
         // __sk_dst_reset(sk);

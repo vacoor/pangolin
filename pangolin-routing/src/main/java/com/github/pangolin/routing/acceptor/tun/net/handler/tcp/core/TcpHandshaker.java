@@ -98,11 +98,8 @@ public class TcpHandshaker {
 
         // req.timeout =
 
-        final InetAddress srcAddr = req.ir_rmt_addr;
         final InetAddress dstAddr = req.ir_loc_addr;
-        final TcpPort tcpSrcPort = req.ir_rmt_port;
         final TcpPort tcpDstPort = req.ir_num;
-        final int srcPort = tcpSrcPort.valueAsInt();
         final int dstPort = tcpDstPort.valueAsInt();
         final String dstHostname;
         if (dnsEngine.isFakeAddress(dstAddr.getAddress())) {

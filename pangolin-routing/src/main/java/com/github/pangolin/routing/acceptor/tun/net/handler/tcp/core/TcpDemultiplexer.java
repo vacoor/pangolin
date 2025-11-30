@@ -501,9 +501,14 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
         // ...
     }
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L328">tcp_time_wait</a>
+     */
     public void tcp_time_wait(TcpSock tp, TcpState state, long timeout) {
+
         tp.state(state);
 
+        // FIXME
         if (TCP_TIME_WAIT.equals(state)) {
             tp.state(TCP_CLOSE);
             tcp_done(tp);

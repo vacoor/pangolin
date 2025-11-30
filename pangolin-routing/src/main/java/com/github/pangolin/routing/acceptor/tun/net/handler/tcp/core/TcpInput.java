@@ -1768,6 +1768,7 @@ public class TcpInput<T extends IpPacket> {
                     /*-
                      * FIN_WAIT2 开始的总超时时间 > TIME_WAIT 的 2MSL, 则在进入 TIME_WAIT 前保证连接存活.
                      */
+                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2 timeout={}"), tmo - TCP_TIMEWAIT_LEN);
                     demultiplexer.timer.tcp_reset_keepalive_timer(sk, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
                 } else if (th.getFin()) {
                     /* Bad case. We could lose such FIN otherwise.
@@ -1776,8 +1777,10 @@ public class TcpInput<T extends IpPacket> {
                      * if it spins in bh_lock_sock(), but it is really
                      * marginal case.
                      */
+                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2 timeout={}(tmo)"), tmo);
                     demultiplexer.timer.tcp_reset_keepalive_timer(sk, tmo);
                 } else {
+                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2, 2MSL timeout={}(tmo)"), tmo);
                     demultiplexer.tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
