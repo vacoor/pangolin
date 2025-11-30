@@ -15,4 +15,6 @@ public interface inet_connection_sock_af_ops<T extends IpPacket> {
 
     tcp_request_sock conn_request(final Channel net, TcpSock listenSock, final T ipPacket);
 
+    TcpSock syn_recv_sock(final Channel net, TcpSock listenSock, final T ipPacket, tcp_request_sock req);
+
 }

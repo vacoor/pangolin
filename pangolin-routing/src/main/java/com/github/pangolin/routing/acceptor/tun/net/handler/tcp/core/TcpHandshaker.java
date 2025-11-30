@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_MAX_WSCALE;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_TIMEOUT_INIT;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_NEW_SYN_RECV;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 
@@ -42,8 +43,7 @@ public class TcpHandshaker {
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
          */
-        tcp_request_sock req = inet_reqsk_alloc(ipHdr, tcpPacket, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup);
-        req.parentSock = parent;
+        tcp_request_sock req = inet_reqsk_alloc(ipHdr, tcpPacket, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, parent, true);
         if (null == req) {
             return null;
         }
@@ -72,6 +72,8 @@ public class TcpHandshaker {
 
         // dst = af_ops->route_req(sk, skb, &fl, req, isn)
         // in af_ops->route_req [[
+        //   |- in tcp_v4_route_req
+        //     |- in tcp_v4_init_req
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1680
         req.ir_loc_addr = ipHdr.getDstAddr();
         req.ir_rmt_addr = ipHdr.getSrcAddr();
@@ -96,7 +98,10 @@ public class TcpHandshaker {
 
         tcp_openreq_init_rwin(parent, output, req, tcpPacket);
 
-        // req.timeout =
+        req.timeout = demultiplexer.tcp_timeout_init(req);
+        if (!inet_csk_reqsk_queue_hash_add(parent, req, req.timeout)) {
+            return null;
+        }
 
         final InetAddress dstAddr = req.ir_loc_addr;
         final TcpPort tcpDstPort = req.ir_num;
@@ -183,15 +188,44 @@ public class TcpHandshaker {
     }
 
     /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1190">inet_csk_reqsk_queue_hash_add</a>
+     */
+    private static boolean inet_csk_reqsk_queue_hash_add(TcpSock sk, tcp_request_sock req, long timeout) {
+        if (!reqsk_queue_hash_req(req, timeout)) {
+            return false;
+        }
+
+        // inet_csk_reqsk_queue_added(sk);
+        return true;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1170">reqsk_queue_hash_req</a>
+     */
+    private static boolean reqsk_queue_hash_req(tcp_request_sock req, long timeout) {
+        // FIXME
+        /* The timer needs to be setup after a successful insertion. */
+        // timer_setup(&req->rsk_timer, reqsk_timer_handler, TIMER_PINNED);
+        // mod_timer(&req->rsk_timer, jiffies + timeout);
+        req.rsk_timer = null;
+        return true;
+    }
+
+
+
+    /**
      * https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L891.
      */
     private static tcp_request_sock inet_reqsk_alloc(IpPacket.IpHeader ipHeader, TcpPacket skb,
                                                      DnsEngine dnsEngine,
                                                      SocketChannelFactory socketChannelFactory,
-                                                     int connTimeoutMs, EventLoopGroup childGroup) {
-        tcp_request_sock req = reqsk_alloc(ipHeader, skb, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup);
+                                                     int connTimeoutMs, EventLoopGroup childGroup,
+                                                     TcpSock skListener,
+                                                     boolean attachListener) {
+        tcp_request_sock req = reqsk_alloc(ipHeader, skb, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, skListener, attachListener);
         if (null != req) {
             req.state(TCP_NEW_SYN_RECV);
+            req.timeout = TCP_TIMEOUT_INIT;
         }
 
         return req;
@@ -200,11 +234,16 @@ public class TcpHandshaker {
     private static tcp_request_sock reqsk_alloc(IpPacket.IpHeader ipHeader, TcpPacket skb,
                                                 DnsEngine dnsEngine,
                                                 SocketChannelFactory socketChannelFactory,
-                                                int connTimeoutMs, EventLoopGroup childGroup) {
+                                                int connTimeoutMs, EventLoopGroup childGroup, TcpSock skListener,
+                                                boolean attachListener) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L891
 
         final tcp_request_sock req = new tcp_request_sock();
         req.rawIpHeader = ipHeader;
+        req.skc_listener = null;
+        if (attachListener) {
+            req.skc_listener = skListener;
+        }
 
         return req;
     }

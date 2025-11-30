@@ -75,6 +75,12 @@ public class SockCommon {
      */
     public int rsk_window_clamp;
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">skc_listener</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/request_sock.h#L51">rsk_listener</a>
+     */
+    public Sock skc_listener;
+
     public ChannelFuture child;
     public ChannelFutureListener childCloseListener;
 

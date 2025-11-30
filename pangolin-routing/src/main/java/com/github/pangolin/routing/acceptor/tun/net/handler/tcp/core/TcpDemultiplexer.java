@@ -107,29 +107,14 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    public TcpSock tcp_check_req(final Channel net, T ipPacket, tcp_request_sock request) {
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        TcpSock nsk = tcp_v4_syn_recv_sock(net, request, tcpPacket);
+    public TcpSock tcp_check_req(final Channel net, TcpSock listenSock, T ipPacket, tcp_request_sock request) {
+         TcpSock nsk = listenSock.icsk_af_ops.syn_recv_sock(net, listenSock, ipPacket, request);
+//        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
+//        TcpSock nsk = tcp_v4_syn_recv_sock(net, listenSock, request, tcpPacket);
+//        nsk.skc_listener = listenSock;
         return nsk;
     }
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a> TCP_NEW_SYN_RECV
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L660">tcp_check_req</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
-     */
-    private TcpSock tcp_v4_syn_recv_sock(Channel net, tcp_request_sock req, final TcpPacket skb) {
-        TcpSock parent = req.parentSock;
-        TcpSock newsk = tcp_create_openreq_child(net, parent, req, skb);
-
-        newsk.icsk_ext_hdr_len = 0;
-        output.tcp_sync_mss(newsk, parent.dst_mtu());
-        newsk.advmss = parent.tcp_mss_clamp(newsk, parent.dst_metric_advmss());
-
-        input.tcp_initialize_rcv_mss(newsk);
-        return newsk;
-    }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a> TCP_NEW_SYN_RECV
@@ -137,7 +122,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpSock tcp_create_openreq_child(Channel net, TcpSock sk, tcp_request_sock req, final TcpPacket skb) {
+    protected TcpSock tcp_create_openreq_child(Channel net, TcpSock sk, tcp_request_sock req, final TcpPacket skb) {
         /*-
          * 第一步调用 <code>inet_csk_clone_lock<code/> 基于原 TCP_NEW_SYN_RECV sock clone时会将状态设置为 TCP_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1247"></a>
@@ -605,4 +590,12 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     }
 
 
+    /**
+     * @param sk
+     * @return
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2702">tcp_timeout_init</a>
+     */
+    public long tcp_timeout_init(SockCommon sk) {
+        return Math.min(TCP_TIMEOUT_INIT, TCP_RTO_MAX);
+    }
 }

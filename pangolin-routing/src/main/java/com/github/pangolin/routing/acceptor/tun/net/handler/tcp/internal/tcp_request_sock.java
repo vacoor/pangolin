@@ -17,6 +17,4 @@ public class tcp_request_sock extends inet_request_sock {
     public int rcv_nxt;
     public int syn_tos;
 
-    public TcpSock parentSock;
-
 }

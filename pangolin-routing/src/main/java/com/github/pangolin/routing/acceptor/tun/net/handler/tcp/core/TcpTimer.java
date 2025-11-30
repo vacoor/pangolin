@@ -406,7 +406,7 @@ public class TcpTimer {
         if (timeout == 0) {
             long rto_base = TCP_RTO_MIN;
             if (0 != ((1 << tp.state().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV))) {
-                rto_base = tcp_timeout_init();
+                rto_base = demultiplexer.tcp_timeout_init(tp);
             }
             timeout = tcp_model_timeout(boundary, rto_base);
         }
@@ -428,14 +428,6 @@ public class TcpTimer {
             timeout = ((2 << linear_backoff_thresh) - 1) * rto_base + (boundary - linear_backoff_thresh) * TCP_RTO_MAX;
         }
         return TcpClock.jiffies_to_msecs(timeout);
-    }
-
-    /**
-     * @return
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2702">tcp_timeout_init</a>
-     */
-    private long tcp_timeout_init() {
-        return Math.min(TcpConstants.TCP_TIMEOUT_INIT, TCP_RTO_MAX);
     }
 
     /**

@@ -81,6 +81,11 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
             public tcp_request_sock conn_request(Channel net, TcpSock listenSock, IpV4Packet ipPacket) {
                 return tcp_v4_conn_request(net, listenSock, ipPacket, ipPacket.get(TcpPacket.class));
             }
+
+            @Override
+            public TcpSock syn_recv_sock(Channel net, TcpSock listenSock, IpV4Packet ipPacket, tcp_request_sock req) {
+                return tcp_v4_syn_recv_sock(net, listenSock, ipPacket, req);
+            }
         };
     }
 
@@ -112,7 +117,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
             log.debug(logFormat(ipPacket, "Connection handshake 3/3: ACK"));
 
             final tcp_request_sock request = (tcp_request_sock) sk;
-            final TcpSock nsk = tcp_check_req(net, ipPacket, request);
+            final TcpSock nsk = tcp_check_req(net, (TcpSock) request.skc_listener, ipPacket, request);
 
             nsk.state(TcpState.TCP_SYN_RECV);
             moveToEstablished(request, nsk);
@@ -307,6 +312,26 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
 
         net.writeAndFlush(ipPacket);
     }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a> TCP_NEW_SYN_RECV
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L660">tcp_check_req</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
+     */
+    private TcpSock tcp_v4_syn_recv_sock(Channel net, TcpSock listenSock, IpV4Packet ipPacket, tcp_request_sock req) {
+        final TcpPacket skb = ipPacket.get(TcpPacket.class);
+        TcpSock parent = listenSock;
+        TcpSock newsk = tcp_create_openreq_child(net, parent, req, skb);
+
+        newsk.icsk_ext_hdr_len = 0;
+        output.tcp_sync_mss(newsk, parent.dst_mtu());
+        newsk.advmss = parent.tcp_mss_clamp(newsk, parent.dst_metric_advmss());
+
+        input.tcp_initialize_rcv_mss(newsk);
+        return newsk;
+    }
+
 
     protected static void _INDIRECT_CALL_INET(Channel net, TcpSock tp, final IpHeader ipHeader, final TcpBuffer skb) {
         final IpV4Header ipHdr = (IpV4Header) ipHeader;
