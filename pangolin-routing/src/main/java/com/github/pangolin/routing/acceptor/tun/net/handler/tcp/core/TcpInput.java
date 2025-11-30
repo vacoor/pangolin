@@ -1749,7 +1749,7 @@ public class TcpInput<T extends IpPacket> {
 //                }
 
                 if (sk.linger2 < 0) {
-                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 3/4 aborted: linger2 < 0"));
+                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake aborted: linger2 < 0"));
                     demultiplexer.tcp_done(sk);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
@@ -1758,7 +1758,7 @@ public class TcpInput<T extends IpPacket> {
                 final int end_seq = determineEndSeq(tcpPacket);
                 if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), sk.rcv_nxt)) {
                     /* Receive out of order FIN after close() */
-                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 3/4 aborted: out of order FIN"));
+                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4 aborted: out of order FIN"));
                     demultiplexer.tcp_done(sk);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
@@ -1766,7 +1766,7 @@ public class TcpInput<T extends IpPacket> {
                 final int tmo = sk.tcp_fin_time();
                 if (tmo > TcpConstants.TCP_TIMEWAIT_LEN) {
                     /*-
-                     * FIN_WAIT2 开始的总超时时间 > TIME_WAIT 的 2MSL, 则在进入 TIME_WAIT 前保证连接存活.
+                     * FIN_WAIT2 开始的总超时时间 > TIME_WAIT 的 2MSL, 则等待 tmo - TCP_TIMEWAIT_LEN 后进入 TIME_WAIT.
                      */
                     log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2 timeout={}"), tmo - TCP_TIMEWAIT_LEN);
                     demultiplexer.timer.tcp_reset_keepalive_timer(sk, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
@@ -1780,7 +1780,7 @@ public class TcpInput<T extends IpPacket> {
                     log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2 timeout={}(tmo)"), tmo);
                     demultiplexer.timer.tcp_reset_keepalive_timer(sk, tmo);
                 } else {
-                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2, 2MSL timeout={}(tmo)"), tmo);
+                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4, 2MSL timeout={}(tmo)"), tmo);
                     demultiplexer.tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
