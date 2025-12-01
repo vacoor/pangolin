@@ -108,7 +108,7 @@ public final class DarwinDns {
                 if (null == automaticServiceDns) {
                     return false;
                 }
-                if (append && addServiceDns(store, primaryServiceId, false, dns)) {
+                if (append && !addServiceDns(store, primaryServiceId, false, dns)) {
                     return false;
                 } else if (!append && !setServiceDns(store, primaryServiceId, false, dns)) {
                     return false;
@@ -174,6 +174,7 @@ public final class DarwinDns {
                 watch(name, patterns, callback);
             }
         });
+        worker.setName("DNS-Watcher");
         worker.setDaemon(true);
         return worker;
     }
