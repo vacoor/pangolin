@@ -63,7 +63,7 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
             if (null != hostname && !hostname.isEmpty()) {
                 return InetAddress.getByAddress(hostname, addr);
             }
-            throw new UnknownHostException(String.format("Can't resolve hostname for fake IP: %s", address.getHostAddress()));
+            // throw new UnknownHostException(String.format("Can't resolve hostname for fake IP: %s", address.getHostAddress()));
         }
         return address;
     }
