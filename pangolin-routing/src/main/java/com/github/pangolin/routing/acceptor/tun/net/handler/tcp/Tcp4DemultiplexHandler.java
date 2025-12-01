@@ -23,9 +23,13 @@ public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler<IpV4Packet> {
 
     @Override
     protected IpV4Packet prepare(final IpV4Packet ipPacket) throws UnknownHostException {
-        final Inet4Address dstAddr = ipPacket.getHeader().getDstAddr();
-        return ipPacket.getBuilder().dstAddr((Inet4Address) resolveDstAddress(dstAddr)).build();
-//        return ipPacket;
+        final IpV4Packet.IpV4Header iph = ipPacket.getHeader();
+        final Inet4Address dstAddr = iph.getDstAddr();
+         return ipPacket.getBuilder()
+                 .srcAddr((Inet4Address) noDnsQuery(iph.getSrcAddr()))
+                 .dstAddr((Inet4Address) resolveDstAddress(dstAddr))
+                 .build();
+//        return ipPacket.getBuilder().dstAddr((Inet4Address) noDnsQuery(dstAddr)).build();
     }
 
     @Override

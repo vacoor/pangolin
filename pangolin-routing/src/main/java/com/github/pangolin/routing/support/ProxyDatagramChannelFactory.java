@@ -44,6 +44,7 @@ public class ProxyDatagramChannelFactory implements DatagramChannelFactory {
     private ChannelHandler newDatagramProxyHandler(final SocketAddress destination) {
         if (destination instanceof InetSocketAddress) {
             final InetSocketAddress address = (InetSocketAddress) destination;
+            // FIXME getHostName() skip dns query.
             final String hostname = address.isUnresolved() ? address.getHostString() : address.getHostName();
             if (!bypass.contains(hostname)) {
                 return upstream.newDatagramProxyHandler(address);

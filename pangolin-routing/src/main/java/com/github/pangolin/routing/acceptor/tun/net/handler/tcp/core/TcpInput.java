@@ -1046,9 +1046,9 @@ public class TcpInput<T extends IpPacket> {
                 log.debug(logFormat(ipPacket, "(PASSIVE) Connection handshake 1/4: FIN"));
 
                 log.debug(logFormat(
-                        iph.getProtocol().name(),
-                        iph.getDstAddr(), th.getDstPort().valueAsInt(),
-                        iph.getSrcAddr(), th.getSrcPort().valueAsInt(),
+                        "TCP",
+                        tp.ir_rmt_addr, th.getDstPort().valueAsInt(),
+                        tp.ir_loc_addr, th.getSrcPort().valueAsInt(),
                         "(PASSIVE) Connection handshake 2/4: ACK"
                 ));
                 /* Move to CLOSE_WAIT */
@@ -1079,8 +1079,8 @@ public class TcpInput<T extends IpPacket> {
 //                final TcpHeader th = ipPacket.get(TcpPacket.class).getHeader();
                 log.debug(logFormat(
                         iph.getProtocol().name(),
-                        iph.getDstAddr(), th.getDstPort().valueAsInt(),
-                        iph.getSrcAddr(), th.getSrcPort().valueAsInt(),
+                        tp.ir_rmt_addr, th.getDstPort().valueAsInt(),
+                        tp.ir_loc_addr, th.getSrcPort().valueAsInt(),
                         "(ACTIVE) Connection handshake 4/4: ACK"
                 ));
                 output.tcp_send_ack(net, tp);
@@ -1497,6 +1497,7 @@ public class TcpInput<T extends IpPacket> {
         sk.childCloseListener = new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
+                // FIXME getHostName skip dns query.
                 log.info(logFormat(ipPacket, "Connection to {}:{} has been disconnected"), sk.ir_loc_addr.getHostName(), sk.ir_num.valueAsInt());
                 TcpState state = sk.state();
                 if (demultiplexer.tcp_close_state(sk)) {

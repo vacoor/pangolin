@@ -65,7 +65,13 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
             }
             // throw new UnknownHostException(String.format("Can't resolve hostname for fake IP: %s", address.getHostAddress()));
         }
-        return address;
+
+        // SKIP address.getHostName();
+        return noDnsQuery(address);
+    }
+
+    protected InetAddress noDnsQuery(final InetAddress address) throws UnknownHostException {
+        return InetAddress.getByAddress(address.getHostAddress(), address.getAddress());
     }
 
     protected abstract TcpDemultiplexer<T> create(

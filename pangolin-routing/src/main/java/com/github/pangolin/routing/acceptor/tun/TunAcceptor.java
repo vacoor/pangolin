@@ -23,12 +23,7 @@ import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.util.SocketUtils;
 import freework.crypto.digest.Hash;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.DefaultEventLoopGroup;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.handler.codec.dns.DatagramDnsQuery;
 import io.netty.handler.codec.dns.DatagramDnsResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -157,9 +152,9 @@ public class TunAcceptor implements Acceptor {
                     }
 
                     // TODO add route
-                     final InetAddress dst = SocketUtils.addressByName("10.188.70.45");
-                     final InetAddress gw = SocketUtils.addressByName("198.18.0.1");
-                     NetworkRoutingTable.get().add(dst, (byte) 24, gw, adapter.name(), 0);
+                    final InetAddress dst = SocketUtils.addressByName("10.188.70.45");
+                    final InetAddress gw = SocketUtils.addressByName("198.18.0.1");
+                    NetworkRoutingTable.get().add(dst, (byte) 24, gw, adapter.name(), 0);
                 } else {
                     log.error("Tun adapter bound error: {}", future.cause().getMessage(), future.cause());
                 }
@@ -204,7 +199,7 @@ public class TunAcceptor implements Acceptor {
     private static String determineUuid(final InterfaceAddressEx... bindings) {
         final StringBuilder buff = new StringBuilder();
         for (final InterfaceAddressEx binding : bindings) {
-            buff.append(binding.getAddress().getHostName()).append(binding.getNetworkPrefixLength()).append(";");
+            buff.append(binding.getAddress().getHostAddress()).append(binding.getNetworkPrefixLength()).append(";");
         }
         final String hash = new Hash.MD5(buff.toString()).toHex().toUpperCase();
         buff.setLength(0);

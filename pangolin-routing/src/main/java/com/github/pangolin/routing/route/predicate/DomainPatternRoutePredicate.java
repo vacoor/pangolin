@@ -16,6 +16,7 @@ public class DomainPatternRoutePredicate implements RoutePredicate<InetSocketAdd
     @Override
     public boolean test(final InetSocketAddress address) {
         final String hostname = address.isUnresolved()
+                // FIXME getHostName() skip dns query.
                 ? address.getHostString() : address.getAddress().getHostName();
         return MATCHER.match(pattern, hostname);
     }

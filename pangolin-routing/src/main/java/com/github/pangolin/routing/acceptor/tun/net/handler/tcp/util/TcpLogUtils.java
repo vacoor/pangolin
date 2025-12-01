@@ -131,6 +131,10 @@ public class TcpLogUtils {
     }
 
     private static StringBuilder stringify(final StringBuilder buff, final InetAddress addr) {
+        /*-
+         * FIXME: A reverse name lookup will be performed and the result will be returned
+         * based on the system configured name lookup service.
+         */
         final String hostname = addr.getHostName();
         final String hostAddress = addr.getHostAddress();
         if (null != hostname && !hostname.isEmpty() && !hostname.equals(hostAddress)) {

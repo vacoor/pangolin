@@ -182,16 +182,18 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
     static void tcp_v4_send_reset(final Channel net, IpV4Header rawRequest, TcpPacket skb, int err) {
+        final Inet4Address dstAddr = rawRequest.getDstAddr();
+        final Inet4Address srcAddr = rawRequest.getSrcAddr();
         log.warn("SEND-RST: {}", err);
         // FIXME
         // send reset.
-        TcpPacket.Builder buf = new TcpPacket.Builder();
-
         final TcpPacket.TcpHeader th = skb.getHeader();
+
+        TcpPacket.Builder buf = new TcpPacket.Builder();
         /*-
          * Swap the send and the receive.
          */
-        buf.srcAddr(rawRequest.getDstAddr())
+        buf.srcAddr(dstAddr)
                 .srcPort(th.getDstPort())
                 .rst(true);
 
@@ -202,9 +204,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
             buf.acknowledgmentNumber(determineEndSeq(skb));
         }
 
-        buf.dstAddr(rawRequest.getSrcAddr())
+        buf.dstAddr(srcAddr)
                 .dstPort(th.getSrcPort())
-                .dstAddr(rawRequest.getSrcAddr())
                 .paddingAtBuild(true)
                 .correctLengthAtBuild(true)
                 .correctChecksumAtBuild(true);
@@ -215,8 +216,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
 
         arg.version(IpVersion.IPV4)
                 .protocol(rawRequest.getProtocol())
-                .srcAddr(rawRequest.getDstAddr())
-                .dstAddr(rawRequest.getSrcAddr())
+                .srcAddr(dstAddr)
+                .dstAddr(srcAddr)
                 .ttl(rawRequest.getTtl())
                 // FIXME
                 .fragmentOffset(rawRequest.getFragmentOffset())
@@ -288,14 +289,16 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
 
     protected void tcp_v4_send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, final IpHeader iphdr, final TcpPacket syn_skb) {
         final IpV4Header iph = (IpV4Header) iphdr;
-        Inet4Address dstAddr = (Inet4Address) iphdr.getDstAddr();
-        Inet4Address srcAddr = (Inet4Address) iphdr.getSrcAddr();
+        Inet4Address ir_loc_addr = (Inet4Address) req.ir_loc_addr;
+        Inet4Address ir_rmt_addr = (Inet4Address) req.ir_rmt_addr;
+
+
 
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
         final TcpPacket.Builder skb = output.tcp_make_synack(listenSock, req, iph, syn_skb)
                 .asBuilder()
-                .srcAddr(dstAddr)
-                .dstAddr(srcAddr)
+                .srcAddr(ir_loc_addr)
+                .dstAddr(ir_rmt_addr)
                 .srcPort(syn_skb.getHeader().getDstPort())
                 .dstPort(syn_skb.getHeader().getSrcPort());
 
@@ -305,8 +308,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 .ttl(iph.getTtl())
                 .identification(iph.getIdentification())
                 .fragmentOffset(iph.getFragmentOffset())
-                .srcAddr(dstAddr)
-                .dstAddr(srcAddr)
+                .srcAddr(ir_loc_addr)
+                .dstAddr(ir_rmt_addr)
                 .protocol(IpNumber.TCP)
 
                 .paddingAtBuild(true)
