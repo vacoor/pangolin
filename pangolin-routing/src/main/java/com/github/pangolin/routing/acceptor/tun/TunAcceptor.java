@@ -140,8 +140,8 @@ public class TunAcceptor implements Acceptor {
                             255.255.255.0
                             192.168.1.1
                          */
-                        DarwinDns.addDns(dnsServers);
-//                        DarwinDns.addGlobalDns(dnsServers, true);
+                         DarwinDns.addDns(dnsServers);
+//                        DarwinDns.setDns(dnsServers);
                         log.info("Set DNS server to: {}", Arrays.toString(dnsServers));
 
                         DarwinDns.flushDnsCache();
