@@ -128,7 +128,7 @@ public class TcpHandshaker {
             public void operationComplete(ChannelFuture future) throws Exception {
                 // for TCP_NEW_SYN_RECV, TCP_SYN_RECV
                 log.debug(logFormat(ipPacket, "Connection to {}:{} has been disconnected"), resolved.getHostString(), resolved.getPort());
-                log.debug(logFormat(ipPacket, "Connection handshake: ABORT"));
+                log.debug(logFormat(ipPacket, "Connection handshake 3/3: ABORT"));
 
                 // af_ops.send_synack(net, parent, req, ipHdr, tcpPacket);
                 // FIXME set reset.
