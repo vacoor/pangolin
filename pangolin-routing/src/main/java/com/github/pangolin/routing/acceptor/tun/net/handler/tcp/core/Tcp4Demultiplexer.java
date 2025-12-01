@@ -4,6 +4,8 @@ import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
@@ -13,6 +15,7 @@ import org.pcap4j.packet.namednumber.IpNumber;
 import org.pcap4j.packet.namednumber.IpVersion;
 
 import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.util.Map;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
@@ -285,11 +288,14 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
 
     protected void tcp_v4_send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, final IpHeader iphdr, final TcpPacket syn_skb) {
         final IpV4Header iph = (IpV4Header) iphdr;
+        Inet4Address dstAddr = (Inet4Address) iphdr.getDstAddr();
+        Inet4Address srcAddr = (Inet4Address) iphdr.getSrcAddr();
+
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
         final TcpPacket.Builder skb = output.tcp_make_synack(listenSock, req, iph, syn_skb)
                 .asBuilder()
-                .srcAddr(iph.getDstAddr())
-                .dstAddr(iph.getSrcAddr())
+                .srcAddr(dstAddr)
+                .dstAddr(srcAddr)
                 .srcPort(syn_skb.getHeader().getDstPort())
                 .dstPort(syn_skb.getHeader().getSrcPort());
 
@@ -299,8 +305,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 .ttl(iph.getTtl())
                 .identification(iph.getIdentification())
                 .fragmentOffset(iph.getFragmentOffset())
-                .srcAddr(iph.getDstAddr())
-                .dstAddr(iph.getSrcAddr())
+                .srcAddr(dstAddr)
+                .dstAddr(srcAddr)
                 .protocol(IpNumber.TCP)
 
                 .paddingAtBuild(true)
@@ -310,7 +316,13 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 .payloadBuilder(skb)
                 .build();
 
-        net.writeAndFlush(ipPacket);
+        log.warn(logFormat(ipPacket, "SYNACK send starting..."));
+        net.writeAndFlush(ipPacket).addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture future) throws Exception {
+                log.warn(logFormat(ipPacket, "SYNACK send successful"));
+            }
+        });
     }
 
     /**

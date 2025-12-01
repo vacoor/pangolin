@@ -1161,10 +1161,10 @@ public class TcpOutput<T extends IpPacket> {
         long now = tcp_clock_ns();
 
         final TcpBuffer current = new TcpBuffer()
-                .srcAddr(ipHdr.getDstAddr())
-                .dstAddr(ipHdr.getSrcAddr())
-                .srcPort(skb.getHeader().getDstPort())
-                .dstPort(skb.getHeader().getSrcPort())
+//                .srcAddr(ipHdr.getDstAddr())
+//                .dstAddr(ipHdr.getSrcAddr())
+//                .srcPort(skb.getHeader().getDstPort())
+//                .dstPort(skb.getHeader().getSrcPort())
                 .syn(true).ack(true)
                 .sequenceNumber(req.snt_isn)
                 .acknowledgmentNumber(req.rcv_nxt)
