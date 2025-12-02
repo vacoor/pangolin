@@ -31,6 +31,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Arrays;
+import java.util.concurrent.TimeUnit;
 
 /**
  *
@@ -131,6 +132,13 @@ public class TunAcceptor implements Acceptor {
 
                         WindowsNetworkInterface.flushDnsCache();
                         log.info("Flush DNS cache");
+
+                        future.channel().eventLoop().schedule(() -> {
+                            for (final NetworkRoutingTable.Route route : NetworkRoutingTable.get().routes()) {
+                                System.out.println(route);
+                            }
+                        }, 3, TimeUnit.SECONDS);
+
                     } else if (adapter instanceof DarwinTunAdapter) {
                         // networksetup -setdnsservers "Wi-Fi" 127.0.0.1 or "empty"
                         // sudo killall -HUP mDNSResponder;
@@ -151,9 +159,11 @@ public class TunAcceptor implements Acceptor {
                         log.warn("Can't flush DNS cache");
                     }
 
+                    final InetAddress gw = SocketUtils.addressByName("198.18.0.1");
+//                    NetworkRoutingTable.get().add(gw, (byte) 32, gw, adapter.name(), 25);
+
                     // TODO add route
                     final InetAddress dst = SocketUtils.addressByName("10.188.70.45");
-                    final InetAddress gw = SocketUtils.addressByName("198.18.0.1");
                     NetworkRoutingTable.get().add(dst, (byte) 24, gw, adapter.name(), 0);
                 } else {
                     log.error("Tun adapter bound error: {}", future.cause().getMessage(), future.cause());

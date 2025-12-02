@@ -1,13 +1,13 @@
 package com.github.pangolin.routing.acceptor.tun.adapter.darwin;
 
 import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
+import com.github.pangolin.routing.acceptor.tun.adapter.TunAdapter;
 import com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.IfUtun;
 import com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.KernControl;
 import com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Socket;
 import com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.SysDomain;
 import com.github.pangolin.routing.acceptor.tun.adapter.unix.jna.LibC;
 import com.github.pangolin.routing.acceptor.tun.adapter.util.NetUtils2;
-import com.github.pangolin.routing.acceptor.tun.adapter.TunAdapter;
 import com.google.common.collect.Sets;
 import com.sun.jna.Native;
 import com.sun.jna.Structure;
@@ -193,7 +193,7 @@ public class DarwinTunAdapter extends TunAdapter {
             nix.addInterfaceAddress(binding);
 
             /*-
-             * MacOS 不会添加默认网关路由.
+             * MacOS 不会添加默认路由.
              * sudo route add -net 198.18.0.0/24 198.18.0.1
              */
             final InetAddress gw = binding.getAddress();

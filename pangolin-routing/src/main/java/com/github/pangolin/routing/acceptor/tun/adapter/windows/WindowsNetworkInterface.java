@@ -416,6 +416,7 @@ public class WindowsNetworkInterface implements NetworkInterfaceEx {
         row.ValidLifetime = 0xffffffff;
         row.PreferredLifetime = 0xffffffff;
         row.DadState = 4;
+        row.SkipAsSource = 0;
 
         final int err = IP_HLP_API.CreateUnicastIpAddressEntry(row);
         if (WinError.NO_ERROR != err && err != WinError.ERROR_OBJECT_ALREADY_EXISTS) {

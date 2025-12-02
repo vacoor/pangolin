@@ -370,12 +370,14 @@ public class TcpTimer {
         // ...
 
         long l = tcp_clamp_rto_to_user_timeout(tp);
-        log.info(logFormat(
-                "TCP",
-                tp.ir_loc_addr, tp.ir_num.valueAsInt(),
-                tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
-                "next timeout: {}"
-        ), new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date(System.currentTimeMillis() + l)));
+        if (log.isTraceEnabled()) {
+            log.trace(logFormat(
+                    "TCP",
+                    tp.ir_loc_addr, tp.ir_num.valueAsInt(),
+                    tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                    "next timeout: {}"
+            ), new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date(System.currentTimeMillis() + l)));
+        }
         tp.tcp_reset_xmit_timer(this, ICSK_TIME_RETRANS, l, false);
 //        if (retransmits_timed_out(sysctl_tcp_retries1 + 1, 0)) {
         // 重置路由缓存

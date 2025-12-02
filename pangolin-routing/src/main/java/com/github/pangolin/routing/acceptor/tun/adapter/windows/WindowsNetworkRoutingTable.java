@@ -91,8 +91,8 @@ public class WindowsNetworkRoutingTable extends NetworkRoutingTable {
      * @param interfaceLuid the LUID of interface, force the route to be associated with the specified device
      * @param metric        the metric field in the routing table (used by routing daemons)
      */
-    private static void add0(final InetAddress dst, final byte prefix,
-                             final InetAddress gw, final long interfaceLuid, final int metric) {
+    static void add0(final InetAddress dst, final byte prefix,
+                     final InetAddress gw, final long interfaceLuid, final int metric) {
         final MIB_IPFORWARD_ROW2 row = new MIB_IPFORWARD_ROW2();
         IP_HLP_API.InitializeIpForwardEntry(row);
 

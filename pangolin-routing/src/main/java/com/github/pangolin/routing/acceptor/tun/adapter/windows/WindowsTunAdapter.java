@@ -1,25 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.adapter.windows;
 
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WINTUN_ADAPTER_HANDLE;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WINTUN_SESSION_HANDLE;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunAllocateSendPacket;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunCloseAdapter;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunCreateAdapter;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunEndSession;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunGetAdapterLUID;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunGetReadWaitEvent;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunGetRunningDriverVersion;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunOpenAdapter;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunReceivePacket;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunReleaseReceivePacket;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunSendPacket;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.WintunStartSession;
-import static com.sun.jna.platform.win32.Guid.GUID;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
-
 import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
-import com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib;
 import com.github.pangolin.routing.acceptor.tun.adapter.TunAdapter;
+import com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
@@ -33,6 +16,10 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+
+import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.WintunLib.*;
+import static com.sun.jna.platform.win32.Guid.GUID;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
 
 /**
  * Windows tun adapter based on <a href="https://www.wintun.net/">wintun</a>.
@@ -187,6 +174,18 @@ public class WindowsTunAdapter extends TunAdapter {
                     mtuToUse = WindowsNetworkInterface.getMTU0(luid, AF_INET);
                 }
 
+                /*-
+                 * automatic add routes:
+                 * route add 198.18.0.0 mask 255.255.255.0 0.0.0.0 metric 261 IF 12
+                 * route add 198.18.0.1 mask 255.255.255.255 0.0.0.0 metric 261 IF 12
+                 *
+                 * if want to capture all by tun:
+                 * route add 198.18.0.0 mask 255.255.255.0 198.18.0.1 metric 261 IF 12
+                 * route add 198.18.0.1 mask 255.255.255.255 198.18.0.1 metric 261 IF 12
+                 *
+                 * route delete 198.18.0.0 mask 255.255.255.0 0.0.0.0
+                 * route delete 198.18.0.1 mask 255.255.255.255 0.0.0.0
+                 */
                 for (final InterfaceAddressEx binding : bindings) {
                     WindowsNetworkInterface.addInterfaceAddress0(
                             luid,
