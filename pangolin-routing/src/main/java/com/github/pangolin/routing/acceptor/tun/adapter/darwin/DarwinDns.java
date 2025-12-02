@@ -174,7 +174,7 @@ public final class DarwinDns {
                 watch(name, patterns, callback);
             }
         });
-        worker.setName("DNS-Watcher");
+        worker.setName("DNS-WATCHER");
         worker.setDaemon(true);
         return worker;
     }
@@ -206,6 +206,20 @@ public final class DarwinDns {
                 }
             }
         };
+    }
+
+    public static String[] getDns() {
+        final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR("GET-DNS"), null, null);
+        try {
+            final String primaryServiceId = getPrimaryServiceId(store);
+            if (null == primaryServiceId) {
+                return null;
+            }
+            final String[] manuallyServiceDns = getServiceDns(store, primaryServiceId, true);
+            return null != manuallyServiceDns ? manuallyServiceDns : getServiceDns(store, primaryServiceId, false);
+        } finally {
+            CF.CFRelease(store);
+        }
     }
 
     /**

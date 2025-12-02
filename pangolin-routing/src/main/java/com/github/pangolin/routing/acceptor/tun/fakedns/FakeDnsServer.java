@@ -1,8 +1,10 @@
 package com.github.pangolin.routing.acceptor.tun.fakedns;
 
+import com.github.pangolin.routing.acceptor.tun.adapter.darwin.DarwinDns;
+import com.github.pangolin.routing.acceptor.tun.adapter.windows.WindowsNetworkInterface;
 import com.github.pangolin.routing.acceptor.tun.fakedns.handler.DatagramDnsProxyServerHandler;
 import com.github.pangolin.routing.acceptor.tun.fakedns.handler.DatagramFakeDnsServerHandler;
-import com.github.pangolin.routing.acceptor.tun.adapter.windows.WindowsNetworkInterface;
+import com.github.pangolin.routing.util.SocketUtils;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -17,6 +19,7 @@ import org.springframework.util.CollectionUtils;
 
 import java.net.InetSocketAddress;
 import java.net.SocketException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Predicate;
@@ -46,7 +49,14 @@ public class FakeDnsServer {
                     .collect(Collectors.toList());
         }
         if (PlatformDependent.isOsx()) {
-            // DarwinDns.getPrimaryDnsServers();
+            final String[] dns = DarwinDns.getDns();
+            return null != dns ? Arrays.stream(dns)
+                    .map(SocketUtils::addressByName)
+                    .filter(a -> !a.isAnyLocalAddress())
+                    .filter(a -> !a.isLoopbackAddress())
+                    .map(a -> new InetSocketAddress(a, 53))
+                    .collect(Collectors.toList())
+                    : Collections.emptyList();
         }
         return Collections.singletonList(new InetSocketAddress("192.168.1.1", 53));
     }

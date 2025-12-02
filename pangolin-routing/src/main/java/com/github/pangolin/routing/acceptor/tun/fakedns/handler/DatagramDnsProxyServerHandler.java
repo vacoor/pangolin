@@ -15,6 +15,7 @@ import io.netty.handler.codec.dns.DnsSection;
 import io.netty.resolver.dns.DnsNameResolver;
 
 import java.net.InetSocketAddress;
+import java.util.List;
 
 public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<DatagramDnsQuery> {
 
@@ -48,6 +49,20 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
         final InetSocketAddress recipient = query.recipient();
         final DnsQuestion question = query.recordAt(DnsSection.QUESTION);
 
+        resolver.resolveAll(question).addListener(f -> {
+            if (f.isSuccess()) {
+                final List<DnsRecord> records = (List<DnsRecord>) f.getNow();
+                final DnsResponse response = new DatagramDnsResponse(recipient, sender, id);
+                response.addRecord(DnsSection.QUESTION, question);
+                for (DnsRecord record : records) {
+                    response.addRecord(DnsSection.ANSWER, record);
+                }
+                ctx.writeAndFlush(response);
+            }
+        });
+
+
+        /*
         resolver.query(question).addListener(f -> {
             if (f.isSuccess()) {
                 final AddressedEnvelope<DnsResponse, InetSocketAddress> envelope = (AddressedEnvelope<DnsResponse, InetSocketAddress>) f.getNow();
@@ -59,6 +74,7 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
                 }
             }
         });
+        */
     }
 
     private DnsResponse getResponse(InetSocketAddress sender, InetSocketAddress recipient, int id, DnsResponse serverResponse) {
