@@ -4,14 +4,7 @@ import io.netty.channel.AddressedEnvelope;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.handler.codec.dns.DatagramDnsQuery;
-import io.netty.handler.codec.dns.DatagramDnsQueryDecoder;
-import io.netty.handler.codec.dns.DatagramDnsResponse;
-import io.netty.handler.codec.dns.DatagramDnsResponseEncoder;
-import io.netty.handler.codec.dns.DnsQuestion;
-import io.netty.handler.codec.dns.DnsRecord;
-import io.netty.handler.codec.dns.DnsResponse;
-import io.netty.handler.codec.dns.DnsSection;
+import io.netty.handler.codec.dns.*;
 import io.netty.resolver.dns.DnsNameResolver;
 
 import java.net.InetSocketAddress;
@@ -48,7 +41,17 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
         final InetSocketAddress sender = query.sender();
         final InetSocketAddress recipient = query.recipient();
         final DnsQuestion question = query.recordAt(DnsSection.QUESTION);
+        if (question.type().intValue() == 65) {
+            final DnsResponse response = new DatagramDnsResponse(recipient, sender, id);
+            response.setCode(DnsResponseCode.NOERROR);
+//            response.addRecord(DnsSection.QUESTION, question);
+            ctx.writeAndFlush(response);
+            return;
+//            question = new DefaultDnsQuestion(question.name(), DnsRecordType.A, question.dnsClass());
+        }
 
+        /*
+        FIXME this code is cache but filtered.
         resolver.resolveAll(question).addListener(f -> {
             if (f.isSuccess()) {
                 final List<DnsRecord> records = (List<DnsRecord>) f.getNow();
@@ -60,9 +63,7 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
                 ctx.writeAndFlush(response);
             }
         });
-
-
-        /*
+        */
         resolver.query(question).addListener(f -> {
             if (f.isSuccess()) {
                 final AddressedEnvelope<DnsResponse, InetSocketAddress> envelope = (AddressedEnvelope<DnsResponse, InetSocketAddress>) f.getNow();
@@ -74,7 +75,6 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
                 }
             }
         });
-        */
     }
 
     private DnsResponse getResponse(InetSocketAddress sender, InetSocketAddress recipient, int id, DnsResponse serverResponse) {
