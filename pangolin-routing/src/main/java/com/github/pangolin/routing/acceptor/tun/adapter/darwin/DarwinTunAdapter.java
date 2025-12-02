@@ -193,7 +193,10 @@ public class DarwinTunAdapter extends TunAdapter {
             nix.addInterfaceAddress(binding);
 
             /*-
-             * MacOS 不会添加默认路由.
+             * Mac OS is a strong-end system model, only accepting datagrams
+             * where the destination address matches the interface.
+             *
+             * Add default TUN network routes:
              * sudo route add -net 198.18.0.0/24 198.18.0.1
              */
             final InetAddress gw = binding.getAddress();

@@ -175,16 +175,20 @@ public class WindowsTunAdapter extends TunAdapter {
                 }
 
                 /*-
-                 * automatic add routes:
-                 * route add 198.18.0.0 mask 255.255.255.0 0.0.0.0 metric 261 IF 12
-                 * route add 198.18.0.1 mask 255.255.255.255 0.0.0.0 metric 261 IF 12
+                 * Windows is a weak-end system model
+                 * where the IP implementation accepts datagrams destined for
+                 * any IP address of the host, regardless of the interface the
+                 * datagram arrives on.
                  *
-                 * if want to capture all by tun:
-                 * route add 198.18.0.0 mask 255.255.255.0 198.18.0.1 metric 261 IF 12
-                 * route add 198.18.0.1 mask 255.255.255.255 198.18.0.1 metric 261 IF 12
+                 * Windows automatically adds routes:
+                 * route add 198.18.0.0 mask 255.255.255.0 0.0.0.0 metric 261 IF {ifindex}
+                 * route add 198.18.0.1 mask 255.255.255.255 0.0.0.0 metric 261 IF {ifindex}
                  *
+                 * if you want the TUN to capture all packets, add the following routes:
                  * route delete 198.18.0.0 mask 255.255.255.0 0.0.0.0
                  * route delete 198.18.0.1 mask 255.255.255.255 0.0.0.0
+                 * route add 198.18.0.0 mask 255.255.255.0 198.18.0.1 metric 261 IF 12
+                 * route add 198.18.0.1 mask 255.255.255.255 198.18.0.1 metric 261 IF 12
                  */
                 for (final InterfaceAddressEx binding : bindings) {
                     WindowsNetworkInterface.addInterfaceAddress0(
