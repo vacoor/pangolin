@@ -1,5 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.fakedns.handler;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.AddressedEnvelope;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
@@ -8,6 +10,7 @@ import io.netty.handler.codec.dns.*;
 import io.netty.resolver.dns.DnsNameResolver;
 
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<DatagramDnsQuery> {
@@ -52,6 +55,9 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
 
         /*
         FIXME this code is cache but filtered.
+        https://r2wind.cn/articles/20221111.html
+        https://tao.zz.ac/dns/dns-svcb-https.html
+        https://www.rfc-editor.org/rfc/rfc9460.html
         resolver.resolveAll(question).addListener(f -> {
             if (f.isSuccess()) {
                 final List<DnsRecord> records = (List<DnsRecord>) f.getNow();

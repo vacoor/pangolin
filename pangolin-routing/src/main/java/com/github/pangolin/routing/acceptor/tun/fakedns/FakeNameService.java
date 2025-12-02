@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.fakedns;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.beta.SimpleInet4FakeDns;
 import com.github.pangolin.routing.acceptor.tun.fakedns.beta.SimpleInet6FakeDns;
+import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.dns.*;
 import lombok.extern.slf4j.Slf4j;
@@ -10,6 +11,7 @@ import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
 
 @Slf4j
 public class FakeNameService implements DnsEngine {
@@ -64,6 +66,35 @@ public class FakeNameService implements DnsEngine {
         int ttl = leaseTime;
 
         InetAddress address = null;
+
+        /*-
+          https://r2wind.cn/articles/20221111.html
+          https://tao.zz.ac/dns/dns-svcb-https.html
+          https://www.rfc-editor.org/rfc/rfc9460.html
+         */
+        final int HTTPS = 65;
+        if (HTTPS == type.intValue()) {
+            address = lookupHostAddress4(hostname);
+            if (null != address) {
+                ByteBuf buf = Unpooled.buffer();
+                buf.writeShort(1);  // svc priority
+                buf.writeByte(0);
+
+                buf.writeShort(1);  // KEY=ALPN
+                buf.writeShort(3);  // VALUE LENGTH
+                buf.writeByte(2);
+                buf.writeBytes("h2".getBytes(StandardCharsets.UTF_8));
+
+                buf.writeShort(4);   // ipv4hint
+                buf.writeShort(4);
+                buf.writeBytes(address.getAddress());
+
+                DefaultDnsRawRecord httpsRecord = new DefaultDnsRawRecord(dnsQuestion.name(), DnsRecordType.valueOf(HTTPS), 10, buf);
+                return newResponse(dnsQuery, httpsRecord);
+            }
+            return null;
+        }
+
         if (DnsRecordType.A.equals(type)) {
             address = lookupHostAddress4(hostname);
 //        } else if (DnsRecordType.AAAA.equals(type)) {
