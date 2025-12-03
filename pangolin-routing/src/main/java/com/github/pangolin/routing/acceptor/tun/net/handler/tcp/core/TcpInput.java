@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.*;
@@ -1497,8 +1498,9 @@ public class TcpInput<T extends IpPacket> {
         sk.childCloseListener = new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                // FIXME getHostName skip dns query.
-                log.info(logFormat(ipPacket, "Connection to {}:{} has been disconnected"), sk.ir_loc_addr.getHostName(), sk.ir_num.valueAsInt());
+                String hostname = TcpLogUtils.getHostNameNoResolve(sk.ir_loc_addr);
+                hostname = null != hostname ? hostname : sk.ir_loc_addr.getHostAddress();
+                log.info(logFormat(ipPacket, "Connection to {}:{} has been disconnected"), hostname, sk.ir_num.valueAsInt());
                 TcpState state = sk.state();
                 if (demultiplexer.tcp_close_state(sk)) {
                     if (TCP_CLOSE_WAIT.equals(state)) {
