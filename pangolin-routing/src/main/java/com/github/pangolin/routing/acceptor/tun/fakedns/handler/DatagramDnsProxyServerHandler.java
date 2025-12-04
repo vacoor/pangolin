@@ -1,21 +1,22 @@
 package com.github.pangolin.routing.acceptor.tun.fakedns.handler;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
+import com.github.pangolin.routing.acceptor.tun.fakedns.v2.fake.MyDnsCache;
 import io.netty.channel.AddressedEnvelope;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.dns.*;
 import io.netty.resolver.dns.DnsNameResolver;
+import io.netty.util.internal.StringUtil;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.util.List;
 
+@Slf4j
 public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<DatagramDnsQuery> {
 
     private final DnsNameResolver resolver;
+    private final MyDnsCache cache = new MyDnsCache();
 
     public DatagramDnsProxyServerHandler(final DnsNameResolver resolver) {
         this.resolver = resolver;
@@ -60,27 +61,62 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
         https://www.rfc-editor.org/rfc/rfc9460.html
         resolver.resolveAll(question).addListener(f -> {
             if (f.isSuccess()) {
+                final String hostname = question.name();
+                final DnsCnameCache dnsCnameCache = resolver.cnameCache();
+
+                String hostnameToUse = hostname;
+                while (null != hostnameToUse) {
+                    final String cname = dnsCnameCache.get(hostnameWithDot(hostnameToUse));
+                    if (null == cname) {
+                        break;
+                    }
+                    // new DefaultDnsRawRecord(hostnameToUse, DnsRecordType.CNAME, ttl)
+                    hostnameToUse = cname;
+                }
+
                 final List<DnsRecord> records = (List<DnsRecord>) f.getNow();
                 final DnsResponse response = new DatagramDnsResponse(recipient, sender, id);
                 response.addRecord(DnsSection.QUESTION, question);
+
                 for (DnsRecord record : records) {
                     response.addRecord(DnsSection.ANSWER, record);
                 }
+                resolver.authoritativeDnsServerCache().get(qu)
                 ctx.writeAndFlush(response);
             }
         });
+        DnsResponse res = cache.getCache(question, new DatagramDnsResponse(recipient, sender, id));
+        if (res.count(DnsSection.ANSWER) > 0) {
+            log.info("DNS CACHE: {} -> {}", question.name(), res.recordAt(DnsSection.ANSWER));
+            ctx.writeAndFlush(res);
+            return;
+        }
         */
+
+        log.info("[DNS] QUERY: {}", question.name());
         resolver.query(question).addListener(f -> {
             if (f.isSuccess()) {
                 final AddressedEnvelope<DnsResponse, InetSocketAddress> envelope = (AddressedEnvelope<DnsResponse, InetSocketAddress>) f.getNow();
                 try {
+                    cache.cache(question, envelope.content(), ctx.channel().eventLoop());
                     DnsResponse response = getResponse(recipient, sender, id, envelope.content());
+                    for (int i = 0; i < response.count(DnsSection.ANSWER); i++) {
+                        DnsRecord dnsRecord = response.recordAt(DnsSection.ANSWER, i);
+                        log.info("[DNS] QUERY: {} -> {}", question.name(), dnsRecord);
+                    }
                     ctx.writeAndFlush(response);
                 } finally {
                     // envelope.release();
                 }
             }
         });
+    }
+
+    private static String hostnameWithDot(String name) {
+        if (StringUtil.endsWith(name, '.')) {
+            return name;
+        }
+        return name + '.';
     }
 
     private DnsResponse getResponse(InetSocketAddress sender, InetSocketAddress recipient, int id, DnsResponse serverResponse) {
