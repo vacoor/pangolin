@@ -1,33 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.adapter.windows;
 
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.WindowsUtils.toInetAddress;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.WindowsUtils.writeSockAddr;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.DnsLib.DnsFlushResolverCache;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.AF_UNSPEC;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.DNS_INTERFACE_SETTINGS;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.DNS_INTERFACE_SETTINGS_VERSION1;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.DNS_SETTING_IPV6;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.DNS_SETTING_NAMESERVER;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.DNS_SETTING_SEARCHLIST;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.GAA_FLAG_INCLUDE_ALL_INTERFACES;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.GAA_FLAG_INCLUDE_GATEWAYS;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.GAA_FLAG_SKIP_ANYCAST;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.GAA_FLAG_SKIP_FRIENDLY_NAME;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.GAA_FLAG_SKIP_MULTICAST;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.GAA_FLAG_SKIP_UNICAST;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.IP_ADAPTER_ADDRESSES_LH;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.IP_ADAPTER_DNS_SERVER_ADDRESS_XP;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.IP_ADAPTER_DNS_SUFFIX;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.MIB_IPINTERFACE_ROW;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.MIB_UNICASTIPADDRESS_ROW;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.MIB_UNICASTIPADDRESS_TABLE;
-import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.NDIS_IF_MAX_STRING_SIZE;
-import static com.sun.jna.platform.win32.Guid.GUID;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
-import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
-
 import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.acceptor.tun.adapter.NetworkInterfaceEx;
+import com.github.pangolin.routing.acceptor.tun.adapter.util.NetUtils2;
 import com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
@@ -41,16 +16,19 @@ import com.sun.jna.ptr.LongByReference;
 import com.sun.jna.ptr.PointerByReference;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.Inet4Address;
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
-import java.net.UnknownHostException;
+import java.net.*;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.LinkedList;
 import java.util.List;
+
+import static com.github.pangolin.routing.acceptor.tun.adapter.windows.WindowsUtils.toInetAddress;
+import static com.github.pangolin.routing.acceptor.tun.adapter.windows.WindowsUtils.writeSockAddr;
+import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.DnsLib.DnsFlushResolverCache;
+import static com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib.*;
+import static com.sun.jna.platform.win32.Guid.GUID;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
+import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET6;
 
 /**
  * @see <a href="https://github.com/WireGuard/wireguard-windows/blob/master/tunnel/winipcfg/luid.go">luid</a>
@@ -404,6 +382,21 @@ public class WindowsNetworkInterface implements NetworkInterfaceEx {
         addInterfaceAddress0(interfaceLuid, address, prefixLength);
     }
 
+    /**
+     * @see <a href="https://github.com/MicrosoftDocs/win32/blob/docs/desktop-src/IpHlp/managing-ip-addresses-using-addipaddress-and-deleteipaddress.md">Managing IP Addresses Using AddIPAddress and DeleteIPAddress</a>
+     */
+    static void addInterfaceAddress0(final int ifIndex, final Inet4Address address, final byte prefixLength) {
+        final byte[] addr = address.getAddress();
+        final byte[] mask = NetUtils2.cidrPrefixToNetmask(addr, prefixLength);
+        final int addrInt = (addr[0] & 0xff) << 24 | (addr[1] & 0xff) << 16 | (addr[2] & 0xff) << 8 | addr[3] & 0xff;
+        final int maskInt = (mask[0] & 0xff) << 24 | (mask[1] & 0xff) << 16 | (mask[2] & 0xff) << 8 | mask[3] & 0xff;
+        final int err = IP_HLP_API.AddIPAddress(addrInt, maskInt, ifIndex, new IntByReference(), new IntByReference());
+        // FIXME 87
+        if (WinError.NO_ERROR != err) {
+            throw new IllegalStateException("AddIPAddress failed: " + err);
+        }
+    }
+
     static void addInterfaceAddress0(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
         final MIB_UNICASTIPADDRESS_ROW row = new MIB_UNICASTIPADDRESS_ROW();
         IP_HLP_API.InitializeUnicastIpAddressEntry(row);
@@ -413,9 +406,11 @@ public class WindowsNetworkInterface implements NetworkInterfaceEx {
 
         writeSockAddr(row.Address, address);
 
+        row.PrefixOrigin = 1 /*IpPrefixOriginManual*/;
+        row.SuffixOrigin = 1 /*IpSuffixOriginManual*/;
         row.ValidLifetime = 0xffffffff;
         row.PreferredLifetime = 0xffffffff;
-        row.DadState = 4;
+        row.DadState = 4 /*IpDadStatePreferred*/;
         row.SkipAsSource = 0;
 
         final int err = IP_HLP_API.CreateUnicastIpAddressEntry(row);

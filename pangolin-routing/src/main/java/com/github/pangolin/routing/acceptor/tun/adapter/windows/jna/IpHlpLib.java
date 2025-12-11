@@ -1,13 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.adapter.windows.jna;
 
-import static com.sun.jna.platform.win32.Guid.GUID;
-
-import com.sun.jna.LastErrorException;
-import com.sun.jna.Native;
-import com.sun.jna.Pointer;
-import com.sun.jna.Structure;
-import com.sun.jna.Union;
-import com.sun.jna.WString;
+import com.sun.jna.*;
 import com.sun.jna.platform.win32.Guid;
 import com.sun.jna.platform.win32.IPHlpAPI;
 import com.sun.jna.ptr.IntByReference;
@@ -19,10 +12,13 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 
+import static com.sun.jna.platform.win32.Guid.GUID;
+
 /**
  * Windows IP Helper API.
  *
  * @see <a href="https://msdn.microsoft.com/en-us/library/windows/desktop/aa373083(v=vs.85).aspx">IP Helper Reference</a>
+ * @see <a href="https://github.com/MicrosoftDocs/win32/blob/docs/desktop-src/IpHlp/getting-started-with-ip-helper.md">Getting Started with IP Helper</a>
  */
 public interface IpHlpLib extends IPHlpAPI {
     IpHlpLib INSTANCE = Native.load("IPHlpAPI", IpHlpLib.class, W32APIOptions.DEFAULT_OPTIONS);
@@ -117,6 +113,44 @@ public interface IpHlpLib extends IPHlpAPI {
 
 
     // ------------------------ START Interface related ------------------------
+
+    /**
+     * The AddIPAddress function adds the specified IPv4 address to the specified adapter.
+     *
+     * @param Address     The IPv4 address to add to the adapter, in the form of an IPAddr structure.
+     * @param IpMask      The subnet mask for the IPv4 address specified in the Address parameter.
+     *                    The IPMask parameter uses the same format as an IPAddr structure.
+     * @param IfIndex     The index of the adapter on which to add the IPv4 address.
+     * @param NTEContext  A pointer to a ULONG variable.
+     *                    On successful return, this parameter points to the Net Table Entry (NTE) context
+     *                    for the IPv4 address that was added.
+     *                    The caller can later use this context in a call to the DeleteIPAddress function.
+     * @param NTEInstance A pointer to a ULONG variable. On successful return, this parameter points to
+     *                    the NTE instance for the IPv4 address that was added.
+     * @return If the function succeeds, the return value is NO_ERROR.
+     * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-addipaddress">AddIPAddress</a>
+     */
+    int AddIPAddress(final int Address, final int IpMask, final int IfIndex,
+                     final IntByReference NTEContext, final IntByReference NTEInstance);
+
+    /**
+     * The DeleteIPAddress function deletes an IP address previously added using AddIPAddress.
+     *
+     * @param NTEContext The Net Table Entry (NTE) context for the IP address.
+     *                   This context was returned by the previous call to AddIPAddress.
+     * @return The function returns NO_ERROR (zero) if the function is successful.
+     */
+    int DeleteIPAddress(final LongByReference NTEContext);
+
+    /**
+     * The FlushIpNetTable function deletes all ARP entries for the specified interface
+     * from the ARP table on the local computer.
+     *
+     * @param IfIndex The index of the interface for which to delete all ARP entries.
+     * @return The function returns NO_ERROR (zero) if the function is successful.
+     * @see <a href="https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-flushipnettable">FlushIpNetTable</a>
+     */
+    int FlushIpNetTable(final int IfIndex);
 
     /**
      * The MIB_IPINTERFACE_ROW structure stores interface management information for a particular

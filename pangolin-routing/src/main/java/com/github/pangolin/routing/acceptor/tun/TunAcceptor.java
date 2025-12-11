@@ -38,7 +38,7 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 public class TunAcceptor implements Acceptor {
-    private static final String DEFAULT_WINTUN_TYPE = "Pangolin Proxies Host-Only";
+    private static final String DEFAULT_WINTUN_TYPE = "Pangolin Virtual Ethernet Adapter";
 
     private final String ifname;
     private final InterfaceAddressEx[] bindings;

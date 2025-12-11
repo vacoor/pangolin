@@ -190,7 +190,15 @@ public class WindowsTunAdapter extends TunAdapter {
                  * route add 198.18.0.0 mask 255.255.255.0 198.18.0.1 metric 261 IF 12
                  * route add 198.18.0.1 mask 255.255.255.255 198.18.0.1 metric 261 IF 12
                  */
+                 final int ifIndex = WindowsNetworkInterface.interfaceLuidToIndex(luid);
                 for (final InterfaceAddressEx binding : bindings) {
+                    /*
+                    final InetAddress address = binding.getAddress();
+                    if (address instanceof Inet4Address) {
+                        WindowsNetworkInterface.addInterfaceAddress0(ifIndex, (Inet4Address) address, (byte) binding.getNetworkPrefixLength());
+                        continue;
+                    }
+                     */
                     WindowsNetworkInterface.addInterfaceAddress0(
                             luid,
                             binding.getAddress(),
