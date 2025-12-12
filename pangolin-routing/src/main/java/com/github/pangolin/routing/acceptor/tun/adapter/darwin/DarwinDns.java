@@ -133,10 +133,10 @@ public final class DarwinDns {
                      * Clean up the DNS of the previous service when the service changed.
                      */
                     final boolean changed = !Objects.equals(prevServiceId, nextServiceId);
-                    if (null != prevServiceId && changed && removeServiceDns(store, prevServiceId, true, dns, defaultDns)) {
+                    if (null != prevServiceId && changed && removeServiceDns(store, prevServiceId, true, dns)) {
                         log.info("• Cleanup Network Service DNS: {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, prevServiceId), Arrays.asList(dns));
                     }
-                    if (null != prevServiceId && changed && removeServiceDns(store, prevServiceId, false, dns, defaultDns)) {
+                    if (null != prevServiceId && changed && removeServiceDns(store, prevServiceId, false, dns)) {
                         log.info("• Cleanup Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, prevServiceId), Arrays.asList(dns));
                     }
 
