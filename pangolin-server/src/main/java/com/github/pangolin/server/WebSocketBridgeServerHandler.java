@@ -76,13 +76,23 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
     private static final String PARAM_BACKHAUL_ID = "id";
 
     private final String endpointPath;
+    private final String accessKey;
     private final WebSocketBridgeServerEngine webSocketBridgeServerEngine;
     private final WebSocketBridgeServerForwarder webSocketBridgeServerForwarder;
 
     public WebSocketBridgeServerHandler(final String endpointPath,
                                         final WebSocketBridgeServerEngine webSocketBridgeServerEngine,
                                         final WebSocketBridgeServerForwarder webSocketBridgeServerForwarder) {
+        this(endpointPath,
+                System.getProperty("websocket.bridge.access_key", "c254dacd0cde3be75ac2988f691ec105"),
+                webSocketBridgeServerEngine, webSocketBridgeServerForwarder);
+    }
+
+    public WebSocketBridgeServerHandler(final String endpointPath, final String accessKey,
+                                        final WebSocketBridgeServerEngine webSocketBridgeServerEngine,
+                                        final WebSocketBridgeServerForwarder webSocketBridgeServerForwarder) {
         this.endpointPath = endpointPath;
+        this.accessKey = accessKey;
         this.webSocketBridgeServerEngine = webSocketBridgeServerEngine;
         this.webSocketBridgeServerForwarder = webSocketBridgeServerForwarder;
     }
@@ -205,7 +215,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
     }
 
     private boolean authenticate(final String accessKey) {
-        final String accessTokenInSys = System.getProperty("websocket.bridge.access_key", "c254dacd0cde3be75ac2988f691ec105");
+        final String accessTokenInSys = this.accessKey;
         if (null == accessTokenInSys || accessTokenInSys.isEmpty()) {
             return true;
         }
