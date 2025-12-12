@@ -87,6 +87,7 @@ public class WebSocketBridgeServerShell {
         if (0 == cmdline.length) {
             out.println("agent       Agents operations");
             out.println("forward     Port forwarding operations");
+            out.println("connection  Connection operations");
             out.println();
             return;
         }
