@@ -1,5 +1,0 @@
-spring:
-  application:
-    name: pangolin-agent
-  management:
-    tunnel: ws://127.0.0.1:2345/tunnel
