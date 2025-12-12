@@ -94,29 +94,30 @@ public final class DarwinDns {
              * Using "Setup:/Network/Service/{ServiceId}/DNS" when manually (high priority).
              * Using "State:/Network/Service/{ServiceId}/DNS" when automatic.
              */
-            String[] currentDns;
+            String[] defaultDns;
+            String[] dnsToSet;
             final String[] manuallyServiceDns = getServiceDns(store, primaryServiceId, true);
             if (null != manuallyServiceDns) {
-                if (append && !addServiceDns(store, primaryServiceId, true, dns)) {
-                    return false;
-                } else if (!append && !setServiceDns(store, primaryServiceId, true, dns)) {
+                defaultDns = manuallyServiceDns;
+                dnsToSet = append ? merge(dns, defaultDns) : dns;
+                if (!setServiceDns(store, primaryServiceId, true, dnsToSet)) {
                     return false;
                 }
-                currentDns = manuallyServiceDns;
             } else {
                 final String[] automaticServiceDns = getServiceDns(store, primaryServiceId, false);
                 if (null == automaticServiceDns) {
+                    /*-
+                     * Can't detect DNS settings (manually or automatic).
+                     */
                     return false;
                 }
-                if (append && !addServiceDns(store, primaryServiceId, false, dns)) {
-                    return false;
-                } else if (!append && !setServiceDns(store, primaryServiceId, false, dns)) {
+                defaultDns = automaticServiceDns;
+                dnsToSet = append ? merge(dns, defaultDns) : dns;
+                if (!setServiceDns(store, primaryServiceId, false, dnsToSet)) {
                     return false;
                 }
-                currentDns = automaticServiceDns;
             }
 
-            final String[] defaultDns = currentDns;
             serviceIdHolder.set(primaryServiceId);
             watchInBackground(name, new String[]{STATE_GLOBAL_IPV4_KEY}, new SCDynamicStoreCallBack() {
                 @Override
@@ -143,9 +144,9 @@ public final class DarwinDns {
                     /*-
                      * add dns to the current service.
                      */
-                    if (null != nextServiceId && addServiceDns(store, nextServiceId, true, dns)) {
+                    if (null != nextServiceId && setServiceDns(store, nextServiceId, true, dnsToSet)) {
                         log.info("• Add Network Service DNS: {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(dns));
-                    } else if (null != nextServiceId && addServiceDns(store, nextServiceId, false, dns)) {
+                    } else if (null != nextServiceId && setServiceDns(store, nextServiceId, false, dnsToSet)) {
                         log.info("• Add Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(dns));
                     }
                 }
@@ -158,6 +159,13 @@ public final class DarwinDns {
         } finally {
             CF.CFRelease(store);
         }
+    }
+
+    private static String[] merge(final String[] one, final String[] more) {
+        final String[] array = new String[one.length + more.length];
+        System.arraycopy(one, 0, array, 0, one.length);
+        System.arraycopy(more, 0, array, one.length, more.length);
+        return array;
     }
 
     /**
