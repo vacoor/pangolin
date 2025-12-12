@@ -8,10 +8,7 @@ import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -83,7 +80,6 @@ public final class DarwinDns {
     public static boolean setDns(final String[] dns, final boolean append, final boolean cleanupOnShutdown) {
         final String name = DarwinDns.class.getSimpleName();
         final AtomicBoolean shutdownHolder = new AtomicBoolean();
-        final AtomicReference<String> serviceIdHolder = new AtomicReference<>();
         final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR(name), null, null);
         try {
             final String primaryServiceId = getPrimaryServiceId(store);
@@ -94,12 +90,11 @@ public final class DarwinDns {
              * Using "Setup:/Network/Service/{ServiceId}/DNS" when manually (high priority).
              * Using "State:/Network/Service/{ServiceId}/DNS" when automatic.
              */
-            String[] defaultDns;
-            String[] dnsToSet;
+            final String[] defaultDns;
             final String[] manuallyServiceDns = getServiceDns(store, primaryServiceId, true);
             if (null != manuallyServiceDns) {
                 defaultDns = manuallyServiceDns;
-                dnsToSet = append ? merge(dns, defaultDns) : dns;
+                final String[] dnsToSet = append ? merge(dns, defaultDns) : dns;
                 if (!setServiceDns(store, primaryServiceId, true, dnsToSet)) {
                     return false;
                 }
@@ -112,48 +107,62 @@ public final class DarwinDns {
                     return false;
                 }
                 defaultDns = automaticServiceDns;
-                dnsToSet = append ? merge(dns, defaultDns) : dns;
+                final String[] dnsToSet = append ? merge(dns, defaultDns) : dns;
                 if (!setServiceDns(store, primaryServiceId, false, dnsToSet)) {
                     return false;
                 }
             }
 
-            serviceIdHolder.set(primaryServiceId);
+            final AtomicReference<String> prevServiceIdRef = new AtomicReference<>(primaryServiceId);
+            final AtomicReference<String[]> prevDefaultDnsRef = new AtomicReference<>(defaultDns);
             watchInBackground(name, new String[]{STATE_GLOBAL_IPV4_KEY}, new SCDynamicStoreCallBack() {
+
                 @Override
                 public void invoke(final SCDynamicStoreRef store, final CFArrayRef changedKeys, final Pointer info) {
                     if (Thread.currentThread().isInterrupted() || shutdownHolder.get()) {
                         return;
                     }
 
-                    final String prevServiceId = serviceIdHolder.get();
+                    final String prevServiceId = prevServiceIdRef.get();
+                    final String[] prevDefaultDns = prevDefaultDnsRef.get();
                     final String nextServiceId = getPrimaryServiceId(store);
-                    serviceIdHolder.set(nextServiceId);
 
                     /*-
                      * Clean up the DNS of the previous service when the service changed.
                      */
                     final boolean changed = !Objects.equals(prevServiceId, nextServiceId);
-                    if (null != prevServiceId && changed && removeServiceDns(store, prevServiceId, true, dns)) {
+                    if (null != prevServiceId && changed && removeServiceDns(store, prevServiceId, true, dns, prevDefaultDns)) {
                         log.info("• Cleanup Network Service DNS: {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, prevServiceId), Arrays.asList(dns));
                     }
-                    if (null != prevServiceId && changed && removeServiceDns(store, prevServiceId, false, dns)) {
+                    if (null != prevServiceId && changed && removeServiceDns(store, prevServiceId, false, dns, prevDefaultDns)) {
                         log.info("• Cleanup Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, prevServiceId), Arrays.asList(dns));
                     }
+
+                    prevServiceIdRef.set(nextServiceId);
 
                     /*-
                      * add dns to the current service.
                      */
-                    if (null != nextServiceId && setServiceDns(store, nextServiceId, true, dnsToSet)) {
-                        log.info("• Add Network Service DNS: {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(dns));
-                    } else if (null != nextServiceId && setServiceDns(store, nextServiceId, false, dnsToSet)) {
-                        log.info("• Add Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(dns));
+                    if (null != nextServiceId) {
+                        String[] nextDefaultDns = getServiceDns(store, nextServiceId, true);
+                        nextDefaultDns = null != nextDefaultDns ? nextDefaultDns : getServiceDns(store, nextServiceId, false);
+                        nextDefaultDns = null != nextDefaultDns ? nextDefaultDns : new String[0];
+                        prevDefaultDnsRef.set(nextDefaultDns);
+
+                        final String[] dnsToSet = append ? merge(dns, nextDefaultDns) : dns;
+                        if (setServiceDns(store, nextServiceId, true, dnsToSet)) {
+                            log.info("• Set Network Service DNS: {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(dnsToSet));
+                        } else if (setServiceDns(store, nextServiceId, false, dnsToSet)) {
+                            log.info("• Set Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(dnsToSet));
+                        }
+                    } else {
+                        prevDefaultDnsRef.set(new String[0]);
                     }
                 }
             }).start();
 
             if (cleanupOnShutdown) {
-                Runtime.getRuntime().addShutdownHook(dnsCleaner(name, serviceIdHolder, shutdownHolder, dns, defaultDns));
+                Runtime.getRuntime().addShutdownHook(dnsCleaner(name, prevServiceIdRef, shutdownHolder, dns, prevDefaultDnsRef));
             }
             return true;
         } finally {
@@ -162,10 +171,18 @@ public final class DarwinDns {
     }
 
     private static String[] merge(final String[] one, final String[] more) {
-        final String[] array = new String[one.length + more.length];
-        System.arraycopy(one, 0, array, 0, one.length);
-        System.arraycopy(more, 0, array, one.length, more.length);
-        return array;
+        final List<String> ret = new ArrayList<>();
+        for (final String s : one) {
+            if (!ret.contains(s)) {
+                ret.add(s);
+            }
+        }
+        for (String s : more) {
+            if (!ret.contains(s)) {
+                ret.add(s);
+            }
+        }
+        return ret.toArray(new String[0]);
     }
 
     /**
@@ -189,8 +206,10 @@ public final class DarwinDns {
 
     private static Thread dnsCleaner(final String name,
                                      final AtomicReference<String> serviceIdHolder,
-                                     final AtomicBoolean shutdownHolder, final String[] dns, final String... defaultDns) {
+                                     final AtomicBoolean shutdownHolder,
+                                     final String[] dns, final AtomicReference<String[]> defaultDnsHolder) {
         final String dnsAddresses = Arrays.toString(dns);
+        final String[] defaultDns = defaultDnsHolder.get();
         return new Thread() {
             @Override
             public void run() {
