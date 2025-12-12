@@ -1,9 +1,9 @@
-package com.github.pangolin.server.mgt;
+package com.github.pangolin.server.shell;
 
 import com.github.pangolin.server.WebSocketBridgeServerEngine;
 import com.github.pangolin.server.WebSocketBridgeServerForwarder;
-import com.github.pangolin.server.mgt.shell.ConsoleReaderFactory;
-import com.github.pangolin.server.mgt.shell.WebSocketBridgeServerShell;
+import com.github.pangolin.server.shell.ConsoleReaderFactory;
+import com.github.pangolin.server.shell.WebSocketBridgeServerShell;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -160,7 +161,7 @@ public class WebSocketBridgeServerConsoleHandler extends SimpleChannelInboundHan
 
         @Override
         public String getOutputEncoding() {
-            return "UTF-8";
+            return StandardCharsets.UTF_8.name();
         }
 
         @Override

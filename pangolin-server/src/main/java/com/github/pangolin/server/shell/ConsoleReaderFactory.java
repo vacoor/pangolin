@@ -1,4 +1,4 @@
-package com.github.pangolin.server.mgt.shell;
+package com.github.pangolin.server.shell;
 
 import jline.Terminal;
 import jline.console.ConsoleReader;
@@ -45,7 +45,8 @@ public abstract class ConsoleReaderFactory {
         return completion;
     }
 
-    private static Completer createCompleter(final Supplier<Collection<String>> agentNames, final Supplier<Collection<String>> connectionIds) {
+    private static Completer createCompleter(final Supplier<Collection<String>> agentNames,
+                                             final Supplier<Collection<String>> connectionIds) {
         return new AggregateCompleter(
                 new StringsCompleter("exit"),
                 new ArgumentCompleter(new StringsCompleter("agent"), new StringsCompleter("list"), NullCompleter.INSTANCE),

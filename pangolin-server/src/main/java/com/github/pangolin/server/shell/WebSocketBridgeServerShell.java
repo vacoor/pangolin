@@ -1,4 +1,4 @@
-package com.github.pangolin.server.mgt.shell;
+package com.github.pangolin.server.shell;
 
 import com.github.pangolin.server.WebSocketBridgeServerEngine;
 import com.github.pangolin.server.WebSocketBridgeServerForwarder;
@@ -25,15 +25,17 @@ public class WebSocketBridgeServerShell {
 
     private final boolean breakOnNull;
     private final ConsoleReader console;
-    private final WebSocketBridgeServerEngine webSocketBridgeServerEngine;
+    private final WebSocketBridgeServerEngine engine;
     private final WebSocketBridgeServerForwarder forwarder;
 
     private final AtomicBoolean started = new AtomicBoolean(false);
 
-    private WebSocketBridgeServerShell(final ConsoleReader console, final boolean breakOnNull, final WebSocketBridgeServerEngine webSocketBridgeServerEngine, final WebSocketBridgeServerForwarder forwarder) {
+    private WebSocketBridgeServerShell(final ConsoleReader console, final boolean breakOnNull,
+                                       final WebSocketBridgeServerEngine engine,
+                                       final WebSocketBridgeServerForwarder forwarder) {
         this.console = console;
         this.breakOnNull = breakOnNull;
-        this.webSocketBridgeServerEngine = webSocketBridgeServerEngine;
+        this.engine = engine;
         this.forwarder = forwarder;
     }
 
@@ -88,6 +90,7 @@ public class WebSocketBridgeServerShell {
             out.println("agent       Agents operations");
             out.println("forward     Port forwarding operations");
             out.println("connection  Connection operations");
+            out.println("exit        ");
             out.println();
             return;
         }
@@ -202,7 +205,7 @@ public class WebSocketBridgeServerShell {
 
     private void doExecuteConnectionCommand(final List<String> args, final ConsoleReader out) throws IOException {
         if ("list".equals(safeGet(args, 0))) {
-            final Collection<WebSocketBridgeServerEngine.Connection> connections = webSocketBridgeServerEngine.getConnections();
+            final Collection<WebSocketBridgeServerEngine.Connection> connections = engine.getConnections();
             final String[][] table = new String[connections.size() + 1][];
             int i = 0;
             table[i++] = new String[]{"ID", "CONNECTION", "STATE"};
@@ -220,7 +223,7 @@ public class WebSocketBridgeServerShell {
             table.add(new String[]{"CONNECTION", "RESULT"});
             for (final String connectionId : args.subList(1, args.size())) {
                 try {
-                    if (webSocketBridgeServerEngine.kill(connectionId)) {
+                    if (engine.kill(connectionId)) {
                         table.add(new String[]{connectionId, "Killed"});
                     } else {
                         table.add(new String[]{connectionId, "Not found"});
@@ -241,11 +244,11 @@ public class WebSocketBridgeServerShell {
 
 
     private Collection<WebSocketBridgeServerEngine.Agent> getAgents() {
-        return webSocketBridgeServerEngine.getAgents();
+        return engine.getAgents();
     }
 
     private boolean removeAgent(final String agentKey) throws InterruptedException {
-        final Collection<WebSocketBridgeServerEngine.Agent> agents = webSocketBridgeServerEngine.getAgents();
+        final Collection<WebSocketBridgeServerEngine.Agent> agents = engine.getAgents();
         final Iterator<WebSocketBridgeServerEngine.Agent> it = agents.iterator();
         while (it.hasNext()) {
             final WebSocketBridgeServerEngine.Agent agent = it.next();

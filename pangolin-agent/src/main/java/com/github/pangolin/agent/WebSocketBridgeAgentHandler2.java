@@ -1,50 +1,28 @@
 package com.github.pangolin.agent;
 
+import com.github.pangolin.agent.util.Channels2;
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.util.Channels;
-import com.github.pangolin.agent.util.Channels2;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ChannelPromise;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
-import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
-import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
-import io.netty.handler.codec.http.websocketx.WebSocketCloseStatus;
-import io.netty.handler.codec.http.websocketx.WebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
-import io.netty.handler.codec.http.websocketx.WebSocketVersion;
+import io.netty.handler.codec.http.websocketx.*;
 import io.netty.handler.flow.FlowControlHandler;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.CharsetUtil;
 import io.netty.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
-import java.net.URI;
-import java.net.UnknownHostException;
+import java.net.*;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -54,7 +32,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 public class WebSocketBridgeAgentHandler2 extends SimpleChannelInboundHandler<WebSocketFrame> {
     private static final String AGENT_VERSION = "1.1";
-    private static final String BACKHAUL_PROTOCOL = "PASSIVE";
+    private static final String PROTO_AGENT_BACKHAUL = "BACKHAUL";
 
     private static final byte IPv4_ADDR_SIZE = 4;
     private static final byte IPv6_ADDR_SIZE = 16;
@@ -207,7 +185,7 @@ public class WebSocketBridgeAgentHandler2 extends SimpleChannelInboundHandler<We
         final URI uri = handshaker.uri();
         final String endpoint = uri.getScheme() + "://" + uri.getHost() + ":" + uri.getPort() + uri.getPath();
         final URI backhaulWebSocketUri = URI.create(endpoint + "?id=" + id);
-        return newHandshaker(backhaulWebSocketUri, BACKHAUL_PROTOCOL);
+        return newHandshaker(backhaulWebSocketUri, PROTO_AGENT_BACKHAUL);
     }
 
     private WebSocketClientHandshaker newHandshaker(final URI webSocketEndpoint, final String subprotocol) {
@@ -317,6 +295,7 @@ public class WebSocketBridgeAgentHandler2 extends SimpleChannelInboundHandler<We
     private static final int MAX_HTTP_CONTENT_LENGTH = 1024 * 1024 * 8;
 
     public static void main(String[] args) throws InterruptedException {
+
         final WebSocketClientHandshaker handshaker = WebSocketClientHandshakerFactory.newHandshaker(
                 URI.create("ws://localhost:8888"), WebSocketVersion.V13, "x", true, new DefaultHttpHeaders()
         );

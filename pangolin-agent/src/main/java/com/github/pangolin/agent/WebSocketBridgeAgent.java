@@ -53,9 +53,9 @@ public class WebSocketBridgeAgent {
         );
         return Channels2.openWs(
                 handshaker, workerGroup,
-                new IdleStateHandler(600, 600, 600),
-                new WebSocketBridgeAgentHandler(name, handshaker, customHttpHeaders)
-                 , new WebSocketBridgeAgentHandler2(name, handshaker, customHttpHeaders)
+                new IdleStateHandler(600, 600, 600)
+                , new WebSocketBridgeAgentHandler(name, handshaker, customHttpHeaders)
+                , new WebSocketBridgeAgentHandler2(name, handshaker, customHttpHeaders)
         );
     }
 

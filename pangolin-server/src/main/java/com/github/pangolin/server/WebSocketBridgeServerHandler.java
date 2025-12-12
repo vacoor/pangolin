@@ -3,7 +3,7 @@ package com.github.pangolin.server;
 import com.github.pangolin.handler.TcpOverWebSocketDecodeHandler;
 import com.github.pangolin.handler.TcpOverWebSocketEncodeHandler;
 import com.github.pangolin.handler.WebSocketInboundRedirectHandler;
-import com.github.pangolin.server.mgt.WebSocketBridgeServerConsoleHandler;
+import com.github.pangolin.server.shell.WebSocketBridgeServerConsoleHandler;
 import com.github.pangolin.util.Util;
 import com.google.common.base.Preconditions;
 import io.netty.buffer.ByteBuf;
@@ -108,6 +108,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
             final String subprotocol = null != rawSubprotocol ? rawSubprotocol : PROTO_WS_CONNECT;
 
             if (PROTO_AGENT_REGISTER.equals(subprotocol) || PROTO_AGENT_SERVICE.equals(subprotocol)) {
+                // agent service request.
                 if (!webSocketBridgeServerEngine.agentRegistered(handshake, ctx)) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(
                             WebSocketCloseStatus.INVALID_PAYLOAD_DATA
@@ -119,6 +120,9 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                          */
                         @Override
                         public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+                            /*-
+                             * agent service CMD response.
+                             */
                             if (msg instanceof BinaryWebSocketFrame) {
                                 try {
                                     webSocketBridgeServerEngine.agentResponded((BinaryWebSocketFrame) msg, ctx);
@@ -133,22 +137,30 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                 }
             } else if (PROTO_WS_CONNECT.equals(subprotocol) || PROTO_TCP_CONNECT.equals(subprotocol)) {
                 final boolean downgrade = PROTO_TCP_CONNECT.equals(subprotocol);
-                final URI endpointPathUri = URI.create(new QueryStringDecoder(endpointPath).path());
-                final URI handshakePathUri = URI.create(new QueryStringDecoder(handshake.requestUri()).path());
-                final String agentKey = endpointPathUri.relativize(handshakePathUri).getPath();
-                final String accessToken = getAccessToken(handshake);
+                /*-
+                 * CONNECT request.
+                 *
+                 * {endpoint}/{tunnel}
+                 */
+                final String tunnelKey = getPathWithinEndpoint(handshake);
+                final String accessToken = getHandshakeAccessToken(handshake);
 
-                if (null == agentKey || null == accessToken || !handshake(ctx, agentKey, accessToken, downgrade)) {
-                    ctx.writeAndFlush(new CloseWebSocketFrame(
-                            WebSocketCloseStatus.INVALID_PAYLOAD_DATA
-                    )).addListener(ChannelFutureListener.CLOSE);
+                if (null == tunnelKey) {
+                    ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE)).addListener(ChannelFutureListener.CLOSE);
+                } else if (null == accessToken) {
+                    ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.POLICY_VIOLATION)).addListener(ChannelFutureListener.CLOSE);
+                } else if (!handshake(ctx, tunnelKey, accessToken, downgrade)) {
+                    ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INVALID_PAYLOAD_DATA)).addListener(ChannelFutureListener.CLOSE);
                 }
             } else if (PROTO_AGENT_BACKHAUL_LEGACY.equals(subprotocol) || PROTO_AGENT_BACKHAUL.equals(subprotocol)) {
-                final String id = Util.last(new QueryStringDecoder(handshake.requestUri()).parameters(), PARAM_BACKHAUL_ID);
+                /*-
+                 * BACKHAUL request.
+                 */
+                String id = getPathWithinEndpoint(handshake);
+                // @Deprecated
+                id = null == id || id.isEmpty() ? Util.last(new QueryStringDecoder(handshake.requestUri()).parameters(), PARAM_BACKHAUL_ID) : id;
                 if (null == id || id.isEmpty() || !webSocketBridgeServerEngine.finishHandshake(id, ctx)) {
-                    ctx.writeAndFlush(new CloseWebSocketFrame(
-                            WebSocketCloseStatus.INVALID_PAYLOAD_DATA
-                    )).addListener(ChannelFutureListener.CLOSE);
+                    ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.POLICY_VIOLATION)).addListener(ChannelFutureListener.CLOSE);
                 }
             } else if (PROTO_MGR_CONSOLE.equals(subprotocol)) {
                 // XXX authorize.
@@ -162,11 +174,19 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
         ctx.fireUserEventTriggered(evt);
     }
 
-    private String getAccessToken(final HandshakeComplete handshake) {
+    private String getPathWithinEndpoint(final HandshakeComplete handshake) {
+        final URI endpointPathUri = URI.create(new QueryStringDecoder(endpointPath).path());
+        final URI handshakePathUri = URI.create(new QueryStringDecoder(handshake.requestUri()).path());
+        return endpointPathUri.relativize(handshakePathUri).getPath();
+    }
+
+    private String getHandshakeAccessToken(final HandshakeComplete handshake) {
         final String authorization = handshake.requestHeaders().get("Authorization");
         if (null != authorization) {
             return authorization.startsWith("Bearer ") ? authorization.substring(7) : null;
         }
+
+        // @Deprecated
         return Util.last(new QueryStringDecoder(handshake.requestUri()).parameters(), "access_token");
     }
 

@@ -436,7 +436,6 @@ public class WebSocketBridgeServerEngine {
         final Connection connection = null != id ? connections.get(id) : null;
         if (null == connection) {
             log.info("[{}] Pending handshake context not found for {}", id, id);
-            // backhaulCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             return false;
         }
 
@@ -448,7 +447,6 @@ public class WebSocketBridgeServerEngine {
             return true;
         } else {
             log.warn("[{}] Connection already established: {} -{}-> {}", id, stringify(accessAddr), simplify(agent), connection.target);
-            // backhaulCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             return false;
         }
     }

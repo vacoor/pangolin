@@ -7,6 +7,8 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 
 /**
+ * Shadowsocks encryption/decription key generator.
+ *
  * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Stream-Ciphers#stream-encryptiondecryption">EVP_BytesToKey</a>
  */
 public class SsSecretKey /*implements SecretKey*/ {
@@ -15,6 +17,15 @@ public class SsSecretKey /*implements SecretKey*/ {
 
     private static final Charset UTF_8 = StandardCharsets.UTF_8;
 
+    /**
+     * The key can be input directly from user or generated from a password.
+     *
+     * @param password the password
+     * @param keySize  the key size
+     * @return the generated key bytes
+     * @see <a href="https://github.com/shadowsocks/shadowsocks-org/wiki/Stream-Ciphers#stream-encryptiondecryption">EVP_BytesToKey</a>
+     * @see <a href="https://wiki.openssl.org/index.php/Manual:EVP_BytesToKey(3)">EVP_BytesToKey</a>
+     */
     public static byte[] generateKey(final String password, final int keySize) {
         final MessageDigest digest = createDigest(DIGEST_ALGORITHM);
 
@@ -24,11 +35,13 @@ public class SsSecretKey /*implements SecretKey*/ {
         byte[] hash = new byte[0];
         for (int i = 0; i < keyBytes.length; i += hash.length) {
             final byte[] input = new byte[hash.length + passwordBytes.length];
+            // copy previous hash & password to input.
             System.arraycopy(hash, 0, input, 0, hash.length);
             System.arraycopy(passwordBytes, 0, input, hash.length, passwordBytes.length);
 
             hash = digest.digest(input);
 
+            // copy hash to key bytes.
             System.arraycopy(hash, 0, keyBytes, i, hash.length);
         }
 
