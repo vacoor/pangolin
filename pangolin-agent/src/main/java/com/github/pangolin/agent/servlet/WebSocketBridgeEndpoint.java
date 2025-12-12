@@ -38,10 +38,10 @@ public class WebSocketBridgeEndpoint {
 
         final ByteBuf in = Base64.decode(Unpooled.wrappedBuffer(accessTokenToUse.getBytes()), Base64Dialect.URL_SAFE);
         final byte version = in.readByte();
-        if (VER_1 != version) {
+        if (VER_1_1 != version) {
             session.close(new CloseReason(
                     CloseReason.CloseCodes.NOT_CONSISTENT,
-                    String.format("unsupported version: %s, (expected: %s)", version, VER_1)
+                    String.format("unsupported version: %s, (expected: %s)", version, VER_1_1)
             ));
         }
         final String accessKey = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
@@ -49,7 +49,7 @@ public class WebSocketBridgeEndpoint {
         if (CMD_CONNECT != cmd) {
             session.close(new CloseReason(
                     CloseReason.CloseCodes.NOT_CONSISTENT,
-                    String.format("unsupported command type: %s, (expected: %s)", version, VER_1)
+                    String.format("unsupported command type: %s, (expected: %s)", version, VER_1_1)
             ));
         }
 
@@ -126,15 +126,6 @@ public class WebSocketBridgeEndpoint {
         return System.getProperty("websocket.bridge.access_key", "c254dacd0cde3be75ac2988f691ec105").equals(accessKey);
     }
 
-    private InetSocketAddress parseTarget(final String target) {
-        if (null == target) {
-            return null;
-        }
-        final String[] split = target.split(":", 2);
-        return InetSocketAddress.createUnresolved(split[0], Integer.parseInt(split[1]));
-    }
-
-
     public static class AuthenticationConfigurator extends ServerEndpointConfig.Configurator {
 
         @Override
@@ -149,7 +140,7 @@ public class WebSocketBridgeEndpoint {
     private static final byte IPv4_ADDR_SIZE = 4;
     private static final byte IPv6_ADDR_SIZE = 16;
 
-    private static final byte VER_1 = 0x01;
+    private static final byte VER_1_1 = 0x01;
 
     private static final byte CMD_CONNECT = 0x01;
 

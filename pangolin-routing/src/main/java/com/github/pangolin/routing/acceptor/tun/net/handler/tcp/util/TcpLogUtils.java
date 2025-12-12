@@ -3,8 +3,6 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.TcpPacket;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.net.InetAddress;
 
 public class TcpLogUtils {
@@ -147,44 +145,9 @@ public class TcpLogUtils {
          * FIXME: A reverse name lookup will be performed and the result will be returned
          * based on the system configured name lookup service.
          */
-        return InetAddressHostNameGetter.getHostNameNoResolve(address);
-    }
-
-    private static class InetAddressHostNameGetter {
-        private static final Method GET_HOLDER;
-        private static final Method GET_HOLDER_HOST_NAME;
-
-        static {
-            try {
-                final Method holder = InetAddress.class.getDeclaredMethod("holder");
-                holder.setAccessible(true);
-
-                final Class<?> inetAddressHolder = Class.forName(InetAddress.class.getName() + "$InetAddressHolder");
-                final Method getHostName = inetAddressHolder.getDeclaredMethod("getHostName");
-                getHostName.setAccessible(true);
-
-                GET_HOLDER = holder;
-                GET_HOLDER_HOST_NAME = getHostName;
-            } catch (final NoSuchMethodException e) {
-                throw new IllegalStateException(e);
-            } catch (ClassNotFoundException e) {
-                throw new IllegalStateException(e);
-            }
-        }
-
-        public static String getHostNameNoResolve(final InetAddress address) {
-            if (null == GET_HOLDER || null == GET_HOLDER_HOST_NAME) {
-                return null;
-            }
-
-            try {
-                return (String) GET_HOLDER_HOST_NAME.invoke(GET_HOLDER.invoke(address));
-            } catch (final InvocationTargetException e) {
-                throw new IllegalStateException(e);
-            } catch (final IllegalAccessException e) {
-                throw new IllegalStateException(e);
-            }
-        }
+        final String hostnameAndAddress = address.toString();
+        final int index = hostnameAndAddress.indexOf("/");
+        return 0 < index ? hostnameAndAddress.substring(0, index) : null;
     }
 
 }

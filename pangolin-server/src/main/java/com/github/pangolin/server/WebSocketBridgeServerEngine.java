@@ -43,7 +43,7 @@ public class WebSocketBridgeServerEngine {
     private static final byte IPv4_ADDR_SIZE = 4;
     private static final byte IPv6_ADDR_SIZE = 16;
 
-    private static final byte VER_1 = 0x01;
+    private static final byte VER_1_1 = 0x01;
 
     private static final byte CMD_CONNECT = 0x01;
 
@@ -134,25 +134,25 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Initiating a handshake with the agent for the given target address.
+     * Initiating a handshake with the tunnel for the given target address.
      *
      * @param accessCtx        the access channel context
-     * @param agentKey         the connection agent key
+     * @param tunnelKey        the connection tunnel key
      * @param target           the connection target address
      * @param handshakePromise the handshake promise
      * @return the handshake promise
      */
     public Promise<ChannelHandlerContext> handshake(final ChannelHandlerContext accessCtx,
-                                                    final String agentKey, final InetSocketAddress target,
+                                                    final String tunnelKey, final InetSocketAddress target,
                                                     final Promise<ChannelHandlerContext> handshakePromise) {
-        return handshake(accessCtx, agentKey, target, handshakeTimeoutMs, TimeUnit.MILLISECONDS, handshakePromise);
+        return handshake(accessCtx, tunnelKey, target, handshakeTimeoutMs, TimeUnit.MILLISECONDS, handshakePromise);
     }
 
     /**
-     * Initiating a handshake with the agent for the given target address.
+     * Initiating a handshake with the tunnel for the given target address.
      *
      * @param accessCtx        the access channel context
-     * @param agentKey         the connection agent key
+     * @param tunnelKey        the connection tunnel key
      * @param target           the connection target address
      * @param handshakeTimeout the maximum time to wait
      * @param unit             the time unit of the {@code handshakeTimeout} argument
@@ -160,12 +160,12 @@ public class WebSocketBridgeServerEngine {
      * @return the handshake promise
      */
     private Promise<ChannelHandlerContext> handshake(final ChannelHandlerContext accessCtx,
-                                                     final String agentKey, final InetSocketAddress target,
+                                                     final String tunnelKey, final InetSocketAddress target,
                                                      final long handshakeTimeout, final TimeUnit unit,
                                                      final Promise<ChannelHandlerContext> handshakePromise) {
-        final Agent agent = this.choose(agentKey);
+        final Agent agent = this.choose(tunnelKey);
         if (null == agent) {
-            handshakePromise.tryFailure(new ConnectException(String.format("The agent not found: '%s'", agentKey)));
+            handshakePromise.tryFailure(new ConnectException(String.format("The agent not found: '%s'", tunnelKey)));
             return handshakePromise;
         }
 
@@ -268,20 +268,20 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Choose a agent for agent key.
+     * Choose a agent for tunnel key.
      *
-     * @param agentKey the agent key
+     * @param tunnelKey the tunnel key
      * @return the agent instance or null
      */
-    private Agent choose(final String agentKey) {
-        Agent agent = registeredAgents.get(agentKey);
+    private Agent choose(final String tunnelKey) {
+        Agent agent = registeredAgents.get(tunnelKey);
         if (null != agent) {
             return agent;
         }
 
         final List<Agent> candidates = new ArrayList<>();
         for (final Agent candidate : registeredAgents.values()) {
-            if (candidate.getName().equals(agentKey)) {
+            if (candidate.getName().equals(tunnelKey)) {
                 candidates.add(candidate);
             }
         }
@@ -356,7 +356,7 @@ public class WebSocketBridgeServerEngine {
          */
         final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(id);
         final ByteBuf buffer = accessCtx.alloc().buffer();
-        buffer.writeByte(VER_1);
+        buffer.writeByte(VER_1_1);
         buffer.writeByte(idBytes.remaining());
         buffer.writeBytes(idBytes);
         buffer.writeByte(CMD_CONNECT);
@@ -409,7 +409,7 @@ public class WebSocketBridgeServerEngine {
          */
         final ByteBuf in = message.content();
         final byte version = in.readByte();
-        Preconditions.checkState(VER_1 == version, "Unsupported version: %s, (expected: %s)", version, VER_1);
+        Preconditions.checkState(VER_1_1 == version, "Unsupported version: %s, (expected: %s)", version, VER_1_1);
 
         final String id = in.readCharSequence(in.readByte(), CharsetUtil.UTF_8).toString();
         final byte status = in.readByte();
@@ -501,10 +501,19 @@ public class WebSocketBridgeServerEngine {
     }
 
     private String stringify(final Agent agent) {
-        if (null != agent) {
-            return agent.id + ' ' + agent.name + ' ' + agent.version + " " + agent.extranet + '/' + agent.intranet;
+        if (null == agent) {
+            return null;
         }
-        return null;
+
+        final StringBuilder buff = new StringBuilder();
+        buff.append(agent.id)
+                .append(' ').append(agent.name)
+                .append(" v").append(agent.version)
+                .append(' ').append(agent.extranet);
+        if (null != agent.intranet && !agent.intranet.equals(agent.extranet)) {
+            buff.append('/').append(agent.intranet);
+        }
+        return buff.toString();
     }
 
 }

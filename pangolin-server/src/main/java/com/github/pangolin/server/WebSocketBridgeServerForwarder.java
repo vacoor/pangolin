@@ -34,13 +34,13 @@ public class WebSocketBridgeServerForwarder {
     }
 
     public WebSocketBridgeServerForwarder addForwarding(final int localPort,
-                                                        final String agentKey,
+                                                        final String tunnelKey,
                                                         final InetSocketAddress remoteAddr) throws InterruptedException {
-        return addForwarding(new InetSocketAddress(localPort), agentKey, remoteAddr);
+        return addForwarding(new InetSocketAddress(localPort), tunnelKey, remoteAddr);
     }
 
     public WebSocketBridgeServerForwarder addForwarding(final SocketAddress localAddr,
-                                                        final String agentKey,
+                                                        final String tunnelKey,
                                                         final InetSocketAddress target) throws InterruptedException {
         Channels.listen(localAddr, false, bossGroup, workerGroup, new ChannelInitializer<SocketChannel>() {
             @Override
@@ -51,10 +51,10 @@ public class WebSocketBridgeServerForwarder {
                     public void channelActive(final ChannelHandlerContext accessCtx) throws Exception {
                         final String id = accessCtx.channel().id().toString();
                         final SocketAddress source = accessCtx.channel().remoteAddress();
-                        log.info("[{}] Establishing Connection from {} to {} via {}", id, source, target, agentKey);
+                        log.info("[{}] Establishing Connection from {} to {} via {}", id, source, target, tunnelKey);
 
                         engine.handshake(
-                                accessCtx, agentKey, target, accessCtx.executor().newPromise()
+                                accessCtx, tunnelKey, target, accessCtx.executor().newPromise()
                         ).addListener(new FutureListener<ChannelHandlerContext>() {
                             @Override
                             public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {
@@ -65,14 +65,14 @@ public class WebSocketBridgeServerForwarder {
                                         @Override
                                         public void operationComplete(final ChannelFuture future) throws Exception {
                                             if (accessCtx.channel().isActive()) {
-                                                log.info("[{}] Connection closed by agent: from {} to {} via {}", id, source, target, agentKey);
+                                                log.info("[{}] Connection closed by agent: from {} to {} via {}", id, source, target, tunnelKey);
                                             } else {
-                                                log.info("[{}] Connection closed by client: from {} to {} via {}", id, source, target, agentKey);
+                                                log.info("[{}] Connection closed by client: from {} to {} via {}", id, source, target, tunnelKey);
                                             }
                                         }
                                     });
 
-                                    log.info("[{}] Connection established from {} to {} via {}", id, source, target, agentKey);
+                                    log.info("[{}] Connection established from {} to {} via {}", id, source, target, tunnelKey);
 
                                     /*-
                                      * client <--socket--> server <--ws--> agent
@@ -84,7 +84,7 @@ public class WebSocketBridgeServerForwarder {
                                     backhaulCtx.channel().config().setAutoRead(true);
                                 } else {
                                     final Throwable cause = future.cause();
-                                    log.warn("[{}] Connection from {} to {} via {} failed: {}", id, source, target, agentKey, cause.getMessage());
+                                    log.warn("[{}] Connection from {} to {} via {} failed: {}", id, source, target, tunnelKey, cause.getMessage());
 
                                     accessCtx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                                 }
@@ -98,9 +98,9 @@ public class WebSocketBridgeServerForwarder {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
-                    log.info("Local connections to {} forwarded to remote address {} via {}", localAddr, target, agentKey);
+                    log.info("Local connections to {} forwarded to remote address {} via {}", localAddr, target, tunnelKey);
 
-                    final Forwarding forwarding = new Forwarding(localAddr, agentKey, target, future.channel());
+                    final Forwarding forwarding = new Forwarding(localAddr, tunnelKey, target, future.channel());
                     registeredForwardingMap.put(localAddr, forwarding);
                 }
             }

@@ -77,24 +77,25 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
 
     private final String endpointPath;
     private final String accessKey;
-    private final WebSocketBridgeServerEngine webSocketBridgeServerEngine;
-    private final WebSocketBridgeServerForwarder webSocketBridgeServerForwarder;
+    private final WebSocketBridgeServerEngine engine;
+    private final WebSocketBridgeServerForwarder forwarder;
 
     public WebSocketBridgeServerHandler(final String endpointPath,
-                                        final WebSocketBridgeServerEngine webSocketBridgeServerEngine,
-                                        final WebSocketBridgeServerForwarder webSocketBridgeServerForwarder) {
+                                        final WebSocketBridgeServerEngine engine,
+                                        final WebSocketBridgeServerForwarder forwarder) {
         this(endpointPath,
                 System.getProperty("websocket.bridge.access_key", "c254dacd0cde3be75ac2988f691ec105"),
-                webSocketBridgeServerEngine, webSocketBridgeServerForwarder);
+                engine, forwarder);
     }
 
-    public WebSocketBridgeServerHandler(final String endpointPath, final String accessKey,
-                                        final WebSocketBridgeServerEngine webSocketBridgeServerEngine,
-                                        final WebSocketBridgeServerForwarder webSocketBridgeServerForwarder) {
+    public WebSocketBridgeServerHandler(final String endpointPath,
+                                        final String accessKey,
+                                        final WebSocketBridgeServerEngine engine,
+                                        final WebSocketBridgeServerForwarder forwarder) {
         this.endpointPath = endpointPath;
         this.accessKey = accessKey;
-        this.webSocketBridgeServerEngine = webSocketBridgeServerEngine;
-        this.webSocketBridgeServerForwarder = webSocketBridgeServerForwarder;
+        this.engine = engine;
+        this.forwarder = forwarder;
     }
 
     /**
@@ -108,8 +109,13 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
             final String subprotocol = null != rawSubprotocol ? rawSubprotocol : PROTO_WS_CONNECT;
 
             if (PROTO_AGENT_REGISTER.equals(subprotocol) || PROTO_AGENT_SERVICE.equals(subprotocol)) {
-                // agent service request.
-                if (!webSocketBridgeServerEngine.agentRegistered(handshake, ctx)) {
+                /*-
+                 * agent register.
+                 *
+                 * TODO {endpoint}/{tunnel}
+                 *  FIXME authenticate
+                 */
+                if (!engine.agentRegistered(handshake, ctx)) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(
                             WebSocketCloseStatus.INVALID_PAYLOAD_DATA
                     )).addListener(ChannelFutureListener.CLOSE);
@@ -125,7 +131,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                              */
                             if (msg instanceof BinaryWebSocketFrame) {
                                 try {
-                                    webSocketBridgeServerEngine.agentResponded((BinaryWebSocketFrame) msg, ctx);
+                                    engine.agentResponded((BinaryWebSocketFrame) msg, ctx);
                                 } finally {
                                     ReferenceCountUtil.release(msg);
                                 }
@@ -140,7 +146,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                 /*-
                  * CONNECT request.
                  *
-                 * {endpoint}/{tunnel}
+                 * {endpoint}/{[agent@]tunnel}
                  */
                 final String tunnelKey = getPathWithinEndpoint(handshake);
                 final String accessToken = getHandshakeAccessToken(handshake);
@@ -155,17 +161,20 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
             } else if (PROTO_AGENT_BACKHAUL_LEGACY.equals(subprotocol) || PROTO_AGENT_BACKHAUL.equals(subprotocol)) {
                 /*-
                  * BACKHAUL request.
+                 *
+                 * {endpoint}/{handshake_id}
                  */
                 String id = getPathWithinEndpoint(handshake);
                 // @Deprecated
                 id = null == id || id.isEmpty() ? Util.last(new QueryStringDecoder(handshake.requestUri()).parameters(), PARAM_BACKHAUL_ID) : id;
-                if (null == id || id.isEmpty() || !webSocketBridgeServerEngine.finishHandshake(id, ctx)) {
+                if (null == id || id.isEmpty() || !engine.finishHandshake(id, ctx)) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.POLICY_VIOLATION)).addListener(ChannelFutureListener.CLOSE);
                 }
             } else if (PROTO_MGR_CONSOLE.equals(subprotocol)) {
                 // XXX authorize.
+                //  FIXME authenticate
                 ctx.pipeline().replace(ctx.name(), null, new WebSocketBridgeServerConsoleHandler(
-                        webSocketBridgeServerEngine, webSocketBridgeServerForwarder
+                        engine, forwarder
                 ));
             } else {
                 ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.PROTOCOL_ERROR)).addListener(ChannelFutureListener.CLOSE);
@@ -202,7 +211,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
     }
 
     private boolean handshake(final ChannelHandlerContext accessCtx,
-                              final String agentKey, final String accessToken,
+                              final String tunnelKey, final String accessToken,
                               final boolean downgrade) throws UnknownHostException {
         final ByteBuf in = Base64.decode(Unpooled.wrappedBuffer(accessToken.getBytes()), Base64Dialect.URL_SAFE);
         /*-
@@ -230,7 +239,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
             return false;
         }
         // ..
-        handshake0(accessCtx, agentKey, target, downgrade);
+        handshake0(accessCtx, tunnelKey, target, downgrade);
         return true;
     }
 
@@ -274,19 +283,19 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
      * a WebSocket connection or downgrade the WebSocket to a TCP socket.
      *
      * @param accessCtx the access channel context
-     * @param agentKey  the connection agent key
+     * @param tunnelKey the connection tunnel key
      * @param target    the connection target address
      * @param downgrade the WebSocket downgrade to a TCP socket
      */
     private void handshake0(final ChannelHandlerContext accessCtx,
-                            final String agentKey, final InetSocketAddress target, final boolean downgrade) {
+                            final String tunnelKey, final InetSocketAddress target, final boolean downgrade) {
         final String id = accessCtx.channel().id().toString();
         final SocketAddress source = accessCtx.channel().remoteAddress();
-        log.info("[{}] Establishing WebSocket connection from {} to {} via {}", id, source, target, agentKey);
+        log.info("[{}] Establishing WebSocket connection from {} to {} via {}", id, source, target, tunnelKey);
 
         accessCtx.channel().config().setAutoRead(false);
-        webSocketBridgeServerEngine.handshake(
-                accessCtx, agentKey, target, accessCtx.executor().newPromise()
+        engine.handshake(
+                accessCtx, tunnelKey, target, accessCtx.executor().newPromise()
         ).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
@@ -297,14 +306,14 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                         @Override
                         public void operationComplete(final ChannelFuture future) throws Exception {
                             if (accessCtx.channel().isActive()) {
-                                log.info("[{}] WebSocket connection closed by agent: from {} to {} via {}", id, source, target, agentKey);
+                                log.info("[{}] WebSocket connection closed by agent: from {} to {} via {}", id, source, target, tunnelKey);
                             } else {
-                                log.info("[{}] WebSocket connection closed by client: from {} to {} via {}", id, source, target, agentKey);
+                                log.info("[{}] WebSocket connection closed by client: from {} to {} via {}", id, source, target, tunnelKey);
                             }
                         }
                     });
 
-                    log.info("[{}] WebSocket connection established from {} to {} via {}", id, source, target, agentKey);
+                    log.info("[{}] WebSocket connection established from {} to {} via {}", id, source, target, tunnelKey);
 
                     if (!downgrade) {
                         /*-
@@ -338,7 +347,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                 } else {
                     final Throwable cause = backhaulFuture.cause();
 
-                    log.warn("[{}] WebSocket connection from {} to {} via {} failed: {}", id, source, target, agentKey, cause.getMessage());
+                    log.warn("[{}] WebSocket connection from {} to {} via {} failed: {}", id, source, target, tunnelKey, cause.getMessage());
 
                     accessCtx.writeAndFlush(
                             new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE, cause.getMessage())
