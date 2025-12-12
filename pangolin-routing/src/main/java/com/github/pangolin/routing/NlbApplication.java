@@ -6,10 +6,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @Slf4j
 @SpringBootApplication
-public class ApplicationLauncher {
+public class NlbApplication {
 
     public static void main(String[] args) throws Exception {
-        SpringApplication.run(ApplicationLauncher.class, args);
+        SpringApplication.run(NlbApplication.class, args);
         Application.main(args);
     }
 
