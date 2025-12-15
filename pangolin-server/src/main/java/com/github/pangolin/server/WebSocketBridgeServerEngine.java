@@ -5,7 +5,6 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
-import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -29,16 +28,11 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
-import static io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
-
 /**
  *
  */
 @Slf4j
 public class WebSocketBridgeServerEngine {
-    private static final String AGENT_NAME = "X-Node-Name";
-    private static final String AGENT_VERSION = "X-Node-Version";
-    private static final String AGENT_INTRANET = "X-Node-Intranet";
 
     private static final byte IPv4_ADDR_SIZE = 4;
     private static final byte IPv6_ADDR_SIZE = 16;
@@ -86,12 +80,27 @@ public class WebSocketBridgeServerEngine {
     /**
      * Agent registered.
      *
-     * @param handshake the handshake information
-     * @param agentCtx  the agent channel handler context
+     * @param tunnelKey     the tunnel key
+     * @param tunnelVersion the tunnel version
+     * @param agentName     the agent name
+     * @param agentVersion  the agent version
+     * @param intranet      the agent intranet address
+     * @param agentCtx      the agent channel handler context
      * @return true if registered, otherwise false
      */
-    boolean agentRegistered(final HandshakeComplete handshake, final ChannelHandlerContext agentCtx) {
-        final Agent agent = this.createAgent(handshake, agentCtx);
+    boolean agentRegistered(final String tunnelKey,
+                            final byte tunnelVersion,
+                            final String agentName,
+                            final String agentVersion,
+                            final String intranet,
+                            final ChannelHandlerContext agentCtx) {
+        final Channel ch = agentCtx.channel();
+        final String extranet = stringify(ch.remoteAddress());
+        final Agent agent = new Agent(ch.id().toString(), agentName, agentVersion, intranet, extranet, tunnelKey, tunnelVersion, agentCtx);
+        return agentRegistered(agent, agentCtx);
+    }
+
+    private boolean agentRegistered(final Agent agent, final ChannelHandlerContext agentCtx) {
         if (null == registeredAgents.putIfAbsent(agent.id, agent)) {
             log.info("[Agent] Agent registered: {}", stringify(agent));
 
@@ -106,17 +115,6 @@ public class WebSocketBridgeServerEngine {
             return true;
         }
         return false;
-    }
-
-    private Agent createAgent(final HandshakeComplete handshake, final ChannelHandlerContext agentCtx) {
-        final HttpHeaders headers = handshake.requestHeaders();
-        final String name = headers.getAsString(AGENT_NAME);
-        final String version = headers.getAsString(AGENT_VERSION);
-        final String intranet = headers.getAsString(AGENT_INTRANET);
-        final String extranet = stringify(agentCtx.channel().remoteAddress());
-
-        final String id = agentCtx.channel().id().toString();
-        return new Agent(id, name, version, intranet, extranet, agentCtx);
     }
 
     /**
@@ -475,6 +473,9 @@ public class WebSocketBridgeServerEngine {
         private final String version;
         private final String intranet;
         private final String extranet;
+
+        private final String tunnelKey;
+        private final byte tunnelVersion;
         private final ChannelHandlerContext bus;
     }
 
@@ -501,19 +502,10 @@ public class WebSocketBridgeServerEngine {
     }
 
     private String stringify(final Agent agent) {
-        if (null == agent) {
-            return null;
+        if (null != agent) {
+            return agent.tunnelKey + ' ' + agent.id + ' ' + agent.name + " v" + agent.version + "(" + agent.tunnelVersion + ") " + agent.extranet + '/' + agent.intranet;
         }
-
-        final StringBuilder buff = new StringBuilder();
-        buff.append(agent.id)
-                .append(' ').append(agent.name)
-                .append(" v").append(agent.version)
-                .append(' ').append(agent.extranet);
-        if (null != agent.intranet && !agent.intranet.equals(agent.extranet)) {
-            buff.append('/').append(agent.intranet);
-        }
-        return buff.toString();
+        return null;
     }
 
 }

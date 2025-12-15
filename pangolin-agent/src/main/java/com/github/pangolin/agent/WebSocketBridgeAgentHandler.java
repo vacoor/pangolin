@@ -9,6 +9,9 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
+import io.netty.handler.codec.base64.Base64;
+import io.netty.handler.codec.base64.Base64Dialect;
+import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.websocketx.*;
 import io.netty.handler.flow.FlowControlHandler;
@@ -26,13 +29,13 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Slf4j
 public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
-    private static final String AGENT_VERSION = "1.1";
+    private static final String AGENT_VERSION = "1.2";
     private static final String PROTO_AGENT_BACKHAUL = "BACKHAUL";
 
     private static final byte IPv4_ADDR_SIZE = 4;
     private static final byte IPv6_ADDR_SIZE = 16;
 
-    private static final byte VER_1_1 = 0x01;
+    private static final byte VER_1 = 0x01;
 
     private static final byte CMD_CONNECT = 0x01;
 
@@ -88,6 +91,33 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
             customHttpHeaders.set("X-Node-Name", name);
             customHttpHeaders.set("X-Node-Version", AGENT_VERSION);
             customHttpHeaders.set("X-Node-Intranet", localAddress.getHostString());
+
+            final Channel ch = ctx.channel();
+            final InetSocketAddress addr = ((InetSocketAddress) ch.localAddress());
+
+            final int port = addr.getPort();
+            final ByteBuffer addrBytes = CharsetUtil.UTF_8.encode(addr.getHostString());
+            final ByteBuffer nameBytes = CharsetUtil.UTF_8.encode(name);
+            final ByteBuffer versionBytes = CharsetUtil.UTF_8.encode(AGENT_VERSION);
+
+            final ByteBuf buf = ctx.alloc().buffer(4 + addrBytes.remaining() + 2 + 1 + nameBytes.remaining());
+            buf.writeByte(VER_1);
+
+            buf.writeByte(0xFF);
+            buf.writeByte(0);
+
+            buf.writeByte(ATYPE_DOMAIN);
+            buf.writeByte(addrBytes.remaining());
+            buf.writeBytes(addrBytes);
+
+            buf.writeShort(port);
+            buf.writeByte(nameBytes.remaining());
+            buf.writeBytes(nameBytes);
+            buf.writeByte(AGENT_VERSION.length());
+            buf.writeBytes(versionBytes);
+
+            final String token = Base64.encode(buf, Base64Dialect.URL_SAFE).toString(CharsetUtil.UTF_8);
+            customHttpHeaders.set("Authorization", "Bearer " + token);
         }
         super.channelActive(ctx);
     }
@@ -130,24 +160,21 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
             final InetAddress address = parseAddress(in);
             final int port = in.readUnsignedShort();
             final InetSocketAddress destination = new InetSocketAddress(address, port);
+
+            final WebSocketClientHandshaker backhaulHandshaker = newBackhaulHandshaker(id, ctx);
             final ChannelPromise backhaulPromise = ctx.newPromise().addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(final ChannelFuture future) throws Exception {
-                    final byte status = future.isSuccess() ? REPLY_SUCCESS : REPLY_FAILURE;
-                    ctx.writeAndFlush(new BinaryWebSocketFrame(newReply(ctx, id, rsv, status)));
+                    if (!future.isSuccess()) {
+                        ctx.writeAndFlush(new BinaryWebSocketFrame(
+                                newReply(ctx, id, rsv, REPLY_HOST_UNREACHABLE)
+                        ));
+                    }
                 }
             });
-            final WebSocketClientHandshaker backhaulHandshaker = newBackhaulHandshaker(id);
-            pipe(destination, backhaulHandshaker, ctx.channel().eventLoop(), backhaulPromise, 0 != rsv);
-        } else {
-            ctx.writeAndFlush(new BinaryWebSocketFrame(newReply(ctx, id, rsv, REPLY_COMMAND_UNSUPPORTED)));
-        }
-    }
 
-    @Override
-    public void exceptionCaught(final ChannelHandlerContext webSocketContext, final Throwable cause) throws Exception {
-        log.warn("Software caused connection abort: {}", cause.getMessage(), cause);
-        webSocketContext.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INTERNAL_SERVER_ERROR, cause.getMessage())).addListener(ChannelFutureListener.CLOSE);
+            pipe(destination, backhaulHandshaker, ctx.channel().eventLoop(), backhaulPromise, 0 != rsv);
+        }
     }
 
     private InetAddress parseAddress(final ByteBuf in) throws UnknownHostException {
@@ -169,7 +196,7 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
                              final String id, final byte rsv, final byte status) {
         final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(id);
         final ByteBuf reply = ctx.alloc().buffer(1 + idBytes.remaining() + 4 + IPv4_ADDR_SIZE + 2);
-        reply.writeByte(VER_1_1);
+        reply.writeByte(VER_1);
         reply.writeByte(idBytes.remaining());
         reply.writeBytes(idBytes);
         reply.writeByte(status);
@@ -180,17 +207,26 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
         return reply;
     }
 
-    private WebSocketClientHandshaker newBackhaulHandshaker(final String id) {
+    private WebSocketClientHandshaker newBackhaulHandshaker(final String id, final ChannelHandlerContext ctx) {
         final URI uri = handshaker.uri();
-        final String path = uri.getPath();
-        final String pathToUse = path.endsWith("/") ? path + id : path + "/" + id;
-        final String endpoint = uri.getScheme() + "://" + uri.getHost() + ":" + uri.getPort() + pathToUse;
+        final String basePath = uri.getPath();
+        final String backhaulPath = basePath.endsWith("/") ? basePath + id : basePath + "/" + id;
+        final String endpoint = uri.getScheme() + "://" + uri.getHost() + ":" + uri.getPort() + backhaulPath;
         final URI backhaulWebSocketUri = URI.create(endpoint + "?id=" + id);
+
+        ByteBuf buf = newReply(ctx, id, (byte) 0, REPLY_SUCCESS);
+
+        final String token = Base64.encode(buf, Base64Dialect.URL_SAFE).toString(CharsetUtil.UTF_8);
+        final DefaultHttpHeaders backhaulHeaders = new DefaultHttpHeaders();
+        backhaulHeaders.set("Authorization", "Bearer " + token);
+
+        // backhaulHeaders.set("")
         return WebSocketClientHandshakerFactory.newHandshaker(
                 backhaulWebSocketUri, handshaker.version(), PROTO_AGENT_BACKHAUL,
-                false, customHttpHeaders, handshaker.maxFramePayloadLength()
+                false, backhaulHeaders, handshaker.maxFramePayloadLength()
         );
     }
+
 
 
     /*

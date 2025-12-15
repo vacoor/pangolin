@@ -5,53 +5,19 @@ import com.google.common.collect.Maps;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelConfig;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelId;
-import io.netty.channel.ChannelMetadata;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ChannelProgressivePromise;
-import io.netty.channel.ChannelPromise;
-import io.netty.channel.EventLoop;
+import io.netty.channel.*;
 import io.netty.handler.codec.MessageToMessageCodec;
 import io.netty.handler.codec.base64.Base64;
 import io.netty.handler.codec.base64.Base64Dialect;
-import io.netty.handler.codec.http.DefaultHttpHeaders;
-import io.netty.handler.codec.http.EmptyHttpHeaders;
-import io.netty.handler.codec.http.FullHttpResponse;
-import io.netty.handler.codec.http.HttpClientCodec;
-import io.netty.handler.codec.http.HttpHeaders;
-import io.netty.handler.codec.http.HttpMethod;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpResponseDecoder;
-import io.netty.handler.codec.http.QueryStringDecoder;
-import io.netty.handler.codec.http.QueryStringEncoder;
-import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.PongWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.Utf8FrameValidator;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
-import io.netty.handler.codec.http.websocketx.WebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketVersion;
+import io.netty.handler.codec.http.*;
+import io.netty.handler.codec.http.websocketx.*;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
 import io.netty.util.CharsetUtil;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.Inet4Address;
-import java.net.Inet6Address;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.ByteBuffer;
+import java.net.*;
 import java.util.List;
 import java.util.Map;
 
@@ -70,27 +36,20 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
     private final int maxFramePayloadLength;
     private final boolean performMasking;
     private final boolean allowMaskMismatch;
-    private final String accessKey;
+//    private final String accessKey;
 
     public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
                                  final String webSocketProxyServerProtocol) {
-        this(webSocketProxyServerEndpoint, webSocketProxyServerProtocol, null);
-    }
-
-    public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
-                                 final String webSocketProxyServerProtocol,
-                                 final String accessKey) {
-        this(webSocketProxyServerEndpoint, WebSocketVersion.V13, webSocketProxyServerProtocol, true, 65536, true, true, accessKey);
+        this(webSocketProxyServerEndpoint, WebSocketVersion.V13, webSocketProxyServerProtocol, true, 65536, true, true);
     }
 
     public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
                                  final WebSocketVersion webSocketVersion,
                                  final String webSocketProxyServerProtocol,
                                  final boolean allowExtensions, final int maxFramePayloadLength,
-                                 final boolean performMasking, final boolean allowMaskMismatch,
-                                 final String accessKey) {
+                                 final boolean performMasking, final boolean allowMaskMismatch) {
         this(webSocketProxyServerEndpoint, webSocketVersion, webSocketProxyServerProtocol,
-                EmptyHttpHeaders.INSTANCE, allowExtensions, maxFramePayloadLength, performMasking, allowMaskMismatch, accessKey);
+                EmptyHttpHeaders.INSTANCE, allowExtensions, maxFramePayloadLength, performMasking, allowMaskMismatch);
     }
 
     public WebSocketProxyHandler(final URI webSocketProxyServerEndpoint,
@@ -98,7 +57,7 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
                                  final String webSocketProxyServerProtocol,
                                  final HttpHeaders customHandshakeHttpHeaders,
                                  final boolean allowExtensions, final int maxFramePayloadLength,
-                                 final boolean performMasking, final boolean allowMaskMismatch, final String accessKey) {
+                                 final boolean performMasking, final boolean allowMaskMismatch) {
         super(SocketUtils.toSocketAddress(webSocketProxyServerEndpoint.getHost(), webSocketProxyServerEndpoint.getPort()));
         this.webSocketProxyServerEndpoint = webSocketProxyServerEndpoint;
         this.webSocketVersion = webSocketVersion;
@@ -108,7 +67,7 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
         this.maxFramePayloadLength = maxFramePayloadLength;
         this.performMasking = performMasking;
         this.allowMaskMismatch = allowMaskMismatch;
-        this.accessKey = accessKey;
+//        this.accessKey = accessKey;
     }
 
     @Override
@@ -178,11 +137,8 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
     }
 
     private String createAccessTokenNew(final ByteBufAllocator alloc, final InetSocketAddress target) {
-        final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(null != accessKey ? accessKey : "c254dacd0cde3be75ac2988f691ec105");
         final ByteBuf buffer = alloc.buffer();
         buffer.writeByte(0x01);
-        buffer.writeByte(idBytes.remaining());
-        buffer.writeBytes(idBytes);
         buffer.writeByte(0x01);
         buffer.writeByte(0);
 

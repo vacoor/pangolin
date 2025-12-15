@@ -20,9 +20,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class WebSocketBridgeAgent {
 
-    /**
-     * Agent register.
-     */
     private static final String PROTO_AGENT_SERVICE = "SERVICE";
 
     private final String name;
