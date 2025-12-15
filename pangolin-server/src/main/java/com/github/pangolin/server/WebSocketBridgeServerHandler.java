@@ -14,6 +14,7 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.base64.Base64;
+import io.netty.handler.codec.base64.Base64Dialect;
 import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.handler.codec.http.websocketx.*;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete;
@@ -146,7 +147,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
         } else {
             payload = Util.last(new QueryStringDecoder(handshake.requestUri()).parameters(), "access_token");
         }
-        return null != payload && !payload.isEmpty() ? Base64.decode(Unpooled.wrappedBuffer(CharsetUtil.UTF_8.encode(payload))) : null;
+        return null != payload && !payload.isEmpty() ? Base64.decode(Unpooled.wrappedBuffer(CharsetUtil.UTF_8.encode(payload)), Base64Dialect.URL_SAFE) : null;
     }
 
     /**
