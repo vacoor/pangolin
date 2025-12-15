@@ -88,12 +88,9 @@ public class WebSocketBridgeServerEngine {
      * @param agentCtx      the agent channel handler context
      * @return true if registered, otherwise false
      */
-    boolean agentRegistered(final String tunnelKey,
-                            final byte tunnelVersion,
-                            final String agentName,
-                            final String agentVersion,
-                            final String intranet,
-                            final ChannelHandlerContext agentCtx) {
+    boolean agentRegistered(final String tunnelKey, final byte tunnelVersion,
+                            final String agentName, final String agentVersion,
+                            final String intranet, final ChannelHandlerContext agentCtx) {
         final Channel ch = agentCtx.channel();
         final String extranet = stringify(ch.remoteAddress());
         final Agent agent = new Agent(ch.id().toString(), agentName, agentVersion, intranet, extranet, tunnelKey, tunnelVersion, agentCtx);
@@ -395,7 +392,7 @@ public class WebSocketBridgeServerEngine {
         });
     }
 
-    void agentResponded(final BinaryWebSocketFrame message, final ChannelHandlerContext agentCtx) {
+    void agentResponded(final ByteBuf payload, final ChannelHandlerContext agentCtx) {
         /*-
          * The reply is a SOCKS5-like reply:
          *
@@ -405,13 +402,12 @@ public class WebSocketBridgeServerEngine {
          * | 1  | Variable |  1  | X'00' |  1   | Variable |    2     |
          * +----+----------+-----+-------+------+----------+----------+
          */
-        final ByteBuf in = message.content();
-        final byte version = in.readByte();
+        final byte version = payload.readByte();
         Preconditions.checkState(VER_1_1 == version, "Unsupported version: %s, (expected: %s)", version, VER_1_1);
 
-        final String id = in.readCharSequence(in.readByte(), CharsetUtil.UTF_8).toString();
-        final byte status = in.readByte();
-        in.skipBytes(1);
+        final String id = payload.readCharSequence(payload.readByte(), CharsetUtil.UTF_8).toString();
+        final byte status = payload.readByte();
+        payload.skipBytes(1);
 
         if (REPLY_SUCCESS != status) {
             final Connection connection = connections.get(id);
