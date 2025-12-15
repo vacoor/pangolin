@@ -59,12 +59,12 @@ public class WebSocketBridgeAgentAutoConfiguration implements EnvironmentAware {
     }
 
     private void launchTunnelClientIfNecessary() throws IOException, InterruptedException {
-        final String wsServerUrlToUse = env.getProperty(WS_SERVER_URL_PROPERTY);
         final String name = env.getProperty("spring.application.name", UUID.randomUUID().toString());
         final String profiles = Arrays.toString(env.getActiveProfiles()).replaceAll("[\\[\\]]+", "");
-        final String wsTunnelInstanceName = !profiles.isEmpty() ? (name + '@' + profiles).replace(" ", "") : name;
+        final String tunnelKey = !profiles.isEmpty() ? (name + '@' + profiles).replace(" ", "") : name;
 
-        launcher.launchIfNecessary(wsTunnelInstanceName, wsServerUrlToUse);
+        final String wsServerUrlToUse = env.getProperty(WS_SERVER_URL_PROPERTY) + "/" + tunnelKey;
+        launcher.launchIfNecessary(tunnelKey, wsServerUrlToUse);
     }
 
     @Override
