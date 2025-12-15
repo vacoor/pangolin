@@ -123,9 +123,9 @@ public class WebSocketBridgeServerShell {
             final Collection<WebSocketBridgeServerEngine.Agent> agents = getAgents();
             final String[][] table = new String[agents.size() + 1][];
             int i = 0;
-            table[i++] = new String[]{"ID", "NAME", "VERSION", "ADDRESS"};
+            table[i++] = new String[]{"ID", "NAME", "VERSION", "ADDRESS", "TUNNEL", "TUNNEL VERSION"};
             for (final WebSocketBridgeServerEngine.Agent agent : agents) {
-                table[i++] = new String[]{agent.getId(), agent.getName(), agent.getVersion(), agent.getExtranet() + '/' + agent.getIntranet()};
+                table[i++] = new String[]{agent.getId(), agent.getName(), agent.getVersion(), agent.getExtranet() + '/' + agent.getIntranet(), agent.getTunnelKey(), agent.getTunnelVersion() + ""};
             }
             printTable(table, out);
             return;

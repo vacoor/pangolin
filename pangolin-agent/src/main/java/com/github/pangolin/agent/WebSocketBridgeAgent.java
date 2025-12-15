@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 
 public class WebSocketBridgeAgent {
-    private static final String AGENT_REGISTER_PROTOCOL = "PASSIVE-REG";
+    private static final String PROTO_AGENT_SERVICE = "SERVICE";
 
     private final String name;
     private final URI webSocketServerEndpoint;
@@ -47,15 +47,14 @@ public class WebSocketBridgeAgent {
     }
 
     private ChannelFuture connect() throws IOException, InterruptedException {
-        final HttpHeaders customHttpHeaders = new DefaultHttpHeaders();
+        final HttpHeaders httpHeaders = new DefaultHttpHeaders();
         final WebSocketClientHandshaker handshaker = WebSocketClientHandshakerFactory.newHandshaker(
-                webSocketServerEndpoint, WebSocketVersion.V13, AGENT_REGISTER_PROTOCOL, true, customHttpHeaders
+                webSocketServerEndpoint, WebSocketVersion.V13, PROTO_AGENT_SERVICE, true, httpHeaders
         );
         return Channels2.openWs(
                 handshaker, workerGroup,
                 new IdleStateHandler(600, 600, 600)
-                , new WebSocketBridgeAgentHandler(name, handshaker, customHttpHeaders)
-                , new WebSocketBridgeAgentHandler2(name, handshaker, customHttpHeaders)
+                , new WebSocketBridgeAgentHandler(name, handshaker, httpHeaders)
         );
     }
 
