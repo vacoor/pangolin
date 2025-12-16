@@ -4,6 +4,7 @@ import com.github.pangolin.routing.support.handler.client.WebSocketProxyHandler;
 import com.github.pangolin.routing.upstream.AbstractUpstream;
 import com.github.pangolin.routing.upstream.Upstream;
 import io.netty.channel.ChannelHandler;
+import io.netty.handler.codec.http.HttpMethod;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -60,7 +61,8 @@ public class WebSocketUpstreamFactory extends AbstractUpstreamFactory {
 
         @Override
         public ChannelHandler newSocketProxyHandler(InetSocketAddress destination) {
-            return new WebSocketProxyHandler(uri, null);
+             return new WebSocketProxyHandler(uri, null);
+//            return new WebSocketProxyHandler(uri, HttpMethod.CONNECT.name());
         }
 
         @Override

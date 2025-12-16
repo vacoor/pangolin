@@ -101,23 +101,27 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
             final ByteBuffer versionBytes = CharsetUtil.UTF_8.encode(AGENT_VERSION);
 
             final ByteBuf buf = ctx.alloc().buffer(4 + addrBytes.remaining() + 2 + 1 + nameBytes.remaining());
-            buf.writeByte(VER_1);
+            try {
+                buf.writeByte(VER_1);
 
-            buf.writeByte(0xFF);
-            buf.writeByte(0);
+                buf.writeByte(0xFF);
+                buf.writeByte(0);
 
-            buf.writeByte(ATYPE_DOMAIN);
-            buf.writeByte(addrBytes.remaining());
-            buf.writeBytes(addrBytes);
+                buf.writeByte(ATYPE_DOMAIN);
+                buf.writeByte(addrBytes.remaining());
+                buf.writeBytes(addrBytes);
 
-            buf.writeShort(port);
-            buf.writeByte(nameBytes.remaining());
-            buf.writeBytes(nameBytes);
-            buf.writeByte(AGENT_VERSION.length());
-            buf.writeBytes(versionBytes);
+                buf.writeShort(port);
+                buf.writeByte(nameBytes.remaining());
+                buf.writeBytes(nameBytes);
+                buf.writeByte(AGENT_VERSION.length());
+                buf.writeBytes(versionBytes);
 
-            final String token = Base64.encode(buf, Base64Dialect.URL_SAFE).toString(CharsetUtil.UTF_8);
-            customHttpHeaders.set("Authorization", "Bearer " + token);
+                final String token = Base64.encode(buf, Base64Dialect.URL_SAFE).toString(CharsetUtil.UTF_8);
+                customHttpHeaders.set("Authorization", "Bearer " + token);
+            } finally {
+                buf.release();
+            }
         }
         super.channelActive(ctx);
     }

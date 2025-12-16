@@ -332,7 +332,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                          */
                         accessCtx.pipeline().remove("wsencoder");
                         accessCtx.pipeline().remove("wsdecoder");
-                        accessCtx.pipeline().remove("WS403Responder");
+                        // accessCtx.pipeline().remove("WS403Responder");
                         accessCtx.pipeline().remove(Utf8FrameValidator.class);
                         accessCtx.pipeline().remove(WebSocketServerProtocolHandler.class);
                     }

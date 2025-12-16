@@ -75,19 +75,18 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
         final ChannelPipeline cp = ctx.pipeline();
         if (null == cp.get(HttpResponseDecoder.class)) {
             if (null == cp.get(HttpClientCodec.class)) {
-                cp.addBefore(ctx.name(), null, new HttpClientCodec());
-                // throw new IllegalStateException("ChannelPipeline does not contain " + "a HttpResponseDecoder or HttpClientCodec");
+                cp.addBefore(ctx.name(), HttpClientCodec.class.getName(), new HttpClientCodec());
             }
         }
         if (null == cp.get(HttpObjectAggregator.class)) {
-//            throw new IllegalStateException("ChannelPipeline does not contain " + "a HttpObjectAggregator");
-            cp.addBefore(ctx.name(), null, new HttpObjectAggregator(8 * 1024 * 1024));
+            cp.addBefore(ctx.name(), HttpObjectAggregator.class.getName(), new HttpObjectAggregator(8 * 1024 * 1024));
         }
-        if (!HttpMethod.CONNECT.name().equals(webSocketProxyServerProtocol)) {
-            if (null == cp.get(Utf8FrameValidator.class)) {
-                cp.addBefore(ctx.name(), Utf8FrameValidator.class.getName(), new Utf8FrameValidator());
-            }
 
+        if (null == cp.get(Utf8FrameValidator.class)) {
+            cp.addBefore(ctx.name(), Utf8FrameValidator.class.getName(), new Utf8FrameValidator());
+        }
+
+        if (!HttpMethod.CONNECT.name().equals(webSocketProxyServerProtocol)) {
             if (null == cp.get(TcpOverWebSocketProxyCodec.class)) {
                 cp.addAfter(ctx.name(), TcpOverWebSocketProxyCodec.class.getName(), new TcpOverWebSocketProxyCodec());
             }
@@ -124,7 +123,8 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
                 handshakeUri, webSocketVersion, webSocketProxyServerProtocol,
                 allowExtensions, handshakeHeaders, maxFramePayloadLength, performMasking, allowMaskMismatch
         );
-        handshaker.handshake(new CtxWriteDelegatingChannel(ctx)).addListener(new ChannelFutureListener() {
+         handshaker.handshake(new CtxWriteDelegatingChannel(ctx)).addListener(new ChannelFutureListener() {
+//        handshaker.handshake(ctx.channel()).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 if (!future.isSuccess()) {
@@ -136,31 +136,44 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
         return handshakePromise;
     }
 
+    private void removeIfNeeded(final ChannelPipeline cp, final Class<? extends ChannelHandler>... types) {
+        for (final Class<? extends ChannelHandler> type : types) {
+            final ChannelHandler handler = cp.get(type);
+            if (null != handler) {
+                cp.remove(handler);
+            }
+        }
+    }
+
     private String createAccessTokenNew(final ByteBufAllocator alloc, final InetSocketAddress target) {
         final ByteBuf buffer = alloc.buffer();
-        buffer.writeByte(0x01);
-        buffer.writeByte(0x01);
-        buffer.writeByte(0);
+        try {
+            buffer.writeByte(0x01);
+            buffer.writeByte(0x01);
+            buffer.writeByte(0);
 
-        if (target.isUnresolved()) {
-            final String hostname = target.getHostString();
-            final byte[] bytes = hostname.getBytes(CharsetUtil.UTF_8);
-            buffer.writeByte(0x03);
-            buffer.writeByte(bytes.length);
-            buffer.writeBytes(bytes);
-        } else {
-            final InetAddress address = target.getAddress();
-            if (address instanceof Inet4Address) {
-                buffer.writeByte(0x01);
-            } else if (address instanceof Inet6Address) {
-                buffer.writeByte(0x04);
+            if (target.isUnresolved()) {
+                final String hostname = target.getHostString();
+                final byte[] bytes = hostname.getBytes(CharsetUtil.UTF_8);
+                buffer.writeByte(0x03);
+                buffer.writeByte(bytes.length);
+                buffer.writeBytes(bytes);
             } else {
-                throw new UnsupportedOperationException(address.toString());
+                final InetAddress address = target.getAddress();
+                if (address instanceof Inet4Address) {
+                    buffer.writeByte(0x01);
+                } else if (address instanceof Inet6Address) {
+                    buffer.writeByte(0x04);
+                } else {
+                    throw new UnsupportedOperationException(address.toString());
+                }
+                buffer.writeBytes(address.getAddress());
             }
-            buffer.writeBytes(address.getAddress());
+            buffer.writeShort(target.getPort());
+            return Base64.encode(buffer, Base64Dialect.URL_SAFE).toString(CharsetUtil.UTF_8);
+        } finally {
+            buffer.release();
         }
-        buffer.writeShort(target.getPort());
-        return Base64.encode(buffer, Base64Dialect.URL_SAFE).toString(CharsetUtil.UTF_8);
     }
 
     @Override
@@ -177,8 +190,13 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
         if (HttpMethod.CONNECT.name().equals(webSocketProxyServerProtocol)) {
             ctx.pipeline().remove("ws-encoder");
             ctx.pipeline().remove("ws-decoder");
+            ctx.pipeline().remove(Utf8FrameValidator.class);
             // auto remove when handshake completed.
             // ctx.pipeline().remove(HttpClientCodec.class);
+        } else {
+//            if (null == ctx.pipeline().get(TcpOverWebSocketProxyCodec.class)) {
+//                ctx.pipeline().addAfter(ctx.name(), TcpOverWebSocketProxyCodec.class.getName(), new TcpOverWebSocketProxyCodec());
+//            }
         }
         return true;
     }
