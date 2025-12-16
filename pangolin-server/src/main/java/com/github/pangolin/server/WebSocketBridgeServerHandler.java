@@ -127,6 +127,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                         webSocketBridgeServerEngine, webSocketBridgeServerForwarder
                 ));
             } else {
+                log.warn("Connection aborted: INVALID_PROTOCOL '{}' from {}", rawSubprotocol, ctx.channel().remoteAddress());
                 ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.PROTOCOL_ERROR)).addListener(ChannelFutureListener.CLOSE);
             }
         }
