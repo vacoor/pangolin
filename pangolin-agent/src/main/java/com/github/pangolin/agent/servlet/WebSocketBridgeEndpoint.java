@@ -13,6 +13,7 @@ import io.netty.util.ReferenceCountUtil;
 
 import javax.websocket.*;
 import javax.websocket.server.HandshakeRequest;
+import javax.websocket.server.PathParam;
 import javax.websocket.server.ServerEndpoint;
 import javax.websocket.server.ServerEndpointConfig;
 import java.io.IOException;
@@ -22,30 +23,29 @@ import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Map;
 
-@ServerEndpoint(value = "/ws/bridge", configurator = WebSocketBridgeEndpoint.AuthenticationConfigurator.class)
+@ServerEndpoint(value = "/ws/bridge/{tunnelKey}", configurator = WebSocketBridgeEndpoint.AuthenticationConfigurator.class)
 public class WebSocketBridgeEndpoint {
     private Channel channel;
 
     @OnOpen
-    public void onOpen(final Session session) throws InterruptedException, IOException {
+    public void onOpen(@PathParam("tunnelKey") final String tunnelKey, final Session session) throws InterruptedException, IOException {
         final Map<String, List<String>> params = session.getRequestParameterMap();
-        final List<String> accessToken = params.get("access_token");
-        final String accessTokenToUse = null != accessToken && accessToken.size() > 0 ? accessToken.get(accessToken.size() - 1) : null;
-        if (null == accessTokenToUse) {
+        final List<String> encodedPayload = params.get("access_token");
+        final String encodedPayloadToUse = null != encodedPayload && !encodedPayload.isEmpty() ? encodedPayload.get(encodedPayload.size() - 1) : null;
+        if (null == encodedPayloadToUse) {
             session.close(new CloseReason(CloseReason.CloseCodes.NOT_CONSISTENT, ""));
             return;
         }
 
-        final ByteBuf in = Base64.decode(Unpooled.wrappedBuffer(accessTokenToUse.getBytes()), Base64Dialect.URL_SAFE);
-        final byte version = in.readByte();
+        final ByteBuf payload = Base64.decode(Unpooled.wrappedBuffer(encodedPayloadToUse.getBytes()), Base64Dialect.URL_SAFE);
+        final byte version = payload.readByte();
         if (VER_1_1 != version) {
             session.close(new CloseReason(
                     CloseReason.CloseCodes.NOT_CONSISTENT,
                     String.format("unsupported version: %s, (expected: %s)", version, VER_1_1)
             ));
         }
-        final String accessKey = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
-        final byte cmd = in.readByte();
+        final byte cmd = payload.readByte();
         if (CMD_CONNECT != cmd) {
             session.close(new CloseReason(
                     CloseReason.CloseCodes.NOT_CONSISTENT,
@@ -53,16 +53,16 @@ public class WebSocketBridgeEndpoint {
             ));
         }
 
-        final byte rsv = in.readByte();
+        final byte rsv = payload.readByte();
         if (0 != rsv) {
             session.close(new CloseReason(
                     CloseReason.CloseCodes.NOT_CONSISTENT,
                     String.format("unsupported rsv: %s, (expected: %s)", rsv, 0)
             ));
         }
-        final InetSocketAddress target = parseSocketAddress(in);
+        final InetSocketAddress target = parseSocketAddress(payload);
 
-        if (null == target || !authenticate(accessKey)) {
+        if (null == target || !authenticate(tunnelKey)) {
             session.close(new CloseReason(CloseReason.CloseCodes.NOT_CONSISTENT, ""));
             return;
         }
