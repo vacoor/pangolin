@@ -184,8 +184,12 @@ public class TunAcceptor implements Acceptor {
                     final Subnet4RoutePredicate subnet = (Subnet4RoutePredicate) predicate;
                     final int cidrPrefix = subnet.getCidrPrefix();
                     final InetAddress na = subnet.getNetworkAddress();
-                    rt.add(na, (byte) cidrPrefix, gw, ifname, 0);
                     log.info("route add -inet {}/{} gw {} {}", na.getHostAddress(), cidrPrefix, gw.getHostAddress(), ifname);
+                    try {
+                        rt.add(na, (byte) cidrPrefix, gw, ifname, 0);
+                    } catch (final Exception ex) {
+                        log.warn("route add -inet {}/{} gw {} {} -> {}", na.getHostAddress(), cidrPrefix, gw.getHostAddress(), ifname, ex.getMessage(), ex);
+                    }
                 }
             }
         }
