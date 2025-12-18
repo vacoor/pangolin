@@ -20,4 +20,5 @@ DOMAIN-SUFFIX,wiki.baozun.com
 
 # 
 IP-CIDR,10.188.71.0/24
+IP-CIDR,10.188.70.45/24
 
