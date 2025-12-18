@@ -80,7 +80,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
 
         Ini.Section rule = ini.getSection("Rule");
         if (null != rule) {
-            rule.keySet().stream().map(route -> apply(route, configLocation, aliasRegistry)).forEach(registry::addRoute);
+            rule.keySet().stream().map(route -> apply(route, configLocation, aliasRegistry, true)).forEach(registry::addRoute);
         }
 
         // TODO

@@ -85,7 +85,7 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
             }
         }
 
-        rules.stream().map(r -> apply(r, url, context)).filter(Objects::nonNull).forEach(context::addRoute);
+        rules.stream().map(r -> apply(r, url, context, false)).filter(Objects::nonNull).forEach(context::addRoute);
 
         return context;
     }

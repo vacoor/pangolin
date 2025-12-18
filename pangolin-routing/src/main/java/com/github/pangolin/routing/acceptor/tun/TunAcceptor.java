@@ -183,6 +183,9 @@ public class TunAcceptor implements Acceptor {
         final Set<String> added = Sets.newHashSet();
         for (final Route<?> route : context.routes()) {
             for (Object predicate : route.getPredicates()) {
+                if (!route.isUdf()) {
+                    continue;
+                }
                 if (predicate instanceof Subnet4RoutePredicate) {
                     final Subnet4RoutePredicate subnet = (Subnet4RoutePredicate) predicate;
                     final int cidrPrefix = subnet.getCidrPrefix();
