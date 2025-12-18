@@ -16,6 +16,8 @@ import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelOption;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.Tcp4DemultiplexHandler;
 import com.github.pangolin.routing.context.RouteContext;
+import com.github.pangolin.routing.route.Route;
+import com.github.pangolin.routing.route.predicate.Subnet4RoutePredicate;
 import com.github.pangolin.routing.support.DatagramChannelFactory;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.upstream.DynamicUpstream;
@@ -28,6 +30,7 @@ import io.netty.handler.codec.dns.DatagramDnsQuery;
 import io.netty.handler.codec.dns.DatagramDnsResponse;
 import lombok.extern.slf4j.Slf4j;
 
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Arrays;
@@ -94,10 +97,11 @@ public class TunAcceptor implements Acceptor {
             }
         };
 
-        return start0(ifname, bindings, wintunType, wintunUuid, lazyDns, socketFactory, datagramFactory);
+        return start0(context, ifname, bindings, wintunType, wintunUuid, lazyDns, socketFactory, datagramFactory);
     }
 
-    private ChannelFuture start0(final String ifname, final InterfaceAddressEx[] bindings,
+    private ChannelFuture start0(final RouteContext context,
+                                 final String ifname, final InterfaceAddressEx[] bindings,
                                  final String wintunType, final String wintunUuid,
                                  final DnsEngine dnsEngine,
                                  final SocketChannelFactory socketFactory, final DatagramChannelFactory datagramFactory) throws Exception {
@@ -132,13 +136,6 @@ public class TunAcceptor implements Acceptor {
 
                         WindowsNetworkInterface.flushDnsCache();
                         log.info("Flush DNS cache");
-
-                        future.channel().eventLoop().schedule(() -> {
-                            for (final NetworkRoutingTable.Route route : NetworkRoutingTable.get().routes()) {
-                                System.out.println(route);
-                            }
-                        }, 3, TimeUnit.SECONDS);
-
                     } else if (adapter instanceof DarwinTunAdapter) {
                         // networksetup -setdnsservers "Wi-Fi" 127.0.0.1 or "empty"
                         // sudo killall -HUP mDNSResponder;
@@ -159,17 +156,39 @@ public class TunAcceptor implements Acceptor {
                         log.warn("Can't flush DNS cache");
                     }
 
-                    final InetAddress gw = SocketUtils.addressByName("198.18.0.1");
-//                    NetworkRoutingTable.get().add(gw, (byte) 32, gw, adapter.name(), 25);
-
-                    // TODO add route
-                    final InetAddress dst = SocketUtils.addressByName("10.188.70.45");
-                    NetworkRoutingTable.get().add(dst, (byte) 24, gw, adapter.name(), 0);
+                    addRoutingIfNecessary(context, adapter.name(), bindings);
                 } else {
                     log.error("Tun adapter bound error: {}", future.cause().getMessage(), future.cause());
                 }
             }
         });
+    }
+
+    private void addRoutingIfNecessary(final RouteContext context, final String ifname, final InterfaceAddressEx... addresses) {
+        Inet4Address gw = null;
+        for (InterfaceAddressEx address : addresses) {
+            final InetAddress addr = address.getAddress();
+            if (addr instanceof Inet4Address) {
+                gw = (Inet4Address) addr;
+                break;
+            }
+        }
+        if (null == gw) {
+            return;
+        }
+
+        final NetworkRoutingTable rt = NetworkRoutingTable.get();
+        for (final Route<?> route : context.routes()) {
+            for (Object predicate : route.getPredicates()) {
+                if (predicate instanceof Subnet4RoutePredicate) {
+                    final Subnet4RoutePredicate subnet = (Subnet4RoutePredicate) predicate;
+                    final int cidrPrefix = subnet.getCidrPrefix();
+                    final InetAddress na = subnet.getNetworkAddress();
+                    rt.add(na, (byte) cidrPrefix, gw, ifname, 0);
+                    log.info("route add -inet {}/{} gw {} {}", na.getHostAddress(), cidrPrefix, gw.getHostAddress(), ifname);
+                }
+            }
+        }
     }
 
     private SocketChannelFactory getSocketChannelFactory(final RouteContext context) {
