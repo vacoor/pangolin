@@ -23,6 +23,7 @@ import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.upstream.DynamicUpstream;
 import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.util.SocketUtils;
+import com.google.common.collect.Sets;
 import freework.crypto.digest.Hash;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
@@ -34,6 +35,7 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Arrays;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -178,12 +180,17 @@ public class TunAcceptor implements Acceptor {
         }
 
         final NetworkRoutingTable rt = NetworkRoutingTable.get();
+        final Set<String> added = Sets.newHashSet();
         for (final Route<?> route : context.routes()) {
             for (Object predicate : route.getPredicates()) {
                 if (predicate instanceof Subnet4RoutePredicate) {
                     final Subnet4RoutePredicate subnet = (Subnet4RoutePredicate) predicate;
                     final int cidrPrefix = subnet.getCidrPrefix();
                     final InetAddress na = subnet.getNetworkAddress();
+                    final String key = na.getHostAddress() + "/" + cidrPrefix;
+                    if (!added.add(key)) {
+                        continue;
+                    }
                     log.info("route add -inet {}/{} gw {} {}", na.getHostAddress(), cidrPrefix, gw.getHostAddress(), ifname);
                     try {
                         rt.add(na, (byte) cidrPrefix, gw, ifname, 0);
