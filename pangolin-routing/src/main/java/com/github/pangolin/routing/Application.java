@@ -8,16 +8,11 @@ import com.github.pangolin.routing.context.InheritableRouteContext;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.context.RouteContextFactory;
 import com.github.pangolin.routing.route.RoutePredicateFactoriesAware;
+import com.github.pangolin.routing.route.RouteRegistry;
+import com.github.pangolin.routing.route.RouteUpstream;
 import com.github.pangolin.routing.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.route.predicate.RoutePredicateSetFactory;
-import com.github.pangolin.routing.upstream.DirectUpstream;
-import com.github.pangolin.routing.upstream.DropUpstream;
-import com.github.pangolin.routing.upstream.RejectUpstream;
-import com.github.pangolin.routing.upstream.Upstream;
-import com.github.pangolin.routing.upstream.UpstreamCombiner;
-import com.github.pangolin.routing.upstream.UpstreamCombinersAware;
-import com.github.pangolin.routing.upstream.UpstreamFactoriesAware;
-import com.github.pangolin.routing.upstream.UpstreamFactory;
+import com.github.pangolin.routing.upstream.*;
 import com.github.pangolin.routing.upstream.stats.StatsAware;
 import com.github.pangolin.routing.upstream.stats.StatsUpstreamCombiner;
 import com.github.pangolin.routing.upstream.stats.StatsUpstreamFactory;
@@ -105,16 +100,19 @@ public class Application {
 
     public RouteContext run(final URL configLocation) throws Exception {
         log.info("Initializing context...");
-        final RouteContext context = createParentContext(configLocation);
-        final InheritableRouteContext contextToUse = new InheritableRouteContext(context);
+        final InheritableRouteContext root = new InheritableRouteContext(null, null);
         final Upstream[] embeddedUpstreams = new Upstream[]{
                 DirectUpstream.INSTANCE,
                 DropUpstream.INSTANCE,
                 RejectUpstream.INSTANCE
         };
         for (final Upstream embeddedUpstream : embeddedUpstreams) {
-            contextToUse.addUpstream(embeddedUpstream.name(), embeddedUpstream);
+            root.addUpstream(embeddedUpstream.name(), embeddedUpstream);
         }
+
+        final RouteContext context = createParentContext(configLocation, root);
+        final RouteContext contextToUse = context;//new InheritableRouteContext(configLocation, context);
+        root.addUpstream(RouteUpstream.NAME, new RouteUpstream((RouteRegistry<InetSocketAddress>) contextToUse, (UpstreamRegistry) contextToUse));
         log.info("Context initialized.");
 
         int port = 0;
@@ -148,9 +146,9 @@ public class Application {
     }
 
 
-    protected RouteContext createParentContext(final URL configLocation) throws Exception {
+    protected RouteContext createParentContext(final URL configLocation, RouteContext root) throws Exception {
         final ServiceLoader<RouteContextFactory> factories = ServiceLoader.load(RouteContextFactory.class);
-        RouteContext context = null;
+        RouteContext context = root;
         for (final RouteContextFactory factory : factories) {
             if (factory instanceof UpstreamFactoriesAware) {
                 ((UpstreamFactoriesAware) factory).setUpstreamFactories(upstreamFactories);

@@ -51,7 +51,7 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
         final List<ProxyGroupDefinition> proxyGroupDefinitions = nvl(conf.getProxyGroups(), Collections.emptyList());
         final List<String> rules = nvl(conf.getRules(), Collections.emptyList());
 
-        final InheritableRouteContext context = new InheritableRouteContext(parent);
+        final InheritableRouteContext context = new InheritableRouteContext(url, parent);
 
         proxyDefinitions.stream()
                 .filter(d -> !"0.0.0.0".equals(d.getServer()))

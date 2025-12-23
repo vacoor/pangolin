@@ -20,23 +20,26 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 import java.net.InetSocketAddress;
+import java.net.URL;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 public class InheritableRouteContext extends SimpleAliasRegistry implements RouteContext, RouteRegistry<InetSocketAddress>, UpstreamRegistry, AcceptorProvider {
+    private URL location;
     private RouteContext parent;
     private final List<Route<InetSocketAddress>> routes = Lists.newLinkedList();
     private final Map<String, Upstream> upstreams = Maps.newLinkedHashMap();
     private final Map<String, Object> attributes = Maps.newLinkedHashMap();
 
     private final List<Acceptor> acceptors = Lists.newLinkedList();
-    private final Upstream self = new RouteUpstream(this, this);
+//    private final Upstream self = new RouteUpstream(this, this);
 
-    public InheritableRouteContext(final RouteContext parent) {
+    public InheritableRouteContext(final URL location, final RouteContext parent) {
+        this.location = location;
         this.parent = parent;
-        this.addUpstream(RouteUpstream.NAME, self);
+//        this.addUpstream(RouteUpstream.NAME, self);
     }
 
     @Override
@@ -50,7 +53,7 @@ public class InheritableRouteContext extends SimpleAliasRegistry implements Rout
 
     @Override
     public Iterable<Route> routes() {
-        return null == parent ? Collections.unmodifiableList(routes) : Iterables.concat(routes, parent.routes());
+        return null == parent ? Collections.unmodifiableList(routes) : Iterables.concat(parent.routes(), routes);
     }
 
     @Override
@@ -61,6 +64,10 @@ public class InheritableRouteContext extends SimpleAliasRegistry implements Rout
     @Override
     public Route getRoute(final InetSocketAddress destination) {
         // TODO get from cache.
+        Route r = null != parent ? parent.getRoute(destination) : null;
+        if (null != r) {
+            return r;
+        }
         for (final Route<InetSocketAddress> route : routes) {
             final Iterable<RoutePredicate<InetSocketAddress>> predicates = route.getPredicates();
             for (final RoutePredicate<InetSocketAddress> predicate : predicates) {
@@ -70,7 +77,7 @@ public class InheritableRouteContext extends SimpleAliasRegistry implements Rout
                 }
             }
         }
-        return null != parent ? parent.getRoute(destination) : null;
+        return null;
     }
 
     @Override
@@ -90,12 +97,8 @@ public class InheritableRouteContext extends SimpleAliasRegistry implements Rout
 
     @Override
     public Upstream getUpstream(final String name) {
-        final String nameToUse = canonicalName(name);
-        final Upstream upstream = upstreams.get(nameToUse);
-        if (null != upstream || null == parent) {
-            return upstream;
-        }
-        return parent.getUpstream(name);
+        final Upstream upstream = null != parent ? parent.getUpstream(name) : null;
+        return null != upstream ? upstream : upstreams.get(canonicalName(name));
     }
 
     /*

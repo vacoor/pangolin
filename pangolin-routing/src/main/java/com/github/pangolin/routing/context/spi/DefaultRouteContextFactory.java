@@ -34,21 +34,12 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
         ini.load(configLocation.openStream());
 
 
-        final Ini.Section external = ini.getSection("External");
-        RouteContext externalCtx = parent;
-        if (null != external) {
-            for (String urlToUse : external.values()) {
-                externalCtx = loadExternal(urlToUse, externalCtx);
-            }
-//            return externalCtx;
-        }
-
-        final InheritableRouteContext registry = new InheritableRouteContext(externalCtx);
-        final AliasRegistry aliasRegistry = registry;
+        final InheritableRouteContext iniContext = new InheritableRouteContext(configLocation, parent);
+        final AliasRegistry aliasRegistry = iniContext;
 
         final Ini.Section proxy = ini.getSection("Proxy");
         if (null != proxy) {
-            proxy.forEach((k, v) -> registry.addUpstream(k, apply(k, v)));
+            proxy.forEach((k, v) -> iniContext.addUpstream(k, apply(k, v)));
         }
 
         final Ini.Section proxyGroups = ini.getSection("Proxy Group");
@@ -68,9 +59,9 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
                 } else if (1 == proxies.size()) {
                     aliasRegistry.registerAlias(proxies.iterator().next(), name);
                 } else {
-                    final Upstream combine = combine(name, type, proxies, registry);
+                    final Upstream combine = combine(name, type, proxies, iniContext);
                     if (null != combine) {
-                        registry.addUpstream(name, combine);
+                        iniContext.addUpstream(name, combine);
                     } else {
                         log.warn("Unable upstream combine type {}", type);
                     }
@@ -80,7 +71,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
 
         Ini.Section rule = ini.getSection("Rule");
         if (null != rule) {
-            rule.keySet().stream().map(route -> apply(route, configLocation, aliasRegistry, true)).forEach(registry::addRoute);
+            rule.keySet().stream().map(route -> apply(route, configLocation, aliasRegistry, true)).forEach(iniContext::addRoute);
         }
 
         // TODO
@@ -98,7 +89,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
                 if (segments.length < 2) {
                     throw new IllegalArgumentException("Unable to create Acceptor with definition " + definition);
                 }
-                registry.addAcceptors(new MixinAcceptor(listenPort, segments[0], Arrays.copyOfRange(segments, 1, segments.length)));
+                iniContext.addAcceptors(new MixinAcceptor(listenPort, segments[0], Arrays.copyOfRange(segments, 1, segments.length)));
             }
         }
 
@@ -120,7 +111,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
                 final String leaseTime = fakeDns.get("LEASE-TIME");
                 final int leaseTimeSeconds = StringUtils.hasText(leaseTime) ? Integer.parseInt(leaseTime) : 60;
 
-                registry.addAcceptors(new FakeDnsAcceptor(inet4subnet, inet6subnet, leaseTimeSeconds));
+                iniContext.addAcceptors(new FakeDnsAcceptor(inet4subnet, inet6subnet, leaseTimeSeconds));
             }
         }
 
@@ -138,10 +129,19 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
             final InterfaceAddressEx bindingToUse = InterfaceAddressEx.of(addr, len);
 
             final String ifname = Platform.isWindows() ? "Pangolin" : null;
-            registry.addAcceptors(new TunAcceptor(ifname, new InterfaceAddressEx[]{bindingToUse}, entry.getValue()));
+            iniContext.addAcceptors(new TunAcceptor(ifname, new InterfaceAddressEx[]{bindingToUse}, entry.getValue()));
         }
 
-        return registry;
+        final Ini.Section external = ini.getSection("External");
+        RouteContext externalCtx = iniContext;
+        if (null != external) {
+            for (String urlToUse : external.values()) {
+                externalCtx = loadExternal(urlToUse, externalCtx);
+            }
+//            return externalCtx;
+        }
+        // return iniContext;
+        return externalCtx;
     }
 
 
