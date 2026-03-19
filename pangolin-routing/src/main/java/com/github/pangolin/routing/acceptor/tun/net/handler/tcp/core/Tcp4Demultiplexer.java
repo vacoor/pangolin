@@ -131,7 +131,20 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
 
         final TcpSock sockToUse = (TcpSock) sk;
         if (null != sockToUse.child) {
-            innerChannel(sockToUse).eventLoop().execute(() -> tcp_v4_do_rcv(net, sockToUse, ipPacket));
+            try {
+                final Channel channel = innerChannel(sockToUse);
+                // 检查通道是否已经注册到event loop上
+                if (channel.eventLoop().inEventLoop()) {
+                    // 如果当前已经在event loop中，直接执行
+                    tcp_v4_do_rcv(net, sockToUse, ipPacket);
+                } else {
+                    // 否则提交到event loop中执行
+                    channel.eventLoop().execute(() -> tcp_v4_do_rcv(net, sockToUse, ipPacket));
+                }
+            } catch (IllegalStateException e) {
+                // 如果通道没有注册到event loop上，直接在当前线程执行
+                tcp_v4_do_rcv(net, sockToUse, ipPacket);
+            }
         } else {
             tcp_v4_do_rcv(net, sockToUse, ipPacket);
         }
