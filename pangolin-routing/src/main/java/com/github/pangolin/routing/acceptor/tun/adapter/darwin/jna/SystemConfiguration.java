@@ -71,6 +71,25 @@ public interface SystemConfiguration extends Library {
             final Pointer context
     );
 
+    /**
+     * Creates a dynamic store key that can be used to access the per-service network configuration information.
+     *
+     * @param allocator The allocator that should be used to allocate memory
+     *                  for this key. This parameter may be NULL in which case
+     *                  the current default allocator is used.
+     *                  If this value is not a valid CFAllocator, the behavior is undefined.
+     * @param domain    The desired domain, such as the requested configuration or the current state.
+     * @param serviceID The service ID or a regular expression pattern.
+     * @param entity    The specific global entity, such as IPv4 or DNS.
+     * @return A reference to the new key. You must release the returned value.
+     * @see <a href="https://developer.apple.com/documentation/systemconfiguration/scdynamicstorekeycreatenetworkserviceentity(_:_:_:_:)/">SCDynamicStoreKeyCreateNetworkServiceEntity(_:_:_:_:)</a>
+     */
+    CFStringRef SCDynamicStoreKeyCreateNetworkServiceEntity(
+            final CFAllocatorRef allocator,
+            final CFStringRef domain,
+            final CFStringRef serviceID,
+            final CFStringRef entity
+    );
 
     /**
      * Creates a CFRunLoopSource object that can be added to the

@@ -287,8 +287,8 @@ public final class DarwinDns {
      */
     private static boolean addServiceDns(final SCDynamicStoreRef store,
                                          final String serviceId, final boolean setup, final String[] dns) {
-        final String dnsDirectoryKeyFmt = setup ? SETUP_SERVICE_ID_DNS_KEY_FMT : STATE_SERVICE_ID_DNS_KEY_FMT;
-        return addDns0(store, CFSTR(String.format(dnsDirectoryKeyFmt, serviceId)), dns);
+        final CFStringRef dnsDirectoryKey = getNetworkServiceEntity(setup, serviceId);
+        return addDns0(store, dnsDirectoryKey, dns);
     }
 
     /**
@@ -341,8 +341,15 @@ public final class DarwinDns {
     private static boolean removeServiceDns(final SCDynamicStoreRef store,
                                             final String serviceId, final boolean setup,
                                             final String[] dns, final String... defaultDns) {
+        final CFStringRef dnsDirectoryKey = getNetworkServiceEntity(setup, serviceId);
+        return removeDns0(store, dnsDirectoryKey, dns, defaultDns);
+    }
+
+    private static CFStringRef getNetworkServiceEntity(final boolean setup, final String serviceId) {
         final String dnsDirectoryKeyFmt = setup ? SETUP_SERVICE_ID_DNS_KEY_FMT : STATE_SERVICE_ID_DNS_KEY_FMT;
-        return removeDns0(store, CFSTR(String.format(dnsDirectoryKeyFmt, serviceId)), dns, defaultDns);
+        return CFSTR(String.format(dnsDirectoryKeyFmt, serviceId));
+        // final String domain = setup ? "Setup:" : "State:";
+        // return SC.SCDynamicStoreKeyCreateNetworkServiceEntity(null, CFSTR(domain), CFSTR(serviceId), CFSTR("DNS"));
     }
 
     /**
@@ -455,8 +462,8 @@ public final class DarwinDns {
      * @return true if apply dns addresses successful, otherwise false
      */
     private static boolean setServiceDns(final SCDynamicStoreRef store, final String serviceId, final boolean setup, final String[] dns) {
-        final String dnsDirectoryKeyFmt = setup ? SETUP_SERVICE_ID_DNS_KEY_FMT : STATE_SERVICE_ID_DNS_KEY_FMT;
-        return setDns0(store, CFSTR(String.format(dnsDirectoryKeyFmt, serviceId)), dns);
+        final CFStringRef dnsDirectoryKey = getNetworkServiceEntity(setup, serviceId);
+        return setDns0(store, dnsDirectoryKey, dns);
     }
 
     /**
