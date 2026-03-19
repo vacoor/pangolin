@@ -46,8 +46,11 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
             final T ipPacket = prepare(rawIpPacket);
             demultiplexer.tcp_rcv(ctx.channel(), ipPacket);
         } catch (final Exception ex) {
-            ex.printStackTrace();
-            demultiplexer.send_reset(ctx.channel(), rawIpPacket.getHeader(), rawIpPacket.get(TcpPacket.class), -77);
+            log.error("Failed to process TCP packet", ex);
+            final TcpPacket tcpPacket = rawIpPacket.get(TcpPacket.class);
+            if (tcpPacket != null) {
+                demultiplexer.send_reset(ctx.channel(), rawIpPacket.getHeader(), tcpPacket, -77);
+            }
         }
     }
 

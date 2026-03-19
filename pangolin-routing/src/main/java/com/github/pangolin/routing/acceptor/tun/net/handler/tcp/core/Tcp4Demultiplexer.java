@@ -181,7 +181,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 }
             }
         } catch (final Throwable cause) {
-            cause.printStackTrace();
+            log.error("Failed to process TCP state", cause);
             if (!TcpState.TCP_LISTEN.equals(sock.state())) {
                 inet_csk_destroy_sock(sock);
             }

@@ -327,6 +327,15 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 
 
     public static Channel innerChannel(SockCommon sock) {
+        if (sock == null || sock.child == null) {
+            throw new NullPointerException("sock or sock.child is null");
+        }
+        if (!sock.child.isDone()) {
+            throw new IllegalStateException("child channel future is not done yet");
+        }
+        if (sock.child.cause() != null) {
+            throw new RuntimeException("child channel future failed", sock.child.cause());
+        }
         return sock.child.channel();
     }
 
