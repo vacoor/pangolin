@@ -7,7 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.TcpPacket;
 
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.ArrayDeque;
 import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
@@ -200,8 +200,8 @@ public class TcpSock extends inet_connection_sock {
     public long ipv4_tcp_challenge_timestamp;
     public int ipv4_tcp_challenge_count;
 
-    public ConcurrentLinkedQueue<TcpBuffer> sk_write_queue = new ConcurrentLinkedQueue<>();
-    public ConcurrentLinkedQueue<TcpBuffer> tcp_rtx_queue = new ConcurrentLinkedQueue<>();
+    public final ArrayDeque<TcpBuffer> sk_write_queue = new ArrayDeque<>();
+    public final ArrayDeque<TcpBuffer> tcp_rtx_queue  = new ArrayDeque<>();
 
 
     public Runnable icsk_retransmit_timer;
