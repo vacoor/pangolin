@@ -3,6 +3,7 @@ package com.github.pangolin.routing.acceptor.tun.fakedns.v2.fake;
 import com.google.common.collect.Lists;
 import io.netty.channel.EventLoop;
 import io.netty.handler.codec.dns.DnsRecord;
+import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.ScheduledFuture;
 
 import java.util.Collections;
@@ -39,8 +40,7 @@ public class DnsRecordCache {
 
     public boolean clear(final String hostname) {
         final Entries entries = resolveCache.remove(hostname);
-        // return null != entries && entries.clearAndCancel();
-        return null != entries;
+        return null != entries && entries.clearAndCancel();
     }
 
     public void clear() {
@@ -49,7 +49,7 @@ public class DnsRecordCache {
             while (it.hasNext()) {
                 final Map.Entry<String, Entries> e = it.next();
                 it.remove();
-                // e.getValue().clearAndCancel();
+                e.getValue().clearAndCancel();
             }
         }
     }
@@ -67,6 +67,7 @@ public class DnsRecordCache {
 
         void add(final DnsRecord dnsRecord, final EventLoop loop) {
             final int ttl = (int) dnsRecord.timeToLive();
+            ReferenceCountUtil.retain(dnsRecord);
             while (true) {
                 final List<DnsRecord> entries = this.get();
                 if (!entries.isEmpty()) {
@@ -107,6 +108,9 @@ public class DnsRecordCache {
             final List<DnsRecord> entries = getAndSet(Collections.emptyList());
             if (entries.isEmpty()) {
                 return false;
+            }
+            for (DnsRecord record : entries) {
+                ReferenceCountUtil.release(record);
             }
             final ScheduledFuture expiration = FUTURE_UPDATER.getAndSet(this, null);
             if (null != expiration) {

@@ -4,6 +4,7 @@ import io.netty.channel.EventLoop;
 import io.netty.handler.codec.dns.DnsRecord;
 import io.netty.handler.codec.dns.DnsResponse;
 import io.netty.handler.codec.dns.DnsSection;
+import io.netty.util.ReferenceCountUtil;
 
 import java.util.List;
 
@@ -38,17 +39,23 @@ public class DnsResponseCache {
             return dnsResponse;
         }
         for (int i = 0; i < answers.size(); i++) {
-            dnsResponse.addRecord(DnsSection.ANSWER, i, answers.get(i));
+            DnsRecord record = answers.get(i);
+            ReferenceCountUtil.retain(record);
+            dnsResponse.addRecord(DnsSection.ANSWER, i, record);
         }
 
         List<DnsRecord> authority = authoritativeDnsServerCache.get(hostname);
         for (int i = 0; i < authority.size(); i++) {
-            dnsResponse.addRecord(DnsSection.AUTHORITY, i, authority.get(i));
+            DnsRecord record = authority.get(i);
+            ReferenceCountUtil.retain(record);
+            dnsResponse.addRecord(DnsSection.AUTHORITY, i, record);
         }
 
         List<DnsRecord> additional = additionalCache.get(hostname);
         for (int i = 0; i < additional.size(); i++) {
-            dnsResponse.addRecord(DnsSection.ADDITIONAL, i, additional.get(i));
+            DnsRecord record = additional.get(i);
+            ReferenceCountUtil.retain(record);
+            dnsResponse.addRecord(DnsSection.ADDITIONAL, i, record);
         }
         return dnsResponse;
     }

@@ -7,6 +7,7 @@ import io.netty.channel.ChannelPipeline;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.dns.*;
 import io.netty.resolver.dns.DnsNameResolver;
+import io.netty.util.ReferenceCountUtil;
 import io.netty.util.internal.StringUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -106,7 +107,7 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
                     }
                     ctx.writeAndFlush(response);
                 } finally {
-                    // envelope.release();
+                    envelope.release();
                 }
             }
         });
@@ -134,6 +135,8 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
     private void copySection(DnsResponse r1, DnsResponse r2, DnsSection section) {
         for (int i = 0; i < r1.count(section); i++) {
             DnsRecord record = r1.recordAt(section, i);
+            // 使用ReferenceCountUtil.retain()自动处理引用计数，无需手动检查类型
+            ReferenceCountUtil.retain(record);
             r2.addRecord(section, record);
         }
     }
