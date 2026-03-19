@@ -3,7 +3,6 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.support.SocketChannelFactory;
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -367,17 +366,6 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         final Inet4Address dstAddr = (Inet4Address) tp.ir_loc_addr;
         final Inet4Address srcAddr = (Inet4Address) tp.ir_rmt_addr;
 
-        // Zero-copy path: when the TcpBuffer was built from a ByteBuf slice (upstream data),
-        // assemble IP+TCP headers manually and combine with the payload via CompositeByteBuf —
-        // bypassing all pcap4j serialization for the data portion.
-        final ByteBuf rawPayload = skb.rawPayload();
-        if (rawPayload != null && (skb.options() == null || skb.options().isEmpty())) {
-            skb.srcAddr(dstAddr).dstAddr(srcAddr);
-            sendDirect(net, skb, srcAddr, dstAddr, rawPayload);
-            return;
-        }
-
-        // pcap4j path (SYN / SYN-ACK / FIN / ACK-only / retransmit with options)
         TcpPacket.Builder buf = skb
                 .srcAddr(dstAddr)
                 .dstAddr(srcAddr)
@@ -404,101 +392,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 .build();
 
         log.trace(logify(ipPacket, tp.rx_opt.snd_wscale));
+//        parent.writeAndFlush(ipPacket).syncUninterruptibly();
         net.writeAndFlush(ipPacket);
-    }
-
-    /**
-     * Assemble a raw IPv4+TCP packet directly into a {@link io.netty.buffer.CompositeByteBuf},
-     * bypassing pcap4j serialization entirely.
-     *
-     * <p>Layout: {@code [20-byte IPv4 header][20-byte TCP header][payload]}
-     *
-     * <p>The method retains a slice of {@code payload} for the composite buffer ownership;
-     * the caller's reference to {@code rawPayload} is left intact for possible retransmission.
-     */
-    private static void sendDirect(Channel net, TcpBuffer skb,
-                                   Inet4Address srcAddr, Inet4Address dstAddr,
-                                   ByteBuf payload) {
-        final int payloadLen = payload.readableBytes();
-
-        // --- Allocate 40-byte header buffer (20 IP + 20 TCP) ---
-        final ByteBuf headers = net.alloc().buffer(40, 40);
-
-        // === IPv4 header (20 bytes, offset 0) ===
-        final byte[] srcBytes = srcAddr.getAddress();
-        final byte[] dstBytes = dstAddr.getAddress();
-        headers.writeByte(0x45);                        // version=4, IHL=5 (no options)
-        headers.writeByte(0x00);                        // DSCP/ECN = 0
-        headers.writeShort(40 + payloadLen);            // total length
-        headers.writeShort(0x0000);                     // identification (irrelevant with DF=1)
-        headers.writeShort(0x4000);                     // flags=DF, fragment offset=0
-        headers.writeByte((byte) 64);                   // TTL
-        headers.writeByte((byte) 0x06);                 // protocol = TCP
-        headers.writeShort(0);                          // IP checksum placeholder  (offset 10)
-        headers.writeBytes(srcBytes);                   // source IP
-        headers.writeBytes(dstBytes);                   // destination IP
-
-        // === TCP header (20 bytes, offset 20) ===
-        headers.writeShort(skb.srcPort().valueAsInt()); // source port
-        headers.writeShort(skb.dstPort().valueAsInt()); // destination port
-        headers.writeInt(skb.sequenceNumber());         // sequence number
-        headers.writeInt(skb.acknowledgmentNumber());   // acknowledgment number
-        headers.writeByte(0x50);                        // data offset=5 (20 bytes), reserved=0
-        int flags = 0;
-        if (skb.urg()) flags |= 0x20;
-        if (skb.ack()) flags |= 0x10;
-        if (skb.psh()) flags |= 0x08;
-        if (skb.rst()) flags |= 0x04;
-        if (skb.syn()) flags |= 0x02;
-        if (skb.fin()) flags |= 0x01;
-        headers.writeByte(flags);
-        headers.writeShort(skb.window() & 0xFFFF);     // window size
-        headers.writeShort(0);                          // TCP checksum placeholder (offset 36)
-        headers.writeShort(0);                          // urgent pointer
-
-        // === TCP checksum (pseudo-header + TCP header + payload) ===
-        long sum = 0;
-        // pseudo-header: srcIP + dstIP + 0x00 + proto(6) + TCP-segment-length
-        sum += ((srcBytes[0] & 0xFF) << 8) | (srcBytes[1] & 0xFF);
-        sum += ((srcBytes[2] & 0xFF) << 8) | (srcBytes[3] & 0xFF);
-        sum += ((dstBytes[0] & 0xFF) << 8) | (dstBytes[1] & 0xFF);
-        sum += ((dstBytes[2] & 0xFF) << 8) | (dstBytes[3] & 0xFF);
-        sum += 0x0006;                                  // protocol = TCP
-        sum += 20 + payloadLen;                         // TCP segment length
-        // TCP header (20 bytes, checksum field already 0)
-        for (int i = 20; i < 40; i += 2) {
-            sum += ((headers.getByte(i) & 0xFF) << 8) | (headers.getByte(i + 1) & 0xFF);
-        }
-        // TCP payload
-        final int ri = payload.readerIndex();
-        for (int i = 0; i < payloadLen - 1; i += 2) {
-            sum += ((payload.getByte(ri + i) & 0xFF) << 8) | (payload.getByte(ri + i + 1) & 0xFF);
-        }
-        if ((payloadLen & 1) != 0) {
-            sum += (payload.getByte(ri + payloadLen - 1) & 0xFF) << 8; // odd-byte padding
-        }
-        // fold carries and invert
-        while ((sum >> 16) != 0) sum = (sum & 0xFFFF) + (sum >> 16);
-        headers.setShort(36, (int) (~sum & 0xFFFF));
-
-        // === IP header checksum (over 20-byte IP header) ===
-        sum = 0;
-        for (int i = 0; i < 20; i += 2) {
-            sum += ((headers.getByte(i) & 0xFF) << 8) | (headers.getByte(i + 1) & 0xFF);
-        }
-        while ((sum >> 16) != 0) sum = (sum & 0xFFFF) + (sum >> 16);
-        headers.setShort(10, (int) (~sum & 0xFFFF));
-
-        // === Assemble CompositeByteBuf: headers + payload (zero-copy) ===
-        // retainedSlice increments payload's refCnt; composite owns the new reference.
-        // The original rawPayload in TcpBuffer retains its own ref for retransmission.
-        final io.netty.buffer.CompositeByteBuf packet = net.alloc().compositeBuffer(2);
-        packet.addComponent(true, headers);
-        packet.addComponent(true, payload.retainedSlice());
-
-        // Writing a ByteBuf (not IpPacket) bypasses IpPacketCodec.encode and goes
-        // directly to the TUN channel write handler.
-        net.writeAndFlush(packet);
     }
 
 }
