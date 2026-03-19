@@ -8,7 +8,6 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.pcap4j.packet.IpPacket;
 import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.UnknownPacket;
 
 import java.io.IOException;
 import java.security.SecureRandom;
@@ -595,6 +594,7 @@ public class TcpInput<T extends IpPacket> {
 
 
             tp.tcp_rtx_queue.remove(skb);
+            skb.release(); // release rawPayload ByteBuf once the segment is fully acknowledged
 
             tp.tcp_ack_tstamp();
         }
@@ -1535,17 +1535,16 @@ public class TcpInput<T extends IpPacket> {
                             final int mss = demultiplexer.output.tcp_current_mss(sk);
                             final int total = buf.readableBytes();
 
-                            // Read each MSS-sized chunk directly from the ByteBuf — avoids the
-                            // upfront full-buffer copy that ByteBufUtil.getBytes() would cause.
-                            // pcap4j's UnknownPacket still copies each chunk internally; eliminating
-                            // that copy requires the direct-ByteBuf transmit path (design.md §14 full refactor).
+                            // Zero-copy path: slice the upstream ByteBuf per MSS and store
+                            // as rawPayload.  No byte[] allocation, no pcap4j serialization
+                            // of the payload.  The retainedSlice keeps the underlying memory
+                            // alive until the segment is ACKed and TcpBuffer.release() is called.
                             for (int offset = 0; offset < total; ) {
                                 final int len = Math.min(total - offset, mss);
-                                final byte[] chunk = new byte[len];
-                                buf.getBytes(buf.readerIndex() + offset, chunk);
+                                final ByteBuf slice = buf.retainedSlice(buf.readerIndex() + offset, len);
                                 final boolean flush = offset + len >= total;
                                 demultiplexer.tcp_sendmsg2(net, sk, new TcpBuffer().ack(true)
-                                        .payloadBuilder(UnknownPacket.newPacket(chunk, 0, len).getBuilder()),
+                                        .rawPayload(slice),
                                         flush);
                                 offset += len;
                             }

@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import io.netty.buffer.ByteBuf;
 import org.pcap4j.packet.Packet;
 import org.pcap4j.packet.TcpPacket;
 import org.pcap4j.packet.namednumber.TcpPort;
@@ -26,6 +27,13 @@ public class TcpBuffer {
     private List<TcpPacket.TcpOption> options;
     private byte[] padding;
     private Packet.Builder payloadBuilder;
+    /**
+     * Zero-copy path: upstream data held as a retained ByteBuf slice.
+     * When non-null, {@link #payloadBuilder} is ignored on the transmit path.
+     * Must be released via {@link #release()} when the segment is discarded
+     * (ACKed or connection destroyed).
+     */
+    private ByteBuf rawPayload;
     private InetAddress srcAddr;
     private InetAddress dstAddr;
 
@@ -39,13 +47,42 @@ public class TcpBuffer {
 
     /**
      * 返回 payload 长度，结果会被缓存，避免反复触发 pcap4j 序列化。
+     * rawPayload 路径直接返回 readableBytes，无需序列化。
      */
     public int payloadLength() {
+        if (rawPayload != null) {
+            return rawPayload.readableBytes();
+        }
         if (cachedPayloadLength < 0) {
             Packet.Builder p = payloadBuilder;
             cachedPayloadLength = (p != null) ? p.build().length() : 0;
         }
         return cachedPayloadLength;
+    }
+
+    public ByteBuf rawPayload() {
+        return rawPayload;
+    }
+
+    /**
+     * 设置零拷贝 payload（retained ByteBuf slice）。
+     * 调用方已负责 retain，本对象持有所有权，最终由 {@link #release()} 归还。
+     */
+    public TcpBuffer rawPayload(ByteBuf rawPayload) {
+        this.rawPayload = rawPayload;
+        this.cachedPayloadLength = -1;
+        return this;
+    }
+
+    /**
+     * 释放 rawPayload 引用计数。在 segment 被 ACK 确认或连接关闭时必须调用。
+     * 对没有 rawPayload 的 TcpBuffer 调用为无操作。
+     */
+    public void release() {
+        if (rawPayload != null) {
+            rawPayload.release();
+            rawPayload = null;
+        }
     }
 
     public TcpPort srcPort() {

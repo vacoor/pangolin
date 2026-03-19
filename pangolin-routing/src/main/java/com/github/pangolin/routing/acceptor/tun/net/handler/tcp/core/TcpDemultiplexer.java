@@ -406,6 +406,16 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 
         synRegistry.remove(sk.uniqueKey());
         establishedRegistry.remove(sk.uniqueKey());
+
+        // Drain send/retransmit queues and release any rawPayload ByteBufs to
+        // prevent memory leaks when a connection is torn down before all segments
+        // have been acknowledged.
+        if (sk instanceof TcpSock) {
+            final TcpSock tcp = (TcpSock) sk;
+            TcpBuffer skb;
+            while ((skb = tcp.sk_write_queue.poll()) != null) skb.release();
+            while ((skb = tcp.tcp_rtx_queue.poll()) != null) skb.release();
+        }
     }
 
     public synchronized void tcp_sendmsg2(final Channel net, final TcpSock tp, TcpBuffer skb, boolean flush) {
