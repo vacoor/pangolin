@@ -60,6 +60,7 @@ public abstract class IpPacketHandler<T extends IpPacket> extends ChannelDuplexH
             if (release) {
                 ReferenceCountUtil.release(msg);
             }
+            IpPacketCodec.RAW_BYTES.remove();
         }
     }
 

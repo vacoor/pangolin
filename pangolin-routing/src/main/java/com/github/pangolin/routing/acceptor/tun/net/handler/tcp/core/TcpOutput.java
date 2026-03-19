@@ -531,11 +531,8 @@ public class TcpOutput<T extends IpPacket> {
             mss_now = tcp_sync_mss(tp, mtu);
         }
 
-        int optLen = tcp_established_options()
-                .stream()
-                .mapToInt(TcpOption::length)
-                .reduce(Integer::sum)
-                .orElse(0);
+        List<TcpOption> opts = tcp_established_options();
+        int optLen = opts.isEmpty() ? 0 : opts.stream().mapToInt(TcpOption::length).sum();
         int header_len = optLen + SIZE_OF_TCP_HDR;
         if (header_len != tp.tcp_header_len) {
             int delta = header_len - tp.tcp_header_len;
@@ -918,9 +915,11 @@ public class TcpOutput<T extends IpPacket> {
 
 
     private boolean tcp_under_memory_pressure() {
-        // FIXME
         // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L274
-        return true;
+        // Returning false eliminates premature receive-window suppression caused by
+        // the old hard-coded true (which forced quick-ACK off and called
+        // tcp_adjust_rcv_ssthresh on every packet).
+        return false;
     }
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1583
@@ -978,8 +977,8 @@ public class TcpOutput<T extends IpPacket> {
     public static final int TCP_DEFAULT_SCALING_RATIO = (1 << (TCP_RMEM_TO_WIN_SCALE - 1));
 
     private int __tcp_win_from_space(int scaling_ratio, int space) {
-        int scaled_space = space * scaling_ratio;
-        return scaled_space >> TCP_RMEM_TO_WIN_SCALE;
+        long scaled_space = (long) space * scaling_ratio;
+        return (int) (scaled_space >> TCP_RMEM_TO_WIN_SCALE);
     }
 
 

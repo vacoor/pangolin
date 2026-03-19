@@ -15,6 +15,16 @@ import java.util.List;
 public class IpPacketCodec extends ByteToMessageCodec<IpPacket> {
 
     /**
+     * Carries the original raw bytes of the IP packet being decoded on this thread.
+     * Set in {@link #decode} before firing the packet downstream, allowing
+     * {@link com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer#consume}
+     * to reference the bytes directly (zero-copy) instead of triggering a second
+     * pcap4j serialization.  Cleared by
+     * {@link IpPacketHandler#channelRead} after the packet is fully processed.
+     */
+    public static final ThreadLocal<byte[]> RAW_BYTES = new ThreadLocal<>();
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -31,6 +41,7 @@ public class IpPacketCodec extends ByteToMessageCodec<IpPacket> {
                           final ByteBuf packet, final List<Object> out) throws Exception {
         final byte[] bytes = new byte[packet.readableBytes()];
         packet.readBytes(bytes);
+        RAW_BYTES.set(bytes);
         out.add(parsePacket(bytes));
     }
 

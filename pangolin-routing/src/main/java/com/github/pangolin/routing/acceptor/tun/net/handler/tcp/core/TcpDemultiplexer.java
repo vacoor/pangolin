@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
@@ -533,11 +534,25 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     public void consume(final TcpSock sk, final TcpPacket skb) {
         if (null != sk.child) {
             final TcpPacket.TcpHeader hdr = skb.getHeader();
-            final byte[] bytes = skb.getPayload().getRawData();
-
             final int offset = sk.rcv_nxt - hdr.getSequenceNumber();
-            final int length = Math.min(output.tcp_receive_window(sk), bytes.length - offset);
-            innerChannel(sk).writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
+            final int payloadLen = skb.length() - hdr.length();
+            final int length = Math.min(output.tcp_receive_window(sk), payloadLen - offset);
+            if (length <= 0) {
+                return;
+            }
+            // Zero-copy path: reuse the byte[] already decoded by IpPacketCodec instead of
+            // calling skb.getPayload().getRawData() which forces pcap4j to allocate+copy again.
+            // Layout in rawBytes: [IP header][TCP header][TCP payload]
+            // IP header length = rawBytes.length - skb.length()
+            final byte[] rawBytes = IpPacketCodec.RAW_BYTES.get();
+            if (rawBytes != null) {
+                final int payloadOffset = rawBytes.length - skb.length() + hdr.length();
+                innerChannel(sk).writeAndFlush(Unpooled.wrappedBuffer(rawBytes, payloadOffset + offset, length));
+            } else {
+                // Fallback (e.g. synthetic packets not originating from IpPacketCodec)
+                final byte[] bytes = skb.getPayload().getRawData();
+                innerChannel(sk).writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
+            }
         }
     }
 
