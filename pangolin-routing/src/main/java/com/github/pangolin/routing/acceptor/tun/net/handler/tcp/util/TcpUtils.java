@@ -108,9 +108,7 @@ public abstract class TcpUtils {
         if (skb.fin()) {
             endSeq++;
         }
-        final Packet.Builder b = skb.payloadBuilder();
-        final int len = null != b ? b.build().length() : 0;
-        return endSeq + len;
+        return endSeq + skb.payloadLength();
     }
 
     public static int rounddown(int a, int b) {

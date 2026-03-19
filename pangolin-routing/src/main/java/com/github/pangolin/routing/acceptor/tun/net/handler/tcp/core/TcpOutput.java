@@ -411,8 +411,7 @@ public class TcpOutput<T extends IpPacket> {
             tcp_event_ack_sent(tp, rcv_nxt);
         }
 
-        Packet.Builder p = skb.payloadBuilder();
-        int len = null != p ? p.build().length() : 0;
+        int len = skb.payloadLength();
         if (len > 0) {
             tcp_event_data_sent(tp);
             tp.data_segs_out += tcp_skb_pcount(skb);
@@ -554,7 +553,7 @@ public class TcpOutput<T extends IpPacket> {
      *  skb_pcount = skb->len / mss_now
      */
     protected void tcp_minshall_update(TcpSock tp, int mss_now, TcpBuffer skb) {
-        final int skbLen = skb.asBuilder().build().length();
+        final int skbLen = skb.payloadLength();
         if (skbLen < tcp_skb_pcount(skb) * mss_now) {
             tp.snd_sml = determineEndSeq(skb);
         }
@@ -638,7 +637,7 @@ public class TcpOutput<T extends IpPacket> {
             skb.srcPort(tp.ir_num);
             skb.dstPort(tp.ir_rmt_port);
 
-            final int skbLen = skb.asBuilder().build().length();
+            final int skbLen = skb.payloadLength();
             final int missing_bytes = cwnd_quota * mss_now - skbLen;
             if (missing_bytes > 0) {
                 tcp_grow_skb(skb, missing_bytes);
@@ -784,7 +783,7 @@ public class TcpOutput<T extends IpPacket> {
     /* Does at least the first segment of SKB fit into the send window? */
     boolean tcp_snd_wnd_test(TcpSock tp, TcpBuffer skb, int cur_mss) {
         int end_seq = determineEndSeq(skb);
-        int skb_len = skb.asBuilder().build().length();
+        int skb_len = skb.payloadLength();
         if (skb_len > cur_mss)
             end_seq = skb.sequenceNumber() + cur_mss;
 
@@ -1070,10 +1069,7 @@ public class TcpOutput<T extends IpPacket> {
             }
         }
 
-        int skbLen = skb.asBuilder()
-                .srcAddr(tp.ir_loc_addr)    // XXX remove it.
-                .dstAddr(tp.ir_rmt_addr)    // XXX remove it.
-                .build().length();
+        int skbLen = skb.payloadLength();
         if (skbLen > len) {
             // TODO
             // fragment
@@ -1320,7 +1316,7 @@ public class TcpOutput<T extends IpPacket> {
              * but the window size is != 0
              * must have been a result SWS avoidance ( sender )
              */
-            final int len = skb.asBuilder().build().length();
+            final int len = skb.payloadLength();
             if (seg_size < end_seq - seq || len > mss) {
                 seg_size = Math.min(seg_size, mss);
                 skb.psh(true);

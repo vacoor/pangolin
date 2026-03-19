@@ -35,6 +35,19 @@ public class TcpBuffer {
 
     public long skb_mstamp_ns;
 
+    private transient int cachedPayloadLength = -1;
+
+    /**
+     * 返回 payload 长度，结果会被缓存，避免反复触发 pcap4j 序列化。
+     */
+    public int payloadLength() {
+        if (cachedPayloadLength < 0) {
+            Packet.Builder p = payloadBuilder;
+            cachedPayloadLength = (p != null) ? p.build().length() : 0;
+        }
+        return cachedPayloadLength;
+    }
+
     public TcpPort srcPort() {
         return srcPort;
     }
@@ -193,6 +206,7 @@ public class TcpBuffer {
 
     public TcpBuffer payloadBuilder(Packet.Builder payloadBuilder) {
         this.payloadBuilder = payloadBuilder;
+        this.cachedPayloadLength = -1;
         return this;
     }
 
