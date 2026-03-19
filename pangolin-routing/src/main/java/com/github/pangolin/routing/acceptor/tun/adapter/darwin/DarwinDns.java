@@ -143,7 +143,7 @@ public final class DarwinDns {
                     /*-
                      * add dns to the current service.
                      */
-                    if (null != nextServiceId) {
+                    if (null != nextServiceId && changed) {
                         String[] nextDefaultDns = getServiceDns(store, nextServiceId, true);
                         nextDefaultDns = null != nextDefaultDns ? nextDefaultDns : getServiceDns(store, nextServiceId, false);
                         nextDefaultDns = null != nextDefaultDns ? nextDefaultDns : new String[0];
