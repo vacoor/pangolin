@@ -3,7 +3,6 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -1533,35 +1532,22 @@ public class TcpInput<T extends IpPacket> {
                     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                         try {
                             final ByteBuf buf = (ByteBuf) msg;
-                            final byte[] payload = ByteBufUtil.getBytes(buf);
-
-                            // tcp data len = tcp snd.mss - tcp options.len
-                            // 超过 tcp data len 不切割, 会使用TSO功能通过网卡来分段.
-                            /*
-                            tcp_sendmsg2(new TcpBuffer()
-                            .ack(true)
-                            .psh(true)
-                            .payloadBuilder(
-                                    UnknownPacket.newPacket(payload, 0, payload.length).getBuilder()
-                            ), true);
-                            */
-
                             final int mss = demultiplexer.output.tcp_current_mss(sk);
-                            for (int offset = 0; offset < payload.length; ) {
-                                final int len = payload.length - offset;
-                                if (len <= mss) {
-                                    final UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, len).getBuilder();
-                                    demultiplexer.tcp_sendmsg2(net, sk, new TcpBuffer().ack(true)
-                                            //.psh(true)
-                                            .payloadBuilder(builder), true);
-                                    offset += len;
-                                } else {
-                                    UnknownPacket.Builder builder = UnknownPacket.newPacket(payload, offset, mss).getBuilder();
-                                    demultiplexer.tcp_sendmsg2(net, sk, new TcpBuffer().ack(true)
-                                            // .psh(true)
-                                            .payloadBuilder(builder), false);
-                                    offset += mss;
-                                }
+                            final int total = buf.readableBytes();
+
+                            // Read each MSS-sized chunk directly from the ByteBuf — avoids the
+                            // upfront full-buffer copy that ByteBufUtil.getBytes() would cause.
+                            // pcap4j's UnknownPacket still copies each chunk internally; eliminating
+                            // that copy requires the direct-ByteBuf transmit path (design.md §14 full refactor).
+                            for (int offset = 0; offset < total; ) {
+                                final int len = Math.min(total - offset, mss);
+                                final byte[] chunk = new byte[len];
+                                buf.getBytes(buf.readerIndex() + offset, chunk);
+                                final boolean flush = offset + len >= total;
+                                demultiplexer.tcp_sendmsg2(net, sk, new TcpBuffer().ack(true)
+                                        .payloadBuilder(UnknownPacket.newPacket(chunk, 0, len).getBuilder()),
+                                        flush);
+                                offset += len;
                             }
                         } finally {
                             ReferenceCountUtil.release(msg);
