@@ -143,17 +143,20 @@ public final class DarwinDns {
                     /*-
                      * add dns to the current service.
                      */
-                    if (null != nextServiceId && changed) {
+                    if (null != nextServiceId) {
                         String[] nextDefaultDns = getServiceDns(store, nextServiceId, true);
                         nextDefaultDns = null != nextDefaultDns ? nextDefaultDns : getServiceDns(store, nextServiceId, false);
                         nextDefaultDns = null != nextDefaultDns ? nextDefaultDns : new String[0];
                         prevDefaultDnsRef.set(nextDefaultDns);
 
+                        if (dns.length < 1 || new HashSet<>(Arrays.asList(nextDefaultDns)).containsAll(Arrays.asList(dns))) {
+                            return;
+                        }
                         final String[] dnsToSet = append ? merge(dns, nextDefaultDns) : dns;
                         if (setServiceDns(store, nextServiceId, true, dnsToSet)) {
-                            log.info("• Set Network Service DNS: {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(dnsToSet));
+                            log.info("• Set Network Service DNS: {} {} -> {}", String.format(SETUP_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(nextDefaultDns), Arrays.asList(dnsToSet));
                         } else if (setServiceDns(store, nextServiceId, false, dnsToSet)) {
-                            log.info("• Set Network Service DNS: {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(dnsToSet));
+                            log.info("• Set Network Service DNS: {} {} -> {}", String.format(STATE_SERVICE_ID_DNS_KEY_FMT, nextServiceId), Arrays.asList(nextDefaultDns), Arrays.asList(dnsToSet));
                         }
                     } else {
                         prevDefaultDnsRef.set(new String[0]);
@@ -255,7 +258,8 @@ public final class DarwinDns {
      * @return true if notify OS successful, otherwise false
      */
     public static boolean flushDnsCache() {
-        final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR("DNS-FLUSHER"), null, null);
+        final String name = DarwinDns.class.getSimpleName();
+        final SCDynamicStoreRef store = SC.SCDynamicStoreCreate(null, CFSTR(name), null, null);
         try {
             return flushDnsCache(store);
         } finally {
