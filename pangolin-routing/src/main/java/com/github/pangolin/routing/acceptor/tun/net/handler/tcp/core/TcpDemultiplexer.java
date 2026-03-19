@@ -412,11 +412,10 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 
         tcp_skb_entail(tp, skb);
 
-        final Packet.Builder payload = skb.payloadBuilder();
-        if (null != payload) {
+        if (skb.payloadLength() > 0) {
             // only for build.
             skb.dstPort(tp.ir_rmt_port).srcPort(tp.ir_num);
-            tp.write_seq += payload.build().length();
+            tp.write_seq += skb.payloadLength();
         }
         if (flush) {
             tcp_push_pending_frames(net, tp);
