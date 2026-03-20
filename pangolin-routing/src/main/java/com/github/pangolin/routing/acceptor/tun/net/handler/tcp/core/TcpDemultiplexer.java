@@ -1,17 +1,12 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.IpPacket.IpHeader;
-import org.pcap4j.packet.Packet;
-import org.pcap4j.packet.TcpPacket;
 
 import java.util.Map;
 
@@ -21,7 +16,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
 
 @Slf4j
-public abstract class TcpDemultiplexer<T extends IpPacket> {
+public abstract class TcpDemultiplexer {
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L943
     public static final int TCPCB_SACKED_ACKED = (1 << 0);    /* SKB ACK'd by a SACK block	*/
@@ -44,8 +39,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
     int connTimeoutMs = 5 * 1000;
 
 
-    public TcpOutput<T> output = new TcpOutput<>(this);
-    public TcpInput<T> input = new TcpInput<>(this, output);
+    public TcpOutput output = new TcpOutput(this);
+    public TcpInput input = new TcpInput(this, output);
     public TcpTimer timer = new TcpTimer(this);
 
     protected Map<String, tcp_request_sock> synRegistry;
@@ -80,7 +75,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 
     protected abstract TcpSock init(final TcpSock sk);
 
-    public abstract void tcp_rcv(final Channel net, final T ipPacket);
+    public abstract void tcp_rcv(final Channel net, final IpPacketBuf pkt);
 
     // ...
 
@@ -95,7 +90,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 //    protected abstract tcp_request_sock conn_request(final Channel net, TcpSock listenSock, final T ipPacket, final TcpPacket tcpPacket);
 
 
-    public abstract void send_reset(final Channel net, final IpHeader ipHeader, final TcpPacket tcpPacket, int err);
+    public abstract void send_reset(final Channel net, final IpPacketBuf pkt, int err);
 
 
     /* ************** ]] Initialize Connection Request ************ */
@@ -108,11 +103,8 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    public TcpSock tcp_check_req(final Channel net, TcpSock listenSock, T ipPacket, tcp_request_sock request) {
-         TcpSock nsk = listenSock.icsk_af_ops.syn_recv_sock(net, listenSock, ipPacket, request);
-//        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-//        TcpSock nsk = tcp_v4_syn_recv_sock(net, listenSock, request, tcpPacket);
-//        nsk.skc_listener = listenSock;
+    public TcpSock tcp_check_req(final Channel net, TcpSock listenSock, IpPacketBuf pkt, tcp_request_sock request) {
+        TcpSock nsk = listenSock.icsk_af_ops.syn_recv_sock(net, listenSock, pkt, request);
         return nsk;
     }
 
@@ -123,7 +115,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    protected TcpSock tcp_create_openreq_child(Channel net, TcpSock sk, tcp_request_sock req, final TcpPacket skb) {
+    protected TcpSock tcp_create_openreq_child(Channel net, TcpSock sk, tcp_request_sock req) {
         /*-
          * 第一步调用 <code>inet_csk_clone_lock<code/> 基于原 TCP_NEW_SYN_RECV sock clone时会将状态设置为 TCP_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1247"></a>
@@ -175,7 +167,7 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
             newtp.window_clamp = Math.min(sk.window_clamp, TcpConstants.U16_MAX);
         }
 
-        newtp.snd_wnd = skb.getHeader().getWindow() << newtp.rx_opt.snd_wscale;
+        newtp.snd_wnd = req.snd_wnd << newtp.rx_opt.snd_wscale;
         newtp.max_window = newtp.snd_wnd;
 
         boolean rx_opt_tstamp = newtp.rx_opt.tstamp_ok;
@@ -531,28 +523,15 @@ public abstract class TcpDemultiplexer<T extends IpPacket> {
 
     }
 
-    public void consume(final TcpSock sk, final TcpPacket skb) {
+    public void consume(final TcpSock sk, final IpPacketBuf pkt) {
         if (null != sk.child) {
-            final TcpPacket.TcpHeader hdr = skb.getHeader();
-            final int offset = sk.rcv_nxt - hdr.getSequenceNumber();
-            final int payloadLen = skb.length() - hdr.length();
+            final int offset = sk.rcv_nxt - pkt.tcpSeq();
+            final int payloadLen = pkt.tcpPayloadLength();
             final int length = Math.min(output.tcp_receive_window(sk), payloadLen - offset);
             if (length <= 0) {
                 return;
             }
-            // Zero-copy path: reuse the byte[] already decoded by IpPacketCodec instead of
-            // calling skb.getPayload().getRawData() which forces pcap4j to allocate+copy again.
-            // Layout in rawBytes: [IP header][TCP header][TCP payload]
-            // IP header length = rawBytes.length - skb.length()
-            final byte[] rawBytes = IpPacketCodec.RAW_BYTES.get();
-            if (rawBytes != null) {
-                final int payloadOffset = rawBytes.length - skb.length() + hdr.length();
-                innerChannel(sk).writeAndFlush(Unpooled.wrappedBuffer(rawBytes, payloadOffset + offset, length));
-            } else {
-                // Fallback (e.g. synthetic packets not originating from IpPacketCodec)
-                final byte[] bytes = skb.getPayload().getRawData();
-                innerChannel(sk).writeAndFlush(Unpooled.wrappedBuffer(bytes, offset, length));
-            }
+            innerChannel(sk).writeAndFlush(pkt.tcpPayloadSlice().retainedSlice(offset, length));
         }
     }
 

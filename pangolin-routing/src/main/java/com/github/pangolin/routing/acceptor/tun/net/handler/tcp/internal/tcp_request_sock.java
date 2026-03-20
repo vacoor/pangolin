@@ -16,5 +16,7 @@ public class tcp_request_sock extends inet_request_sock {
     public int last_oow_ack_time;
     public int rcv_nxt;
     public int syn_tos;
+    /** Initial send window from the SYN packet (client's advertised window). */
+    public int snd_wnd;
 
 }

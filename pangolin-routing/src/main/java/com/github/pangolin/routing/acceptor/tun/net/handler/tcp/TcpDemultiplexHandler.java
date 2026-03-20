@@ -1,62 +1,53 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketHandler;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
-import freework.reflect.Types;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.namednumber.IpNumber;
 
-import java.lang.reflect.Type;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Map;
 
 @Slf4j
-public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacketHandler<T> {
+public abstract class TcpDemultiplexHandler extends IpPacketHandler {
+
+    private static final byte PROTO_TCP = 6;
+
     private final DnsEngine dnsEngine;
     private final EventLoopGroup childGroup = new NioEventLoopGroup();
 
     private final Map<String, tcp_request_sock> synRegistry = Maps.newConcurrentMap();
     private final Map<String, TcpSock> establishedRegistry = Maps.newConcurrentMap();
-    private final TcpDemultiplexer<T> demultiplexer;
+    private final TcpDemultiplexer demultiplexer;
 
     public TcpDemultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
-        super(IpNumber.TCP);
-        final Type type = Types.resolveType(TcpDemultiplexHandler.class.getTypeParameters()[0], getClass());
-        Preconditions.checkState(type instanceof Class<?>, "Can't resolve %s IpPacket Class", TcpDemultiplexHandler.class.getName());
-
+        super(PROTO_TCP);
         this.dnsEngine = dnsEngine;
         this.demultiplexer = create(synRegistry, establishedRegistry, childGroup, dnsEngine, factory);
     }
 
     @Override
-    protected void channelRead0(final ChannelHandlerContext ctx, final T rawIpPacket) throws Exception {
+    protected void channelRead0(final ChannelHandlerContext ctx, final IpPacketBuf rawPkt) throws Exception {
         try {
-            final T ipPacket = prepare(rawIpPacket);
-            demultiplexer.tcp_rcv(ctx.channel(), ipPacket);
+            final IpPacketBuf pkt = prepare(rawPkt);
+            demultiplexer.tcp_rcv(ctx.channel(), pkt);
         } catch (final Exception ex) {
             log.error("Failed to process TCP packet", ex);
-            final TcpPacket tcpPacket = rawIpPacket.get(TcpPacket.class);
-            if (tcpPacket != null) {
-                demultiplexer.send_reset(ctx.channel(), rawIpPacket.getHeader(), tcpPacket, -77);
-            }
+            demultiplexer.send_reset(ctx.channel(), rawPkt, -77);
         }
     }
 
-
-    protected T prepare(final T ipPacket) throws UnknownHostException {
-        return ipPacket;
+    protected IpPacketBuf prepare(final IpPacketBuf pkt) throws UnknownHostException {
+        return pkt;
     }
 
     protected InetAddress resolveDstAddress(final InetAddress address) throws UnknownHostException {
@@ -66,10 +57,7 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
             if (null != hostname && !hostname.isEmpty()) {
                 return InetAddress.getByAddress(hostname, addr);
             }
-            // throw new UnknownHostException(String.format("Can't resolve hostname for fake IP: %s", address.getHostAddress()));
         }
-
-        // SKIP address.getHostName();
         return noDnsQuery(address);
     }
 
@@ -77,10 +65,9 @@ public abstract class TcpDemultiplexHandler<T extends IpPacket> extends IpPacket
         return InetAddress.getByAddress(address.getHostAddress(), address.getAddress());
     }
 
-    protected abstract TcpDemultiplexer<T> create(
+    protected abstract TcpDemultiplexer create(
             Map<String, tcp_request_sock> synRegistry,
             Map<String, TcpSock> establishedRegistry,
             EventLoopGroup childGroup,
             DnsEngine dnsEngine, SocketChannelFactory socketChannelFactory);
-
 }

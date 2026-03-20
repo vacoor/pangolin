@@ -1,18 +1,18 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
-import com.google.common.collect.Lists;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.*;
 
-import java.util.Collections;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -27,17 +27,16 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpU
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock.IP_HEADER_SIZE;
 import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
 import static com.sun.jna.platform.linux.ErrNo.EINVAL;
-import static org.pcap4j.packet.TcpPacket.TcpOption;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_output.c</a>
  */
 @Slf4j
-public class TcpOutput<T extends IpPacket> {
+public class TcpOutput {
 
-    private final TcpDemultiplexer<T> demultiplexer;
+    private final TcpDemultiplexer demultiplexer;
 
-    public TcpOutput(TcpDemultiplexer<T> demultiplexer) {
+    public TcpOutput(TcpDemultiplexer demultiplexer) {
         this.demultiplexer = demultiplexer;
     }
 
@@ -270,8 +269,8 @@ public class TcpOutput<T extends IpPacket> {
         TcpBuffer skb = new TcpBuffer();
         skb.srcAddr(tp.ir_loc_addr);
         skb.dstAddr(tp.ir_rmt_addr);
-        skb.srcPort(tp.ir_num);
-        skb.dstPort(tp.ir_rmt_port);
+        skb.srcPort(tp.ir_num);       // int
+        skb.dstPort(tp.ir_rmt_port);  // int
         skb.sequenceNumber(seq);
         skb.syn(0 != (flags & TcpConstants.SYN));
         skb.ack(0 != (flags & TcpConstants.ACK));
@@ -280,53 +279,40 @@ public class TcpOutput<T extends IpPacket> {
     }
 
     /**
-     * Compute TCP options for SYN packets. This is not the final
-     * network wire format yet.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L817">tcp_syn_options</a>
+     * Build raw TCP options for SYN packets (client mode — currently unsupported).
      */
-    private List<TcpOption> tcp_syn_options() {
-        // XXX NOT-SUPPORED: for client
-        return Collections.emptyList();
+    private byte[] tcp_syn_options() {
+        return null;
     }
 
     /**
-     * Set up TCP options for SYN-ACKs.
+     * Build raw TCP options for SYN-ACK.
+     * Returns serialised byte[] ready for {@link TcpBuffer#rawOptions(byte[])}.
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L902">tcp_synack_options</a>
      */
-    private List<TcpOption> tcp_synack_options(TcpSock tp, tcp_request_sock req, int mss) {
-        final List<TcpOption> options = Lists.newArrayList();
-
-        // XXX
-
-        /* We always send an MSS option. */
-        options.add(new TcpMaximumSegmentSizeOption.Builder()
-                .maxSegSize((short) mss)
-                .correctLengthAtBuild(true).build());
-
-        if (req.wscale_ok) {
-            options.add(TcpNoOperationOption.getInstance());
-            options.add(new TcpWindowScaleOption.Builder()
-                    .shiftCount((byte) req.rcv_wscale)
-                    .correctLengthAtBuild(true)
-                    .build());
+    private byte[] tcp_synack_options(TcpSock tp, tcp_request_sock req, int mss) {
+        ByteBuf optBuf = Unpooled.buffer(12);
+        try {
+            int wscale = req.wscale_ok ? req.rcv_wscale : -1;
+            TcpOptionCodec.writeSynOptions(optBuf, mss, wscale);
+            byte[] bytes = new byte[optBuf.readableBytes()];
+            optBuf.readBytes(bytes);
+            return bytes;
+        } finally {
+            optBuf.release();
         }
-
-        // TODO ...
-
-        return options;
     }
 
     /**
-     * Compute TCP options for ESTABLISHED sockets. This is not the
-     * final wire format yet.
+     * Build raw TCP options for ESTABLISHED sockets.
+     * Returns null if no options (common case).
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L978">tcp_established_options</a>
      */
-    private List<TcpOption> tcp_established_options() {
-        // TODO
-        return Collections.emptyList();
+    private byte[] tcp_established_options() {
+        // TODO: timestamp option
+        return null;
     }
 
     /**
@@ -355,11 +341,11 @@ public class TcpOutput<T extends IpPacket> {
             // TODO
         }
 
-        List<TcpOption> options;
+        byte[] rawOptions;
         if (skb.syn()) {
-            options = tcp_syn_options();
+            rawOptions = tcp_syn_options();
         } else {
-            options = tcp_established_options();
+            rawOptions = tcp_established_options();
             /*-
              * Force a PSH flag on all (GSO) packets to expedite GRO flush
              * at receiver : This slightly improve GRO performance.
@@ -399,7 +385,7 @@ public class TcpOutput<T extends IpPacket> {
             skb.window((short) Math.min(tp.rcv_wnd, U16_MAX));
         }
 
-        skb.options(options);
+        skb.rawOptions(rawOptions);
 
 
 
@@ -531,8 +517,8 @@ public class TcpOutput<T extends IpPacket> {
             mss_now = tcp_sync_mss(tp, mtu);
         }
 
-        List<TcpOption> opts = tcp_established_options();
-        int optLen = opts.isEmpty() ? 0 : opts.stream().mapToInt(TcpOption::length).sum();
+        byte[] opts = tcp_established_options();
+        int optLen = opts != null ? opts.length : 0;
         int header_len = optLen + SIZE_OF_TCP_HDR;
         if (header_len != tp.tcp_header_len) {
             int delta = header_len - tp.tcp_header_len;
@@ -1151,15 +1137,11 @@ public class TcpOutput<T extends IpPacket> {
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708
     protected TcpBuffer tcp_make_synack(final TcpSock listeSock,
                                         final tcp_request_sock req,
-                                        final IpPacket.IpHeader ipHdr, final TcpPacket skb) {
+                                        final IpPacketBuf syn) {
         int mss = listeSock.tcp_mss_clamp(listeSock, listeSock.dst_metric_advmss());
         long now = tcp_clock_ns();
 
         final TcpBuffer current = new TcpBuffer()
-//                .srcAddr(ipHdr.getDstAddr())
-//                .dstAddr(ipHdr.getSrcAddr())
-//                .srcPort(skb.getHeader().getDstPort())
-//                .dstPort(skb.getHeader().getSrcPort())
                 .syn(true).ack(true)
                 .sequenceNumber(req.snt_isn)
                 .acknowledgmentNumber(req.rcv_nxt)
@@ -1167,8 +1149,7 @@ public class TcpOutput<T extends IpPacket> {
 
         listeSock.skb_set_delivery_time(current, now, "SKB_CLOCK_MONOTONIC");
 
-        current.options(tcp_synack_options(listeSock, req, mss));
-
+        current.rawOptions(tcp_synack_options(listeSock, req, mss));
 
         return current;
     }

@@ -1,15 +1,12 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
-import org.pcap4j.packet.Packet;
-import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.namednumber.TcpPort;
+import io.netty.buffer.ByteBuf;
 
 import java.net.InetAddress;
-import java.util.List;
 
 public class TcpBuffer {
-    private TcpPort srcPort;
-    private TcpPort dstPort;
+    private int srcPort;
+    private int dstPort;
     private int sequenceNumber;
     private int acknowledgmentNumber;
     private byte dataOffset;
@@ -23,45 +20,37 @@ public class TcpBuffer {
     private short window;
     private short checksum;
     private short urgentPointer;
-    private List<TcpPacket.TcpOption> options;
+    /** Serialised TCP options bytes, 4-byte aligned (built by TcpOptionCodec). */
+    private byte[] rawOptions;
     private byte[] padding;
-    private Packet.Builder payloadBuilder;
+    /** Raw payload ByteBuf; TcpBuffer owns one reference count. */
+    private ByteBuf rawPayload;
     private InetAddress srcAddr;
     private InetAddress dstAddr;
-
 
     public long tstamp;
     public transient int sacked;
 
     public long skb_mstamp_ns;
 
-    private transient int cachedPayloadLength = -1;
-
-    /**
-     * 返回 payload 长度，结果会被缓存，避免反复触发 pcap4j 序列化。
-     */
     public int payloadLength() {
-        if (cachedPayloadLength < 0) {
-            Packet.Builder p = payloadBuilder;
-            cachedPayloadLength = (p != null) ? p.build().length() : 0;
-        }
-        return cachedPayloadLength;
+        return rawPayload != null ? rawPayload.readableBytes() : 0;
     }
 
-    public TcpPort srcPort() {
+    public int srcPort() {
         return srcPort;
     }
 
-    public TcpBuffer srcPort(TcpPort srcPort) {
+    public TcpBuffer srcPort(int srcPort) {
         this.srcPort = srcPort;
         return this;
     }
 
-    public TcpPort dstPort() {
+    public int dstPort() {
         return dstPort;
     }
 
-    public TcpBuffer dstPort(TcpPort dstPort) {
+    public TcpBuffer dstPort(int dstPort) {
         this.dstPort = dstPort;
         return this;
     }
@@ -182,12 +171,12 @@ public class TcpBuffer {
         return this;
     }
 
-    public List<TcpPacket.TcpOption> options() {
-        return options;
+    public byte[] rawOptions() {
+        return rawOptions;
     }
 
-    public TcpBuffer options(List<TcpPacket.TcpOption> options) {
-        this.options = options;
+    public TcpBuffer rawOptions(byte[] rawOptions) {
+        this.rawOptions = rawOptions;
         return this;
     }
 
@@ -200,13 +189,19 @@ public class TcpBuffer {
         return this;
     }
 
-    public Packet.Builder payloadBuilder() {
-        return payloadBuilder;
+    public ByteBuf rawPayload() {
+        return rawPayload;
     }
 
-    public TcpBuffer payloadBuilder(Packet.Builder payloadBuilder) {
-        this.payloadBuilder = payloadBuilder;
-        this.cachedPayloadLength = -1;
+    /**
+     * Set raw payload. TcpBuffer takes ownership of one reference count.
+     * Previous payload (if any) is released.
+     */
+    public TcpBuffer rawPayload(ByteBuf rawPayload) {
+        if (this.rawPayload != null) {
+            this.rawPayload.release();
+        }
+        this.rawPayload = rawPayload;
         return this;
     }
 
@@ -228,30 +223,11 @@ public class TcpBuffer {
         return this;
     }
 
-    public TcpPacket.Builder asBuilder() {
-        return new TcpPacket.Builder()
-                .srcPort(srcPort)
-                .dstPort(dstPort)
-                .sequenceNumber(sequenceNumber)
-                .acknowledgmentNumber(acknowledgmentNumber)
-                .dataOffset(dataOffset)
-                .reserved(reserved)
-                .urg(urg)
-                .ack(ack)
-                .psh(psh)
-                .rst(rst)
-                .syn(syn)
-                .fin(fin)
-                .window(window)
-                .checksum(checksum)
-                .urgentPointer(urgentPointer)
-                .options(options)
-                .padding(padding)
-                .payloadBuilder(payloadBuilder)
-                .srcAddr(srcAddr)
-                .dstAddr(dstAddr)
-                .paddingAtBuild(true)
-                .correctLengthAtBuild(true)
-                .correctChecksumAtBuild(true);
+    /** Release rawPayload reference if held. */
+    public void release() {
+        if (rawPayload != null) {
+            rawPayload.release();
+            rawPayload = null;
+        }
     }
 }

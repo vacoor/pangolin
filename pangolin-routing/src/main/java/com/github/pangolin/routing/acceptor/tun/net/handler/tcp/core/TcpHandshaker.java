@@ -1,13 +1,14 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.Ip4PacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.*;
-import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -23,8 +24,6 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpL
 public class TcpHandshaker {
 
     /**
-     * @param tcpPacket
-     * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
     public static tcp_request_sock tcp_conn_request(Channel net,
@@ -32,18 +31,16 @@ public class TcpHandshaker {
                                                     request_sock_ops rsk_ops,
                                                     tcp_request_sock_ops af_ops,
                                                     TcpSock parent,
-                                                    final IpPacket ipPacket,
-                                                    final TcpPacket tcpPacket,
+                                                    final IpPacketBuf pkt,
                                                     DnsEngine dnsEngine,
                                                     SocketChannelFactory socketChannelFactory,
                                                     int connTimeoutMs, EventLoopGroup childGroup,
                                                     TcpOutput output) {
-        final IpPacket.IpHeader ipHdr = ipPacket.getHeader();
         /*-
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
          */
-        tcp_request_sock req = inet_reqsk_alloc(ipHdr, tcpPacket, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, parent, true);
+        tcp_request_sock req = inet_reqsk_alloc(pkt, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, parent, true);
         if (null == req) {
             return null;
         }
@@ -53,50 +50,34 @@ public class TcpHandshaker {
         req.ts_off = 0;
         req.req_usec_ts = false;
 
-
-//        req.INDIRECT_CALL_INET = af_ops::INDIRECT_CALL_INET;
-
-
-        final int user_mss = 0; // FIXME parent.rx_opt.user_mss;// setsockopt(sockfd, IPPROTO_TCP, TCP_MAXSEG, &mss, sizeof(mss))
+        final int user_mss = 0; // FIXME parent.rx_opt.user_mss;
 
         final tcp_options_received tmp_opt = new tcp_options_received();
         tmp_opt.mss_clamp = af_ops.mss_clamp;
         tmp_opt.user_mss = parent.rx_opt.user_mss;
 
-        tcp_parse_options(parent, tmp_opt, tcpPacket, false);
-
-        // want_cookie && !tmp_opt.saw_tstamp
+        tcp_parse_options(parent, tmp_opt, pkt, false);
 
         tmp_opt.tstamp_ok = tmp_opt.saw_tstmap != 0;
-        tcp_openreq_init(req, tmp_opt, tcpPacket);
+        tcp_openreq_init(req, tmp_opt, pkt);
 
         // dst = af_ops->route_req(sk, skb, &fl, req, isn)
-        // in af_ops->route_req [[
-        //   |- in tcp_v4_route_req
-        //     |- in tcp_v4_init_req
-        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1680
-        req.ir_loc_addr = ipHdr.getDstAddr();
-        req.ir_rmt_addr = ipHdr.getSrcAddr();
-        // ]] in af_ops->route_req
-
-        // ...
+        req.ir_loc_addr = pkt.dstAddr();
+        req.ir_rmt_addr = pkt.srcAddr();
 
         // FIXME
         if (tmp_opt.tstamp_ok) {
             req.req_usec_ts = false;    // FIXME dst_tcp_usec_ts
-            req.ts_off = af_ops.init_ts_off(tcpPacket);
+            req.ts_off = af_ops.init_ts_off(pkt);
         }
 
-        // ...
-        int isn = af_ops.init_seq(ipHdr, tcpPacket.getHeader());
-        // ...
+        int isn = af_ops.init_seq(pkt);
 
         req.snt_isn = isn;
-        // ...
-        req.syn_tos = ((IpV4Packet.IpV4Header) ipHdr).getTos().value();
-        // ...
+        // Store TOS for IPv4 (0 for IPv6)
+        req.syn_tos = (pkt instanceof Ip4PacketBuf) ? ((Ip4PacketBuf) pkt).tos() & 0xFF : 0;
 
-        tcp_openreq_init_rwin(parent, output, req, tcpPacket);
+        tcp_openreq_init_rwin(parent, output, req, pkt);
 
         req.timeout = demultiplexer.tcp_timeout_init(req);
         if (!inet_csk_reqsk_queue_hash_add(parent, req, req.timeout)) {
@@ -104,13 +85,12 @@ public class TcpHandshaker {
         }
 
         final InetAddress dstAddr = req.ir_loc_addr;
-        final TcpPort tcpDstPort = req.ir_num;
-        final int dstPort = tcpDstPort.valueAsInt();
+        final int dstPort = req.ir_num;
         final String dstHostname;
         if (dnsEngine.isFakeAddress(dstAddr.getAddress())) {
             dstHostname = dnsEngine.getHostByAddress(dstAddr.getAddress());
             if (null == dstHostname || dstHostname.isEmpty()) {
-                log.warn(logFormat(ipPacket, "Could not resolve FAKE-IP: {}"), dstAddr.getHostAddress());
+                log.warn(logFormat(pkt, "Could not resolve FAKE-IP: {}"), dstAddr.getHostAddress());
                 return null;
             }
         } else {
@@ -127,19 +107,19 @@ public class TcpHandshaker {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 // for TCP_NEW_SYN_RECV, TCP_SYN_RECV
-                log.debug(logFormat(ipPacket, "Connection to {}:{} has been disconnected"), resolved.getHostString(), resolved.getPort());
-                log.debug(logFormat(ipPacket, "Connection handshake 3/3: ABORT"));
+                log.debug(logFormat(pkt, "Connection to {}:{} has been disconnected"), resolved.getHostString(), resolved.getPort());
+                log.debug(logFormat(pkt, "Connection handshake 3/3: ABORT"));
 
-                // af_ops.send_synack(net, parent, req, ipHdr, tcpPacket);
+                // af_ops.send_synack(net, parent, req, pkt);
                 // FIXME set reset.
-                rsk_ops.send_reset(net, parent, ipPacket, tcpPacket, -100);
+                rsk_ops.send_reset(net, parent, pkt, -100);
                 // FIXME clean queue
                 demultiplexer.inet_csk_destroy_sock(req);
             }
         };
 
 
-        log.info(logFormat(ipPacket, "ESTABLISHING connection to {}:{}"), resolved.getHostString(), resolved.getPort());
+        log.info(logFormat(pkt, "ESTABLISHING connection to {}:{}"), resolved.getHostString(), resolved.getPort());
         req.child = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
             private final AtomicBoolean initialized = new AtomicBoolean(false);
 
@@ -147,7 +127,7 @@ public class TcpHandshaker {
             public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                 try {
                     if (initialized.compareAndSet(false, true)) {
-//                        log.info(logFormat(ipPacket, "Connection ESTABLISHED to {}"), resolved.getHostString());
+//                        log.info(logFormat(pkt, "Connection ESTABLISHED to {}"), resolved.getHostString());
                     }
                     ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
                 } finally {
@@ -158,20 +138,18 @@ public class TcpHandshaker {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
-                    log.debug(logFormat(ipPacket, "Connection ESTABLISHED to {}:{}"), resolved.getHostString(), resolved.getPort());
+                    log.debug(logFormat(pkt, "Connection ESTABLISHED to {}:{}"), resolved.getHostString(), resolved.getPort());
 
-                    final IpPacket.IpHeader iph = ipPacket.getHeader();
-                    final TcpPacket.TcpHeader th = ipPacket.get(TcpPacket.class).getHeader();
                     log.debug(logFormat(
-                            ipPacket.getHeader().getProtocol().name(),
-                            iph.getDstAddr(), th.getDstPort().valueAsInt(),
-                            iph.getSrcAddr(), th.getSrcPort().valueAsInt(),
+                            "TCP",
+                            pkt.dstAddr(), pkt.tcpDstPort(),
+                            pkt.srcAddr(), pkt.tcpSrcPort(),
                             "Connection handshake 2/3: SYN-ACK"
                     ));
-                    af_ops.send_synack(net, parent, req, ipHdr, tcpPacket);
+                    af_ops.send_synack(net, parent, req, pkt);
                 } else {
-                    log.warn(logFormat(ipPacket, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
-                    rsk_ops.send_reset(net, parent, ipPacket, tcpPacket, -88);
+                    log.warn(logFormat(pkt, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
+                    rsk_ops.send_reset(net, parent, pkt, -88);
                     // FIXME clean queue
                     demultiplexer.inet_csk_destroy_sock(req);
                 }
@@ -180,9 +158,6 @@ public class TcpHandshaker {
         }).channel().closeFuture().addListener(req.childCloseListener);
 
         af_ops.addToHalfQueue(parent, req);
-
-        // send_synack
-        // af_ops.send_synack(listenSock, req, ipHdr, skb);
 
         return req;
     }
@@ -205,8 +180,6 @@ public class TcpHandshaker {
     private static boolean reqsk_queue_hash_req(tcp_request_sock req, long timeout) {
         // FIXME
         /* The timer needs to be setup after a successful insertion. */
-        // timer_setup(&req->rsk_timer, reqsk_timer_handler, TIMER_PINNED);
-        // mod_timer(&req->rsk_timer, jiffies + timeout);
         req.rsk_timer = null;
         return true;
     }
@@ -216,13 +189,13 @@ public class TcpHandshaker {
     /**
      * https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L891.
      */
-    private static tcp_request_sock inet_reqsk_alloc(IpPacket.IpHeader ipHeader, TcpPacket skb,
+    private static tcp_request_sock inet_reqsk_alloc(IpPacketBuf pkt,
                                                      DnsEngine dnsEngine,
                                                      SocketChannelFactory socketChannelFactory,
                                                      int connTimeoutMs, EventLoopGroup childGroup,
                                                      TcpSock skListener,
                                                      boolean attachListener) {
-        tcp_request_sock req = reqsk_alloc(ipHeader, skb, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, skListener, attachListener);
+        tcp_request_sock req = reqsk_alloc(pkt, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, skListener, attachListener);
         if (null != req) {
             req.state(TCP_NEW_SYN_RECV);
             req.timeout = TCP_TIMEOUT_INIT;
@@ -231,7 +204,7 @@ public class TcpHandshaker {
         return req;
     }
 
-    private static tcp_request_sock reqsk_alloc(IpPacket.IpHeader ipHeader, TcpPacket skb,
+    private static tcp_request_sock reqsk_alloc(IpPacketBuf pkt,
                                                 DnsEngine dnsEngine,
                                                 SocketChannelFactory socketChannelFactory,
                                                 int connTimeoutMs, EventLoopGroup childGroup, TcpSock skListener,
@@ -239,7 +212,7 @@ public class TcpHandshaker {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L891
 
         final tcp_request_sock req = new tcp_request_sock();
-        req.rawIpHeader = ipHeader;
+        req.rawIpHeader = pkt;
         req.skc_listener = null;
         if (attachListener) {
             req.skc_listener = skListener;
@@ -249,16 +222,14 @@ public class TcpHandshaker {
     }
 
     /**
-     * @param skb
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7068">tcp_openreq_init</a>
      * @see <a href="https://www.cnblogs.com/wanpengcoder/p/11751292.html">TCP MSS</a>
      */
-    private static void tcp_openreq_init(tcp_request_sock req, tcp_options_received rx_opt, final TcpPacket skb) {
+    private static void tcp_openreq_init(tcp_request_sock req, tcp_options_received rx_opt, final IpPacketBuf pkt) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7068
-        final TcpPacket.TcpHeader hdr = skb.getHeader();
         req.rsk_rcv_wnd = 0;
-        req.rcv_isn = hdr.getSequenceNumber();
-        req.rcv_nxt = hdr.getSequenceNumber() + 1;
+        req.rcv_isn = pkt.tcpSeq();
+        req.rcv_nxt = pkt.tcpSeq() + 1;
         // req.snt_synack = 0;
         // req.last_oow_ack_time = 0;
 
@@ -266,12 +237,12 @@ public class TcpHandshaker {
         req.snd_wscale = rx_opt.snd_wscale;
         req.wscale_ok = rx_opt.wscale_ok;
 
-        req.ir_rmt_port = hdr.getSrcPort();
-        req.ir_num = hdr.getDstPort();
-
+        req.ir_rmt_port = pkt.tcpSrcPort();
+        req.ir_num = pkt.tcpDstPort();
+        req.snd_wnd = pkt.tcpWindow();
     }
 
-    private static void tcp_openreq_init_rwin(TcpSock pSock, TcpOutput output, tcp_request_sock req, TcpPacket skb) {
+    private static void tcp_openreq_init_rwin(TcpSock pSock, TcpOutput output, tcp_request_sock req, IpPacketBuf pkt) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L422
         int full_space = output.tcp_full_space(pSock);
         final int mss = pSock.tcp_mss_clamp(pSock, pSock.dst_metric_advmss());
@@ -308,21 +279,22 @@ public class TcpHandshaker {
         req.rsk_window_clamp = req_rsk_window_clamp_ref.get();
     }
 
-    private static void tcp_parse_options(TcpSock tp, tcp_options_received opt_rx, final TcpPacket skb, final boolean estab) {
+    private static void tcp_parse_options(TcpSock tp, tcp_options_received opt_rx, final IpPacketBuf pkt, final boolean estab) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4183
-        final TcpPacket.TcpHeader hdr = skb.getHeader();
-        for (final TcpPacket.TcpOption option : hdr.getOptions()) {
-            if (option instanceof TcpMaximumSegmentSizeOption && hdr.getSyn() && !estab) {
-                int inMss = ((TcpMaximumSegmentSizeOption) option).getMaxSegSizeAsInt();
-                if (inMss > 0) {
-                    int user_mss = opt_rx.user_mss;
-                    inMss = user_mss > 0 && user_mss < inMss ? user_mss : inMss;
-                    opt_rx.mss_clamp = inMss;
-                }
-            } else if (option instanceof TcpWindowScaleOption && hdr.getSyn() && !estab && SysctlOptions.sysctl_tcp_window_scaling) {
-                final byte wscale = ((TcpWindowScaleOption) option).getShiftCount();
+        if (!pkt.isSyn() || estab) {
+            return;
+        }
+        final io.netty.buffer.ByteBuf opts = pkt.tcpOptionsSlice();
+        final int mss = TcpOptionCodec.parseMss(opts);
+        if (mss > 0) {
+            int user_mss = opt_rx.user_mss;
+            opt_rx.mss_clamp = user_mss > 0 && user_mss < mss ? user_mss : mss;
+        }
+        if (SysctlOptions.sysctl_tcp_window_scaling) {
+            final int wscale = TcpOptionCodec.parseWindowScale(opts);
+            if (wscale >= 0) {
                 opt_rx.wscale_ok = true;
-                opt_rx.snd_wscale = wscale > TCP_MAX_WSCALE ? TCP_MAX_WSCALE : wscale;
+                opt_rx.snd_wscale = (byte) Math.min(wscale, TCP_MAX_WSCALE);
             }
         }
     }

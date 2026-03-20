@@ -1,14 +1,12 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.UnknownPacket;
 
 import java.io.IOException;
 import java.security.SecureRandom;
@@ -24,10 +22,9 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
-import static org.pcap4j.packet.TcpPacket.TcpHeader;
 
 @Slf4j
-public class TcpInput<T extends IpPacket> {
+public class TcpInput {
     /**
      * Incoming frame contained data.
      *
@@ -67,10 +64,10 @@ public class TcpInput<T extends IpPacket> {
     private static final int CA_ACK_WIN_UPDATE = FLAG_WIN_UPDATE;
     private static final int CA_ACK_SLOWPATH = FLAG_SLOWPATH;
 
-    private final TcpDemultiplexer<T> demultiplexer;
+    private final TcpDemultiplexer demultiplexer;
     private final TcpOutput output;
 
-    public TcpInput(TcpDemultiplexer<T> demultiplexer, final TcpOutput output) {
+    public TcpInput(TcpDemultiplexer demultiplexer, final TcpOutput output) {
         this.demultiplexer = demultiplexer;
         this.output = output;
     }
@@ -79,17 +76,16 @@ public class TcpInput<T extends IpPacket> {
     /**
      * Adapt the MSS value used to make delayed ack decision to the real world.
      *
-     * @param sk
-     * @param ipPacket
+     * @param sk  the TCP socket
+     * @param pkt the IP packet buffer
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L227">tcp_measure_rcv_mss</a>
      */
-    private void tcp_measure_rcv_mss(final TcpSock sk, final T ipPacket) {
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
+    private void tcp_measure_rcv_mss(final TcpSock sk, final IpPacketBuf pkt) {
         // FIXME
         final int lss = sk.icsk_ack.last_seg_size;
 
         sk.icsk_ack.last_seg_size = 0;
-        final int len = tcpPacket.length() - tcpPacket.getHeader().length();
+        final int len = pkt.tcpPayloadLength();
         if (len >= sk.icsk_ack.rcv_mss) {
             /*
             if (len != icsk_ack.rcv_mss) {
@@ -254,10 +250,10 @@ public class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L820">tcp_event_data_recv</a>
      */
-    private void tcp_event_data_recv(final TcpSock sk, final T ipPacket) {
+    private void tcp_event_data_recv(final TcpSock sk, final IpPacketBuf pkt) {
 
         inet_csk_schedule_ack(sk);
-        tcp_measure_rcv_mss(sk, ipPacket);
+        tcp_measure_rcv_mss(sk, pkt);
         tcp_rcv_rtt_measure(sk);
 
         final long now = tcp_jiffies32();
@@ -294,10 +290,7 @@ public class TcpInput<T extends IpPacket> {
 
         // ...
 
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        TcpPacket.TcpHeader th = tcpPacket.getHeader();
-        int len = tcpPacket.length() - th.length();
-        if (len >= 128) {
+        if (pkt.tcpPayloadLength() >= 128) {
             // tcp_grow_window(sk, skb, true);
         }
     }
@@ -696,14 +689,12 @@ public class TcpInput<T extends IpPacket> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3696">tcp_ack_update_window</a>
      */
     private int tcp_ack_update_window(final TcpSock tp,
-                                      final T ipPacket,
+                                      final IpPacketBuf pkt,
                                       final int ack, final int ack_seq) {
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        final TcpPacket.TcpHeader tcpHdr = tcpPacket.getHeader();
         int flag = 0;
-        int nwin = tcpHdr.getWindowAsInt();
+        int nwin = pkt.tcpWindow();
 
-        if (!tcpHdr.getSyn()) {
+        if (!pkt.isSyn()) {
             nwin <<= tp.rx_opt.snd_wscale;
         }
 
@@ -767,12 +758,10 @@ public class TcpInput<T extends IpPacket> {
      * endpoint is sending out-of-window SYNs or pure ACKs at a high rate.
      */
     private boolean tcp_oow_rate_limited(final TcpSock net/* FIXME */,
-                                         final T ipPacket,
+                                         final IpPacketBuf pkt,
                                          final int mib_idx, final long last_oow_ack_time) {
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        final TcpPacket.TcpHeader th = tcpPacket.getHeader();
         /* Data packets without SYNs are not likely part of an ACK loop. */
-        if ((th.getSequenceNumber() != determineEndSeq(tcpPacket)) && !th.getSyn()) {
+        if ((pkt.tcpSeq() != determineEndSeq(pkt)) && !pkt.isSyn()) {
             return false;
         }
         return __tcp_oow_rate_limited(net, mib_idx, last_oow_ack_time);
@@ -820,13 +809,11 @@ public class TcpInput<T extends IpPacket> {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3805">tcp_ack</a>
      */
-    private int tcp_ack(final Channel net, final TcpSock tp, final T ipPacket, int flag) {
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        final TcpPacket.TcpHeader tcpHdr = tcpPacket.getHeader();
+    private int tcp_ack(final Channel net, final TcpSock tp, final IpPacketBuf pkt, int flag) {
         final int prior_snd_una = tp.snd_una;
         final int prior_packets_out = tp.packets_out;
-        final int ack_seq = tcpHdr.getSequenceNumber();
-        final int ack = tcpHdr.getAcknowledgmentNumber();
+        final int ack_seq = pkt.tcpSeq();
+        final int ack = pkt.tcpAckNum();
 
         /*-
          * If the ack is older than previous acks then we can probably ignore it.
@@ -840,11 +827,11 @@ public class TcpInput<T extends IpPacket> {
                 if (0 == (flag & FLAG_NO_CHALLENGE_ACK)) {
                     tcp_send_challenge_ack(net, tp);
                 }
-                log.warn("TOO OLD ACK on {}: ACK({}) < SND.UNA({}), {}", tp.state(), ack, prior_snd_una, tcpHdr);
+                log.warn("TOO OLD ACK on {}: ACK({}) < SND.UNA({})", tp.state(), ack, prior_snd_una);
                 return -TcpDropReason.SKB_DROP_REASON_TCP_TOO_OLD_ACK;
             }
             // goto old_ack.
-            log.warn("OLD ACK on {}: ACK({}) < SND.UNA({}), {}", tp.state(), ack, prior_snd_una, tcpHdr);
+            log.warn("OLD ACK on {}: ACK({}) < SND.UNA({})", tp.state(), ack, prior_snd_una);
             return 0;
         }
 
@@ -884,11 +871,11 @@ public class TcpInput<T extends IpPacket> {
             flag |= FLAG_WIN_UPDATE;
         } else {
 //            int ack_ev_flags = CA_ACK_SLOWPATH;
-            if (ack_seq != determineEndSeq(tcpPacket)) {
+            if (ack_seq != determineEndSeq(pkt)) {
                 flag |= FLAG_DATA;
             }
 
-            flag |= tcp_ack_update_window(tp, ipPacket, ack, ack_seq);
+            flag |= tcp_ack_update_window(tp, pkt, ack, ack_seq);
 
 //            if (skb.sacked) {
 //                flag |= tcp_sacktag_write_queue(sk, skb, prior_snd_una, &sack_state);
@@ -957,15 +944,13 @@ public class TcpInput<T extends IpPacket> {
         return SKB_NOT_DROPPED_YET;
     }
 
-    private int tcp_disordered_ack_check(final TcpSock tp, final T ipPacket) {
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
+    private int tcp_disordered_ack_check(final TcpSock tp, final IpPacketBuf pkt) {
         int reason = TCP_RFC7323_PAWS;
-        TcpPacket.TcpHeader th = tcpPacket.getHeader();
-        int seq = th.getSequenceNumber();
-        int ack = th.getAcknowledgmentNumber();
+        int seq = pkt.tcpSeq();
+        int ack = pkt.tcpAckNum();
 
         /* 1. Is this not a pure ACK ? */
-        if (!th.getAck() || seq != determineEndSeq(tcpPacket)) {
+        if (!pkt.isAck() || seq != determineEndSeq(pkt)) {
             return reason;
         }
 
@@ -1007,7 +992,7 @@ public class TcpInput<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4430">tcp_reset</a>
      */
-    private void tcp_reset(final TcpSock tp, final T ipPacket) {
+    private void tcp_reset(final TcpSock tp, final IpPacketBuf pkt) {
         // sk_is_mptcp
 
         int err;
@@ -1031,24 +1016,22 @@ public class TcpInput<T extends IpPacket> {
     /**
      * Process the FIN bit.
      */
-    private void tcp_fin(final Channel net, final TcpSock tp, T ipPacket) {
+    private void tcp_fin(final Channel net, final TcpSock tp, IpPacketBuf pkt) {
         inet_csk_schedule_ack(tp);
 
         tp.sk_shutdown |= RCV_SHUTDOWN;
         // sock_set_flag(sk, SOCK_DONE)
 
-        final IpPacket.IpHeader iph = ipPacket.getHeader();
-        final TcpHeader th = ipPacket.get(TcpPacket.class).getHeader();
         final TcpState state = tp.state();
         switch (state) {
             case TCP_SYN_RECV:
             case TCP_ESTABLISHED:
-                log.debug(logFormat(ipPacket, "(PASSIVE) Connection handshake 1/4: FIN"));
+                log.debug(logFormat(pkt, "(PASSIVE) Connection handshake 1/4: FIN"));
 
                 log.debug(logFormat(
                         "TCP",
-                        tp.ir_rmt_addr, th.getDstPort().valueAsInt(),
-                        tp.ir_loc_addr, th.getSrcPort().valueAsInt(),
+                        tp.ir_rmt_addr, pkt.tcpDstPort(),
+                        tp.ir_loc_addr, pkt.tcpSrcPort(),
                         "(PASSIVE) Connection handshake 2/4: ACK"
                 ));
                 /* Move to CLOSE_WAIT */
@@ -1073,14 +1056,12 @@ public class TcpInput<T extends IpPacket> {
                 break;
             case TCP_FIN_WAIT2:
                 /* Received a FIN -- send ACK and enter TIME_WAIT. */
-                log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 3/4: FIN"));
+                log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 3/4: FIN"));
 
-//                final IpPacket.IpHeader iph = ipPacket.getHeader();
-//                final TcpHeader th = ipPacket.get(TcpPacket.class).getHeader();
                 log.debug(logFormat(
-                        iph.getProtocol().name(),
-                        tp.ir_rmt_addr, th.getDstPort().valueAsInt(),
-                        tp.ir_loc_addr, th.getSrcPort().valueAsInt(),
+                        "TCP",
+                        tp.ir_rmt_addr, pkt.tcpDstPort(),
+                        tp.ir_loc_addr, pkt.tcpSrcPort(),
                         "(ACTIVE) Connection handshake 4/4: ACK"
                 ));
                 output.tcp_send_ack(net, tp);
@@ -1113,9 +1094,8 @@ public class TcpInput<T extends IpPacket> {
 //        }
     }
 
-    private void tcp_send_dupack(final Channel net, final TcpSock tp, final TcpPacket skb) {
-        TcpPacket.TcpHeader th = skb.getHeader();
-        int seq = th.getSequenceNumber();
+    private void tcp_send_dupack(final Channel net, final TcpSock tp, final IpPacketBuf skb) {
+        int seq = skb.tcpSeq();
         int end_seq = determineEndSeq(skb);
         if (end_seq != seq && before(seq, tp.rcv_nxt)) {
             tcp_enter_quickack_mode(tp, TCP_MAX_QUICKACKS);
@@ -1130,30 +1110,26 @@ public class TcpInput<T extends IpPacket> {
         // FIXME
     }
 
-    private void tcp_data_queue_ofo(final TcpSock sk, final T ipPacket) {
+    private void tcp_data_queue_ofo(final TcpSock sk, final IpPacketBuf pkt) {
 
     }
 
-    private int tcp_queue_rcv(final TcpSock tp, final IpPacket ipPacket) {
+    private int tcp_queue_rcv(final TcpSock tp, final IpPacketBuf pkt) {
         // https://www.cnblogs.com/wanpengcoder/p/11752122.html
-        final TcpPacket skb = ipPacket.get(TcpPacket.class);
-        final TcpPacket.TcpHeader hdr = skb.getHeader();
-        final int len = skb.length() - hdr.length();
+        final int len = pkt.tcpPayloadLength();
         if (len > 0) {
-            demultiplexer.consume(tp, skb);
+            demultiplexer.consume(tp, pkt);
         }
-        tcp_rcv_nxt_update(tp, determineEndSeq(skb));
+        tcp_rcv_nxt_update(tp, determineEndSeq(pkt));
         return len;
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5229">tcp_input.c</a>
      */
-    public void tcp_data_queue(final Channel net, final TcpSock tp, final T ipPacket) throws IOException {
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        final TcpPacket.TcpHeader hdr = tcpPacket.getHeader();
-        final int seq = hdr.getSequenceNumber();
-        final int endSeq = determineEndSeq(tcpPacket);
+    public void tcp_data_queue(final Channel net, final TcpSock tp, final IpPacketBuf pkt) throws IOException {
+        final int seq = pkt.tcpSeq();
+        final int endSeq = determineEndSeq(pkt);
 
         if (seq == endSeq) {
             return;
@@ -1173,25 +1149,24 @@ public class TcpInput<T extends IpPacket> {
                  * because the FIN flag will simply be merged to the
                  * receive queue tail skb in most cases.
                  */
-                final int len = tcpPacket.length() - hdr.length();
-                if (len > 0 && hdr.getFin()) {
-                    queue_and_out(net, tp, ipPacket);
+                if (pkt.tcpPayloadLength() > 0 && pkt.isFin()) {
+                    queue_and_out(net, tp, pkt);
                 } else {
-                    out_of_window(tp, ipPacket, TcpDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
+                    out_of_window(tp, pkt, TcpDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
                     return;
                 }
             }
 
             /* Ok. In sequence. In window. */
-            queue_and_out(net, tp, ipPacket);
+            queue_and_out(net, tp, pkt);
         } else if (!after(endSeq, tp.rcv_nxt)) {
-            tcp_rcv_spurious_retrans(tcpPacket);
+            tcp_rcv_spurious_retrans(pkt);
             /* A retransmit, 2nd most common case.  Force an immediate ack. */
             // ... tcp_dsack_set ....
-            out_of_window(tp, ipPacket, TcpDropReason.SKB_DROP_REASON_TCP_OLD_DATA);
+            out_of_window(tp, pkt, TcpDropReason.SKB_DROP_REASON_TCP_OLD_DATA);
         } else if (!before(seq, tp.rcv_nxt + output.tcp_receive_window(tp))) {
             /* Out of window. F.e. zero window probe. */
-            out_of_window(tp, ipPacket, TcpDropReason.SKB_DROP_REASON_TCP_OVERWINDOW);
+            out_of_window(tp, pkt, TcpDropReason.SKB_DROP_REASON_TCP_OVERWINDOW);
         } else if (before(seq, tp.rcv_nxt)) {
             /* Partial packet, seq < rcv_next < end_seq */
             // tcp_dasck_set ...
@@ -1201,42 +1176,38 @@ public class TcpInput<T extends IpPacket> {
              * remembering D-SACK for its head made in previous line.
              */
             if (output.tcp_receive_window(tp) == 0) {
-                out_of_window(tp, ipPacket, TcpDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
+                out_of_window(tp, pkt, TcpDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
             } else {
                 // goto queue_and_out
-                queue_and_out(net, tp, ipPacket);
+                queue_and_out(net, tp, pkt);
             }
         } else {
-            tcp_data_queue_ofo(tp, ipPacket);
+            tcp_data_queue_ofo(tp, pkt);
         }
     }
 
-    private void out_of_window(TcpSock tp, final T ipPacket, final int reason) {
+    private void out_of_window(TcpSock tp, final IpPacketBuf pkt, final int reason) {
         tcp_enter_quickack_mode(tp, TCP_MAX_QUICKACKS);
         inet_csk_schedule_ack(tp);
-        drop(tp, ipPacket, reason);
+        drop(tp, reason);
     }
 
-    private void drop(final TcpSock tp, final T ipPacket, final int reason) {
+    private void drop(final TcpSock tp, final int reason) {
         // tcp_drop_reason(sk, skb, reason);
     }
 
-    private void queue_and_out(final Channel net, final TcpSock tp, final T ipPacket) throws IOException {
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
+    private void queue_and_out(final Channel net, final TcpSock tp, final IpPacketBuf pkt) throws IOException {
         // queue_and_out;
-        final TcpPacket.TcpHeader th = tcpPacket.getHeader();
-
         // tcp_try_remem_schedule ...
 
-        int eaten = tcp_queue_rcv(tp, ipPacket/*, &fragstolen*/);
+        int eaten = tcp_queue_rcv(tp, pkt/*, &fragstolen*/);
 
-        final int len = tcpPacket.length() - th.length();
-        if (len > 0) {
-            tcp_event_data_recv(tp, ipPacket);
+        if (pkt.tcpPayloadLength() > 0) {
+            tcp_event_data_recv(tp, pkt);
         }
 
-        if (th.getFin()) {
-            tcp_fin(net, tp, ipPacket);
+        if (pkt.isFin()) {
+            tcp_fin(net, tp, pkt);
         }
 
         // TODO ...
@@ -1300,15 +1271,14 @@ public class TcpInput<T extends IpPacket> {
         __tcp_ack_snd_check(net, tp);
     }
 
-    private boolean tcp_reset_check(final TcpSock tp, final T ipPacket) {
+    private boolean tcp_reset_check(final TcpSock tp, final IpPacketBuf pkt) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5939
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        final int seq = tcpPacket.getHeader().getSequenceNumber();
+        final int seq = pkt.tcpSeq();
         return seq == tp.rcv_nxt - 1 && 0 != ((1 << tp.state().ordinal()) | (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
     }
 
 
-    void tcp_rcv_spurious_retrans(final TcpPacket skb) {
+    void tcp_rcv_spurious_retrans(final IpPacketBuf pkt) {
     }
 
 
@@ -1328,12 +1298,10 @@ public class TcpInput<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5870">tcp_validate_incoming</a>
      */
-    private boolean tcp_validate_incoming(final Channel net, final TcpSock tp, final T ipPacket) {
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        final TcpPacket.TcpHeader th = tcpPacket.getHeader();
-        final int seq = th.getSequenceNumber();
-        final int end_seq = determineEndSeq(tcpPacket);
-        final int ack = th.getAcknowledgmentNumber();
+    private boolean tcp_validate_incoming(final Channel net, final TcpSock tp, final IpPacketBuf pkt) {
+        final int seq = pkt.tcpSeq();
+        final int end_seq = determineEndSeq(pkt);
+        final int ack = pkt.tcpAckNum();
 
         int reason = 0; //tcp_disordered_ack_check(tp, skb);
         if (0 == reason) {
@@ -1341,9 +1309,9 @@ public class TcpInput<T extends IpPacket> {
         }
 
         /* Reset is accepted even if it did not pass PAWS. */
-        if (0 == reason || th.getRst()) {
+        if (0 == reason || pkt.isRst()) {
             // goto step1
-        } else if (th.getSyn()) {
+        } else if (pkt.isSyn()) {
             // goto syn_challenge
             tcp_send_challenge_ack(net, tp);
             reason = SKB_DROP_REASON_TCP_INVALID_SYN;
@@ -1354,8 +1322,8 @@ public class TcpInput<T extends IpPacket> {
             // goto discard;
             tcp_drop_reason(tp, reason);
             return false;
-        } else if (!tcp_oow_rate_limited(tp, ipPacket, 0, tp.last_oow_ack_time)) {
-            tcp_send_dupack(net, tp, tcpPacket);
+        } else if (!tcp_oow_rate_limited(tp, pkt, 0, tp.last_oow_ack_time)) {
+            tcp_send_dupack(net, tp, pkt);
             // goto dicard
             tcp_drop_reason(tp, reason);
             return false;
@@ -1371,8 +1339,8 @@ public class TcpInput<T extends IpPacket> {
              * an acknowledgment should be sent in reply (unless the RST
              * bit is set, if so drop the segment and return)".
              */
-            if (!th.getRst()) {
-                if (th.getSyn()) {
+            if (!pkt.isRst()) {
+                if (pkt.isSyn()) {
                     // goto syn_challenge;
                     tcp_send_challenge_ack(net, tp);
                     reason = SKB_DROP_REASON_TCP_RESET;
@@ -1386,12 +1354,12 @@ public class TcpInput<T extends IpPacket> {
                     // stats
                 }
 
-                if (!tcp_oow_rate_limited(tp, ipPacket, 1, tp.last_oow_ack_time)) {
-                    tcp_send_dupack(net, tp, tcpPacket);
+                if (!tcp_oow_rate_limited(tp, pkt, 1, tp.last_oow_ack_time)) {
+                    tcp_send_dupack(net, tp, pkt);
                 }
-            } else if (tcp_reset_check(tp, ipPacket)) {
+            } else if (tcp_reset_check(tp, pkt)) {
                 // goto reset
-                tcp_reset(tp, ipPacket);
+                tcp_reset(tp, pkt);
                 return false;
             }
             // goto discard
@@ -1402,7 +1370,7 @@ public class TcpInput<T extends IpPacket> {
         /*-
          * Step 2: check RST bit.
          */
-        if (th.getRst()) {
+        if (pkt.isRst()) {
             /*-
              * RFC 5961 3.2 (extend to match against (RCV.NXT - 1) after a  FIN and SACK too if available):
              * If seq num matches RCV.NXT or (RCV.NXT - 1) after a FIN, or the right-most SACK block,
@@ -1411,9 +1379,9 @@ public class TcpInput<T extends IpPacket> {
              * else
              *     Send a challenge ACK
              */
-            if (th.getSequenceNumber() == tp.rcv_nxt || tcp_reset_check(tp, ipPacket)) {
+            if (pkt.tcpSeq() == tp.rcv_nxt || tcp_reset_check(tp, pkt)) {
                 // goto reset
-                tcp_reset(tp, ipPacket);
+                tcp_reset(tp, pkt);
                 return false;
             }
 
@@ -1439,10 +1407,10 @@ public class TcpInput<T extends IpPacket> {
         /* step 4: Check for a SYN
          * RFC 5961 4.2 : Send a challenge ack
          */
-        if (th.getSyn()) {
+        if (pkt.isSyn()) {
             TcpState tcpState = tp.state();
             if (TCP_SYN_RECV.equals(tcpState)
-                    && th.getAck()
+                    && pkt.isAck()
                     && seq + 1 == end_seq
                     && seq + 1 == tp.rcv_nxt
                     && ack == tp.snd_nxt) {
@@ -1463,7 +1431,7 @@ public class TcpInput<T extends IpPacket> {
     private void tcp_drop_reason(final TcpSock tp, int reason) {
     }
 
-    public void tcp_rcv_established(final TcpSock sk, final T ipPacket) throws IOException {
+    public void tcp_rcv_established(final TcpSock sk, final IpPacketBuf pkt) throws IOException {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6110
 
         // step5
@@ -1479,7 +1447,7 @@ public class TcpInput<T extends IpPacket> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6299">tcp_init_transfer</a>
      */
-    public void tcp_init_transfer(final Channel net, final TcpSock sk, final T ipPacket) {
+    public void tcp_init_transfer(final Channel net, final TcpSock sk, final IpPacketBuf pkt) {
         output.tcp_mtup_init(sk);
         demultiplexer.tcp_init_metrics(sk);
 
@@ -1499,21 +1467,21 @@ public class TcpInput<T extends IpPacket> {
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
                 String hostname = TcpLogUtils.getHostNameNoResolve(sk.ir_loc_addr);
                 hostname = null != hostname ? hostname : sk.ir_loc_addr.getHostAddress();
-                log.info(logFormat(ipPacket, "Connection to {}:{} has been disconnected"), hostname, sk.ir_num.valueAsInt());
+                log.info(logFormat(pkt, "Connection to {}:{} has been disconnected"), hostname, sk.ir_num);
                 TcpState state = sk.state();
                 if (demultiplexer.tcp_close_state(sk)) {
                     if (TCP_CLOSE_WAIT.equals(state)) {
                         log.debug(logFormat(
-                                ipPacket.getHeader().getProtocol().name(),
-                                sk.ir_loc_addr, sk.ir_num.valueAsInt(),
-                                sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(),
+                                "TCP",
+                                sk.ir_loc_addr, sk.ir_num,
+                                sk.ir_rmt_addr, sk.ir_rmt_port,
                                 "(PASSIVE) Connection handshake 3/4: FIN"
                         ));
                     } else {
                         log.debug(logFormat(
-                                ipPacket.getHeader().getProtocol().name(),
-                                sk.ir_loc_addr, sk.ir_num.valueAsInt(),
-                                sk.ir_rmt_addr, sk.ir_rmt_port.valueAsInt(),
+                                "TCP",
+                                sk.ir_loc_addr, sk.ir_num,
+                                sk.ir_rmt_addr, sk.ir_rmt_port,
                                 "(ACTIVE) Connection handshake 1/4: FIN"
                         ));
                     }
@@ -1541,11 +1509,9 @@ public class TcpInput<T extends IpPacket> {
                             // that copy requires the direct-ByteBuf transmit path (design.md §14 full refactor).
                             for (int offset = 0; offset < total; ) {
                                 final int len = Math.min(total - offset, mss);
-                                final byte[] chunk = new byte[len];
-                                buf.getBytes(buf.readerIndex() + offset, chunk);
                                 final boolean flush = offset + len >= total;
                                 demultiplexer.tcp_sendmsg2(net, sk, new TcpBuffer().ack(true)
-                                        .payloadBuilder(UnknownPacket.newPacket(chunk, 0, len).getBuilder()),
+                                        .rawPayload(buf.retainedSlice(buf.readerIndex() + offset, len)),
                                         flush);
                                 offset += len;
                             }
@@ -1556,15 +1522,8 @@ public class TcpInput<T extends IpPacket> {
 
                     @Override
                     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                        log.warn(logFormat(ipPacket, "Connection aborted: {}"), cause.getMessage(), cause);
-                        demultiplexer.send_reset(net, sk.rawIpHeader, new TcpPacket.Builder()
-                                .srcAddr(sk.ir_rmt_addr)
-                                .dstAddr(sk.ir_loc_addr)
-                                .srcPort(sk.ir_rmt_port)
-                                .dstPort(sk.ir_num)
-                                .ack(true)
-                                .acknowledgmentNumber(sk.rcv_nxt)
-                                .build(), -1);
+                        log.warn(logFormat(pkt, "Connection aborted: {}"), cause.getMessage(), cause);
+                        demultiplexer.send_reset(net, sk.rawIpHeader, -1);
                         demultiplexer.tcp_done(sk);
 //                        try {
                         if (ctx.channel().isOpen()) {
@@ -1589,57 +1548,54 @@ public class TcpInput<T extends IpPacket> {
      * It's called from both tcp_v4_rcv and tcp_v6_rcv and should be
      * address independent.
      *
-     * @param ipPacket the IP packet
+     * @param pkt the IP packet buffer
      * @return error code
      * @throws IOException
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6910">tcp_rcv_state_process</a>
      */
-    protected int tcp_rcv_state_process(final Channel net, TcpSock sk, final T ipPacket) throws IOException {
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        final TcpHeader th = tcpPacket.getHeader();
-
+    protected int tcp_rcv_state_process(final Channel net, TcpSock sk, final IpPacketBuf pkt) throws IOException {
         switch (sk.state()) {
             case TCP_CLOSE:
-                log.warn(logFormat(ipPacket, "Packet discard: The Connection is CLOSED"));
-                return discard(ipPacket, TcpDropReason.SKB_DROP_REASON_TCP_CLOSE);
+                log.warn(logFormat(pkt, "Packet discard: The Connection is CLOSED"));
+                return discard(TcpDropReason.SKB_DROP_REASON_TCP_CLOSE);
             case TCP_LISTEN:
-                if (th.getAck()) {
-                    log.warn(logFormat(ipPacket, "Connection reset: Invalid TCP flag(ACK)"));
+                if (pkt.isAck()) {
+                    log.warn(logFormat(pkt, "Connection reset: Invalid TCP flag(ACK)"));
                     return TcpDropReason.SKB_DROP_REASON_TCP_FLAGS;
                 }
-                if (th.getRst()) {
-                    log.warn(logFormat(ipPacket, "Packet discard: Connection reset not required"));
-                    return discard(ipPacket, TcpDropReason.SKB_DROP_REASON_TCP_RESET);
+                if (pkt.isRst()) {
+                    log.warn(logFormat(pkt, "Packet discard: Connection reset not required"));
+                    return discard(TcpDropReason.SKB_DROP_REASON_TCP_RESET);
                 }
 
                 /* handshake */
-                if (th.getSyn()) {
-                    if (th.getFin()) {
-                        log.warn(logFormat(ipPacket, "Packet discard: Invalid TCP flag(SYN-FIN)"));
-                        return discard(ipPacket, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
+                if (pkt.isSyn()) {
+                    if (pkt.isFin()) {
+                        log.warn(logFormat(pkt, "Packet discard: Invalid TCP flag(SYN-FIN)"));
+                        return discard(TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
                     }
 
-                    log.debug(logFormat(ipPacket, "Connection handshake 1/3: SYN (req: {}, est: {})"), demultiplexer.synRegistry.size(), demultiplexer.establishedRegistry.size());
+                    log.debug(logFormat(pkt, "Connection handshake 1/3: SYN (req: {}, est: {})"), demultiplexer.synRegistry.size(), demultiplexer.establishedRegistry.size());
 
                     /*-
                      * Linux此处为创建状态为TCP_NEW_SYN_RECV的请求套接字(request_sock)放入半连接队列即可结束,
                      * 此处调整为直接创建连接.
                      */
-                    final tcp_request_sock tcpRequestSock = sk.icsk_af_ops.conn_request(net, sk, ipPacket);
+                    final tcp_request_sock tcpRequestSock = sk.icsk_af_ops.conn_request(net, sk, pkt);
                     if (null == tcpRequestSock) {
-                        log.warn(logFormat(ipPacket, "Connection reset: Reject SYN request"));
+                        log.warn(logFormat(pkt, "Connection reset: Reject SYN request"));
                         return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
                     }
 
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
 
-                return discard(ipPacket, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
+                return discard(TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
             case TCP_SYN_SENT:
                 /*-
                  * XXX client mode not supported.
                  */
-                log.error(logFormat(ipPacket, "Connection reset: TCP_SYN_SENT not implementation"));
+                log.error(logFormat(pkt, "Connection reset: TCP_SYN_SENT not implementation"));
                 return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
         }
 
@@ -1653,17 +1609,17 @@ public class TcpInput<T extends IpPacket> {
          * XXX ... fastopen_request_socket ...
          */
 
-        if (!th.getAck() && !th.getRst() && !th.getSyn()) {
-            log.warn(logFormat(ipPacket, "Connection reset: Invalid TCP flag(!ACK, !RST, !SYN)"));
-            return discard(ipPacket, TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
+        if (!pkt.isAck() && !pkt.isRst() && !pkt.isSyn()) {
+            log.warn(logFormat(pkt, "Connection reset: Invalid TCP flag(!ACK, !RST, !SYN)"));
+            return discard(TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
         }
 
-        if (!tcp_validate_incoming(net, sk, ipPacket)) {
+        if (!tcp_validate_incoming(net, sk, pkt)) {
             return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
         }
 
         /* step 5: check the ACK field */
-        int reason = tcp_ack(net, sk, ipPacket, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
+        int reason = tcp_ack(net, sk, pkt, TcpInput.FLAG_SLOWPATH | TcpInput.FLAG_UPDATE_TS_RECENT | TcpInput.FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {
             if (TcpState.TCP_SYN_RECV.equals(sk.state())) {
                 // send one RST
@@ -1674,7 +1630,7 @@ public class TcpInput<T extends IpPacket> {
             if (reason < 0) {
                 tcp_send_challenge_ack(net, sk);
                 reason = -reason;
-                return discard(ipPacket, reason);
+                return discard(reason);
             }
         }
 
@@ -1697,16 +1653,16 @@ public class TcpInput<T extends IpPacket> {
                 } else {
                     tcp_try_undo_spurious_syn(sk);
                     sk.retrans_stamp = 0;
-                    tcp_init_transfer(net, sk, ipPacket);
+                    tcp_init_transfer(net, sk, pkt);
                     sk.copied_seq = sk.rcv_nxt;
                 }
 
                 sk.state(TcpState.TCP_ESTABLISHED);
                 // sk.sk_state_change(sk);
 
-                sk.snd_una = th.getAcknowledgmentNumber();
-                sk.snd_wnd = th.getWindowAsInt() << sk.rx_opt.snd_wscale;
-                tcp_init_wl(sk, th.getSequenceNumber());
+                sk.snd_una = pkt.tcpAckNum();
+                sk.snd_wnd = pkt.tcpWindow() << sk.rx_opt.snd_wscale;
+                tcp_init_wl(sk, pkt.tcpSeq());
 
                 // ...
 
@@ -1728,7 +1684,7 @@ public class TcpInput<T extends IpPacket> {
                     break;
                 }
 
-                log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4: ACK"));
+                log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 2/4: ACK"));
                 sk.state(TCP_FIN_WAIT2);
                 sk.sk_shutdown |= TcpConstants.SEND_SHUTDOWN;
 
@@ -1738,16 +1694,16 @@ public class TcpInput<T extends IpPacket> {
 //                }
 
                 if (sk.linger2 < 0) {
-                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake aborted: linger2 < 0"));
+                    log.debug(logFormat(pkt, "(ACTIVE) Connection handshake aborted: linger2 < 0"));
                     demultiplexer.tcp_done(sk);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
 
-                final int seq = th.getSequenceNumber();
-                final int end_seq = determineEndSeq(tcpPacket);
-                if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), sk.rcv_nxt)) {
+                final int seq = pkt.tcpSeq();
+                final int end_seq = determineEndSeq(pkt);
+                if (end_seq != seq && after(end_seq - (pkt.isFin() ? 1 : 0), sk.rcv_nxt)) {
                     /* Receive out of order FIN after close() */
-                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4 aborted: out of order FIN"));
+                    log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 2/4 aborted: out of order FIN"));
                     demultiplexer.tcp_done(sk);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
@@ -1757,19 +1713,19 @@ public class TcpInput<T extends IpPacket> {
                     /*-
                      * FIN_WAIT2 开始的总超时时间 > TIME_WAIT 的 2MSL, 则等待 tmo - TCP_TIMEWAIT_LEN 后进入 TIME_WAIT.
                      */
-                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2 timeout={}"), tmo - TCP_TIMEWAIT_LEN);
+                    log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2 timeout={}"), tmo - TCP_TIMEWAIT_LEN);
                     demultiplexer.timer.tcp_reset_keepalive_timer(sk, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
-                } else if (th.getFin()) {
+                } else if (pkt.isFin()) {
                     /* Bad case. We could lose such FIN otherwise.
                      * It is not a big problem, but it looks confusing
                      * and not so rare event. We still can lose it now,
                      * if it spins in bh_lock_sock(), but it is really
                      * marginal case.
                      */
-                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2 timeout={}(tmo)"), tmo);
+                    log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2 timeout={}(tmo)"), tmo);
                     demultiplexer.timer.tcp_reset_keepalive_timer(sk, tmo);
                 } else {
-                    log.debug(logFormat(ipPacket, "(ACTIVE) Connection handshake 2/4, 2MSL timeout={}(tmo)"), tmo);
+                    log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 2/4, 2MSL timeout={}(tmo)"), tmo);
                     demultiplexer.tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
@@ -1782,7 +1738,7 @@ public class TcpInput<T extends IpPacket> {
                 break;
             case TCP_LAST_ACK:
                 if (sk.snd_una == sk.write_seq) {
-                    log.debug(logFormat(ipPacket, "(PASSIVE) Connection handshake 4/4: ACK"));
+                    log.debug(logFormat(pkt, "(PASSIVE) Connection handshake 4/4: ACK"));
                     // tcp_update_metrics
                     demultiplexer.tcp_done(sk);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
@@ -1798,7 +1754,7 @@ public class TcpInput<T extends IpPacket> {
             case TCP_CLOSE_WAIT:
             case TCP_CLOSING:
             case TCP_LAST_ACK:
-                if (!before(th.getSequenceNumber(), sk.rcv_nxt)) {
+                if (!before(pkt.tcpSeq(), sk.rcv_nxt)) {
                     /* If a subflow has been reset, the packet should not
                      * continue to be processed, drop the packet.
                      */
@@ -1813,16 +1769,16 @@ public class TcpInput<T extends IpPacket> {
                  * BSD 4.4 also does reset.
                  */
                 if (0 != (sk.sk_shutdown & TcpConstants.RCV_SHUTDOWN)) {
-                    int seq = th.getSequenceNumber();
-                    int end_seq = determineEndSeq(tcpPacket);
-                    if (end_seq != seq && after(end_seq - (th.getFin() ? 1 : 0), sk.rcv_nxt)) {
-                        tcp_reset(sk, ipPacket);
+                    int seq2 = pkt.tcpSeq();
+                    int end_seq2 = determineEndSeq(pkt);
+                    if (end_seq2 != seq2 && after(end_seq2 - (pkt.isFin() ? 1 : 0), sk.rcv_nxt)) {
+                        tcp_reset(sk, pkt);
                         return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                     }
                 }
                 // fallthrough
             case TCP_ESTABLISHED:
-                tcp_data_queue(net, sk, ipPacket);
+                tcp_data_queue(net, sk, pkt);
                 queued = true;
                 break;
         }
@@ -1843,19 +1799,19 @@ public class TcpInput<T extends IpPacket> {
         }
 
         if (!queued) {
-            tcp_drop_reason(ipPacket, reason);
+            tcp_drop_reason(reason);
         }
 
         return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
     }
 
 
-    private int discard(final T ipPacket, final int reason) {
-        tcp_drop_reason(ipPacket, reason);
+    private int discard(final int reason) {
+        tcp_drop_reason(reason);
         return 0;
     }
 
-    private void tcp_drop_reason(final T skb, final int reason) {
+    private void tcp_drop_reason(final int reason) {
 
     }
 

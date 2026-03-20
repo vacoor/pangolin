@@ -142,8 +142,8 @@ public class TcpTimer {
         } else {
             log.warn(logFormat(
                     "TCP",
-                    tp.ir_loc_addr, tp.ir_num.valueAsInt(),
-                    tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                    tp.ir_loc_addr, tp.ir_num,
+                    tp.ir_rmt_addr, tp.ir_rmt_port,
                     "CANCEL FAILED: {}"
             ), tp.icsk_pending);
         }
@@ -319,8 +319,8 @@ public class TcpTimer {
 //                tp.logError("[RETRANSMIT] RTX PROBE0 TIMEOUT");
                 log.info(logFormat(
                         "TCP",
-                        tp.ir_loc_addr, tp.ir_num.valueAsInt(),
-                        tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                        tp.ir_loc_addr, tp.ir_num,
+                        tp.ir_rmt_addr, tp.ir_rmt_port,
                         "RTX PROBE0 TIMEOUT"
                 ));
                 demultiplexer.tcp_write_err(tp);
@@ -373,8 +373,8 @@ public class TcpTimer {
         if (log.isTraceEnabled()) {
             log.trace(logFormat(
                     "TCP",
-                    tp.ir_loc_addr, tp.ir_num.valueAsInt(),
-                    tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                    tp.ir_loc_addr, tp.ir_num,
+                    tp.ir_rmt_addr, tp.ir_rmt_port,
                     "next timeout: {}"
             ), new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date(System.currentTimeMillis() + l)));
         }
@@ -488,8 +488,8 @@ public class TcpTimer {
 //            tp.logError("[RETRANSMIT] WRITE TIMEOUT");
             log.info(logFormat(
                     "TCP",
-                    tp.ir_loc_addr, tp.ir_num.valueAsInt(),
-                    tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                    tp.ir_loc_addr, tp.ir_num,
+                    tp.ir_rmt_addr, tp.ir_rmt_port,
                     "RETRANSMIT WRITE TIMEOUT"
             ));
             demultiplexer.tcp_write_err(tp);
@@ -562,8 +562,8 @@ public class TcpTimer {
 //                tp.logWarn("PROBE TIMEOUT");
                 log.info(logFormat(
                         "TCP",
-                        tp.ir_loc_addr, tp.ir_num.valueAsInt(),
-                        tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                        tp.ir_loc_addr, tp.ir_num,
+                        tp.ir_rmt_addr, tp.ir_rmt_port,
                         "PROBE TIMEOUT"
                 ));
                 demultiplexer.tcp_write_err(tp);
@@ -579,8 +579,8 @@ public class TcpTimer {
 //            tp.logWarn("TOO MANY PROBES");
             log.info(logFormat(
                     "TCP",
-                    tp.ir_loc_addr, tp.ir_num.valueAsInt(),
-                    tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                    tp.ir_loc_addr, tp.ir_num,
+                    tp.ir_rmt_addr, tp.ir_rmt_port,
                     "TOO MANY PROBES"
             ));
             demultiplexer.tcp_write_err(tp);
@@ -643,8 +643,8 @@ public class TcpTimer {
                     || (user_timeout == 0 && tp.icsk_probes_out >= keepalive_probes(tp))) {
                 log.info(logFormat(
                         "TCP",
-                        tp.ir_loc_addr, tp.ir_num.valueAsInt(),
-                        tp.ir_rmt_addr, tp.ir_rmt_port.valueAsInt(),
+                        tp.ir_loc_addr, tp.ir_num,
+                        tp.ir_rmt_addr, tp.ir_rmt_port,
                         "KEEPALIVE TIMEOUT"
                 ));
                 demultiplexer.output.tcp_send_active_reset(net, tp, "SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT");

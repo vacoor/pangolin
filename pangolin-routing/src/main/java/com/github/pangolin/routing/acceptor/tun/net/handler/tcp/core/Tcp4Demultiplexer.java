@@ -1,18 +1,16 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.support.SocketChannelFactory;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.IpV4Packet;
-import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.namednumber.IpNumber;
-import org.pcap4j.packet.namednumber.IpVersion;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -21,14 +19,12 @@ import java.util.Map;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logify;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
-import static org.pcap4j.packet.IpPacket.IpHeader;
-import static org.pcap4j.packet.IpV4Packet.IpV4Header;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c">tcp_ipv4.c</a>
  */
 @Slf4j
-public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
+public class Tcp4Demultiplexer extends TcpDemultiplexer {
 
     public Tcp4Demultiplexer(
             Map<String, tcp_request_sock> synRegistry,
@@ -41,22 +37,22 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
         super(synRegistry, establishedRegistry, childGroup, dnsEngine, factory, new request_sock_ops() {
 
             @Override
-            public void send_ack(Channel net, TcpSock sk, IpPacket ipPacket, request_sock req) {
+            public void send_ack(Channel net, TcpSock sk, IpPacketBuf pkt, request_sock req) {
                 // FIXME
                 // tcp_v4_reqsk_send_ack
             }
 
             @Override
-            public void send_reset(Channel net, TcpSock sk, IpPacket ipPacket, TcpPacket tcpPacket, int reason) {
-                tcp_v4_send_reset(net, (IpV4Header) ipPacket.getHeader(), tcpPacket, -1);
+            public void send_reset(Channel net, TcpSock sk, IpPacketBuf pkt, int reason) {
+                tcp_v4_send_reset(net, pkt, reason);
             }
 
         });
     }
 
     @Override
-    public void tcp_rcv(final Channel net, final IpV4Packet ipPacket) {
-        tcp_v4_rcv(net, ipPacket);
+    public void tcp_rcv(final Channel net, final IpPacketBuf pkt) {
+        tcp_v4_rcv(net, pkt);
     }
 
     @Override
@@ -74,58 +70,46 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2483">ipv4_specific</a>
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2523">tcp_v4_init_sock</a>
          */
-        sk.icsk_af_ops = new inet_connection_sock_af_ops<IpV4Packet>() {
+        sk.icsk_af_ops = new inet_connection_sock_af_ops() {
             @Override
-            public void send_check(Channel net, TcpSock sk, IpV4Packet ipPacket, TcpPacket tcpPacket) {
-
+            public void send_check(Channel net, TcpSock sk, IpPacketBuf pkt) {
             }
 
             @Override
-            public tcp_request_sock conn_request(Channel net, TcpSock listenSock, IpV4Packet ipPacket) {
-                return tcp_v4_conn_request(net, listenSock, ipPacket, ipPacket.get(TcpPacket.class));
+            public tcp_request_sock conn_request(Channel net, TcpSock listenSock, IpPacketBuf pkt) {
+                return tcp_v4_conn_request(net, listenSock, pkt);
             }
 
             @Override
-            public TcpSock syn_recv_sock(Channel net, TcpSock listenSock, IpV4Packet ipPacket, tcp_request_sock req) {
-                return tcp_v4_syn_recv_sock(net, listenSock, ipPacket, req);
+            public TcpSock syn_recv_sock(Channel net, TcpSock listenSock, IpPacketBuf pkt, tcp_request_sock req) {
+                return tcp_v4_syn_recv_sock(net, listenSock, pkt, req);
             }
         };
     }
 
     /**
-     * @param ipPacket
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a>
      */
-    private void tcp_v4_rcv(final Channel net, final IpV4Packet ipPacket) {
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
-        // log.trace(logFormat(ipPacket, "Packet received"), ipPacket.getHeader().getProtocol().name());
-
-        if (null == tcpPacket) {
-            log.warn(logFormat(ipPacket, "TCP packet not found, discard it"));
-            return;
-        }
-
-        // ...
-
-        SockCommon sk = __inet_lookup_skb(ipPacket);
+    private void tcp_v4_rcv(final Channel net, final IpPacketBuf pkt) {
+        SockCommon sk = __inet_lookup_skb(pkt);
         if (null == sk) {
-            log.warn(logFormat(ipPacket, "NO_TCP_SOCKET"));
-            send_reset(net, ipPacket.getHeader(), tcpPacket, -99);
+            log.warn(logFormat(pkt, "NO_TCP_SOCKET"));
+            send_reset(net, pkt, -99);
             return;
         }
 
-        log.trace(logify(ipPacket, sk instanceof TcpSock ? ((TcpSock) sk).rx_opt.rcv_wscale : 0));
+        log.trace(logify(pkt, sk instanceof TcpSock ? ((TcpSock) sk).rx_opt.rcv_wscale : 0));
 
         if (TcpState.TCP_NEW_SYN_RECV.equals(sk.state())) {
-            log.debug(logFormat(ipPacket, "Connection handshake 3/3: ACK"));
+            log.debug(logFormat(pkt, "Connection handshake 3/3: ACK"));
 
             final tcp_request_sock request = (tcp_request_sock) sk;
-            final TcpSock nsk = tcp_check_req(net, (TcpSock) request.skc_listener, ipPacket, request);
+            final TcpSock nsk = tcp_check_req(net, (TcpSock) request.skc_listener, pkt, request);
 
             nsk.state(TcpState.TCP_SYN_RECV);
             moveToEstablished(request, nsk);
 
-            log.info(logFormat(ipPacket, "Connection ESTABLISHED"));
+            log.info(logFormat(pkt, "Connection ESTABLISHED"));
             sk = nsk;
         }
 
@@ -136,24 +120,22 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
                 // 检查通道是否已经注册到event loop上
                 if (channel.eventLoop().inEventLoop()) {
                     // 如果当前已经在event loop中，直接执行
-                    tcp_v4_do_rcv(net, sockToUse, ipPacket);
+                    tcp_v4_do_rcv(net, sockToUse, pkt);
                 } else {
                     // 否则提交到event loop中执行
-                    channel.eventLoop().execute(() -> tcp_v4_do_rcv(net, sockToUse, ipPacket));
+                    channel.eventLoop().execute(() -> tcp_v4_do_rcv(net, sockToUse, pkt));
                 }
             } catch (IllegalStateException e) {
                 // 如果通道没有注册到event loop上，直接在当前线程执行
-                tcp_v4_do_rcv(net, sockToUse, ipPacket);
+                tcp_v4_do_rcv(net, sockToUse, pkt);
             }
         } else {
-            tcp_v4_do_rcv(net, sockToUse, ipPacket);
+            tcp_v4_do_rcv(net, sockToUse, pkt);
         }
     }
 
-    protected SockCommon __inet_lookup_skb(final IpPacket ipPacket) {
-        final IpHeader iph = ipPacket.getHeader();
-        final TcpPacket.TcpHeader th = ipPacket.get(TcpPacket.class).getHeader();
-        final String lookupKey = uniqueKey(iph, th);
+    protected SockCommon __inet_lookup_skb(final IpPacketBuf pkt) {
+        final String lookupKey = uniqueKey(pkt);
         SockCommon sk = establishedRegistry.get(lookupKey);
         return (null == sk && null == (sk = synRegistry.get(lookupKey))) ? listenSock : sk;
     }
@@ -161,21 +143,12 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1897">tcp_v4_do_rcv</a>
      */
-    private void tcp_v4_do_rcv(final Channel net, final TcpSock sock, final IpV4Packet ipPacket) {
+    private void tcp_v4_do_rcv(final Channel net, final TcpSock sock, final IpPacketBuf pkt) {
         // https://www.cnblogs.com/wanpengcoder/p/11750747.html
-
-        /*
-        if (State.TCP_ESTABLISHED.equals(state.get())) {
-            tcp_rcv_established(skb);
-            return;
-        }
-        */
-
-        final TcpPacket tcpPacket = ipPacket.get(TcpPacket.class);
         try {
-            int err = input.tcp_rcv_state_process(net, sock, ipPacket);
+            int err = input.tcp_rcv_state_process(net, sock, pkt);
             if (0 != err) {
-                tcp_v4_send_reset(net, ipPacket.getHeader(), tcpPacket, err);
+                tcp_v4_send_reset(net, pkt, err);
                 if (!TcpState.TCP_LISTEN.equals(sock.state())) {
                     inet_csk_destroy_sock(sock);
                 }
@@ -189,156 +162,87 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
     }
 
     @Override
-    public void send_reset(final Channel net, final IpHeader ipHeader, final TcpPacket tcpPacket, int err) {
-        tcp_v4_send_reset(net, (IpV4Header) ipHeader, tcpPacket, err);
+    public void send_reset(final Channel net, final IpPacketBuf pkt, int err) {
+        tcp_v4_send_reset(net, pkt, err);
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
-    static void tcp_v4_send_reset(final Channel net, IpV4Header rawRequest, TcpPacket skb, int err) {
-        final Inet4Address dstAddr = rawRequest.getDstAddr();
-        final Inet4Address srcAddr = rawRequest.getSrcAddr();
+    static void tcp_v4_send_reset(final Channel net, final IpPacketBuf pkt, int err) {
         log.warn("SEND-RST: {}", err);
-        // FIXME
-        // send reset.
-        final TcpPacket.TcpHeader th = skb.getHeader();
 
-        TcpPacket.Builder buf = new TcpPacket.Builder();
+        final TcpBuffer rst = new TcpBuffer().rst(true);
         /*-
          * Swap the send and the receive.
          */
-        buf.srcAddr(dstAddr)
-                .srcPort(th.getDstPort())
-                .rst(true);
+        rst.srcPort(pkt.tcpDstPort());
+        rst.dstPort(pkt.tcpSrcPort());
 
-        if (th.getAck()) {
-            buf.sequenceNumber(th.getAcknowledgmentNumber());
+        if (pkt.isAck()) {
+            rst.sequenceNumber(pkt.tcpAckNum());
         } else {
-            buf.sequenceNumber(1);
-            buf.acknowledgmentNumber(determineEndSeq(skb));
+            rst.sequenceNumber(0);
+            rst.ack(true);
+            rst.acknowledgmentNumber(determineEndSeq(pkt));
         }
 
-        buf.dstAddr(srcAddr)
-                .dstPort(th.getSrcPort())
-                .paddingAtBuild(true)
-                .correctLengthAtBuild(true)
-                .correctChecksumAtBuild(true);
-
-        IpV4Packet.Builder arg = new IpV4Packet.Builder();
-        arg.tos(rawRequest.getTos());
-        arg.identification(rawRequest.getIdentification());
-
-        arg.version(IpVersion.IPV4)
-                .protocol(rawRequest.getProtocol())
-                .srcAddr(dstAddr)
-                .dstAddr(srcAddr)
-                .ttl(rawRequest.getTtl())
-                // FIXME
-                .fragmentOffset(rawRequest.getFragmentOffset())
-                .paddingAtBuild(true)
-                .correctLengthAtBuild(true)
-                .correctChecksumAtBuild(true)
-                .payloadBuilder(buf)
-                .build();
-
-        net.writeAndFlush(arg.build());
+        sendRaw(net, rst, pkt.dstAddr(), pkt.srcAddr());
     }
 
-//    @Override
-//    protected tcp_request_sock conn_request(Channel net, TcpSock listenSock, final IpV4Packet ipPacket, final TcpPacket tcpPacket) {
-//        return tcp_v4_conn_request(net, listenSock, ipPacket, tcpPacket);
-//    }
-
     /**
-     * @param ipPacket
-     * @param tcpPacket
-     * @return
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1722">tcp_v4_conn_request</a>
      */
-    protected tcp_request_sock tcp_v4_conn_request(Channel net, TcpSock listenSock, final IpV4Packet ipPacket, final TcpPacket tcpPacket) {
+    protected tcp_request_sock tcp_v4_conn_request(Channel net, TcpSock listenSock, final IpPacketBuf pkt) {
         return TcpHandshaker.tcp_conn_request(
                 net, this,
                 requestSockOps,
                 new tcp_request_sock_ops() {
 
                     /**
-                     * @param ipHdr
-                     * @param tcpHdr
-                     * @return
                      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L103">tcp_v4_init_seq</a>
                      * @see <a href="https://github.com/torvalds/linux/blob/master/net/core/secure_seq.c#L136">secure_tcp_seq</a>
                      */
-                    public int init_seq(final IpHeader ipHdr, final TcpPacket.TcpHeader tcpHdr) {
-                        // return tcpHdr.getSequenceNumber();
+                    @Override
+                    public int init_seq(final IpPacketBuf p) {
                         return secureSeq(
-                                ipHdr.getSrcAddr().getAddress(), tcpHdr.getSrcPort().value(),
-                                ipHdr.getDstAddr().getAddress(), tcpHdr.getDstPort().value()
+                                p.srcAddrBytes(), p.tcpSrcPort(),
+                                p.dstAddrBytes(), p.tcpDstPort()
                         );
                     }
 
                     @Override
-                    public long init_ts_off(TcpPacket skb) {
+                    public long init_ts_off(IpPacketBuf p) {
                         return 0;
                     }
 
                     @Override
-                    public void send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, IpHeader ipHdr, TcpPacket skb) {
-                        tcp_v4_send_synack(net, listenSock, req, ipHdr, skb);
+                    public void send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, IpPacketBuf syn) {
+                        tcp_v4_send_synack(net, listenSock, req, syn);
                     }
 
                     @Override
                     public void addToHalfQueue(TcpSock listenSock, tcp_request_sock req) {
                         Tcp4Demultiplexer.super.addToHalfQueue(listenSock, req);
                     }
-
-//                    @Override
-//                    public void INDIRECT_CALL_INET(TcpBuffer buffer) {
-//                        _INDIRECT_CALL_INET(net, listenSock, ipPacket.getHeader(), buffer);
-//                    }
-                }
-                , listenSock, ipPacket, tcpPacket,
+                },
+                listenSock, pkt,
                 dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, output
         );
     }
 
-    protected void tcp_v4_send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, final IpHeader iphdr, final TcpPacket syn_skb) {
-        final IpV4Header iph = (IpV4Header) iphdr;
-        Inet4Address ir_loc_addr = (Inet4Address) req.ir_loc_addr;
-        Inet4Address ir_rmt_addr = (Inet4Address) req.ir_rmt_addr;
-
-
-
+    protected void tcp_v4_send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, final IpPacketBuf syn) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
-        final TcpPacket.Builder skb = output.tcp_make_synack(listenSock, req, iph, syn_skb)
-                .asBuilder()
-                .srcAddr(ir_loc_addr)
-                .dstAddr(ir_rmt_addr)
-                .srcPort(syn_skb.getHeader().getDstPort())
-                .dstPort(syn_skb.getHeader().getSrcPort());
+        final TcpBuffer skb = output.tcp_make_synack(listenSock, req, syn);
+        skb.srcPort(req.ir_num);
+        skb.dstPort(req.ir_rmt_port);
 
-        final IpV4Packet ipPacket = new IpV4Packet.Builder()
-                .version(IpVersion.IPV4)
-                .tos(iph.getTos())
-                .ttl(iph.getTtl())
-                .identification(iph.getIdentification())
-                .fragmentOffset(iph.getFragmentOffset())
-                .srcAddr(ir_loc_addr)
-                .dstAddr(ir_rmt_addr)
-                .protocol(IpNumber.TCP)
-
-                .paddingAtBuild(true)
-                .correctLengthAtBuild(true)
-                .correctChecksumAtBuild(true)
-
-                .payloadBuilder(skb)
-                .build();
-
-        log.warn(logFormat(ipPacket, "SYNACK send starting..."));
-        net.writeAndFlush(ipPacket).addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture future) throws Exception {
-                log.warn(logFormat(ipPacket, "SYNACK send successful"));
-            }
-        });
+        log.warn(logFormat(syn, "SYNACK send starting..."));
+        net.writeAndFlush(buildIp4Packet(skb, (Inet4Address) req.ir_loc_addr, (Inet4Address) req.ir_rmt_addr))
+                .addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(ChannelFuture future) throws Exception {
+                        log.warn(logFormat(syn, "SYNACK send successful"));
+                    }
+                });
     }
 
     /**
@@ -347,53 +251,162 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer<IpV4Packet> {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpSock tcp_v4_syn_recv_sock(Channel net, TcpSock listenSock, IpV4Packet ipPacket, tcp_request_sock req) {
-        final TcpPacket skb = ipPacket.get(TcpPacket.class);
-        TcpSock parent = listenSock;
-        TcpSock newsk = tcp_create_openreq_child(net, parent, req, skb);
+    private TcpSock tcp_v4_syn_recv_sock(Channel net, TcpSock listenSock, IpPacketBuf pkt, tcp_request_sock req) {
+        TcpSock newsk = tcp_create_openreq_child(net, listenSock, req);
 
         newsk.icsk_ext_hdr_len = 0;
-        output.tcp_sync_mss(newsk, parent.dst_mtu());
-        newsk.advmss = parent.tcp_mss_clamp(newsk, parent.dst_metric_advmss());
+        output.tcp_sync_mss(newsk, listenSock.dst_mtu());
+        newsk.advmss = listenSock.tcp_mss_clamp(newsk, listenSock.dst_metric_advmss());
 
         input.tcp_initialize_rcv_mss(newsk);
         return newsk;
     }
 
+    protected static void _INDIRECT_CALL_INET(Channel net, TcpSock tp, final IpPacketBuf pkt, final TcpBuffer skb) {
+        log.trace(logify(pkt, tp.rx_opt.snd_wscale));
+        sendRaw(net, skb, tp.ir_loc_addr, tp.ir_rmt_addr);
+    }
 
-    protected static void _INDIRECT_CALL_INET(Channel net, TcpSock tp, final IpHeader ipHeader, final TcpBuffer skb) {
-        final IpV4Header ipHdr = (IpV4Header) ipHeader;
-        final Inet4Address dstAddr = (Inet4Address) tp.ir_loc_addr;
-        final Inet4Address srcAddr = (Inet4Address) tp.ir_rmt_addr;
+    /**
+     * Dispatch to sendRaw4 or sendRaw6 based on address type.
+     */
+    static void sendRaw(final Channel net, final TcpBuffer skb,
+                        final InetAddress srcAddr, final InetAddress dstAddr) {
+        if (srcAddr instanceof Inet4Address) {
+            sendRaw4(net, skb, (Inet4Address) srcAddr, (Inet4Address) dstAddr);
+        } else {
+            // TODO IPv6
+            log.warn("sendRaw6 not yet implemented");
+        }
+    }
 
-        TcpPacket.Builder buf = skb
-                .srcAddr(dstAddr)
-                .dstAddr(srcAddr)
-                .asBuilder()
-                .paddingAtBuild(true)
-                .correctLengthAtBuild(true)
-                .correctChecksumAtBuild(true);
+    /**
+     * Build a raw IPv4+TCP packet from TcpBuffer and write to channel.
+     */
+    static void sendRaw4(final Channel net, final TcpBuffer skb,
+                         final Inet4Address srcAddr, final Inet4Address dstAddr) {
+        net.writeAndFlush(buildIp4Packet(skb, srcAddr, dstAddr));
+    }
 
-        final IpV4Packet ipPacket = new IpV4Packet.Builder()
-                .version(IpVersion.IPV4)
-                .tos(ipHdr.getTos())
-                .ttl(ipHdr.getTtl())
-                .identification(ipHdr.getIdentification())
-                .fragmentOffset(ipHdr.getFragmentOffset())
+    /**
+     * Construct a raw IPv4+TCP {@link ByteBuf} from the given {@link TcpBuffer} and addresses.
+     * Computes both the TCP checksum (with IPv4 pseudo-header) and the IPv4 header checksum.
+     */
+    static ByteBuf buildIp4Packet(final TcpBuffer skb,
+                                  final Inet4Address srcAddr, final Inet4Address dstAddr) {
+        final byte[] srcIp = srcAddr.getAddress();
+        final byte[] dstIp = dstAddr.getAddress();
 
-                .srcAddr(dstAddr)
-                .dstAddr(srcAddr)
+        final byte[] opts = skb.rawOptions();
+        final int optLen = opts != null ? opts.length : 0;
+        final int tcpHdrLen = 20 + optLen;
+        final int payloadLen = skb.payloadLength();
+        final int tcpTotalLen = tcpHdrLen + payloadLen;
+        final int ipTotalLen = 20 + tcpTotalLen;
 
-                .protocol(IpNumber.TCP)
-                .paddingAtBuild(true)
-                .correctLengthAtBuild(true)
-                .correctChecksumAtBuild(true)
-                .payloadBuilder(buf)
-                .build();
+        final ByteBuf buf = Unpooled.buffer(ipTotalLen);
 
-        log.trace(logify(ipPacket, tp.rx_opt.snd_wscale));
-//        parent.writeAndFlush(ipPacket).syncUninterruptibly();
-        net.writeAndFlush(ipPacket);
+        // ---- IPv4 header (20 bytes) ----
+        final int ipHdrStart = buf.writerIndex();
+        buf.writeByte(0x45);                        // version=4, IHL=5 (20 bytes)
+        buf.writeByte(0);                           // DSCP/ECN
+        buf.writeShort(ipTotalLen);                 // total length
+        buf.writeShort(0);                          // identification
+        buf.writeShort(0x4000);                     // flags=DF, fragment offset=0
+        buf.writeByte(64);                          // TTL
+        buf.writeByte(0x06);                        // protocol = TCP
+        buf.writeShort(0);                          // checksum placeholder
+        buf.writeBytes(srcIp);                      // source IP
+        buf.writeBytes(dstIp);                      // destination IP
+
+        // ---- TCP header (20 bytes + options) ----
+        final int tcpHdrStart = buf.writerIndex();
+        buf.writeShort(skb.srcPort());
+        buf.writeShort(skb.dstPort());
+        buf.writeInt(skb.sequenceNumber());
+        buf.writeInt(skb.acknowledgmentNumber());
+        buf.writeByte((tcpHdrLen / 4) << 4);        // data offset
+        buf.writeByte(buildTcpFlags(skb));
+        buf.writeShort(skb.window() & 0xFFFF);
+        final int tcpChecksumIdx = buf.writerIndex();
+        buf.writeShort(0);                          // checksum placeholder
+        buf.writeShort(skb.urgentPointer() & 0xFFFF);
+
+        // ---- TCP options ----
+        if (optLen > 0) {
+            buf.writeBytes(opts);
+        }
+
+        // ---- TCP payload ----
+        final ByteBuf payload = skb.rawPayload();
+        if (payload != null && payload.isReadable()) {
+            buf.writeBytes(payload, payload.readerIndex(), payloadLen);
+        }
+
+        // ---- TCP checksum ----
+        final int tcpChecksum = computeTcpChecksum(buf, srcIp, dstIp, tcpHdrStart, tcpTotalLen);
+        buf.setShort(tcpChecksumIdx, tcpChecksum);
+
+        // ---- IPv4 header checksum ----
+        final int ipChecksum = computeIpChecksum(buf, ipHdrStart, 20);
+        buf.setShort(ipHdrStart + 10, ipChecksum);
+
+        return buf;
+    }
+
+    private static int buildTcpFlags(final TcpBuffer skb) {
+        int flags = 0;
+        if (skb.fin()) flags |= 0x01;
+        if (skb.syn()) flags |= 0x02;
+        if (skb.rst()) flags |= 0x04;
+        if (skb.psh()) flags |= 0x08;
+        if (skb.ack()) flags |= 0x10;
+        if (skb.urg()) flags |= 0x20;
+        return flags;
+    }
+
+    /**
+     * Compute TCP checksum using IPv4 pseudo-header.
+     */
+    private static int computeTcpChecksum(final ByteBuf buf,
+                                          final byte[] srcIp, final byte[] dstIp,
+                                          final int tcpOffset, final int tcpLength) {
+        long sum = 0;
+        // pseudo-header: srcIp, dstIp, zero, proto=6, tcpLength
+        sum += ((srcIp[0] & 0xFF) << 8) | (srcIp[1] & 0xFF);
+        sum += ((srcIp[2] & 0xFF) << 8) | (srcIp[3] & 0xFF);
+        sum += ((dstIp[0] & 0xFF) << 8) | (dstIp[1] & 0xFF);
+        sum += ((dstIp[2] & 0xFF) << 8) | (dstIp[3] & 0xFF);
+        sum += 0x0006;      // zero + protocol
+        sum += tcpLength;
+
+        // TCP segment (treat as big-endian 16-bit words)
+        for (int i = tcpOffset; i + 1 < tcpOffset + tcpLength; i += 2) {
+            sum += buf.getUnsignedShort(i);
+        }
+        if ((tcpLength & 1) != 0) {
+            sum += (buf.getUnsignedByte(tcpOffset + tcpLength - 1)) << 8;
+        }
+
+        return foldChecksum(sum);
+    }
+
+    /**
+     * Compute IPv4 header checksum over {@code length} bytes starting at {@code offset}.
+     */
+    private static int computeIpChecksum(final ByteBuf buf, final int offset, final int length) {
+        long sum = 0;
+        for (int i = offset; i + 1 < offset + length; i += 2) {
+            sum += buf.getUnsignedShort(i);
+        }
+        return foldChecksum(sum);
+    }
+
+    private static int foldChecksum(long sum) {
+        while ((sum >> 16) != 0) {
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        }
+        return (int) (~sum & 0xFFFF);
     }
 
 }

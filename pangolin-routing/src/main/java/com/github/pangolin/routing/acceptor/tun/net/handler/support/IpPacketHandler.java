@@ -1,69 +1,41 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.support;
 
-import com.google.common.base.Preconditions;
-import freework.reflect.Types;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.util.ReferenceCountUtil;
-import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.namednumber.IpNumber;
-
-import java.lang.reflect.Type;
-
-import static org.pcap4j.packet.IpPacket.IpHeader;
 
 /**
- *
+ * Base handler that filters incoming {@link IpPacketBuf} messages by protocol number.
  */
-public abstract class IpPacketHandler<T extends IpPacket> extends ChannelDuplexHandler {
-    private final IpNumber ipProtocol;
-    private final Class<T> ipPacketType;
+public abstract class IpPacketHandler extends ChannelDuplexHandler {
 
-    @SuppressWarnings("unchecked")
-    public IpPacketHandler(final IpNumber ipProtocol) {
-        final Type type = Types.resolveType(IpPacketHandler.class.getTypeParameters()[0], getClass());
-        Preconditions.checkState(type instanceof Class<?>, "Can't resolve %s IpPacket Class", IpPacketHandler.class.getName());
+    private final byte ipProtocol;
 
+    public IpPacketHandler(final byte ipProtocol) {
         this.ipProtocol = ipProtocol;
-        this.ipPacketType = (Class<T>) type;
     }
 
-    public IpPacketHandler(final IpNumber ipProtocol, final Class<T> ipPacketType) {
-        this.ipProtocol = ipProtocol;
-        this.ipPacketType = ipPacketType;
-    }
-
-    protected boolean accept(final Object msg) {
-        if (!ipPacketType.isInstance(msg)) {
-            return false;
-        }
-        final T ipPacket = ipPacketType.cast(msg);
-        final IpHeader iph = ipPacket.getHeader();
-        return null != iph.getProtocol() && iph.getProtocol().equals(ipProtocol);
+    protected boolean accept(final IpPacketBuf pkt) {
+        return pkt.nextProto() == ipProtocol;
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    @SuppressWarnings("unchecked")
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-        boolean release = true;
-        try {
-            if (msg instanceof IpPacket && accept(msg)) {
-                channelRead0(ctx, (T) msg);
-            } else {
-                release = false;
-                ctx.fireChannelRead(msg);
+        if (msg instanceof IpPacketBuf) {
+            final IpPacketBuf pkt = (IpPacketBuf) msg;
+            if (accept(pkt)) {
+                try {
+                    channelRead0(ctx, pkt);
+                } finally {
+                    pkt.release();
+                }
+                return;
             }
-        } finally {
-            if (release) {
-                ReferenceCountUtil.release(msg);
-            }
-            IpPacketCodec.RAW_BYTES.remove();
         }
+        ctx.fireChannelRead(msg);
     }
 
-    protected abstract void channelRead0(final ChannelHandlerContext ctx, final T ipPacket) throws Exception;
-
+    protected abstract void channelRead0(final ChannelHandlerContext ctx, final IpPacketBuf pkt) throws Exception;
 }

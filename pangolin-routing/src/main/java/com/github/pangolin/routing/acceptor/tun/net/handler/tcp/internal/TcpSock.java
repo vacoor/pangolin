@@ -4,8 +4,6 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.TcpPacket;
 
 import java.util.ArrayDeque;
 import java.util.concurrent.TimeUnit;
@@ -524,7 +522,7 @@ public class TcpSock extends inet_connection_sock {
 
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L665
-    private void tcp_mark_push(final TcpPacket.Builder skb) {
+    private void tcp_mark_push(final TcpBuffer skb) {
         skb.psh(true);
         pushed_seq = write_seq;
     }

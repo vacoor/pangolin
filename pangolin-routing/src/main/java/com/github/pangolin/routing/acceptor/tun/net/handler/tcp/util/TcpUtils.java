@@ -1,12 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
 import org.bouncycastle.crypto.macs.SipHash;
 import org.bouncycastle.crypto.params.KeyParameter;
-import org.pcap4j.packet.IpPacket.IpHeader;
-import org.pcap4j.packet.Packet;
-import org.pcap4j.packet.TcpPacket;
-import org.pcap4j.packet.TcpPacket.TcpHeader;
 
 import java.security.SecureRandom;
 
@@ -84,20 +81,17 @@ public abstract class TcpUtils {
     }
 
     /**
-     * @param skb
-     * @return
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c">tcp_ipv4.c</a>
+     * Determine end sequence number from an IpPacketBuf (incoming packet).
      */
-    public static int determineEndSeq(final TcpPacket skb) {
-        final TcpPacket.TcpHeader hdr = skb.getHeader();
-        int endSeq = hdr.getSequenceNumber();
-        if (hdr.getSyn()) {
+    public static int determineEndSeq(final IpPacketBuf pkt) {
+        int endSeq = pkt.tcpSeq();
+        if (pkt.isSyn()) {
             endSeq++;
         }
-        if (hdr.getFin()) {
+        if (pkt.isFin()) {
             endSeq++;
         }
-        return endSeq + skb.length() - hdr.length();
+        return endSeq + pkt.tcpPayloadLength();
     }
 
     public static int determineEndSeq(final TcpBuffer skb) {
@@ -121,8 +115,8 @@ public abstract class TcpUtils {
         new SecureRandom().nextBytes(key);
     }
 
-    public static int secureSeq(final byte[] srcAddress, final short srcPort,
-                                final byte[] dstAddress, final short dstPort) {
+    public static int secureSeq(final byte[] srcAddress, final int srcPort,
+                                final byte[] dstAddress, final int dstPort) {
         final SipHash sipHash = new SipHash();
         sipHash.init(new KeyParameter(key));
         sipHash.update(dstAddress, 0, dstAddress.length);
@@ -142,13 +136,13 @@ public abstract class TcpUtils {
         return seq + (int) (System.nanoTime() >> 6);
     }
 
-
-    public static String uniqueKey(final IpHeader ipHeader, final TcpHeader tcpHeader) {
+    /**
+     * Build unique connection key from IpPacketBuf (incoming packet).
+     */
+    public static String uniqueKey(final IpPacketBuf pkt) {
         return uniqueKey(
-                ipHeader.getSrcAddr().getHostAddress(),
-                tcpHeader.getSrcPort().valueAsInt(),
-                ipHeader.getDstAddr().getHostAddress(),
-                tcpHeader.getDstPort().valueAsInt()
+                pkt.srcAddr().getHostAddress(), pkt.tcpSrcPort(),
+                pkt.dstAddr().getHostAddress(), pkt.tcpDstPort()
         );
     }
 

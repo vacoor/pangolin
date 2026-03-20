@@ -1,10 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
-import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.namednumber.TcpPort;
 
 import java.net.InetAddress;
 
@@ -14,7 +13,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpC
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">struct sock_common</a>
  */
 public class SockCommon {
-    public IpPacket.IpHeader rawIpHeader;
+    public IpPacketBuf rawIpHeader;
 
     /**
      * Foreign IPv4 addr.
@@ -37,47 +36,38 @@ public class SockCommon {
     public InetAddress ir_loc_addr;
 
     /**
-     * Placeholder for inet_dport/tw_dport.
+     * Placeholder for inet_dport/tw_dport (remote port).
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_dport</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock->sk_dport</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69">inet_request_sock->ir_rmt_port</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L212">inet_sock->inet_dport</a>
      */
-    public TcpPort ir_rmt_port;
+    public int ir_rmt_port;
 
     /**
-     * Placeholder for inet_num/tw_num.
+     * Placeholder for inet_num/tw_num (local port).
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_num</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock->sk_num</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69">inet_request_sock->ir_num</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L212">inet_sock->inet_num</a>
      */
-    public TcpPort ir_num;
+    public int ir_num;
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_state</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock->sk_state</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L69">inet_request_sock->ireq_state</a>
      */
     private volatile TcpState state = TcpState.TCP_CLOSE;
 
     /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_state</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/request_sock.h#L51">request_sock->rsk_rcv_wnd</a>
      */
     public int rsk_rcv_wnd;
 
     /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">sock_common->skc_window_clamp</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/request_sock.h#L51">request_sock->rsk_window_clamp</a>
      */
     public int rsk_window_clamp;
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">skc_listener</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/request_sock.h#L51">rsk_listener</a>
      */
     public Sock skc_listener;
 
@@ -85,7 +75,7 @@ public class SockCommon {
     public ChannelFutureListener childCloseListener;
 
     public String uniqueKey() {
-        return TcpUtils.uniqueKey(ir_rmt_addr.getHostAddress(), ir_rmt_port.valueAsInt(), ir_loc_addr.getHostAddress(), ir_num.valueAsInt());
+        return TcpUtils.uniqueKey(ir_rmt_addr.getHostAddress(), ir_rmt_port, ir_loc_addr.getHostAddress(), ir_num);
     }
 
     /**

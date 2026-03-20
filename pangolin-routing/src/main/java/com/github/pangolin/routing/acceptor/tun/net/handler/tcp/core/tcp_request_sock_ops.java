@@ -1,11 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
 import io.netty.channel.Channel;
-import org.pcap4j.packet.IpPacket;
-import org.pcap4j.packet.TcpPacket;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_MSS_DEFAULT;
 
@@ -14,16 +12,11 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 public interface tcp_request_sock_ops {
     public int mss_clamp = TCP_MSS_DEFAULT;
 
-    int init_seq(IpPacket.IpHeader ipHdr, TcpPacket.TcpHeader header);
+    int init_seq(IpPacketBuf pkt);
 
-    long init_ts_off(TcpPacket skb);
+    long init_ts_off(IpPacketBuf pkt);
 
-    void send_synack(Channel net, TcpSock p, tcp_request_sock req, IpPacket.IpHeader ipHdr, TcpPacket skb);
+    void send_synack(Channel net, TcpSock p, tcp_request_sock req, IpPacketBuf syn);
 
     void addToHalfQueue(TcpSock p, tcp_request_sock req);
-
-
-//    void INDIRECT_CALL_INET(TcpBuffer buffer);
-
-
 }

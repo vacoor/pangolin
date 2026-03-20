@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.Tcp4Demultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
@@ -8,37 +9,32 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_req
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
-import org.pcap4j.packet.IpV4Packet;
 
-import java.net.Inet4Address;
 import java.net.UnknownHostException;
 import java.util.Map;
 
 @Slf4j
-public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler<IpV4Packet> {
+public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler {
 
     public Tcp4DemultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
         super(dnsEngine, factory);
     }
 
+    /**
+     * DNS-resolve the destination address and store it as metadata on the packet.
+     * The buf is never modified — O(1) operation.
+     */
     @Override
-    protected IpV4Packet prepare(final IpV4Packet ipPacket) throws UnknownHostException {
-        final IpV4Packet.IpV4Header iph = ipPacket.getHeader();
-        final Inet4Address dstAddr = iph.getDstAddr();
-         return ipPacket.getBuilder()
-                 .srcAddr((Inet4Address) noDnsQuery(iph.getSrcAddr()))
-                 .dstAddr((Inet4Address) resolveDstAddress(dstAddr))
-                 .build();
-//        return ipPacket.getBuilder().dstAddr((Inet4Address) noDnsQuery(dstAddr)).build();
+    protected IpPacketBuf prepare(final IpPacketBuf pkt) throws UnknownHostException {
+        return pkt.resolvedDstAddr(resolveDstAddress(pkt.dstAddr()));
     }
 
     @Override
-    protected TcpDemultiplexer<IpV4Packet> create(
+    protected TcpDemultiplexer create(
             final Map<String, tcp_request_sock> synRegistry,
             final Map<String, TcpSock> establishedRegistry,
             final EventLoopGroup childGroup, final DnsEngine dnsEngine,
             final SocketChannelFactory socketChannelFactory) {
         return new Tcp4Demultiplexer(synRegistry, establishedRegistry, childGroup, dnsEngine, socketChannelFactory);
     }
-
 }
