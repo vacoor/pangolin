@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.udp;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketHandler;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.UdpPacketBuf;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.socket.DatagramPacket;
@@ -12,7 +12,7 @@ import java.net.InetSocketAddress;
 /**
  *
  */
-public class Udp4PacketHandler extends IpPacketHandler {
+public class Udp4PacketHandler extends IpPacketHandler<UdpPacketBuf> {
 
     private static final byte PROTO_UDP = 17;
 
@@ -21,7 +21,7 @@ public class Udp4PacketHandler extends IpPacketHandler {
     }
 
     @Override
-    protected void channelRead0(final ChannelHandlerContext ctx, final IpPacketBuf pkt) throws Exception {
+    protected void channelRead0(final ChannelHandlerContext ctx, final UdpPacketBuf pkt) throws Exception {
         final Inet4Address srcAddr = (Inet4Address) pkt.srcAddr();
         final Inet4Address dstAddr = (Inet4Address) pkt.dstAddr();
         final int srcPort = pkt.udpSrcPort();

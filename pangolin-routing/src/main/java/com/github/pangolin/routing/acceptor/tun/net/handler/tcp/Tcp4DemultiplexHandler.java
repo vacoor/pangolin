@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.Tcp4Demultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
@@ -25,8 +25,9 @@ public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler {
      * The buf is never modified — O(1) operation.
      */
     @Override
-    protected IpPacketBuf prepare(final IpPacketBuf pkt) throws UnknownHostException {
-        return pkt.resolvedDstAddr(resolveDstAddress(pkt.dstAddr()));
+    protected TcpPacketBuf prepare(final TcpPacketBuf pkt) throws UnknownHostException {
+        pkt.resolvedDstAddr(resolveDstAddress(pkt.dstAddr()));
+        return pkt;
     }
 
     @Override

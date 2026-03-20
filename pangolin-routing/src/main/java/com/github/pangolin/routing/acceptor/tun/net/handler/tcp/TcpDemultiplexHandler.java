@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketHandler;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
@@ -18,7 +18,7 @@ import java.net.UnknownHostException;
 import java.util.Map;
 
 @Slf4j
-public abstract class TcpDemultiplexHandler extends IpPacketHandler {
+public abstract class TcpDemultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
 
     private static final byte PROTO_TCP = 6;
 
@@ -36,9 +36,9 @@ public abstract class TcpDemultiplexHandler extends IpPacketHandler {
     }
 
     @Override
-    protected void channelRead0(final ChannelHandlerContext ctx, final IpPacketBuf rawPkt) throws Exception {
+    protected void channelRead0(final ChannelHandlerContext ctx, final TcpPacketBuf rawPkt) throws Exception {
         try {
-            final IpPacketBuf pkt = prepare(rawPkt);
+            final TcpPacketBuf pkt = prepare(rawPkt);
             demultiplexer.tcp_rcv(ctx.channel(), pkt);
         } catch (final Exception ex) {
             log.error("Failed to process TCP packet", ex);
@@ -46,7 +46,7 @@ public abstract class TcpDemultiplexHandler extends IpPacketHandler {
         }
     }
 
-    protected IpPacketBuf prepare(final IpPacketBuf pkt) throws UnknownHostException {
+    protected TcpPacketBuf prepare(final TcpPacketBuf pkt) throws UnknownHostException {
         return pkt;
     }
 
