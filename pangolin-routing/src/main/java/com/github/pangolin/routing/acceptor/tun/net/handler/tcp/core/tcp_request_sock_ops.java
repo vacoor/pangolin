@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
 import io.netty.channel.Channel;
@@ -12,11 +12,11 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 public interface tcp_request_sock_ops {
     public int mss_clamp = TCP_MSS_DEFAULT;
 
-    int init_seq(IpPacketBuf pkt);
+    int init_seq(TcpPacketBuf pkt);
 
-    long init_ts_off(IpPacketBuf pkt);
+    long init_ts_off(TcpPacketBuf pkt);
 
-    void send_synack(Channel net, TcpSock p, tcp_request_sock req, IpPacketBuf syn);
+    void send_synack(Channel net, TcpSock p, tcp_request_sock req, TcpPacketBuf syn);
 
     void addToHalfQueue(TcpSock p, tcp_request_sock req);
 }

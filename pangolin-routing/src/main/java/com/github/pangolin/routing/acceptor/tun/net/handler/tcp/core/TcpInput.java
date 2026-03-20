@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils;
 import io.netty.buffer.ByteBuf;
@@ -80,7 +80,7 @@ public class TcpInput {
      * @param pkt the IP packet buffer
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L227">tcp_measure_rcv_mss</a>
      */
-    private void tcp_measure_rcv_mss(final TcpSock sk, final IpPacketBuf pkt) {
+    private void tcp_measure_rcv_mss(final TcpSock sk, final TcpPacketBuf pkt) {
         // FIXME
         final int lss = sk.icsk_ack.last_seg_size;
 
@@ -250,7 +250,7 @@ public class TcpInput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L820">tcp_event_data_recv</a>
      */
-    private void tcp_event_data_recv(final TcpSock sk, final IpPacketBuf pkt) {
+    private void tcp_event_data_recv(final TcpSock sk, final TcpPacketBuf pkt) {
 
         inet_csk_schedule_ack(sk);
         tcp_measure_rcv_mss(sk, pkt);
@@ -689,7 +689,7 @@ public class TcpInput {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3696">tcp_ack_update_window</a>
      */
     private int tcp_ack_update_window(final TcpSock tp,
-                                      final IpPacketBuf pkt,
+                                      final TcpPacketBuf pkt,
                                       final int ack, final int ack_seq) {
         int flag = 0;
         int nwin = pkt.tcpWindow();
@@ -758,7 +758,7 @@ public class TcpInput {
      * endpoint is sending out-of-window SYNs or pure ACKs at a high rate.
      */
     private boolean tcp_oow_rate_limited(final TcpSock net/* FIXME */,
-                                         final IpPacketBuf pkt,
+                                         final TcpPacketBuf pkt,
                                          final int mib_idx, final long last_oow_ack_time) {
         /* Data packets without SYNs are not likely part of an ACK loop. */
         if ((pkt.tcpSeq() != determineEndSeq(pkt)) && !pkt.isSyn()) {
@@ -809,7 +809,7 @@ public class TcpInput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3805">tcp_ack</a>
      */
-    private int tcp_ack(final Channel net, final TcpSock tp, final IpPacketBuf pkt, int flag) {
+    private int tcp_ack(final Channel net, final TcpSock tp, final TcpPacketBuf pkt, int flag) {
         final int prior_snd_una = tp.snd_una;
         final int prior_packets_out = tp.packets_out;
         final int ack_seq = pkt.tcpSeq();
@@ -944,7 +944,7 @@ public class TcpInput {
         return SKB_NOT_DROPPED_YET;
     }
 
-    private int tcp_disordered_ack_check(final TcpSock tp, final IpPacketBuf pkt) {
+    private int tcp_disordered_ack_check(final TcpSock tp, final TcpPacketBuf pkt) {
         int reason = TCP_RFC7323_PAWS;
         int seq = pkt.tcpSeq();
         int ack = pkt.tcpAckNum();
@@ -992,7 +992,7 @@ public class TcpInput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4430">tcp_reset</a>
      */
-    private void tcp_reset(final TcpSock tp, final IpPacketBuf pkt) {
+    private void tcp_reset(final TcpSock tp, final TcpPacketBuf pkt) {
         // sk_is_mptcp
 
         int err;
@@ -1016,7 +1016,7 @@ public class TcpInput {
     /**
      * Process the FIN bit.
      */
-    private void tcp_fin(final Channel net, final TcpSock tp, IpPacketBuf pkt) {
+    private void tcp_fin(final Channel net, final TcpSock tp, TcpPacketBuf pkt) {
         inet_csk_schedule_ack(tp);
 
         tp.sk_shutdown |= RCV_SHUTDOWN;
@@ -1094,7 +1094,7 @@ public class TcpInput {
 //        }
     }
 
-    private void tcp_send_dupack(final Channel net, final TcpSock tp, final IpPacketBuf skb) {
+    private void tcp_send_dupack(final Channel net, final TcpSock tp, final TcpPacketBuf skb) {
         int seq = skb.tcpSeq();
         int end_seq = determineEndSeq(skb);
         if (end_seq != seq && before(seq, tp.rcv_nxt)) {
@@ -1110,11 +1110,11 @@ public class TcpInput {
         // FIXME
     }
 
-    private void tcp_data_queue_ofo(final TcpSock sk, final IpPacketBuf pkt) {
+    private void tcp_data_queue_ofo(final TcpSock sk, final TcpPacketBuf pkt) {
 
     }
 
-    private int tcp_queue_rcv(final TcpSock tp, final IpPacketBuf pkt) {
+    private int tcp_queue_rcv(final TcpSock tp, final TcpPacketBuf pkt) {
         // https://www.cnblogs.com/wanpengcoder/p/11752122.html
         final int len = pkt.tcpPayloadLength();
         if (len > 0) {
@@ -1127,7 +1127,7 @@ public class TcpInput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5229">tcp_input.c</a>
      */
-    public void tcp_data_queue(final Channel net, final TcpSock tp, final IpPacketBuf pkt) throws IOException {
+    public void tcp_data_queue(final Channel net, final TcpSock tp, final TcpPacketBuf pkt) throws IOException {
         final int seq = pkt.tcpSeq();
         final int endSeq = determineEndSeq(pkt);
 
@@ -1186,7 +1186,7 @@ public class TcpInput {
         }
     }
 
-    private void out_of_window(TcpSock tp, final IpPacketBuf pkt, final int reason) {
+    private void out_of_window(TcpSock tp, final TcpPacketBuf pkt, final int reason) {
         tcp_enter_quickack_mode(tp, TCP_MAX_QUICKACKS);
         inet_csk_schedule_ack(tp);
         drop(tp, reason);
@@ -1196,7 +1196,7 @@ public class TcpInput {
         // tcp_drop_reason(sk, skb, reason);
     }
 
-    private void queue_and_out(final Channel net, final TcpSock tp, final IpPacketBuf pkt) throws IOException {
+    private void queue_and_out(final Channel net, final TcpSock tp, final TcpPacketBuf pkt) throws IOException {
         // queue_and_out;
         // tcp_try_remem_schedule ...
 
@@ -1271,14 +1271,14 @@ public class TcpInput {
         __tcp_ack_snd_check(net, tp);
     }
 
-    private boolean tcp_reset_check(final TcpSock tp, final IpPacketBuf pkt) {
+    private boolean tcp_reset_check(final TcpSock tp, final TcpPacketBuf pkt) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5939
         final int seq = pkt.tcpSeq();
         return seq == tp.rcv_nxt - 1 && 0 != ((1 << tp.state().ordinal()) | (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
     }
 
 
-    void tcp_rcv_spurious_retrans(final IpPacketBuf pkt) {
+    void tcp_rcv_spurious_retrans(final TcpPacketBuf pkt) {
     }
 
 
@@ -1298,7 +1298,7 @@ public class TcpInput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5870">tcp_validate_incoming</a>
      */
-    private boolean tcp_validate_incoming(final Channel net, final TcpSock tp, final IpPacketBuf pkt) {
+    private boolean tcp_validate_incoming(final Channel net, final TcpSock tp, final TcpPacketBuf pkt) {
         final int seq = pkt.tcpSeq();
         final int end_seq = determineEndSeq(pkt);
         final int ack = pkt.tcpAckNum();
@@ -1431,7 +1431,7 @@ public class TcpInput {
     private void tcp_drop_reason(final TcpSock tp, int reason) {
     }
 
-    public void tcp_rcv_established(final TcpSock sk, final IpPacketBuf pkt) throws IOException {
+    public void tcp_rcv_established(final TcpSock sk, final TcpPacketBuf pkt) throws IOException {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6110
 
         // step5
@@ -1447,7 +1447,7 @@ public class TcpInput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6299">tcp_init_transfer</a>
      */
-    public void tcp_init_transfer(final Channel net, final TcpSock sk, final IpPacketBuf pkt) {
+    public void tcp_init_transfer(final Channel net, final TcpSock sk, final TcpPacketBuf pkt) {
         output.tcp_mtup_init(sk);
         demultiplexer.tcp_init_metrics(sk);
 
@@ -1553,7 +1553,7 @@ public class TcpInput {
      * @throws IOException
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6910">tcp_rcv_state_process</a>
      */
-    protected int tcp_rcv_state_process(final Channel net, TcpSock sk, final IpPacketBuf pkt) throws IOException {
+    protected int tcp_rcv_state_process(final Channel net, TcpSock sk, final TcpPacketBuf pkt) throws IOException {
         switch (sk.state()) {
             case TCP_CLOSE:
                 log.warn(logFormat(pkt, "Packet discard: The Connection is CLOSED"));

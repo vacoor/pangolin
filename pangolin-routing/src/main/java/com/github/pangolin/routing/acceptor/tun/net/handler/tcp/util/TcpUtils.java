@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
 import org.bouncycastle.crypto.macs.SipHash;
 import org.bouncycastle.crypto.params.KeyParameter;
@@ -83,7 +83,7 @@ public abstract class TcpUtils {
     /**
      * Determine end sequence number from an IpPacketBuf (incoming packet).
      */
-    public static int determineEndSeq(final IpPacketBuf pkt) {
+    public static int determineEndSeq(final TcpPacketBuf pkt) {
         int endSeq = pkt.tcpSeq();
         if (pkt.isSyn()) {
             endSeq++;
@@ -139,7 +139,7 @@ public abstract class TcpUtils {
     /**
      * Build unique connection key from IpPacketBuf (incoming packet).
      */
-    public static String uniqueKey(final IpPacketBuf pkt) {
+    public static String uniqueKey(final TcpPacketBuf pkt) {
         return uniqueKey(
                 pkt.srcAddr().getHostAddress(), pkt.tcpSrcPort(),
                 pkt.dstAddr().getHostAddress(), pkt.tcpDstPort()

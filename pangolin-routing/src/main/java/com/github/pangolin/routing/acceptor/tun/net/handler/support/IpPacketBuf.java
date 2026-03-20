@@ -9,23 +9,23 @@ import java.net.UnknownHostException;
  * Lightweight zero-copy wrapper around a raw IP packet ByteBuf.
  * All field accesses use absolute byte offsets (getXxx) without moving readerIndex.
  *
- * @see Ip4PacketBuf
- * @see Ip6PacketBuf
+ * <p>The factory ({@link #wrap}/{@link #retainedWrap}) dispatches to the most-specific
+ * subclass based on IP version and next-protocol:
+ * <ul>
+ *   <li>IPv4 + TCP=6  → {@link Tcp4PacketBuf}</li>
+ *   <li>IPv4 + UDP=17 → {@link Udp4PacketBuf}</li>
+ *   <li>IPv4 + other  → {@link Ip4PacketBuf}</li>
+ *   <li>IPv6 + TCP=6  → {@link Tcp6PacketBuf}</li>
+ *   <li>IPv6 + other  → {@link Ip6PacketBuf}</li>
+ * </ul>
+ *
+ * @see TcpPacketBuf
+ * @see UdpPacketBuf
  */
 public abstract class IpPacketBuf {
 
     public static final byte PROTO_TCP = 6;
     public static final byte PROTO_UDP = 17;
-
-    // TCP flag bits (byte 13 of TCP header, low 6 bits)
-    public static final int TCP_FLAG_FIN = 0x01;
-    public static final int TCP_FLAG_SYN = 0x02;
-    public static final int TCP_FLAG_RST = 0x04;
-    public static final int TCP_FLAG_PSH = 0x08;
-    public static final int TCP_FLAG_ACK = 0x10;
-    public static final int TCP_FLAG_URG = 0x20;
-
-    private static final int TCP_MIN_HEADER_LEN = 20;
 
     protected final ByteBuf buf;
 
@@ -40,21 +40,43 @@ public abstract class IpPacketBuf {
 
     /**
      * Wrap buf that is already retained by the caller. IpPacketBuf takes ownership.
+     * Dispatches to the most-specific subclass based on IP version and next-protocol.
      */
     public static IpPacketBuf wrap(ByteBuf buf) {
-        int version = (buf.getByte(buf.readerIndex()) >> 4) & 0xF;
-        if (version == 4) return new Ip4PacketBuf(buf);
-        if (version == 6) return new Ip6PacketBuf(buf);
+        final int base = buf.readerIndex();
+        final int version = (buf.getByte(base) >> 4) & 0xF;
+        if (version == 4) {
+            final byte proto = buf.getByte(base + 9);
+            if (proto == PROTO_TCP) return new Tcp4PacketBuf(buf);
+            if (proto == PROTO_UDP) return new Udp4PacketBuf(buf);
+            return new Ip4PacketBuf(buf);
+        }
+        if (version == 6) {
+            final byte proto = buf.getByte(base + 6);
+            if (proto == PROTO_TCP) return new Tcp6PacketBuf(buf);
+            return new Ip6PacketBuf(buf);
+        }
         throw new IllegalArgumentException("Unsupported IP version: " + version);
     }
 
     /**
      * Retain buf once internally and create wrapper. Caller still owns their reference.
+     * Dispatches to the most-specific subclass based on IP version and next-protocol.
      */
     public static IpPacketBuf retainedWrap(ByteBuf buf) {
-        int version = (buf.getByte(buf.readerIndex()) >> 4) & 0xF;
-        if (version == 4) return new Ip4PacketBuf(buf.retain());
-        if (version == 6) return new Ip6PacketBuf(buf.retain());
+        final int base = buf.readerIndex();
+        final int version = (buf.getByte(base) >> 4) & 0xF;
+        if (version == 4) {
+            final byte proto = buf.getByte(base + 9);
+            if (proto == PROTO_TCP) return new Tcp4PacketBuf(buf.retain());
+            if (proto == PROTO_UDP) return new Udp4PacketBuf(buf.retain());
+            return new Ip4PacketBuf(buf.retain());
+        }
+        if (version == 6) {
+            final byte proto = buf.getByte(base + 6);
+            if (proto == PROTO_TCP) return new Tcp6PacketBuf(buf.retain());
+            return new Ip6PacketBuf(buf.retain());
+        }
         throw new IllegalArgumentException("Unsupported IP version: " + version);
     }
 
@@ -82,129 +104,6 @@ public abstract class IpPacketBuf {
     public abstract InetAddress srcAddr();
 
     public abstract InetAddress dstAddr();
-
-    // ---- TCP field accessors (offset = readerIndex + ipHeaderLen()) ----
-
-    private int tcpBase() {
-        return buf.readerIndex() + ipHeaderLen();
-    }
-
-    public int tcpSrcPort() {
-        return buf.getUnsignedShort(tcpBase());
-    }
-
-    public int tcpDstPort() {
-        return buf.getUnsignedShort(tcpBase() + 2);
-    }
-
-    public int tcpSeq() {
-        return buf.getInt(tcpBase() + 4);
-    }
-
-    public int tcpAckNum() {
-        return buf.getInt(tcpBase() + 8);
-    }
-
-    /**
-     * TCP header length in bytes, derived from data offset field.
-     */
-    public int tcpDataOffset() {
-        return ((buf.getByte(tcpBase() + 12) >> 4) & 0xF) * 4;
-    }
-
-    public int tcpFlags() {
-        return buf.getByte(tcpBase() + 13) & 0xFF;
-    }
-
-    public int tcpWindow() {
-        return buf.getUnsignedShort(tcpBase() + 14);
-    }
-
-    public boolean isFin() {
-        return (tcpFlags() & TCP_FLAG_FIN) != 0;
-    }
-
-    public boolean isSyn() {
-        return (tcpFlags() & TCP_FLAG_SYN) != 0;
-    }
-
-    public boolean isRst() {
-        return (tcpFlags() & TCP_FLAG_RST) != 0;
-    }
-
-    public boolean isPsh() {
-        return (tcpFlags() & TCP_FLAG_PSH) != 0;
-    }
-
-    public boolean isAck() {
-        return (tcpFlags() & TCP_FLAG_ACK) != 0;
-    }
-
-    public boolean isUrg() {
-        return (tcpFlags() & TCP_FLAG_URG) != 0;
-    }
-
-    public boolean isTcp() {
-        return nextProto() == PROTO_TCP;
-    }
-
-    // ---- TCP options slice (no copy) ----
-
-    /** Returns a derived slice of TCP options bytes; do NOT release (shares buf refcount). */
-    public ByteBuf tcpOptionsSlice() {
-        int optsLen = tcpDataOffset() - TCP_MIN_HEADER_LEN;
-        if (optsLen <= 0) {
-            return buf.slice(tcpBase() + TCP_MIN_HEADER_LEN, 0);
-        }
-        return buf.slice(tcpBase() + TCP_MIN_HEADER_LEN, optsLen);
-    }
-
-    // ---- TCP payload slice (no copy) ----
-
-    public int tcpPayloadLength() {
-        int readable = buf.readableBytes();
-        return readable - ipHeaderLen() - tcpDataOffset();
-    }
-
-    /** Returns a derived slice of TCP payload; do NOT release (shares buf refcount). */
-    public ByteBuf tcpPayloadSlice() {
-        int payloadLen = tcpPayloadLength();
-        if (payloadLen <= 0) {
-            return buf.slice(tcpBase() + tcpDataOffset(), 0);
-        }
-        return buf.slice(tcpBase() + tcpDataOffset(), payloadLen);
-    }
-
-    // ---- UDP field accessors (offset = readerIndex + ipHeaderLen()) ----
-
-    private int udpBase() {
-        return buf.readerIndex() + ipHeaderLen();
-    }
-
-    public int udpSrcPort() {
-        return buf.getUnsignedShort(udpBase());
-    }
-
-    public int udpDstPort() {
-        return buf.getUnsignedShort(udpBase() + 2);
-    }
-
-    public int udpLength() {
-        return buf.getUnsignedShort(udpBase() + 4);
-    }
-
-    public int udpPayloadLength() {
-        return udpLength() - 8;
-    }
-
-    /** Returns a derived slice of UDP payload; do NOT release (shares buf refcount). */
-    public ByteBuf udpPayloadSlice() {
-        int payloadLen = udpPayloadLength();
-        if (payloadLen <= 0) {
-            return buf.slice(udpBase() + 8, 0);
-        }
-        return buf.slice(udpBase() + 8, payloadLen);
-    }
 
     // ---- DNS resolved address metadata ----
 

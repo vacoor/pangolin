@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.Ip4PacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.Tcp4PacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.support.SocketChannelFactory;
@@ -31,7 +31,7 @@ public class TcpHandshaker {
                                                     request_sock_ops rsk_ops,
                                                     tcp_request_sock_ops af_ops,
                                                     TcpSock parent,
-                                                    final IpPacketBuf pkt,
+                                                    final TcpPacketBuf pkt,
                                                     DnsEngine dnsEngine,
                                                     SocketChannelFactory socketChannelFactory,
                                                     int connTimeoutMs, EventLoopGroup childGroup,
@@ -75,7 +75,7 @@ public class TcpHandshaker {
 
         req.snt_isn = isn;
         // Store TOS for IPv4 (0 for IPv6)
-        req.syn_tos = (pkt instanceof Ip4PacketBuf) ? ((Ip4PacketBuf) pkt).tos() & 0xFF : 0;
+        req.syn_tos = (pkt instanceof Tcp4PacketBuf) ? ((Tcp4PacketBuf) pkt).tos() & 0xFF : 0;
 
         tcp_openreq_init_rwin(parent, output, req, pkt);
 
@@ -189,7 +189,7 @@ public class TcpHandshaker {
     /**
      * https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L891.
      */
-    private static tcp_request_sock inet_reqsk_alloc(IpPacketBuf pkt,
+    private static tcp_request_sock inet_reqsk_alloc(TcpPacketBuf pkt,
                                                      DnsEngine dnsEngine,
                                                      SocketChannelFactory socketChannelFactory,
                                                      int connTimeoutMs, EventLoopGroup childGroup,
@@ -204,7 +204,7 @@ public class TcpHandshaker {
         return req;
     }
 
-    private static tcp_request_sock reqsk_alloc(IpPacketBuf pkt,
+    private static tcp_request_sock reqsk_alloc(TcpPacketBuf pkt,
                                                 DnsEngine dnsEngine,
                                                 SocketChannelFactory socketChannelFactory,
                                                 int connTimeoutMs, EventLoopGroup childGroup, TcpSock skListener,
@@ -225,7 +225,7 @@ public class TcpHandshaker {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7068">tcp_openreq_init</a>
      * @see <a href="https://www.cnblogs.com/wanpengcoder/p/11751292.html">TCP MSS</a>
      */
-    private static void tcp_openreq_init(tcp_request_sock req, tcp_options_received rx_opt, final IpPacketBuf pkt) {
+    private static void tcp_openreq_init(tcp_request_sock req, tcp_options_received rx_opt, final TcpPacketBuf pkt) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7068
         req.rsk_rcv_wnd = 0;
         req.rcv_isn = pkt.tcpSeq();
@@ -242,7 +242,7 @@ public class TcpHandshaker {
         req.snd_wnd = pkt.tcpWindow();
     }
 
-    private static void tcp_openreq_init_rwin(TcpSock pSock, TcpOutput output, tcp_request_sock req, IpPacketBuf pkt) {
+    private static void tcp_openreq_init_rwin(TcpSock pSock, TcpOutput output, tcp_request_sock req, TcpPacketBuf pkt) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L422
         int full_space = output.tcp_full_space(pSock);
         final int mss = pSock.tcp_mss_clamp(pSock, pSock.dst_metric_advmss());
@@ -279,7 +279,7 @@ public class TcpHandshaker {
         req.rsk_window_clamp = req_rsk_window_clamp_ref.get();
     }
 
-    private static void tcp_parse_options(TcpSock tp, tcp_options_received opt_rx, final IpPacketBuf pkt, final boolean estab) {
+    private static void tcp_parse_options(TcpSock tp, tcp_options_received opt_rx, final TcpPacketBuf pkt, final boolean estab) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4183
         if (!pkt.isSyn() || estab) {
             return;

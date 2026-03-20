@@ -7,25 +7,26 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 
 /**
- * IPv4 specialization of {@link IpPacketBuf} for non-TCP/UDP protocols.
+ * TCP-over-IPv4 packet buffer.
  *
+ * <p>IPv4 header layout (offset from readerIndex):
  * <pre>
- * IPv4 header layout (offset from readerIndex):
  *   Byte  0: Version(4) + IHL(4)
- *   Byte  1: DSCP/ECN
+ *   Byte  1: DSCP/ECN (TOS)
  *   Byte  2-3: Total Length
  *   Byte  4-5: Identification
  *   Byte  6-7: Flags + Fragment Offset
  *   Byte  8: TTL
- *   Byte  9: Protocol
+ *   Byte  9: Protocol (= 6 for TCP)
  *   Byte 10-11: Header Checksum
  *   Byte 12-15: Source IP
  *   Byte 16-19: Destination IP
+ *   Byte 20+:   TCP header
  * </pre>
  */
-public final class Ip4PacketBuf extends IpPacketBuf {
+public final class Tcp4PacketBuf extends TcpPacketBuf {
 
-    Ip4PacketBuf(ByteBuf buf) {
+    Tcp4PacketBuf(final ByteBuf buf) {
         super(buf);
     }
 
@@ -67,8 +68,8 @@ public final class Ip4PacketBuf extends IpPacketBuf {
 
     // ---- IPv4-specific fields ----
 
-    public int totalLength() {
-        return buf.getUnsignedShort(buf.readerIndex() + 2);
+    public byte tos() {
+        return Ip4Fields.tos(buf, buf.readerIndex());
     }
 
     public short ipId() {
@@ -79,12 +80,16 @@ public final class Ip4PacketBuf extends IpPacketBuf {
         return Ip4Fields.ipFlags(buf, buf.readerIndex());
     }
 
-    public byte tos() {
-        return Ip4Fields.tos(buf, buf.readerIndex());
+    public Inet4Address srcAddr4() {
+        return (Inet4Address) srcAddr();
+    }
+
+    public Inet4Address dstAddr4() {
+        return (Inet4Address) dstAddr();
     }
 
     @Override
-    protected InetAddress toInetAddress(String host, byte[] addr) {
+    protected InetAddress toInetAddress(final String host, final byte[] addr) {
         try {
             return host != null
                     ? InetAddress.getByAddress(host, addr)
@@ -92,13 +97,5 @@ public final class Ip4PacketBuf extends IpPacketBuf {
         } catch (UnknownHostException e) {
             throw new IllegalStateException("Failed to create Inet4Address", e);
         }
-    }
-
-    public Inet4Address srcAddr4() {
-        return (Inet4Address) srcAddr();
-    }
-
-    public Inet4Address dstAddr4() {
-        return (Inet4Address) dstAddr();
     }
 }

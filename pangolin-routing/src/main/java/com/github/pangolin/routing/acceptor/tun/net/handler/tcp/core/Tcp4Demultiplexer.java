@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
@@ -37,13 +37,13 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         super(synRegistry, establishedRegistry, childGroup, dnsEngine, factory, new request_sock_ops() {
 
             @Override
-            public void send_ack(Channel net, TcpSock sk, IpPacketBuf pkt, request_sock req) {
+            public void send_ack(Channel net, TcpSock sk, TcpPacketBuf pkt, request_sock req) {
                 // FIXME
                 // tcp_v4_reqsk_send_ack
             }
 
             @Override
-            public void send_reset(Channel net, TcpSock sk, IpPacketBuf pkt, int reason) {
+            public void send_reset(Channel net, TcpSock sk, TcpPacketBuf pkt, int reason) {
                 tcp_v4_send_reset(net, pkt, reason);
             }
 
@@ -51,7 +51,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
     }
 
     @Override
-    public void tcp_rcv(final Channel net, final IpPacketBuf pkt) {
+    public void tcp_rcv(final Channel net, final TcpPacketBuf pkt) {
         tcp_v4_rcv(net, pkt);
     }
 
@@ -72,16 +72,16 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
          */
         sk.icsk_af_ops = new inet_connection_sock_af_ops() {
             @Override
-            public void send_check(Channel net, TcpSock sk, IpPacketBuf pkt) {
+            public void send_check(Channel net, TcpSock sk, TcpPacketBuf pkt) {
             }
 
             @Override
-            public tcp_request_sock conn_request(Channel net, TcpSock listenSock, IpPacketBuf pkt) {
+            public tcp_request_sock conn_request(Channel net, TcpSock listenSock, TcpPacketBuf pkt) {
                 return tcp_v4_conn_request(net, listenSock, pkt);
             }
 
             @Override
-            public TcpSock syn_recv_sock(Channel net, TcpSock listenSock, IpPacketBuf pkt, tcp_request_sock req) {
+            public TcpSock syn_recv_sock(Channel net, TcpSock listenSock, TcpPacketBuf pkt, tcp_request_sock req) {
                 return tcp_v4_syn_recv_sock(net, listenSock, pkt, req);
             }
         };
@@ -90,7 +90,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a>
      */
-    private void tcp_v4_rcv(final Channel net, final IpPacketBuf pkt) {
+    private void tcp_v4_rcv(final Channel net, final TcpPacketBuf pkt) {
         SockCommon sk = __inet_lookup_skb(pkt);
         if (null == sk) {
             log.warn(logFormat(pkt, "NO_TCP_SOCKET"));
@@ -134,7 +134,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         }
     }
 
-    protected SockCommon __inet_lookup_skb(final IpPacketBuf pkt) {
+    protected SockCommon __inet_lookup_skb(final TcpPacketBuf pkt) {
         final String lookupKey = uniqueKey(pkt);
         SockCommon sk = establishedRegistry.get(lookupKey);
         return (null == sk && null == (sk = synRegistry.get(lookupKey))) ? listenSock : sk;
@@ -143,7 +143,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1897">tcp_v4_do_rcv</a>
      */
-    private void tcp_v4_do_rcv(final Channel net, final TcpSock sock, final IpPacketBuf pkt) {
+    private void tcp_v4_do_rcv(final Channel net, final TcpSock sock, final TcpPacketBuf pkt) {
         // https://www.cnblogs.com/wanpengcoder/p/11750747.html
         try {
             int err = input.tcp_rcv_state_process(net, sock, pkt);
@@ -162,12 +162,12 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
     }
 
     @Override
-    public void send_reset(final Channel net, final IpPacketBuf pkt, int err) {
+    public void send_reset(final Channel net, final TcpPacketBuf pkt, int err) {
         tcp_v4_send_reset(net, pkt, err);
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
-    static void tcp_v4_send_reset(final Channel net, final IpPacketBuf pkt, int err) {
+    static void tcp_v4_send_reset(final Channel net, final TcpPacketBuf pkt, int err) {
         log.warn("SEND-RST: {}", err);
 
         final TcpBuffer rst = new TcpBuffer().rst(true);
@@ -191,7 +191,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1722">tcp_v4_conn_request</a>
      */
-    protected tcp_request_sock tcp_v4_conn_request(Channel net, TcpSock listenSock, final IpPacketBuf pkt) {
+    protected tcp_request_sock tcp_v4_conn_request(Channel net, TcpSock listenSock, final TcpPacketBuf pkt) {
         return TcpHandshaker.tcp_conn_request(
                 net, this,
                 requestSockOps,
@@ -202,7 +202,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
                      * @see <a href="https://github.com/torvalds/linux/blob/master/net/core/secure_seq.c#L136">secure_tcp_seq</a>
                      */
                     @Override
-                    public int init_seq(final IpPacketBuf p) {
+                    public int init_seq(final TcpPacketBuf p) {
                         return secureSeq(
                                 p.srcAddrBytes(), p.tcpSrcPort(),
                                 p.dstAddrBytes(), p.tcpDstPort()
@@ -210,12 +210,12 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
                     }
 
                     @Override
-                    public long init_ts_off(IpPacketBuf p) {
+                    public long init_ts_off(TcpPacketBuf p) {
                         return 0;
                     }
 
                     @Override
-                    public void send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, IpPacketBuf syn) {
+                    public void send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, TcpPacketBuf syn) {
                         tcp_v4_send_synack(net, listenSock, req, syn);
                     }
 
@@ -229,7 +229,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         );
     }
 
-    protected void tcp_v4_send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, final IpPacketBuf syn) {
+    protected void tcp_v4_send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, final TcpPacketBuf syn) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
         final TcpBuffer skb = output.tcp_make_synack(listenSock, req, syn);
         skb.srcPort(req.ir_num);
@@ -251,7 +251,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    private TcpSock tcp_v4_syn_recv_sock(Channel net, TcpSock listenSock, IpPacketBuf pkt, tcp_request_sock req) {
+    private TcpSock tcp_v4_syn_recv_sock(Channel net, TcpSock listenSock, TcpPacketBuf pkt, tcp_request_sock req) {
         TcpSock newsk = tcp_create_openreq_child(net, listenSock, req);
 
         newsk.icsk_ext_hdr_len = 0;
@@ -262,7 +262,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         return newsk;
     }
 
-    protected static void _INDIRECT_CALL_INET(Channel net, TcpSock tp, final IpPacketBuf pkt, final TcpBuffer skb) {
+    protected static void _INDIRECT_CALL_INET(Channel net, TcpSock tp, final TcpPacketBuf pkt, final TcpBuffer skb) {
         log.trace(logify(pkt, tp.rx_opt.snd_wscale));
         sendRaw(net, skb, tp.ir_loc_addr, tp.ir_rmt_addr);
     }

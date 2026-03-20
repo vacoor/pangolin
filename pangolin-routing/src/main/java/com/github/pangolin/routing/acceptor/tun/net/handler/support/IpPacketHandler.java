@@ -4,9 +4,12 @@ import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 
 /**
- * Base handler that filters incoming {@link IpPacketBuf} messages by protocol number.
+ * Base handler that filters incoming {@link IpPacketBuf} messages by protocol number
+ * and delivers them typed as {@code P} to the subclass.
+ *
+ * @param <P> the specific {@link IpPacketBuf} subtype this handler expects
  */
-public abstract class IpPacketHandler extends ChannelDuplexHandler {
+public abstract class IpPacketHandler<P extends IpPacketBuf> extends ChannelDuplexHandler {
 
     private final byte ipProtocol;
 
@@ -21,13 +24,14 @@ public abstract class IpPacketHandler extends ChannelDuplexHandler {
     /**
      * {@inheritDoc}
      */
+    @SuppressWarnings("unchecked")
     @Override
     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
         if (msg instanceof IpPacketBuf) {
             final IpPacketBuf pkt = (IpPacketBuf) msg;
             if (accept(pkt)) {
                 try {
-                    channelRead0(ctx, pkt);
+                    channelRead0(ctx, (P) pkt);
                 } finally {
                     pkt.release();
                 }
@@ -37,5 +41,5 @@ public abstract class IpPacketHandler extends ChannelDuplexHandler {
         ctx.fireChannelRead(msg);
     }
 
-    protected abstract void channelRead0(final ChannelHandlerContext ctx, final IpPacketBuf pkt) throws Exception;
+    protected abstract void channelRead0(final ChannelHandlerContext ctx, final P pkt) throws Exception;
 }

@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
@@ -75,7 +75,7 @@ public abstract class TcpDemultiplexer {
 
     protected abstract TcpSock init(final TcpSock sk);
 
-    public abstract void tcp_rcv(final Channel net, final IpPacketBuf pkt);
+    public abstract void tcp_rcv(final Channel net, final TcpPacketBuf pkt);
 
     // ...
 
@@ -90,7 +90,7 @@ public abstract class TcpDemultiplexer {
 //    protected abstract tcp_request_sock conn_request(final Channel net, TcpSock listenSock, final T ipPacket, final TcpPacket tcpPacket);
 
 
-    public abstract void send_reset(final Channel net, final IpPacketBuf pkt, int err);
+    public abstract void send_reset(final Channel net, final TcpPacketBuf pkt, int err);
 
 
     /* ************** ]] Initialize Connection Request ************ */
@@ -103,7 +103,7 @@ public abstract class TcpDemultiplexer {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    public TcpSock tcp_check_req(final Channel net, TcpSock listenSock, IpPacketBuf pkt, tcp_request_sock request) {
+    public TcpSock tcp_check_req(final Channel net, TcpSock listenSock, TcpPacketBuf pkt, tcp_request_sock request) {
         TcpSock nsk = listenSock.icsk_af_ops.syn_recv_sock(net, listenSock, pkt, request);
         return nsk;
     }
@@ -523,7 +523,7 @@ public abstract class TcpDemultiplexer {
 
     }
 
-    public void consume(final TcpSock sk, final IpPacketBuf pkt) {
+    public void consume(final TcpSock sk, final TcpPacketBuf pkt) {
         if (null != sk.child) {
             final int offset = sk.rcv_nxt - pkt.tcpSeq();
             final int payloadLen = pkt.tcpPayloadLength();

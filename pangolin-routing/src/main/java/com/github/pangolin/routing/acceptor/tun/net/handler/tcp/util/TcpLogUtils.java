@@ -1,12 +1,12 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 
 import java.net.InetAddress;
 
 public class TcpLogUtils {
 
-    public static String logify(final IpPacketBuf pkt, final int wscale) {
+    public static String logify(final TcpPacketBuf pkt, final int wscale) {
         final StringBuilder buff = new StringBuilder();
         stringify(buff, pkt);
 
@@ -39,7 +39,7 @@ public class TcpLogUtils {
         return buff.toString();
     }
 
-    public static String logFormat(final IpPacketBuf pkt, final Object... extra) {
+    public static String logFormat(final TcpPacketBuf pkt, final Object... extra) {
         final StringBuilder buf = new StringBuilder();
         stringify(buf, pkt);
         for (final Object o : extra) {
@@ -60,10 +60,9 @@ public class TcpLogUtils {
         return buf.toString();
     }
 
-    public static StringBuilder stringify(final StringBuilder buf, final IpPacketBuf pkt) {
-        String proto = pkt.isTcp() ? "TCP" : "UDP";
+    public static StringBuilder stringify(final StringBuilder buf, final TcpPacketBuf pkt) {
         return stringify(
-                buf, proto,
+                buf, "TCP",
                 pkt.srcAddr(), pkt.tcpSrcPort(),
                 pkt.dstAddr(), pkt.tcpDstPort()
         );

@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
@@ -1137,7 +1137,7 @@ public class TcpOutput {
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3708
     protected TcpBuffer tcp_make_synack(final TcpSock listeSock,
                                         final tcp_request_sock req,
-                                        final IpPacketBuf syn) {
+                                        final TcpPacketBuf syn) {
         int mss = listeSock.tcp_mss_clamp(listeSock, listeSock.dst_metric_advmss());
         long now = tcp_clock_ns();
 

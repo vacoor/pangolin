@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -13,7 +13,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpC
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">struct sock_common</a>
  */
 public class SockCommon {
-    public IpPacketBuf rawIpHeader;
+    public TcpPacketBuf rawIpHeader;
 
     /**
      * Foreign IPv4 addr.
