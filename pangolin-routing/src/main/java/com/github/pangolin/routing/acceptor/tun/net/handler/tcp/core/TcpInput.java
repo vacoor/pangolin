@@ -1556,22 +1556,22 @@ public class TcpInput {
     protected int tcp_rcv_state_process(final Channel net, TcpSock sk, final TcpPacketBuf pkt) throws IOException {
         switch (sk.state()) {
             case TCP_CLOSE:
-                log.warn(logFormat(pkt, "Packet discard: The Connection is CLOSED"));
+                log.info(logFormat(pkt, "Packet discard: The Connection is CLOSED"));
                 return discard(TcpDropReason.SKB_DROP_REASON_TCP_CLOSE);
             case TCP_LISTEN:
                 if (pkt.isAck()) {
-                    log.warn(logFormat(pkt, "Connection reset: Invalid TCP flag(ACK)"));
+                    log.info(logFormat(pkt, "Connection reset: Invalid TCP flag(ACK)"));
                     return TcpDropReason.SKB_DROP_REASON_TCP_FLAGS;
                 }
                 if (pkt.isRst()) {
-                    log.warn(logFormat(pkt, "Packet discard: Connection reset not required"));
+                    log.info(logFormat(pkt, "Packet discard: Connection reset not required"));
                     return discard(TcpDropReason.SKB_DROP_REASON_TCP_RESET);
                 }
 
                 /* handshake */
                 if (pkt.isSyn()) {
                     if (pkt.isFin()) {
-                        log.warn(logFormat(pkt, "Packet discard: Invalid TCP flag(SYN-FIN)"));
+                        log.info(logFormat(pkt, "Packet discard: Invalid TCP flag(SYN-FIN)"));
                         return discard(TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
                     }
 
@@ -1583,7 +1583,7 @@ public class TcpInput {
                      */
                     final tcp_request_sock tcpRequestSock = sk.icsk_af_ops.conn_request(net, sk, pkt);
                     if (null == tcpRequestSock) {
-                        log.warn(logFormat(pkt, "Connection reset: Reject SYN request"));
+                        log.info(logFormat(pkt, "Connection reset: Reject SYN request"));
                         return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
                     }
 
