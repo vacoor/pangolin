@@ -6,6 +6,7 @@ import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
 import io.netty.util.internal.ObjectUtil;
 
+
 import java.net.SocketAddress;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ConnectionPendingException;
@@ -146,11 +147,13 @@ public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
                 ctx.flush();
             }
             handshakePromise.trySuccess();
+            ctx.fireUserEventTriggered(HandshakeSuccessEvent.INSTANCE);
         }
     }
 
     protected void setHandshakeFailure(final ChannelHandlerContext ctx, final Throwable cause) {
         if (!handshakePromise.isDone()) {
+            ctx.fireUserEventTriggered(HandshakeFailureEvent.INSTANCE);
             failPendingWritesAndClose(ctx, cause);
         }
     }

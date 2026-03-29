@@ -38,8 +38,10 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
     @Override
     public ChannelFuture open(final SocketAddress destination, final int connTimeoutMs,
                               final boolean autoRead, final EventLoopGroup group, final ChannelHandler handler) {
-        final ChannelHandler transport = !isByPass(destination) ? getUpstream().newSocketProxyHandler((InetSocketAddress) destination) : null;
-        final NoopAddressResolverGroup resolverGroup = null != transport ? NoopAddressResolverGroup.INSTANCE : null;
+        final ChannelHandler[] transports = !isByPass(destination)
+                ? getUpstream().newSocketProxyHandlers((InetSocketAddress) destination)
+                : new ChannelHandler[0];
+        final NoopAddressResolverGroup resolverGroup = transports.length > 0 ? NoopAddressResolverGroup.INSTANCE : null;
 
         final Bootstrap b = new Bootstrap();
         b.option(ChannelOption.AUTO_READ, autoRead);
@@ -51,8 +53,8 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
                 .handler(new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(final SocketChannel ch) {
-                        if (null != transport) {
-                            ch.pipeline().addLast(transport);
+                        if (transports.length > 0) {
+                            ch.pipeline().addLast(transports);
                         }
                         ch.pipeline().addLast(handler);
                     }

@@ -1,3 +1,4 @@
-com.github.pangolin.routing.upstream.spi.UpstreamSelectFactory
+com.github.pangolin.routing.upstream.spi.UpstreamAdaptiveFactory
+#com.github.pangolin.routing.upstream.spi.UpstreamSelectFactory
 com.github.pangolin.routing.upstream.spi.UpstreamChainFactory
 com.github.pangolin.routing.upstream.spi.UpstreamUrlTestFactory
