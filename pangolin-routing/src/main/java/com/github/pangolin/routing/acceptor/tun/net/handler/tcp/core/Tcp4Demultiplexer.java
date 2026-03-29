@@ -168,7 +168,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
     static void tcp_v4_send_reset(final Channel net, final TcpPacketBuf pkt, int err) {
-        log.warn("SEND-RST: {}", err);
+        log.info("SEND-RST: {}", err);
 
         final TcpBuffer rst = new TcpBuffer().rst(true);
         /*-
@@ -235,12 +235,12 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         skb.srcPort(req.ir_num);
         skb.dstPort(req.ir_rmt_port);
 
-        log.warn(logFormat(syn, "SYNACK send starting..."));
+        log.info(logFormat(syn, "SYNACK send starting..."));
         net.writeAndFlush(buildIp4Packet(skb, (Inet4Address) req.ir_loc_addr, (Inet4Address) req.ir_rmt_addr))
                 .addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(ChannelFuture future) throws Exception {
-                        log.warn(logFormat(syn, "SYNACK send successful"));
+                        log.info(logFormat(syn, "SYNACK send successful"));
                     }
                 });
     }
@@ -276,7 +276,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
             sendRaw4(net, skb, (Inet4Address) srcAddr, (Inet4Address) dstAddr);
         } else {
             // TODO IPv6
-            log.warn("sendRaw6 not yet implemented");
+            log.info("sendRaw6 not yet implemented");
         }
     }
 

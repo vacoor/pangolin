@@ -515,7 +515,7 @@ public abstract class TcpDemultiplexer {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L75">tcp_write_err</a>
      */
     public void tcp_write_err(TcpSock sk) {
-        log.warn("TCP WRITE ERROR");
+        log.info("TCP WRITE ERROR");
         input.tcp_done_with_error(sk, sk.sk_err_soft != 0 ? sk.sk_err_soft : ETIMEOUT);
     }
 

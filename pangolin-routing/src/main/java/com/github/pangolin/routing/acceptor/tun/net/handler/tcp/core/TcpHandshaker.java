@@ -148,7 +148,7 @@ public class TcpHandshaker {
                     ));
                     af_ops.send_synack(net, parent, req, pkt);
                 } else {
-                    log.warn(logFormat(pkt, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
+                    log.info(logFormat(pkt, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
                     rsk_ops.send_reset(net, parent, pkt, -88);
                     // FIXME clean queue
                     demultiplexer.inet_csk_destroy_sock(req);

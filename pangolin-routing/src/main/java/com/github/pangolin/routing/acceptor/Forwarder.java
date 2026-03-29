@@ -68,7 +68,7 @@ public class Forwarder {
                                 if (future.isSuccess()) {
                                     log.info("[{}] Connection established from {} to {}", id, source, target);
                                 } else {
-                                    log.warn("[{}] Connection from {} to {} failed: {}", id, source, target, future.cause().getMessage());
+                                    log.info("[{}] Connection from {} to {} failed: {}", id, source, target, future.cause().getMessage());
                                     downstreamCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                                 }
                             }

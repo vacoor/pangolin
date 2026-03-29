@@ -1522,7 +1522,7 @@ public class TcpInput {
 
                     @Override
                     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                        log.warn(logFormat(pkt, "Connection aborted: {}"), cause.getMessage(), cause);
+                        log.info(logFormat(pkt, "Connection aborted: {}"), cause.getMessage(), cause);
                         demultiplexer.send_reset(net, sk.rawIpHeader, -1);
                         demultiplexer.tcp_done(sk);
 //                        try {
