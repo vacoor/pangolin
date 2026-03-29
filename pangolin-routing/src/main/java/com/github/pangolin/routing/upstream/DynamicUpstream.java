@@ -31,6 +31,12 @@ public abstract class DynamicUpstream extends AbstractUpstream {
     }
 
     @Override
+    public ChannelHandler[] newSocketProxyHandlers(final InetSocketAddress destination) {
+        final Upstream upstream = choose(destination);
+        return null != upstream ? upstream.newSocketProxyHandlers(destination) : new ChannelHandler[0];
+    }
+
+    @Override
     public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
         final Upstream upstream = choose(destination);
         return null != upstream ? upstream.newDatagramProxyHandler(destination) : null;
