@@ -188,6 +188,7 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
             return InetAddress.getByAddress(addr);
         } else if (ATYPE_DOMAIN == addressType) {
             final String domain = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
+            // FIXME DNS query.
             return InetAddress.getByName(domain);
         } else if (ATYPE_IPv6 == addressType) {
             final byte[] addr = ByteBufUtil.getBytes(in.readBytes(IPv6_ADDR_SIZE));

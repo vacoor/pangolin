@@ -68,7 +68,8 @@ public class ProxySocketChannelFactory implements SocketChannelFactory {
         if (destination instanceof InetSocketAddress) {
             final InetSocketAddress address = (InetSocketAddress) destination;
             // FIXME getHostName() skip dns query.
-            final String hostname = address.isUnresolved() ? address.getHostString() : address.getHostName();
+            // final String hostname = address.isUnresolved() ? address.getHostString() : address.getHostName();
+            final String hostname = address.getHostString();
             if (!bypass.contains(hostname)) {
                 return false;
             }

@@ -3,6 +3,7 @@ package com.github.pangolin.routing.acceptor;
 import com.github.pangolin.handler.TcpInboundRedirectHandler;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.util.Channels;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.logging.LoggingHandler;
@@ -68,6 +69,7 @@ public class Forwarder {
                                     log.info("[{}] Connection established from {} to {}", id, source, target);
                                 } else {
                                     log.warn("[{}] Connection from {} to {} failed: {}", id, source, target, future.cause().getMessage());
+                                    downstreamCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
                                 }
                             }
 
