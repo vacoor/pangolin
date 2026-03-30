@@ -29,4 +29,10 @@ public class DomainPatternRoutePredicate implements RoutePredicate<InetSocketAdd
         return pattern;
     }
 
+    protected static String checkNotBlank(final String str, final String message) {
+        if (str == null || str.trim().isEmpty()) {
+            throw new IllegalArgumentException(message);
+        }
+        return str;
+    }
 }

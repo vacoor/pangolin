@@ -76,14 +76,14 @@ public class RouteQualityHandler extends ChannelDuplexHandler {
             if (quality != null) {
                 final long rtt = System.currentTimeMillis() - startTime;
                 quality.onSuccess(rtt, circuitOpenThreshold);
-                log.debug("[ADAPTIVE] [{}] → {} success rtt={}ms", serverName, destination, rtt);
+                log.info("[ADAPTIVE] [{}] → {} success rtt={}ms", serverName, destination, rtt);
             }
         } else if (evt == HandshakeFailureEvent.INSTANCE) {
             if (!failureRecorded) {
                 failureRecorded = true;
                 if (quality != null) {
                     quality.onFailure(penalty, circuitOpenThreshold, circuitBaseMs, circuitMaxMs);
-                    log.debug("[ADAPTIVE] [{}] → {} failure penalty={}ms", serverName, destination, penalty);
+                    log.info("[ADAPTIVE] [{}] → {} failure penalty={}ms", serverName, destination, penalty);
                 }
             }
         }

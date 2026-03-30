@@ -39,6 +39,9 @@ public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
             public void operationComplete(final ChannelFuture f) throws Exception {
                 if (!f.isSuccess()) {
 //                    setHandshakeFailure(ctx, f.cause());
+                    ctx.fireUserEventTriggered(HandshakeFailureEvent.INSTANCE);
+                } else {
+                    ctx.fireUserEventTriggered(HandshakeSuccessEvent.INSTANCE);
                 }
             }
         });
@@ -147,13 +150,11 @@ public abstract class AbstractProxyHandler extends ChannelDuplexHandler {
                 ctx.flush();
             }
             handshakePromise.trySuccess();
-            ctx.fireUserEventTriggered(HandshakeSuccessEvent.INSTANCE);
         }
     }
 
     protected void setHandshakeFailure(final ChannelHandlerContext ctx, final Throwable cause) {
         if (!handshakePromise.isDone()) {
-            ctx.fireUserEventTriggered(HandshakeFailureEvent.INSTANCE);
             failPendingWritesAndClose(ctx, cause);
         }
     }
