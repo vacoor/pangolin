@@ -82,10 +82,10 @@ public class UpstreamAdaptiveFactory implements UpstreamCombiner {
             public ChannelHandler newSocketProxyHandler(final InetSocketAddress destination) {
                 final Upstream selected = select(destination);
                 if (selected == null) {
-                    log.warn("[ADAPTIVE] [{}] No available server for {}", name, stringify(destination));
+                    log.warn("[SELECT] {} => [{}] No available server", stringify(destination), name);
                     return null;
                 }
-                log.info("[ADAPTIVE] [{}]: [{}] => {}", name, selected.name(), stringify(destination));
+                log.info("[SELECT] {} => [{}] => [{}]", stringify(destination), name, selected.name());
                 return selected.newSocketProxyHandler(destination);
             }
 
@@ -97,10 +97,10 @@ public class UpstreamAdaptiveFactory implements UpstreamCombiner {
             public ChannelHandler[] newSocketProxyHandlers(final InetSocketAddress destination) {
                 final Upstream selected = select(destination);
                 if (selected == null) {
-                    log.warn("[ADAPTIVE] [{}] No available server for {}", name, stringify(destination));
+                    log.warn("[SELECT] {} No available server", stringify(destination));
                     return new ChannelHandler[0];
                 }
-                log.info("[ADAPTIVE] [{}]: [{}] => {}", name, selected.name(), stringify(destination));
+                log.info("[SELECT] {} => [{}] => [{}]", stringify(destination), name, selected.name());
                 final ChannelHandler proxy = selected.newSocketProxyHandler(destination);
                 if (proxy == null) {
                     return new ChannelHandler[0];
@@ -115,7 +115,7 @@ public class UpstreamAdaptiveFactory implements UpstreamCombiner {
             public ChannelHandler newDatagramProxyHandler(final InetSocketAddress destination) {
                 final Upstream selected = select(destination);
                 if (selected == null) {
-                    log.warn("[ADAPTIVE] [{}] No available server for {}", name, stringify(destination));
+                    log.warn("[SELECT] {} No available server", stringify(destination));
                     return null;
                 }
                 return selected.newDatagramProxyHandler(destination);
@@ -168,7 +168,9 @@ public class UpstreamAdaptiveFactory implements UpstreamCombiner {
                 for (int i = 0; i < servers.size(); i++) {
                     cumulative += scores[i];
                     if (r < cumulative) {
-                        return servers.get(i);
+                        Upstream upstream = servers.get(i);
+                        log.debug("[SELECT] {} => [{}] => [{}] score: {}", dest, name, upstream.name(), scores[i]);
+                        return upstream;
                     }
                 }
                 return servers.get(servers.size() - 1);

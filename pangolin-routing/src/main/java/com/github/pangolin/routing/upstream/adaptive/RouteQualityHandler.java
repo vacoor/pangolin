@@ -62,7 +62,7 @@ public class RouteQualityHandler extends ChannelDuplexHandler {
                     // TCP connection to proxy server failed — record as route failure
                     failureRecorded = true;
                     quality.onFailure(penalty, circuitOpenThreshold, circuitBaseMs, circuitMaxMs);
-                    log.debug("[ADAPTIVE] [{}] → {} TCP connect failed: {}", serverName, destination, f.cause().getMessage());
+                    log.warn("[SELECT] {} => [{}] TCP connect failed: {}", destination, serverName, f.cause().getMessage());
                 }
             }
         });
@@ -76,14 +76,14 @@ public class RouteQualityHandler extends ChannelDuplexHandler {
             if (quality != null) {
                 final long rtt = System.currentTimeMillis() - startTime;
                 quality.onSuccess(rtt, circuitOpenThreshold);
-                log.info("[ADAPTIVE] [{}] → {} success rtt={}ms", serverName, destination, rtt);
+                log.info("[SELECT] {} => [{}] success rtt={}ms", destination, serverName, rtt);
             }
         } else if (evt == HandshakeFailureEvent.INSTANCE) {
             if (!failureRecorded) {
                 failureRecorded = true;
                 if (quality != null) {
                     quality.onFailure(penalty, circuitOpenThreshold, circuitBaseMs, circuitMaxMs);
-                    log.info("[ADAPTIVE] [{}] → {} failure penalty={}ms", serverName, destination, penalty);
+                    log.info("[SELECT] {} => [{}] failure penalty={}ms", destination, serverName, penalty);
                 }
             }
         }
@@ -96,7 +96,7 @@ public class RouteQualityHandler extends ChannelDuplexHandler {
         if (!handshakeCompleted && !failureRecorded && quality != null) {
             failureRecorded = true;
             quality.onFailure(penalty, circuitOpenThreshold, circuitBaseMs, circuitMaxMs);
-            log.debug("[ADAPTIVE] [{}] → {} channel inactive before handshake", serverName, destination);
+            log.debug("[SELECT] {} => [{}] channel inactive before handshake", destination, serverName);
         }
         ctx.fireChannelInactive();
     }
