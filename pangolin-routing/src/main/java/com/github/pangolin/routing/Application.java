@@ -13,13 +13,7 @@ import com.github.pangolin.routing.route.RouteUpstream;
 import com.github.pangolin.routing.route.predicate.RoutePredicateFactory;
 import com.github.pangolin.routing.route.predicate.RoutePredicateSetFactory;
 import com.github.pangolin.routing.upstream.*;
-import com.github.pangolin.routing.upstream.stats.StatsAware;
-import com.github.pangolin.routing.upstream.stats.StatsUpstreamCombiner;
-import com.github.pangolin.routing.upstream.stats.StatsUpstreamFactory;
-import com.google.common.base.Function;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
-import com.netflix.loadbalancer.LoadBalancerStats;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.group.ChannelGroup;
@@ -38,7 +32,6 @@ import java.util.ServiceLoader;
 
 @Slf4j
 public class Application {
-    protected final LoadBalancerStats stats = new LoadBalancerStats();
     protected final Iterable<UpstreamFactory> upstreamFactories;
     protected final Map<String, UpstreamCombiner> upstreamCombiners = Maps.newLinkedHashMap();
     protected final Map<String, RoutePredicateFactory> predicateFactories = Maps.newLinkedHashMap();
@@ -58,18 +51,9 @@ public class Application {
     public Application(final Iterable<UpstreamFactory> upstreamFactories,
                        final Iterable<UpstreamCombiner> upstreamCombiners,
                        final Iterable<RoutePredicateFactory> predicateFactories) {
-        this.upstreamFactories = this.initUpstreamFactories(upstreamFactories);
+        this.upstreamFactories = upstreamFactories;
         this.initUpstreamCombiners(upstreamCombiners);
         this.initPredicateFactories(predicateFactories);
-    }
-
-    private Iterable<UpstreamFactory> initUpstreamFactories(final Iterable<UpstreamFactory> factories) {
-        return Iterables.transform(factories, new Function<UpstreamFactory, UpstreamFactory>() {
-            @Override
-            public UpstreamFactory apply(final UpstreamFactory upstreamFactory) {
-                return new StatsUpstreamFactory(upstreamFactory, stats);
-            }
-        });
     }
 
     private void initUpstreamCombiners(final Iterable<UpstreamCombiner> factories) {
@@ -78,10 +62,7 @@ public class Application {
             if (upstreamCombiners.containsKey(key)) {
                 log.warn("A UpstreamCombiner named " + key + " already exists, class: " + upstreamCombiners.get(key) + ". It will be overwritten.");
             }
-            if (factory instanceof StatsAware) {
-                ((StatsAware) factory).setStats(stats);
-            }
-            upstreamCombiners.put(key, new StatsUpstreamCombiner(factory, stats));
+            upstreamCombiners.put(key, factory);
             log.info("Loaded UpstreamCombiner [" + key + "]");
         }
     }
