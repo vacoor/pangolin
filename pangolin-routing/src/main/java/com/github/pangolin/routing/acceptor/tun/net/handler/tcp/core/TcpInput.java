@@ -1459,7 +1459,7 @@ public class TcpInput {
     private boolean tcp_reset_check(final TcpSock tp, final TcpPacketBuf pkt) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5939
         final int seq = pkt.tcpSeq();
-        return seq == tp.rcv_nxt - 1 && 0 != ((1 << tp.state().ordinal()) | (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
+        return seq == tp.rcv_nxt - 1 && 0 != ((1 << tp.state().ordinal()) & (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
     }
 
 
@@ -2004,7 +2004,7 @@ public class TcpInput {
     private final SecureRandom random = new SecureRandom();
 
     private int get_random_u32_inclusive(int a, int b) {
-        return a + random.nextInt(b - a);
+        return a + random.nextInt(b - a + 1);
     }
 
 

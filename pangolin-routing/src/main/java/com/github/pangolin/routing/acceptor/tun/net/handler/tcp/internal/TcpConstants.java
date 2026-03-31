@@ -68,7 +68,7 @@ public interface TcpConstants {
     // https://github.com/torvalds/linux/blob/master/include/net/sock.h#L1472
     int RCV_SHUTDOWN = 1;
     int SEND_SHUTDOWN = 2;
-    int SHUTDOWN_MASK = 2;
+    int SHUTDOWN_MASK = 3;
     // No options.
     int SIZE_OF_TCP_HDR = 20;
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L160
