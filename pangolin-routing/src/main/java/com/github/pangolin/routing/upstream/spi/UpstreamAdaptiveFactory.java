@@ -151,10 +151,12 @@ public class UpstreamAdaptiveFactory implements UpstreamCombiner {
             }
 
             private Upstream scoreProportionalRandom(final List<Upstream> servers, final String dest) {
+                final java.util.concurrent.ConcurrentHashMap<String, RouteQuality> row =
+                        qualityTable.getRow(dest);
                 final double[] scores = new double[servers.size()];
                 double total = 0.0;
                 for (int i = 0; i < servers.size(); i++) {
-                    final RouteQuality q = qualityTable.getIfPresent(servers.get(i).name(), dest);
+                    final RouteQuality q = row != null ? row.get(servers.get(i).name()) : null;
                     final double sc = (q != null) ? q.effectiveScore() : (1.0 / INITIAL_SRTT_MS);
                     scores[i] = sc;
                     total += sc;
