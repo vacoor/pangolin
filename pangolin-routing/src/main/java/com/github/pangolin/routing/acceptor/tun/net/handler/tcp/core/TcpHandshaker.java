@@ -36,6 +36,10 @@ public class TcpHandshaker {
                                                     SocketChannelFactory socketChannelFactory,
                                                     int connTimeoutMs, EventLoopGroup childGroup,
                                                     TcpOutput output) {
+        if (demultiplexer.sk_acceptq_is_full()) {
+            return null;
+        }
+
         /*-
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
@@ -180,8 +184,15 @@ public class TcpHandshaker {
     private static boolean reqsk_queue_hash_req(tcp_request_sock req, long timeout) {
         // FIXME
         /* The timer needs to be setup after a successful insertion. */
+        req.timeout = timeout;
         req.rsk_timer = null;
         return true;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1027"></a>
+     */
+    private static void reqsk_timer_handler(tcp_request_sock req) {
     }
 
 

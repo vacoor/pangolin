@@ -27,6 +27,10 @@ public abstract class TcpDemultiplexer {
     public static final int TCPCB_EVER_RETRANS = (1 << 7);    /* Ever retransmitted frame	*/
     public static final int TCPCB_RETRANS = (TCPCB_SACKED_RETRANS | TCPCB_EVER_RETRANS | TCPCB_REPAIRED);
 
+    public static final int DEFAULT_MAX_SYN_BACKLOG = 256;
+
+    private final int maxSynBacklog;
+
     protected TcpSock listenSock;
 
     /**
@@ -60,6 +64,8 @@ public abstract class TcpDemultiplexer {
         super();
         this.synRegistry = synRegistry;
         this.establishedRegistry = establishedRegistry;
+        this.maxSynBacklog = DEFAULT_MAX_SYN_BACKLOG;
+
         this.childGroup = childGroup;
         this.dnsEngine = dnsEngine;
         this.socketChannelFactory = socketChannelFactory;
@@ -599,5 +605,9 @@ public abstract class TcpDemultiplexer {
      */
     public long tcp_timeout_init(SockCommon sk) {
         return Math.min(TCP_TIMEOUT_INIT, TCP_RTO_MAX);
+    }
+
+    public boolean sk_acceptq_is_full() {
+        return synRegistry.size() >= 4096;
     }
 }

@@ -1583,7 +1583,7 @@ public class TcpInput {
                      */
                     final tcp_request_sock tcpRequestSock = sk.icsk_af_ops.conn_request(net, sk, pkt);
                     if (null == tcpRequestSock) {
-                        log.info(logFormat(pkt, "Connection reset: Reject SYN request"));
+                        log.warn(logFormat(pkt, "Connection reset: Reject SYN request"));
                         return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
                     }
 
