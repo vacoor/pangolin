@@ -5,6 +5,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 import lombok.extern.slf4j.Slf4j;
 
@@ -416,6 +417,11 @@ public abstract class TcpDemultiplexer {
             }
         }
 
+        // Release OFO queue ByteBufs for established connections
+        if (sk instanceof TcpSock) {
+            tcp_ofo_queue_release((TcpSock) sk);
+        }
+
         if (null != sk.child) {
             innerChannel(sk).close();
             sk.child = null;
@@ -558,6 +564,35 @@ public abstract class TcpDemultiplexer {
             }
             innerChannel(sk).writeAndFlush(pkt.tcpPayloadSlice().retainedSlice(offset, length));
         }
+    }
+
+    /**
+     * Delivers a raw payload ByteBuf (from the OOO queue) to the tunnel layer.
+     * The caller owns the ByteBuf's reference count; this method retains it before
+     * passing to writeAndFlush and does NOT release the original.
+     */
+    public void consumeRaw(final TcpSock sk, final ByteBuf data) {
+        if (sk.child != null && data.isReadable()) {
+            innerChannel(sk).writeAndFlush(data.retain());
+        }
+    }
+
+    /**
+     * Releases all ByteBufs held in the OOO queue of the given socket.
+     * Must be called when the connection is torn down to prevent memory leaks.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4393">tcp_fin — skb_rbtree_purge(&amp;tp-&gt;out_of_order_queue)</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/skbuff.h">skb_rbtree_purge</a>
+     */
+    private void tcp_ofo_queue_release(final TcpSock tp) {
+        if (tp.out_of_order_queue.isEmpty()) {
+            return;
+        }
+        for (final OfoEntry entry : tp.out_of_order_queue.values()) {
+            entry.release();
+        }
+        tp.out_of_order_queue.clear();
+        tp.ofo_queue_bytes = 0;
     }
 
     private void tcp_sendmsg(TcpSock sk) {

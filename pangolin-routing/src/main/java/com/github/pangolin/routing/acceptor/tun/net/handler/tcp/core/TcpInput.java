@@ -10,6 +10,9 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.security.SecureRandom;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.TreeMap;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpOutput.tcp_mstamp_refresh;
@@ -1015,8 +1018,10 @@ public class TcpInput {
 
     /**
      * Process the FIN bit.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4318">tcp_fin</a>
      */
-    private void tcp_fin(final Channel net, final TcpSock tp, TcpPacketBuf pkt) {
+    private void tcp_fin(final Channel net, final TcpSock tp) {
         inet_csk_schedule_ack(tp);
 
         tp.sk_shutdown |= RCV_SHUTDOWN;
@@ -1026,12 +1031,16 @@ public class TcpInput {
         switch (state) {
             case TCP_SYN_RECV:
             case TCP_ESTABLISHED:
-                log.debug(logFormat(pkt, "(PASSIVE) Connection handshake 1/4: FIN"));
-
                 log.debug(logFormat(
                         "TCP",
-                        tp.ir_rmt_addr, pkt.tcpDstPort(),
-                        tp.ir_loc_addr, pkt.tcpSrcPort(),
+                        tp.ir_rmt_addr, tp.ir_num,
+                        tp.ir_loc_addr, tp.ir_rmt_port,
+                        "(PASSIVE) Connection handshake 1/4: FIN"
+                ));
+                log.debug(logFormat(
+                        "TCP",
+                        tp.ir_rmt_addr, tp.ir_num,
+                        tp.ir_loc_addr, tp.ir_rmt_port,
                         "(PASSIVE) Connection handshake 2/4: ACK"
                 ));
                 /* Move to CLOSE_WAIT */
@@ -1056,12 +1065,16 @@ public class TcpInput {
                 break;
             case TCP_FIN_WAIT2:
                 /* Received a FIN -- send ACK and enter TIME_WAIT. */
-                log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 3/4: FIN"));
-
                 log.debug(logFormat(
                         "TCP",
-                        tp.ir_rmt_addr, pkt.tcpDstPort(),
-                        tp.ir_loc_addr, pkt.tcpSrcPort(),
+                        tp.ir_rmt_addr, tp.ir_num,
+                        tp.ir_loc_addr, tp.ir_rmt_port,
+                        "(ACTIVE) Connection handshake 3/4: FIN"
+                ));
+                log.debug(logFormat(
+                        "TCP",
+                        tp.ir_rmt_addr, tp.ir_num,
+                        tp.ir_loc_addr, tp.ir_rmt_port,
                         "(ACTIVE) Connection handshake 4/4: ACK"
                 ));
                 output.tcp_send_ack(net, tp);
@@ -1110,8 +1123,180 @@ public class TcpInput {
         // FIXME
     }
 
-    private void tcp_data_queue_ofo(final TcpSock sk, final TcpPacketBuf pkt) {
+    /**
+     * Drains contiguous entries from the head of the OOO queue now that rcv_nxt has advanced.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4434">tcp_ofo_queue</a>
+     */
+    private void tcp_ofo_queue(final Channel net, final TcpSock tp) throws IOException {
+        final TreeMap<Integer, OfoEntry> ofo = tp.out_of_order_queue;
 
+        while (!ofo.isEmpty()) {
+            final Map.Entry<Integer, OfoEntry> head = ofo.firstEntry();
+            final OfoEntry entry = head.getValue();
+
+            // Still out of order
+            if (after(entry.seq, tp.rcv_nxt)) {
+                break;
+            }
+
+            ofo.pollFirstEntry();
+            tp.ofo_queue_bytes -= entry.payload.readableBytes();
+
+            // Pure duplicate: entirely before rcv_nxt
+            if (!after(entry.endSeq, tp.rcv_nxt)) {
+                log.debug("[OFO] discard duplicate seq={} endSeq={}",
+                        Integer.toUnsignedLong(entry.seq), Integer.toUnsignedLong(entry.endSeq));
+                entry.release();
+                continue;
+            }
+
+            // Deliver (trim leading already-received bytes)
+            final int trimOffset = tp.rcv_nxt - entry.seq;
+            final int deliverLen = entry.endSeq - tp.rcv_nxt - (entry.fin ? 1 : 0);
+
+            if (deliverLen > 0) {
+                final ByteBuf data = entry.payload.slice(trimOffset, deliverLen);
+                demultiplexer.consumeRaw(tp, data);
+            }
+
+            tcp_rcv_nxt_update(tp, entry.endSeq);
+
+            log.debug("[OFO] delivered seq={} endSeq={} rcv_nxt={}",
+                    Integer.toUnsignedLong(entry.seq), Integer.toUnsignedLong(entry.endSeq),
+                    Integer.toUnsignedLong(tp.rcv_nxt));
+
+            entry.release();
+
+            if (entry.fin) {
+                tcp_fin(net, tp);
+                break;
+            }
+        }
+    }
+
+    /** Maximum payload bytes allowed in the OOO queue (mirrors Linux sk_rcvbuf / 2 heuristic). */
+    private static final int OFO_MAX_BYTES = 256 * 1024;
+
+    /**
+     * Queues an out-of-order segment into tp.out_of_order_queue.
+     *
+     * Handles three sub-cases:
+     *   1. Pure duplicate  — drop silently
+     *   2. Partial overlap — trim the new segment's leading / trailing bytes
+     *   3. No overlap      — insert; evict overlapped successors
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4503">tcp_data_queue_ofo</a>
+     */
+    private void tcp_data_queue_ofo(final TcpSock tp, final TcpPacketBuf pkt) {
+        // ── 0. Feature gate — drop silently when OFO is disabled (existing behavior) ──
+        if (!SysctlOptions.sysctl_tcp_ofo_enabled) {
+            return;
+        }
+
+        int seq    = pkt.tcpSeq();
+        int endSeq = determineEndSeq(pkt);
+
+        // ── 1. Empty segment ──
+        if (seq == endSeq) {
+            return;
+        }
+
+        // ── 1. Memory budget ──
+        if (tp.ofo_queue_bytes >= OFO_MAX_BYTES) {
+            tcp_prune_ofo_queue(tp);
+            if (tp.ofo_queue_bytes >= OFO_MAX_BYTES) {
+                log.debug("[OFO] queue full, dropping seq={}", Integer.toUnsignedLong(seq));
+                return;
+            }
+        }
+
+        final TreeMap<Integer, OfoEntry> ofo = tp.out_of_order_queue;
+
+        // ── 2. Check predecessor: trim leading overlap ──
+        final Map.Entry<Integer, OfoEntry> pred = ofo.lowerEntry(seq);
+        if (pred != null) {
+            final OfoEntry prev = pred.getValue();
+            if (after(prev.endSeq, seq)) {
+                // prev.endSeq > seq: genuine overlap at the front
+                if (!after(endSeq, prev.endSeq)) {
+                    // fully covered by predecessor — drop
+                    return;
+                }
+                seq = prev.endSeq;
+                if (seq == endSeq) {
+                    return;
+                }
+            }
+        }
+
+        // ── 3. Evict successors that are fully or partially covered ──
+        final Iterator<Map.Entry<Integer, OfoEntry>> it =
+                ofo.tailMap(seq).entrySet().iterator();
+        while (it.hasNext()) {
+            final Map.Entry<Integer, OfoEntry> next = it.next();
+            final OfoEntry succ = next.getValue();
+
+            if (!before(succ.seq, endSeq)) {
+                break; // successor starts at or after our endSeq — no overlap
+            }
+
+            if (!before(endSeq, succ.endSeq)) {
+                // our segment fully covers this successor — evict
+                tp.ofo_queue_bytes -= succ.payload.readableBytes();
+                succ.release();
+                it.remove();
+            } else {
+                // partial overlap at the tail: trim our tail to keep successor's unique data
+                endSeq = succ.seq;
+                break;
+            }
+        }
+
+        // ── 4. Compute FIN flag and payload length ──
+        // FIN is only propagated if it was NOT trimmed off by a successor.
+        final boolean fin = pkt.isFin() && (endSeq == determineEndSeq(pkt));
+        if (!before(seq, endSeq) && !fin) {
+            return; // segment became empty after trimming — nothing to insert
+        }
+
+        final int payloadOffset = seq - pkt.tcpSeq();
+        final int payloadLen    = endSeq - seq - (fin ? 1 : 0);
+
+        final ByteBuf slice;
+        if (payloadLen > 0) {
+            slice = pkt.tcpPayloadSlice().retainedSlice(payloadOffset, payloadLen);
+        } else {
+            // FIN-only segment: retain a zero-length slice just to satisfy non-null invariant
+            slice = pkt.tcpPayloadSlice().retainedSlice(0, 0);
+        }
+
+        ofo.put(seq, new OfoEntry(seq, endSeq, slice, fin));
+        tp.ofo_queue_bytes += slice.readableBytes();
+
+        log.debug("[OFO] queued seq={} endSeq={} fin={} queueSize={} queueBytes={}",
+                Integer.toUnsignedLong(seq), Integer.toUnsignedLong(endSeq),
+                fin, ofo.size(), tp.ofo_queue_bytes);
+    }
+
+    /**
+     * Prunes the OOO queue to reclaim memory.
+     * Drops up to half the current entries, starting from the highest seq
+     * (least useful for in-order delivery).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4489">tcp_prune_ofo_queue</a>
+     */
+    private void tcp_prune_ofo_queue(final TcpSock tp) {
+        final TreeMap<Integer, OfoEntry> ofo = tp.out_of_order_queue;
+        final int target = Math.max(1, ofo.size() / 2);
+        int pruned = 0;
+        while (pruned < target && !ofo.isEmpty()) {
+            final Map.Entry<Integer, OfoEntry> last = ofo.pollLastEntry();
+            tp.ofo_queue_bytes -= last.getValue().payload.readableBytes();
+            last.getValue().release();
+            pruned++;
+        }
+        log.debug("[OFO] pruned {} entries, remaining queueBytes={}", pruned, tp.ofo_queue_bytes);
     }
 
     private int tcp_queue_rcv(final TcpSock tp, final TcpPacketBuf pkt) {
@@ -1207,14 +1392,14 @@ public class TcpInput {
         }
 
         if (pkt.isFin()) {
-            tcp_fin(net, tp, pkt);
+            tcp_fin(net, tp);
         }
 
-        // TODO ...
-        // if (!RB_EMPTY_ROOT(&tp->out_of_order_queue)) {
-        //    tcp_ofo_queue(sk);
-        // ...
-        // }
+        // Drain OOO queue: rcv_nxt has just advanced, so previously out-of-order
+        // segments may now be deliverable. Queue is always empty when OFO is disabled.
+        if (!tp.out_of_order_queue.isEmpty()) {
+            tcp_ofo_queue(net, tp);
+        }
 //        if (tp->rx_opt.num_sacks)
 //            tcp_sack_remove(tp)
 

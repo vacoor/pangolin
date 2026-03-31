@@ -28,4 +28,11 @@ public class SysctlOptions {
 
   public static final int sysctl_tcp_invalid_ratelimit = HZ / 2;
 
+  /**
+   * Enable TCP out-of-order reordering (OFO queue).
+   * When false (default), out-of-order segments are silently dropped — existing behavior.
+   * Set to true once the OFO implementation (tcp_data_queue_ofo / tcp_ofo_queue) is ready.
+   */
+  public static boolean sysctl_tcp_ofo_enabled = true;
+
 }

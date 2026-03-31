@@ -6,6 +6,7 @@ import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayDeque;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
@@ -200,6 +201,22 @@ public class TcpSock extends inet_connection_sock {
 
     public final ArrayDeque<TcpBuffer> sk_write_queue = new ArrayDeque<>();
     public final ArrayDeque<TcpBuffer> tcp_rtx_queue  = new ArrayDeque<>();
+
+    /**
+     * Out-of-order receive queue, keyed by segment start sequence number.
+     * Mirrors Linux's tcp_sock.out_of_order_queue (rb_root).
+     *
+     * Comparator uses signed subtraction to handle 32-bit sequence wraparound,
+     * consistent with before()/after() helpers.
+     */
+    public final TreeMap<Integer, OfoEntry> out_of_order_queue =
+            new TreeMap<>((a, b) -> a - b);
+
+    /**
+     * Total payload bytes currently held in out_of_order_queue.
+     * Used to enforce OFO_MAX_BYTES budget.
+     */
+    public int ofo_queue_bytes;
 
 
     public Runnable icsk_retransmit_timer;
