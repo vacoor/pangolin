@@ -3,41 +3,40 @@
 **分析范围**: `com.github.pangolin.routing.acceptor.tun.net.handler.tcp`
 **对照基准**: Linux 内核 TCP 协议栈 (`net/ipv4/tcp*.c`, `include/net/tcp.h`)
 **分析日期**: 2026-04-01
+**最后更新**: 2026-04-01（BUG-1/2/3 已修复，commit `dc50ef69`）
 
 ---
 
 ## 一、已确认的 BUG
 
-### BUG-1: `SHUTDOWN_MASK` 值错误（`TcpConstants.java:72`）
+### ~~BUG-1: `SHUTDOWN_MASK` 值错误（`TcpConstants.java:72`）~~ ✅ 已修复
 
 **位置**: `internal/TcpConstants.java`
 
 ```java
-// 当前（错误）
+// 修复前（错误）
 int SHUTDOWN_MASK = 2;
 
-// Linux 内核定义（include/net/sock.h）
-#define RCV_SHUTDOWN  1
-#define SEND_SHUTDOWN 2
-#define SHUTDOWN_MASK 3   // = RCV_SHUTDOWN | SEND_SHUTDOWN
+// 修复后（正确，= RCV_SHUTDOWN | SEND_SHUTDOWN）
+int SHUTDOWN_MASK = 3;
 ```
 
 **影响**: `tcp_done()` 中执行 `tp.sk_shutdown = TcpConstants.SHUTDOWN_MASK`，只设置了 `SEND_SHUTDOWN`（bit 1），未设置 `RCV_SHUTDOWN`（bit 0）。后续任何针对 `sk_shutdown & RCV_SHUTDOWN` 的检查（如 `tcp_fin()` 中对 `sk_shutdown |= RCV_SHUTDOWN` 的依赖）行为不符合预期。
 
-**修复**: 将 `SHUTDOWN_MASK = 2` 改为 `SHUTDOWN_MASK = 3`。
+**修复**: commit `dc50ef69`，将 `SHUTDOWN_MASK = 2` 改为 `SHUTDOWN_MASK = 3`。
 
 ---
 
-### BUG-2: `tcp_reset_check` 位运算符错误（`TcpInput.java:1462`）
+### ~~BUG-2: `tcp_reset_check` 位运算符错误（`TcpInput.java:1462`）~~ ✅ 已修复
 
 **位置**: `core/TcpInput.java`，方法 `tcp_reset_check`
 
 ```java
-// 当前（错误）：| 导致表达式恒为 true
+// 修复前（错误）：| 导致表达式恒为 true
 return seq == tp.rcv_nxt - 1
     && 0 != ((1 << tp.state().ordinal()) | (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
 
-// 应为（正确）：& 检查当前状态是否在允许集合内
+// 修复后（正确）：& 检查当前状态是否在允许集合内
 return seq == tp.rcv_nxt - 1
     && 0 != ((1 << tp.state().ordinal()) & (TCPF_CLOSE_WAIT | TCPF_LAST_ACK | TCPF_CLOSING));
 ```
@@ -48,27 +47,29 @@ return seq == tp.rcv_nxt - 1
 
 **安全影响**: 任意 TCP 连接在 `seq = rcv_nxt - 1` 时均可被伪造的 RST 报文重置，而不限于关闭阶段的状态。
 
-**修复**: 将 `|` 改为 `&`。
+**修复**: commit `dc50ef69`，将 `|` 改为 `&`。
 
 ---
 
-### BUG-3: `get_random_u32_inclusive` 端点包含错误（`TcpInput.java:2006`）
+### ~~BUG-3: `get_random_u32_inclusive` 端点包含错误（`TcpInput.java:2006`）~~ ✅ 已修复
 
 **位置**: `core/TcpInput.java`，方法 `get_random_u32_inclusive`
 
 ```java
-// 当前（错误）：返回 [a, b)，不包含 b
+// 修复前（错误）：返回 [a, b)，不包含 b
 private int get_random_u32_inclusive(int a, int b) {
     return a + random.nextInt(b - a);
 }
 
-// 应为（正确）：返回 [a, b]，包含 b
+// 修复后（正确）：返回 [a, b]，包含 b
 private int get_random_u32_inclusive(int a, int b) {
     return a + random.nextInt(b - a + 1);
 }
 ```
 
 **影响**: Challenge ACK 速率限制计数器的初始化范围少 1，与 Linux 内核 `get_random_u32_inclusive` 语义不符（RFC 5961 §7 要求）。
+
+**修复**: commit `dc50ef69`，将 `nextInt(b - a)` 改为 `nextInt(b - a + 1)`。
 
 ---
 
@@ -168,12 +169,10 @@ if (TCP_TIME_WAIT.equals(state)) {
 
 ## 四、总结
 
-| 类别 | 数量 | 严重程度 |
-|------|------|---------|
-| 确认 BUG | 4 | 中~高 |
-| 设计偏差 | 6 | 低（有意简化） |
+| 类别 | 数量 | 状态 |
+|------|------|------|
+| 确认 BUG | 4 | BUG-1/2/3 已修复（`dc50ef69`），BUG-4 待修复 |
+| 设计偏差 | 6 | 有意简化，无需修复 |
 | 已验证正确 | 15+ | — |
 
-**最高优先级修复**: BUG-2（`tcp_reset_check` `|` 改 `&`），该 bug 存在安全影响，可能导致 ESTABLISHED 状态连接被伪造 RST 注入。
-
-**次优先级**: BUG-1（`SHUTDOWN_MASK = 3`），影响连接关闭阶段状态一致性。
+**待修复**: BUG-4（`ilog2` 浮点精度 + 无用变量），优先级低。
