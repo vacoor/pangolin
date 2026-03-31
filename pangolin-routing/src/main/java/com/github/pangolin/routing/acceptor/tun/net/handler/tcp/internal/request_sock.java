@@ -7,7 +7,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.request_soc
  */
 public class request_sock extends SockCommon {
 
-    public Runnable rsk_timer;
+    public volatile Runnable rsk_timer;
     public request_sock_ops rsk_ops;
 
     public Sock sk;

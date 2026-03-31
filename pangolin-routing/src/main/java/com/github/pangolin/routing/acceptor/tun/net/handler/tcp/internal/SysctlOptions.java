@@ -8,6 +8,7 @@ public class SysctlOptions {
   public static final int sysctl_tcp_pingpong_thresh = 1;
 
   public static final int sysctl_tcp_syn_retries = 5;
+  public static final int sysctl_tcp_synack_retries = 5;
   public static final int sysctl_tcp_retries1 = 5;
   public static final int sysctl_tcp_retries2 = 5;
   /**

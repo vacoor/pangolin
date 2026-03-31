@@ -109,6 +109,13 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
             }
 
             final tcp_request_sock request = (tcp_request_sock) sk;
+
+            // Cancel SYN-ACK retransmission timer — three-way handshake is completing
+            if (request.rsk_timer != null) {
+                timer.sk_stop_timer(request.rsk_timer);
+                request.rsk_timer = null;
+            }
+
             final TcpSock nsk = tcp_check_req(net, (TcpSock) request.skc_listener, pkt, request);
 
             nsk.state(TcpState.TCP_SYN_RECV);
@@ -257,9 +264,28 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
                 .addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(ChannelFuture future) throws Exception {
-                        log.info(logFormat(syn, "SYNACK send successful"));
+                        if (future.isSuccess()) {
+                            log.info(logFormat(syn, "SYNACK send successful"));
+                            // Start SYN-ACK retransmission timer only after the initial send succeeds.
+                            // Deferring to here (instead of reqsk_queue_hash_req) because backend
+                            // connection is async: SYN-ACK is not sent until after backend connects.
+                            timer.scheduleReqskTimer(net, listenSock, req);
+                        } else {
+                            log.warn(logFormat(syn, "SYNACK send failed, sending RST and dropping half-open connection"));
+                            tcp_v4_send_reset(net, syn, -99);
+                            inet_csk_destroy_sock(req);
+                        }
                     }
                 });
+    }
+
+    @Override
+    public void inet_rtx_syn_ack(final Channel net, final TcpSock listenSock, final tcp_request_sock req) {
+        // tcp_make_synack builds entirely from listenSock + req; the original syn packet is not needed
+        final TcpBuffer skb = output.tcp_make_synack(listenSock, req, null);
+        skb.srcPort(req.ir_num);
+        skb.dstPort(req.ir_rmt_port);
+        net.writeAndFlush(buildIp4Packet(skb, (Inet4Address) req.ir_loc_addr, (Inet4Address) req.ir_rmt_addr));
     }
 
     /**

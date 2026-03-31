@@ -182,9 +182,11 @@ public class TcpHandshaker {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1170">reqsk_queue_hash_req</a>
      */
     private static boolean reqsk_queue_hash_req(tcp_request_sock req, long timeout) {
-        // FIXME
-        /* The timer needs to be setup after a successful insertion. */
+        // Timer is NOT started here. Because backend connection is async, the initial SYN-ACK
+        // is sent only after the backend connects. The retransmission timer is started inside
+        // tcp_v4_send_synack() once the first SYN-ACK write succeeds.
         req.timeout = timeout;
+        req.num_retrans = 0;
         req.rsk_timer = null;
         return true;
     }

@@ -696,4 +696,82 @@ public class TcpTimer {
     int keepalive_time_elapsed(final TcpSock tp) {
         return (int) Math.min(TcpClock.tcp_jiffies32() - tp.icsk_ack.lrcvtime, TcpClock.tcp_jiffies32() - tp.rcv_tstamp);
     }
+
+    /* *********** SYN-ACK RETRANSMIT TIMER [[ ************** */
+
+    /**
+     * Schedules (or re-schedules) the SYN-ACK retransmission timer for a half-open connection.
+     * The Runnable is stored in req.rsk_timer; the corresponding Future is kept in the timers map
+     * so sk_stop_timer() can cancel it by Runnable key.
+     *
+     * Must be called on net.eventLoop() thread (same as packet-processing thread).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L1170">reqsk_queue_hash_req</a>
+     */
+    public void scheduleReqskTimer(final Channel net,
+                                   final TcpSock listenSock,
+                                   final tcp_request_sock req) {
+        // Cancel and remove any existing timer before creating a new one
+        if (req.rsk_timer != null) {
+            sk_stop_timer(req.rsk_timer);
+        }
+        final Runnable callback = () -> reqsk_timer_handler(net, listenSock, req);
+        req.rsk_timer = callback;
+        timers.put(callback, net.eventLoop().schedule(callback, req.timeout, TimeUnit.MILLISECONDS));
+    }
+
+    /**
+     * Timer callback for a half-open connection (TCP_NEW_SYN_RECV).
+     * Re-arms the timer first (Linux order: mod_timer → inet_rtx_syn_ack → num_retrans++),
+     * then retransmits SYN-ACK with exponential back-off.
+     * Drops the request after sysctl_tcp_synack_retries exhausted.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L760">reqsk_timer_handler</a>
+     */
+    public void reqsk_timer_handler(final Channel net,
+                                    final TcpSock listenSock,
+                                    final tcp_request_sock req) {
+        // Remove the fired Runnable from the map (it is done, but clean up eagerly)
+        timers.remove(req.rsk_timer);
+
+        if (demultiplexer.synRegistry.get(req.uniqueKey()) != req) {
+            return; // connection already completed or dropped
+        }
+
+        final int maxRetries = SysctlOptions.sysctl_tcp_synack_retries;
+        if (req.num_retrans >= maxRetries) {
+            log.warn("[REQ-TIMER] {}:{} SYN-ACK retries exhausted ({}), dropping",
+                    req.ir_rmt_addr.getHostAddress(), req.ir_rmt_port, maxRetries);
+            inet_csk_reqsk_queue_drop(req);
+            return;
+        }
+
+        // 1. Re-arm timer first (mirrors Linux: mod_timer before inet_rtx_syn_ack)
+        req.timeout = Math.min(req.timeout << 1, TCP_RTO_MAX);
+        scheduleReqskTimer(net, listenSock, req);
+
+        // 2. Retransmit SYN-ACK
+        demultiplexer.inet_rtx_syn_ack(net, listenSock, req);
+        req.num_retrans++;
+
+        log.debug("[REQ-TIMER] {}:{} retransmit SYN-ACK #{}/{}",
+                req.ir_rmt_addr.getHostAddress(), req.ir_rmt_port,
+                req.num_retrans, maxRetries);
+    }
+
+    /**
+     * Drops a half-open connection: cancels its timer, closes the backend channel,
+     * and removes it from synRegistry.
+     *
+     * Delegates to inet_csk_destroy_sock which covers all three cleanup steps.
+     * No RST is sent (mirrors Linux: if SYN-ACK retries exhausted, RST is unlikely
+     * to reach the client either).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L989">inet_csk_reqsk_queue_drop</a>
+     */
+    public void inet_csk_reqsk_queue_drop(final tcp_request_sock req) {
+        demultiplexer.inet_csk_destroy_sock(req);
+    }
+
+    /* ]] *********** SYN-ACK RETRANSMIT TIMER ************** */
 }

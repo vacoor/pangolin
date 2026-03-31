@@ -98,6 +98,14 @@ public abstract class TcpDemultiplexer {
 
     public abstract void send_reset(final Channel net, final TcpPacketBuf pkt, int err);
 
+    /**
+     * Retransmits a SYN-ACK for the given half-open connection.
+     * Called by {@link TcpTimer#reqsk_timer_handler} on each retransmit tick.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L758">inet_rtx_syn_ack</a>
+     */
+    public abstract void inet_rtx_syn_ack(Channel net, TcpSock listenSock, tcp_request_sock req);
+
 
     /* ************** ]] Initialize Connection Request ************ */
 
@@ -397,6 +405,15 @@ public abstract class TcpDemultiplexer {
     public void inet_csk_destroy_sock(SockCommon sk) {
         if (!TCP_CLOSE.equals(sk.state())) {
             // ...
+        }
+
+        // Cancel SYN-ACK retransmission timer if this is a half-open connection
+        if (sk instanceof tcp_request_sock) {
+            final tcp_request_sock req = (tcp_request_sock) sk;
+            if (req.rsk_timer != null) {
+                timer.sk_stop_timer(req.rsk_timer);
+                req.rsk_timer = null;
+            }
         }
 
         if (null != sk.child) {

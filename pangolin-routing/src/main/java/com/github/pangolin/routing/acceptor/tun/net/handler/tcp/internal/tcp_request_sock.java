@@ -19,4 +19,7 @@ public class tcp_request_sock extends inet_request_sock {
     /** Initial send window from the SYN packet (client's advertised window). */
     public int snd_wnd;
 
+    /** Number of SYN-ACK retransmissions sent (0 = only the initial send). */
+    public int num_retrans;
+
 }
