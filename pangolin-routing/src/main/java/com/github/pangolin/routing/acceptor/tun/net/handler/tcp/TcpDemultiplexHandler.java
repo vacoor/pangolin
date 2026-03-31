@@ -11,6 +11,7 @@ import com.google.common.collect.Maps;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.util.NetUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetAddress;
@@ -50,19 +51,18 @@ public abstract class TcpDemultiplexHandler extends IpPacketHandler<TcpPacketBuf
         return pkt;
     }
 
-    protected InetAddress resolveDstAddress(final InetAddress address) throws UnknownHostException {
-        final byte[] addr = address.getAddress();
+    protected InetAddress resolveDstAddress(final byte[] addr) throws UnknownHostException {
         if (dnsEngine.isFakeAddress(addr)) {
             final String hostname = dnsEngine.getHostByAddress(addr);
             if (null != hostname && !hostname.isEmpty()) {
                 return InetAddress.getByAddress(hostname, addr);
             }
         }
-        return noDnsQuery(address);
+        return noDnsQuery(addr);
     }
 
-    protected InetAddress noDnsQuery(final InetAddress address) throws UnknownHostException {
-        return InetAddress.getByAddress(address.getHostAddress(), address.getAddress());
+    protected InetAddress noDnsQuery(final byte[] address) throws UnknownHostException {
+        return InetAddress.getByAddress(NetUtil.bytesToIpAddress(address), address);
     }
 
     protected abstract TcpDemultiplexer create(

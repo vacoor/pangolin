@@ -327,7 +327,8 @@ public abstract class TcpDemultiplexer {
 
     public static Channel innerChannel(SockCommon sock) {
         if (sock == null || sock.child == null) {
-            throw new NullPointerException("sock or sock.child is null");
+//            throw new NullPointerException("sock or sock.child is null");
+            return null;
         }
 //        if (!sock.child.isDone()) {
 //            throw new IllegalStateException("child channel future is not done yet");
@@ -400,6 +401,7 @@ public abstract class TcpDemultiplexer {
 
         if (null != sk.child) {
             innerChannel(sk).close();
+            sk.child = null;
         }
 
         synRegistry.remove(sk.uniqueKey());
@@ -608,6 +610,6 @@ public abstract class TcpDemultiplexer {
     }
 
     public boolean sk_acceptq_is_full() {
-        return synRegistry.size() >= 4096;
+        return synRegistry.size() >= maxSynBacklog;
     }
 }

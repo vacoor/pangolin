@@ -26,7 +26,7 @@ public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler {
      */
     @Override
     protected TcpPacketBuf prepare(final TcpPacketBuf pkt) throws UnknownHostException {
-        pkt.resolvedDstAddr(resolveDstAddress(pkt.dstAddr()));
+        pkt.resolvedDstAddr(resolveDstAddress(pkt.dstAddrBytes()));
         return pkt;
     }
 

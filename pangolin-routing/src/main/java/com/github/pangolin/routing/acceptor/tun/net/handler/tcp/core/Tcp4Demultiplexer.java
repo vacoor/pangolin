@@ -9,6 +9,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 
@@ -93,15 +94,19 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
     private void tcp_v4_rcv(final Channel net, final TcpPacketBuf pkt) {
         SockCommon sk = __inet_lookup_skb(pkt);
         if (null == sk) {
-            log.warn(logFormat(pkt, "NO_TCP_SOCKET"));
-            send_reset(net, pkt, -99);
+            log.warn(logFormat(pkt, "NO_TCP_SOCKET(-3)"));
+            send_reset(net, pkt, -3);
             return;
         }
 
-        log.trace(logify(pkt, sk instanceof TcpSock ? ((TcpSock) sk).rx_opt.rcv_wscale : 0));
+        if (log.isTraceEnabled()) {
+            log.trace(logify(pkt, sk instanceof TcpSock ? ((TcpSock) sk).rx_opt.rcv_wscale : 0));
+        }
 
         if (TcpState.TCP_NEW_SYN_RECV.equals(sk.state())) {
-            log.debug(logFormat(pkt, "Connection handshake 3/3: ACK"));
+            if (log.isDebugEnabled()) {
+                log.debug(logFormat(pkt, "Connection handshake 3/3: ACK"));
+            }
 
             final tcp_request_sock request = (tcp_request_sock) sk;
             final TcpSock nsk = tcp_check_req(net, (TcpSock) request.skc_listener, pkt, request);
@@ -109,25 +114,37 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
             nsk.state(TcpState.TCP_SYN_RECV);
             moveToEstablished(request, nsk);
 
-            log.info(logFormat(pkt, "Connection ESTABLISHED"));
+            if (log.isDebugEnabled()) {
+                log.info(logFormat(pkt, "Connection ESTABLISHED"));
+            }
             sk = nsk;
         }
 
         final TcpSock sockToUse = (TcpSock) sk;
-        if (null != sockToUse.child) {
+        final Channel childChannel = innerChannel(sk);
+        if (null != childChannel && childChannel.isRegistered()) {
             try {
-                final Channel channel = innerChannel(sockToUse);
-                // 检查通道是否已经注册到event loop上
-                if (channel.eventLoop().inEventLoop()) {
-                    // 如果当前已经在event loop中，直接执行
+                EventLoop loop = childChannel.eventLoop();
+                if (loop.inEventLoop()) {
                     tcp_v4_do_rcv(net, sockToUse, pkt);
                 } else {
-                    // 否则提交到event loop中执行
-                    channel.eventLoop().execute(() -> tcp_v4_do_rcv(net, sockToUse, pkt));
+                    // 否则提交到 event loop 中执行，并同步处理可能的异常
+                    loop.execute(() -> {
+                        try {
+                            tcp_v4_do_rcv(net, sockToUse, pkt);
+                        } catch (Throwable t) {
+                            log.error("Failed to process TCP packet in event loop", t);
+                            if (!TcpState.TCP_LISTEN.equals(sockToUse.state())) {
+                                inet_csk_destroy_sock(sockToUse);
+                            }
+                        }
+                    });
                 }
             } catch (IllegalStateException e) {
-                // 如果通道没有注册到event loop上，直接在当前线程执行
-                tcp_v4_do_rcv(net, sockToUse, pkt);
+                // 通道未正确初始化或已关闭，发送 RST
+                log.error(logFormat(pkt, "Channel is not properly initialized or closed"), e);
+                tcp_v4_send_reset(net, pkt, -102);
+                inet_csk_destroy_sock(sockToUse);
             }
         } else {
             tcp_v4_do_rcv(net, sockToUse, pkt);

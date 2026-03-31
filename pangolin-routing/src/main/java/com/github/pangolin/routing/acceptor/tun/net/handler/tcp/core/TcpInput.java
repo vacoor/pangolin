@@ -1792,6 +1792,7 @@ public class TcpInput {
                 // FIXME
                 if (null != sk.child) {
                     innerChannel(sk).close();
+                    sk.child = null;
                 } /* else if (tcp_close_state(sk)) {
                     output.tcp_send_fin(net, tp);
                 } */
