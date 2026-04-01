@@ -431,18 +431,23 @@ public abstract class TcpDemultiplexer {
         establishedRegistry.remove(sk.uniqueKey());
     }
 
-    public synchronized void tcp_sendmsg2(final Channel net, final TcpSock tp, TcpBuffer skb, boolean flush) {
-        skb.sequenceNumber(tp.write_seq);
+    public void tcp_sendmsg2(final Channel net, final TcpSock tp, TcpBuffer skb, boolean flush) {
+        // Lock on tp rather than `this` so that different connections can send concurrently.
+        // All state mutated here (write_seq, sk_write_queue, send path) is per-connection;
+        // there is no shared state between distinct TcpSock instances in this method.
+        synchronized (tp) {
+            skb.sequenceNumber(tp.write_seq);
 
-        tcp_skb_entail(tp, skb);
+            tcp_skb_entail(tp, skb);
 
-        if (skb.payloadLength() > 0) {
-            // only for build.
-            skb.dstPort(tp.ir_rmt_port).srcPort(tp.ir_num);
-            tp.write_seq += skb.payloadLength();
-        }
-        if (flush) {
-            tcp_push_pending_frames(net, tp);
+            if (skb.payloadLength() > 0) {
+                // only for build.
+                skb.dstPort(tp.ir_rmt_port).srcPort(tp.ir_num);
+                tp.write_seq += skb.payloadLength();
+            }
+            if (flush) {
+                tcp_push_pending_frames(net, tp);
+            }
         }
     }
 
