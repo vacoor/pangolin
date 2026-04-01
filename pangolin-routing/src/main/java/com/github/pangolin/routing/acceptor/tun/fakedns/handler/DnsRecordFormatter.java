@@ -45,8 +45,8 @@ public class DnsRecordFormatter {
         ByteBuf content = record.content();
         if (content != null && content.readableBytes() >= 4) {
             try {
-                int ip = content.readInt();
-                return String.format("%d.%d.%d.%d", 
+                int ip = content.getInt(content.readerIndex());
+                return String.format("%d.%d.%d.%d",
                     (ip >> 24) & 0xFF,
                     (ip >> 16) & 0xFF,
                     (ip >> 8) & 0xFF,
@@ -64,7 +64,7 @@ public class DnsRecordFormatter {
             try {
                 // 简化处理，返回十六进制表示
                 byte[] bytes = new byte[16];
-                content.readBytes(bytes);
+                content.getBytes(content.readerIndex(), bytes);
                 StringBuilder hex = new StringBuilder();
                 for (int i = 0; i < bytes.length; i++) {
                     hex.append(String.format("%02x", bytes[i]));
@@ -96,9 +96,10 @@ public class DnsRecordFormatter {
         if (content != null && content.readableBytes() >= 2) {
             try {
                 // 读取优先级（2字节）
-                int priority = content.readUnsignedShort();
+                int ri = content.readerIndex();
+                int priority = content.getUnsignedShort(ri);
                 // 剩余内容为域名
-                String domain = content.toString(io.netty.util.CharsetUtil.UTF_8);
+                String domain = content.toString(ri + 2, content.readableBytes() - 2, io.netty.util.CharsetUtil.UTF_8);
                 return String.format("%d %s", priority, domain);
             } catch (Exception e) {
                 return "Invalid MX";
@@ -113,12 +114,15 @@ public class DnsRecordFormatter {
             try {
                 // TXT记录通常包含长度前缀
                 StringBuilder txt = new StringBuilder();
-                while (content.isReadable()) {
-                    int length = content.readUnsignedByte();
+                int idx = content.readerIndex();
+                int end = content.writerIndex();
+                while (idx < end) {
+                    int length = content.getUnsignedByte(idx++);
                     if (length > 0) {
                         byte[] data = new byte[length];
-                        content.readBytes(data);
+                        content.getBytes(idx, data);
                         txt.append(new String(data, io.netty.util.CharsetUtil.UTF_8));
+                        idx += length;
                     }
                 }
                 return txt.toString();
@@ -157,10 +161,11 @@ public class DnsRecordFormatter {
         ByteBuf content = record.content();
         if (content != null && content.readableBytes() >= 6) {
             try {
-                int priority = content.readUnsignedShort();
-                int weight = content.readUnsignedShort();
-                int port = content.readUnsignedShort();
-                String target = content.toString(io.netty.util.CharsetUtil.UTF_8);
+                int ri = content.readerIndex();
+                int priority = content.getUnsignedShort(ri);
+                int weight = content.getUnsignedShort(ri + 2);
+                int port = content.getUnsignedShort(ri + 4);
+                String target = content.toString(ri + 6, content.readableBytes() - 6, io.netty.util.CharsetUtil.UTF_8);
                 return String.format("%d %d %d %s", priority, weight, port, target);
             } catch (Exception e) {
                 return "Invalid SRV";
