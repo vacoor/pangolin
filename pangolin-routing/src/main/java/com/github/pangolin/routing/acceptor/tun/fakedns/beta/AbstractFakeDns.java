@@ -101,7 +101,10 @@ public abstract class AbstractFakeDns<T extends InetAddress> {
             final List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
             final List<String> newLines = Lists.newLinkedList();
             for (final String line : lines) {
-                final String[] m = line.split("\\s*", 2);
+                final String[] m = line.split("\\s+", 2);
+                if (m.length < 2) {
+                    continue;
+                }
                 final String hostname = m[0];
                 if (!hostname.equalsIgnoreCase(hostnameToRemove)) {
                     newLines.add(line);
@@ -170,7 +173,9 @@ public abstract class AbstractFakeDns<T extends InetAddress> {
             this.idle = new ConcurrentLinkedQueue<>();
         }
 
-        synchronized T acquire() {
+        T acquire() {
+            // ConcurrentLinkedQueue.poll() is already thread-safe.
+            // factory.next() uses AtomicInteger/AtomicReference CAS internally and needs no external lock.
             final T address = idle.poll();
             if (null != address) {
                 return address;

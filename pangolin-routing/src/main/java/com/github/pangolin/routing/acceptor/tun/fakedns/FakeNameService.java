@@ -3,6 +3,7 @@ package com.github.pangolin.routing.acceptor.tun.fakedns;
 import com.github.pangolin.routing.acceptor.tun.fakedns.beta.SimpleInet4FakeDns;
 import com.github.pangolin.routing.acceptor.tun.fakedns.beta.SimpleInet6FakeDns;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.dns.*;
 import lombok.extern.slf4j.Slf4j;
@@ -19,18 +20,16 @@ public class FakeNameService implements DnsEngine {
     private final SimpleInet4FakeDns inet4Dns;
     private final SimpleInet6FakeDns inet6Dns;
 
-    public FakeNameService(final Inet4Address ipAddress4, final int cidrPrefix4,
-                           final Inet6Address ipAddress6, final int cidrPrefix6,
-                           final int leaseTime) {
+    public FakeNameService(final SimpleInet4FakeDns inet4Dns, final SimpleInet6FakeDns inet6Dns, final int leaseTime) {
         this.leaseTime = leaseTime;
-        this.inet4Dns = new SimpleInet4FakeDns(ipAddress4, cidrPrefix4, leaseTime);
-        this.inet6Dns = new SimpleInet6FakeDns(ipAddress6, cidrPrefix6, leaseTime);
+        this.inet4Dns = inet4Dns;
+        this.inet6Dns = inet6Dns;
     }
 
     @Override
     public String getHostByAddress(final byte[] address) {
         try {
-            final InetAddress addr = InetAddress.getByAddress(address);
+            final InetAddress addr = InetAddress.getByAddress(null, address);
             if (addr instanceof Inet4Address) {
                 return inet4Dns.doResolve((Inet4Address) addr);
             } else if (addr instanceof Inet6Address) {
@@ -76,7 +75,8 @@ public class FakeNameService implements DnsEngine {
         if (HTTPS == type.intValue()) {
             address = lookupHostAddress4(hostname);
             if (null != address) {
-                ByteBuf buf = Unpooled.buffer();
+                // Use pooled allocator to avoid per-query heap allocation; 18 bytes is the exact SVCB payload size.
+                ByteBuf buf = PooledByteBufAllocator.DEFAULT.buffer(18);
                 buf.writeShort(1);  // svc priority
                 buf.writeByte(0);
 
@@ -125,28 +125,11 @@ public class FakeNameService implements DnsEngine {
     }
 
     public static FakeNameService create(final String definition4, final String definition6, final int leaseTime) {
-        final int index4 = definition4.indexOf("/");
-        final String address4 = 0 < index4 ? definition4.substring(0, index4) : definition4;
-
-        final Inet4Address ipAddress4 = SimpleInet4FakeDns.checkIpAddress(address4);
-        int cidrPrefix4;
-        if (0 < index4 && index4 < definition4.length() - 1) {
-            cidrPrefix4 = SimpleInet4FakeDns.checkPrefix(Integer.parseInt(definition4.substring(index4 + 1)));
-        } else {
-            cidrPrefix4 = ipAddress4.getAddress().length * Byte.SIZE;
-        }
-
-        final int index6 = definition6.indexOf("/");
-        final String address6 = 0 < index6 ? definition6.substring(0, index6) : definition6;
-
-        final Inet6Address ipAddress6 = SimpleInet6FakeDns.checkIpAddress(address6);
-        int cidrPrefix6;
-        if (0 < index6 && index6 < definition6.length() - 1) {
-            cidrPrefix6 = SimpleInet6FakeDns.checkPrefix(Integer.parseInt(definition6.substring(index6 + 1)));
-        } else {
-            cidrPrefix6 = ipAddress6.getAddress().length * Byte.SIZE;
-        }
-
-        return new FakeNameService(ipAddress4, cidrPrefix4, ipAddress6, cidrPrefix6, leaseTime);
+        // Delegate CIDR parsing to the sub-class factories to avoid duplicating the parsing logic here.
+        return new FakeNameService(
+                SimpleInet4FakeDns.create(definition4, leaseTime),
+                SimpleInet6FakeDns.create(definition6, leaseTime),
+                leaseTime
+        );
     }
 }

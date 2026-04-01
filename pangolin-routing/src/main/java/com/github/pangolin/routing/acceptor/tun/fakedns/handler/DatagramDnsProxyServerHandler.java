@@ -109,6 +109,13 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
                 } finally {
                     envelope.release();
                 }
+            } else {
+                // Upstream DNS query failed (timeout, refused, network error, etc.).
+                // Return SERVFAIL so the client gets an immediate error instead of hanging until its own timeout.
+                log.warn("[DNS] upstream query failed for {}: {}", question.name(), f.cause().getMessage());
+                final DatagramDnsResponse servfail = new DatagramDnsResponse(recipient, sender, id);
+                servfail.setCode(DnsResponseCode.SERVFAIL);
+                ctx.writeAndFlush(servfail);
             }
         });
     }
