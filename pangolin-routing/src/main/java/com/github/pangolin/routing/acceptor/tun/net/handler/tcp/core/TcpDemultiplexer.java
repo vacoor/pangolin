@@ -28,7 +28,7 @@ public abstract class TcpDemultiplexer {
     public static final int TCPCB_EVER_RETRANS = (1 << 7);    /* Ever retransmitted frame	*/
     public static final int TCPCB_RETRANS = (TCPCB_SACKED_RETRANS | TCPCB_EVER_RETRANS | TCPCB_REPAIRED);
 
-    public static final int DEFAULT_MAX_SYN_BACKLOG = 256;
+    public static final int DEFAULT_MAX_SYN_BACKLOG = 1024;
 
     private final int maxSynBacklog;
 
