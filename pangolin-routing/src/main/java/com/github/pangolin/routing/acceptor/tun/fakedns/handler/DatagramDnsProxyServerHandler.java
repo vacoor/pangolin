@@ -103,7 +103,8 @@ public class DatagramDnsProxyServerHandler extends SimpleChannelInboundHandler<D
                     DnsResponse response = getResponse(recipient, sender, id, envelope.content());
                     for (int i = 0; i < response.count(DnsSection.ANSWER); i++) {
                         DnsRecord dnsRecord = response.recordAt(DnsSection.ANSWER, i);
-                        log.debug("[DNS] \t{} -> {}", question.name(), DnsRecordFormatter.formatDnsRecord(dnsRecord));
+                        // FIXME replace read to get
+                        // log.debug("[DNS] \t{} -> {}", question.name(), DnsRecordFormatter.formatDnsRecord(dnsRecord));
                     }
                     ctx.writeAndFlush(response);
                 } finally {
