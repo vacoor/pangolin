@@ -16,7 +16,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.jiffies_to_usecs;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.nsecs_to_jiffies;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.after;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.ilog2;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils._ilog2;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L200">struct tcp_sock</a>
@@ -309,7 +309,7 @@ public class TcpSock extends inet_connection_sock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1516">tcp_probe0_when</a>
      */
     public long tcp_probe0_when(int max_when) {
-        final int backoff = Math.min(ilog2(TCP_RTO_MAX / TCP_RTO_MIN) + 1, icsk_backoff);
+        final int backoff = Math.min(_ilog2(TCP_RTO_MAX / TCP_RTO_MIN) + 1, icsk_backoff);
         final long when = tcp_probe0_base() << backoff;
         return Math.min(when, max_when);
     }

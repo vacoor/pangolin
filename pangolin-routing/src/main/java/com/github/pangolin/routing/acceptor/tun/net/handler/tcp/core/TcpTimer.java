@@ -19,6 +19,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.TCP_RTO_MAX;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.TCP_RTO_MIN;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils._ilog2;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.time_after;
 
 @Slf4j
@@ -422,7 +423,7 @@ public class TcpTimer {
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L186
     private long tcp_model_timeout(int boundary, long rto_base) {
-        int linear_backoff_thresh = (int) (Math.log(TCP_RTO_MAX / rto_base) / Math.log(2));
+        int linear_backoff_thresh = _ilog2((int) (TCP_RTO_MAX / rto_base));
         long timeout;
         if (boundary <= linear_backoff_thresh) {
             timeout = ((2 << boundary) - 1) * rto_base;

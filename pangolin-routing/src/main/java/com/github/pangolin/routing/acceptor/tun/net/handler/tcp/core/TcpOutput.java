@@ -192,8 +192,7 @@ public class TcpOutput {
             space = Math.max(space, SysctlOptions.ipv4_sysctl_tcp_rmem_2);
             space = Math.max(space, SysctlOptions.sysctl_rmem_max);
             space = Math.min(space, window_clamp);
-            int i = _ilog2(space);
-            rcv_wscale.set(clamp(ilog2(space) - 15, 0, TCP_MAX_WSCALE));
+            rcv_wscale.set(clamp(_ilog2(space) - 15, 0, TCP_MAX_WSCALE));
         }
         /* Set the clamp no higher than max representable value */
         __window_clamp.set(Math.min(U16_MAX << rcv_wscale.get(), window_clamp));

@@ -60,10 +60,24 @@ public abstract class TcpUtils {
     }
 
 
+    /**
+     * Integer log2 via bit-shift, equivalent to the Linux kernel ilog2 macro.
+     *
+     * <p>Do NOT replace this with {@code Math.log(x) / Math.log(2)}:
+     * <ol>
+     *   <li>When {@code x == 0}, {@code Math.log(0)} returns {@code -Infinity}; casting
+     *       {@code -Infinity} to {@code int} yields {@code Integer.MIN_VALUE} (undefined
+     *       behavior per JLS §5.1.3), whereas this method correctly returns {@code 0}.</li>
+     *   <li>Floating-point rounding may cause {@code log2(2^n)} to return {@code n-1} for
+     *       certain values of {@code n} (e.g. {@code log(65536)/log(2)} may evaluate to
+     *       {@code 15.9999...} and truncate to {@code 15} instead of {@code 16}), diverging
+     *       from the exact bit-shift semantics of the Linux kernel ilog2 macro.</li>
+     * </ol>
+     */
     public static int _ilog2(int x) {
         int i = 0;
         while (x >= 2) {
-            x = x >> 1;  // 右移一位相当于除以2
+            x = x >> 1;
             i++;
         }
         return i;

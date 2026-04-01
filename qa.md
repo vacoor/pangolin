@@ -3,7 +3,7 @@
 **分析范围**: `com.github.pangolin.routing.acceptor.tun.net.handler.tcp`
 **对照基准**: Linux 内核 TCP 协议栈 (`net/ipv4/tcp*.c`, `include/net/tcp.h`)
 **分析日期**: 2026-04-01
-**最后更新**: 2026-04-01（BUG-1/2/3 已修复，commit `dc50ef69`）
+**最后更新**: 2026-04-01（BUG-1/2/3 已修复，commit `dc50ef69`；BUG-4 已修复）
 
 ---
 
@@ -73,14 +73,17 @@ private int get_random_u32_inclusive(int a, int b) {
 
 ---
 
-### BUG-4: `tcp_select_initial_window` 中无用变量与浮点精度问题（`TcpOutput.java:196`）
+### ~~BUG-4: `tcp_select_initial_window` 中无用变量与浮点精度问题（`TcpOutput.java:196`）~~ ✅ 已修复
 
 **位置**: `core/TcpOutput.java`，方法 `tcp_select_initial_window`
 
 ```java
-// 当前（存在问题）
+// 修复前（错误）
 int i = _ilog2(space);                                        // 计算了但从未使用
 rcv_wscale.set(clamp(ilog2(space) - 15, 0, TCP_MAX_WSCALE)); // 浮点 ilog2，space=0 时异常
+
+// 修复后（正确）
+rcv_wscale.set(clamp(_ilog2(space) - 15, 0, TCP_MAX_WSCALE));
 ```
 
 **问题**:
@@ -88,7 +91,7 @@ rcv_wscale.set(clamp(ilog2(space) - 15, 0, TCP_MAX_WSCALE)); // 浮点 ilog2，s
 2. `ilog2(space)` 使用 `Math.log(a) / Math.log(2)` 浮点计算，当 `space = 0` 时会产生 `-Infinity`，截断为 int 后行为未定义（实际得到 `Integer.MIN_VALUE`）。
 3. 应统一使用整数位运算实现 `_ilog2`，与 Linux 内核的 `ilog2` 宏一致。
 
-**修复**: 删除无用变量 `i`；将 `ilog2(space)` 替换为 `_ilog2(space)`。
+**修复**: 删除无用变量 `i`；将所有 `ilog2(...)` / 内联浮点 log2 调用替换为 `_ilog2(...)`（涉及 `TcpOutput.java`、`TcpSock.java`、`TcpTimer.java`）；将原因注释迁移至 `TcpUtils._ilog2` 方法 Javadoc。
 
 ---
 
@@ -171,8 +174,8 @@ if (TCP_TIME_WAIT.equals(state)) {
 
 | 类别 | 数量 | 状态 |
 |------|------|------|
-| 确认 BUG | 4 | BUG-1/2/3 已修复（`dc50ef69`），BUG-4 待修复 |
+| 确认 BUG | 4 | 全部已修复（BUG-1/2/3: `dc50ef69`，BUG-4: 见上） |
 | 设计偏差 | 6 | 有意简化，无需修复 |
 | 已验证正确 | 15+ | — |
 
-**待修复**: BUG-4（`ilog2` 浮点精度 + 无用变量），优先级低。
+**所有已确认 BUG 均已修复。**
