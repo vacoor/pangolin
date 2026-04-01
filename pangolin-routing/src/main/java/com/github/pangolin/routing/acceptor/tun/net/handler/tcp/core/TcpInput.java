@@ -1032,16 +1032,16 @@ public class TcpInput {
             case TCP_SYN_RECV:
             case TCP_ESTABLISHED:
                 log.debug(logFormat(
-                        "TCP",
-                        tp.ir_rmt_addr, tp.ir_num,
-                        tp.ir_loc_addr, tp.ir_rmt_port,
-                        "(PASSIVE) Connection handshake 1/4: FIN"
+                        "[TCP] [HANDSHAKE]",
+                        tp.ir_rmt_addr, tp.ir_rmt_port,
+                        tp.ir_loc_addr, tp.ir_num,
+                        "(REMOTE->LOCAL) Connection handshake 1/4: FIN"
                 ));
                 log.debug(logFormat(
-                        "TCP",
-                        tp.ir_rmt_addr, tp.ir_num,
-                        tp.ir_loc_addr, tp.ir_rmt_port,
-                        "(PASSIVE) Connection handshake 2/4: ACK"
+                        "[TCP] [HANDSHAKE]",
+                        tp.ir_loc_addr, tp.ir_num,
+                        tp.ir_rmt_addr, tp.ir_rmt_port,
+                        "(LOCAL->REMOTE) Connection handshake 2/4: ACK"
                 ));
                 /* Move to CLOSE_WAIT */
                 tp.state(TcpState.TCP_CLOSE_WAIT);
@@ -1066,16 +1066,16 @@ public class TcpInput {
             case TCP_FIN_WAIT2:
                 /* Received a FIN -- send ACK and enter TIME_WAIT. */
                 log.debug(logFormat(
-                        "TCP",
-                        tp.ir_rmt_addr, tp.ir_num,
-                        tp.ir_loc_addr, tp.ir_rmt_port,
-                        "(ACTIVE) Connection handshake 3/4: FIN"
+                        "[TCP] [HANDSHAKE]",
+                        tp.ir_rmt_addr, tp.ir_rmt_port,
+                        tp.ir_loc_addr, tp.ir_num,
+                        "(REMOTE->LOCAL) Connection handshake 3/4: FIN"
                 ));
                 log.debug(logFormat(
-                        "TCP",
-                        tp.ir_rmt_addr, tp.ir_num,
-                        tp.ir_loc_addr, tp.ir_rmt_port,
-                        "(ACTIVE) Connection handshake 4/4: ACK"
+                        "[TCP] [HANDSHAKE]",
+                        tp.ir_loc_addr, tp.ir_num,
+                        tp.ir_rmt_addr, tp.ir_rmt_port,
+                        "(LOCAL->REMOTE) Connection handshake 4/4: ACK"
                 ));
                 output.tcp_send_ack(net, tp);
                 demultiplexer.tcp_time_wait(tp, TcpState.TCP_TIME_WAIT, 0);
@@ -1652,22 +1652,22 @@ public class TcpInput {
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
                 String hostname = TcpLogUtils.getHostNameNoResolve(sk.ir_loc_addr);
                 hostname = null != hostname ? hostname : sk.ir_loc_addr.getHostAddress();
-                log.info(logFormat(pkt, "Connection to {}:{} has been disconnected"), hostname, sk.ir_num);
+                log.info(logFormat("[TCP] [STATE]", pkt, "Connection to {}:{} has been disconnected"), hostname, sk.ir_num);
                 TcpState state = sk.state();
                 if (demultiplexer.tcp_close_state(sk)) {
                     if (TCP_CLOSE_WAIT.equals(state)) {
                         log.debug(logFormat(
-                                "TCP",
+                                "[TCP] [HANDSHAKE]",
                                 sk.ir_loc_addr, sk.ir_num,
                                 sk.ir_rmt_addr, sk.ir_rmt_port,
-                                "(PASSIVE) Connection handshake 3/4: FIN"
+                                "(LOCAL->REMOTE) Connection handshake 3/4: FIN"
                         ));
                     } else {
                         log.debug(logFormat(
-                                "TCP",
+                                "[TCP] [HANDSHAKE]",
                                 sk.ir_loc_addr, sk.ir_num,
                                 sk.ir_rmt_addr, sk.ir_rmt_port,
-                                "(ACTIVE) Connection handshake 1/4: FIN"
+                                "(LOCAL->REMOTE) Connection handshake 1/4: FIN"
                         ));
                     }
                     demultiplexer.output.tcp_send_fin(net, sk);
@@ -1707,7 +1707,7 @@ public class TcpInput {
 
                     @Override
                     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
-                        log.info(logFormat(pkt, "Connection aborted: {}"), cause.getMessage(), cause);
+                        log.info(logFormat("[TCP] [STATE]", pkt, "Connection aborted: {}"), cause.getMessage(), cause);
                         demultiplexer.send_reset(net, sk.rawIpHeader, -1);
                         demultiplexer.tcp_done(sk);
 //                        try {
@@ -1741,26 +1741,26 @@ public class TcpInput {
     protected int tcp_rcv_state_process(final Channel net, TcpSock sk, final TcpPacketBuf pkt) throws IOException {
         switch (sk.state()) {
             case TCP_CLOSE:
-                log.info(logFormat(pkt, "Packet discard: The Connection is CLOSED"));
+                log.info(logFormat("[TCP] [RCV]", pkt, "Packet discard: The Connection is CLOSED"));
                 return discard(TcpDropReason.SKB_DROP_REASON_TCP_CLOSE);
             case TCP_LISTEN:
                 if (pkt.isAck()) {
-                    log.info(logFormat(pkt, "Connection reset: Invalid TCP flag(ACK)"));
+                    log.info(logFormat("[TCP] [RCV]", pkt, "Connection reset: Invalid TCP flag(ACK)"));
                     return TcpDropReason.SKB_DROP_REASON_TCP_FLAGS;
                 }
                 if (pkt.isRst()) {
-                    log.info(logFormat(pkt, "Packet discard: Connection reset not required"));
+                    log.info(logFormat("[TCP] [RCV]", pkt, "Packet discard: Connection reset not required"));
                     return discard(TcpDropReason.SKB_DROP_REASON_TCP_RESET);
                 }
 
                 /* handshake */
                 if (pkt.isSyn()) {
                     if (pkt.isFin()) {
-                        log.info(logFormat(pkt, "Packet discard: Invalid TCP flag(SYN-FIN)"));
+                        log.info(logFormat("[TCP] [RCV]", pkt, "Packet discard: Invalid TCP flag(SYN-FIN)"));
                         return discard(TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
                     }
 
-                    log.debug(logFormat(pkt, "Connection handshake 1/3: SYN (req: {}, est: {})"), demultiplexer.synRegistry.size(), demultiplexer.establishedRegistry.size());
+                    log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 1/3: SYN (req: {}, est: {})"), demultiplexer.synRegistry.size(), demultiplexer.establishedRegistry.size());
 
                     /*-
                      * Linux此处为创建状态为TCP_NEW_SYN_RECV的请求套接字(request_sock)放入半连接队列即可结束,
@@ -1768,7 +1768,7 @@ public class TcpInput {
                      */
                     final tcp_request_sock tcpRequestSock = sk.icsk_af_ops.conn_request(net, sk, pkt);
                     if (null == tcpRequestSock) {
-                        log.warn(logFormat(pkt, "Connection reset: Reject SYN request"));
+                        log.warn(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection reset: Reject SYN request"));
                         return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
                     }
 
@@ -1780,7 +1780,7 @@ public class TcpInput {
                 /*-
                  * XXX client mode not supported.
                  */
-                log.error(logFormat(pkt, "Connection reset: TCP_SYN_SENT not implementation"));
+                log.error(logFormat("[TCP] [SND]", pkt, "Connection reset: TCP_SYN_SENT not implementation"));
                 return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
         }
 
@@ -1795,7 +1795,7 @@ public class TcpInput {
          */
 
         if (!pkt.isAck() && !pkt.isRst() && !pkt.isSyn()) {
-            log.warn(logFormat(pkt, "Connection reset: Invalid TCP flag(!ACK, !RST, !SYN)"));
+            log.warn(logFormat("[TCP] [RCV]", pkt, "Connection reset: Invalid TCP flag(!ACK, !RST, !SYN)"));
             return discard(TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
         }
 
@@ -1869,7 +1869,7 @@ public class TcpInput {
                     break;
                 }
 
-                log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 2/4: ACK"));
+                log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(REMOTE->LOCAL) Connection handshake 2/4: ACK"));
                 sk.state(TCP_FIN_WAIT2);
                 sk.sk_shutdown |= TcpConstants.SEND_SHUTDOWN;
 
@@ -1879,7 +1879,7 @@ public class TcpInput {
 //                }
 
                 if (sk.linger2 < 0) {
-                    log.debug(logFormat(pkt, "(ACTIVE) Connection handshake aborted: linger2 < 0"));
+                    log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(REMOTE->LOCAL) Connection handshake aborted: linger2 < 0"));
                     demultiplexer.tcp_done(sk);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
@@ -1888,7 +1888,7 @@ public class TcpInput {
                 final int end_seq = determineEndSeq(pkt);
                 if (end_seq != seq && after(end_seq - (pkt.isFin() ? 1 : 0), sk.rcv_nxt)) {
                     /* Receive out of order FIN after close() */
-                    log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 2/4 aborted: out of order FIN"));
+                    log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(REMOTE->LOCAL) Connection handshake 2/4 aborted: out of order FIN"));
                     demultiplexer.tcp_done(sk);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
@@ -1898,7 +1898,7 @@ public class TcpInput {
                     /*-
                      * FIN_WAIT2 开始的总超时时间 > TIME_WAIT 的 2MSL, 则等待 tmo - TCP_TIMEWAIT_LEN 后进入 TIME_WAIT.
                      */
-                    log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2 timeout={}"), tmo - TCP_TIMEWAIT_LEN);
+                    log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(REMOTE->LOCAL) Connection handshake 2/4, FIN_WAIT2 timeout={}"), tmo - TcpConstants.TCP_TIMEWAIT_LEN);
                     demultiplexer.timer.tcp_reset_keepalive_timer(sk, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
                 } else if (pkt.isFin()) {
                     /* Bad case. We could lose such FIN otherwise.
@@ -1907,10 +1907,10 @@ public class TcpInput {
                      * if it spins in bh_lock_sock(), but it is really
                      * marginal case.
                      */
-                    log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 2/4, FIN_WAIT2 timeout={}(tmo)"), tmo);
+                    log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(RETMOTE->LOCAL) Connection handshake 2/4, FIN_WAIT2 timeout={}(tmo)"), tmo);
                     demultiplexer.timer.tcp_reset_keepalive_timer(sk, tmo);
                 } else {
-                    log.debug(logFormat(pkt, "(ACTIVE) Connection handshake 2/4, 2MSL timeout={}(tmo)"), tmo);
+                    log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(REMOTE->LOCAL) Connection handshake 2/4, 2MSL timeout={}(tmo)"), tmo);
                     demultiplexer.tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
@@ -1923,7 +1923,7 @@ public class TcpInput {
                 break;
             case TCP_LAST_ACK:
                 if (sk.snd_una == sk.write_seq) {
-                    log.debug(logFormat(pkt, "(PASSIVE) Connection handshake 4/4: ACK"));
+                    log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(REMOTE->LOCAL) Connection handshake 4/4: ACK"));
                     // tcp_update_metrics
                     demultiplexer.tcp_done(sk);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;

@@ -94,7 +94,7 @@ public class TcpHandshaker {
         if (dnsEngine.isFakeAddress(dstAddr.getAddress())) {
             dstHostname = dnsEngine.getHostByAddress(dstAddr.getAddress());
             if (null == dstHostname || dstHostname.isEmpty()) {
-                log.warn(logFormat(pkt, "Could not resolve FAKE-IP: {}"), dstAddr.getHostAddress());
+                log.warn(logFormat("[TCP] [ERROR]", pkt, "Could not resolve FAKE-IP: {}"), dstAddr.getHostAddress());
                 return null;
             }
         } else {
@@ -111,8 +111,8 @@ public class TcpHandshaker {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 // for TCP_NEW_SYN_RECV, TCP_SYN_RECV
-                log.debug(logFormat(pkt, "Connection to {}:{} has been disconnected"), resolved.getHostString(), resolved.getPort());
-                log.debug(logFormat(pkt, "Connection handshake 3/3: ABORT"));
+                log.debug(logFormat("[TCP] [STATE]", pkt, "Connection to {}:{} has been disconnected"), resolved.getHostString(), resolved.getPort());
+                log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 3/3: ABORT"));
 
                 // af_ops.send_synack(net, parent, req, pkt);
                 // FIXME set reset.
@@ -123,7 +123,7 @@ public class TcpHandshaker {
         };
 
 
-        log.info(logFormat(pkt, "ESTABLISHING connection to {}:{}"), resolved.getHostString(), resolved.getPort());
+        log.info(logFormat("[TCP] [STATE]", pkt, "ESTABLISHING connection to {}:{}"), resolved.getHostString(), resolved.getPort());
         req.child = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
             private final AtomicBoolean initialized = new AtomicBoolean(false);
 
@@ -142,17 +142,17 @@ public class TcpHandshaker {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
-                    log.debug(logFormat(pkt, "Connection ESTABLISHED to {}:{}"), resolved.getHostString(), resolved.getPort());
+                    log.debug(logFormat("[TCP] [STATE]", pkt, "Connection ESTABLISHED to {}:{}"), resolved.getHostString(), resolved.getPort());
 
                     log.debug(logFormat(
-                            "TCP",
+                            "[TCP] [HANDSHAKE]",
                             pkt.dstAddr(), pkt.tcpDstPort(),
                             pkt.srcAddr(), pkt.tcpSrcPort(),
                             "Connection handshake 2/3: SYN-ACK"
                     ));
                     af_ops.send_synack(net, parent, req, pkt);
                 } else {
-                    log.info(logFormat(pkt, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
+                    log.info(logFormat("[TCP] [STATE]", pkt, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
                     rsk_ops.send_reset(net, parent, pkt, -88);
                     // FIXME clean queue
                     demultiplexer.inet_csk_destroy_sock(req);

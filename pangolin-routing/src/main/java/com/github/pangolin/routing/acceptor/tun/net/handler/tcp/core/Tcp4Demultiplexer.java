@@ -94,7 +94,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
     private void tcp_v4_rcv(final Channel net, final TcpPacketBuf pkt) {
         SockCommon sk = __inet_lookup_skb(pkt);
         if (null == sk) {
-            log.warn(logFormat(pkt, "NO_TCP_SOCKET(-3)"));
+            log.warn(logFormat("[TCP] [RCV]", pkt, "NO_TCP_SOCKET(-3)"));
             send_reset(net, pkt, -3);
             return;
         }
@@ -105,7 +105,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
 
         if (TcpState.TCP_NEW_SYN_RECV.equals(sk.state())) {
             if (log.isDebugEnabled()) {
-                log.debug(logFormat(pkt, "Connection handshake 3/3: ACK"));
+                log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 3/3: ACK"));
             }
 
             final tcp_request_sock request = (tcp_request_sock) sk;
@@ -122,7 +122,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
             moveToEstablished(request, nsk);
 
             if (log.isDebugEnabled()) {
-                log.info(logFormat(pkt, "Connection ESTABLISHED"));
+                log.info(logFormat("[TCP] [STATE]", pkt, "Connection ESTABLISHED"));
             }
             sk = nsk;
         }
@@ -149,7 +149,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
                 }
             } catch (IllegalStateException e) {
                 // 通道未正确初始化或已关闭，发送 RST
-                log.error(logFormat(pkt, "Channel is not properly initialized or closed"), e);
+                log.error(logFormat("[TCP] [RCV]", pkt, "Channel is not properly initialized or closed"), e);
                 tcp_v4_send_reset(net, pkt, -102);
                 inet_csk_destroy_sock(sockToUse);
             }
@@ -259,19 +259,19 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         skb.srcPort(req.ir_num);
         skb.dstPort(req.ir_rmt_port);
 
-        log.info(logFormat(syn, "SYNACK send starting..."));
+        log.info(logFormat("[TCP] [HANDSHAKE]", syn, "SYNACK send starting..."));
         net.writeAndFlush(buildIp4Packet(skb, (Inet4Address) req.ir_loc_addr, (Inet4Address) req.ir_rmt_addr))
                 .addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(ChannelFuture future) throws Exception {
                         if (future.isSuccess()) {
-                            log.info(logFormat(syn, "SYNACK send successful"));
+                            log.info(logFormat("[TCP] [HANDSHAKE]", syn, "SYNACK send successful"));
                             // Start SYN-ACK retransmission timer only after the initial send succeeds.
                             // Deferring to here (instead of reqsk_queue_hash_req) because backend
                             // connection is async: SYN-ACK is not sent until after backend connects.
                             timer.scheduleReqskTimer(net, listenSock, req);
                         } else {
-                            log.warn(logFormat(syn, "SYNACK send failed, sending RST and dropping half-open connection"));
+                            log.warn(logFormat("[TCP] [HANDSHAKE]", syn, "SYNACK send failed, sending RST and dropping half-open connection"));
                             tcp_v4_send_reset(net, syn, -99);
                             inet_csk_destroy_sock(req);
                         }

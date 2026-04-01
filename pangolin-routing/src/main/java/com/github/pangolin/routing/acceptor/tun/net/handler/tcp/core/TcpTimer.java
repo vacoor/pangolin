@@ -141,7 +141,7 @@ public class TcpTimer {
             timers.put(timer, schedule(tp.child.channel(), delay, TimeUnit.MILLISECONDS, timer));
         } else {
             log.warn(logFormat(
-                    "TCP",
+                        "[TCP] [TIMER]",
                     tp.ir_loc_addr, tp.ir_num,
                     tp.ir_rmt_addr, tp.ir_rmt_port,
                     "CANCEL FAILED: {}"
@@ -318,7 +318,7 @@ public class TcpTimer {
             if (tcp_rtx_probe0_timed_out(tp, rtx_delta)) {
 //                tp.logError("[RETRANSMIT] RTX PROBE0 TIMEOUT");
                 log.info(logFormat(
-                        "TCP",
+                        "[TCP] [TIMER]",
                         tp.ir_loc_addr, tp.ir_num,
                         tp.ir_rmt_addr, tp.ir_rmt_port,
                         "RTX PROBE0 TIMEOUT"
@@ -372,7 +372,7 @@ public class TcpTimer {
         long l = tcp_clamp_rto_to_user_timeout(tp);
         if (log.isTraceEnabled()) {
             log.trace(logFormat(
-                    "TCP",
+                        "[TCP] [TIMER]",
                     tp.ir_loc_addr, tp.ir_num,
                     tp.ir_rmt_addr, tp.ir_rmt_port,
                     "next timeout: {}"
@@ -487,7 +487,7 @@ public class TcpTimer {
             /* Has it gone just too far? */
 //            tp.logError("[RETRANSMIT] WRITE TIMEOUT");
             log.info(logFormat(
-                    "TCP",
+                        "[TCP] [TIMER]",
                     tp.ir_loc_addr, tp.ir_num,
                     tp.ir_rmt_addr, tp.ir_rmt_port,
                     "RETRANSMIT WRITE TIMEOUT"
@@ -561,7 +561,7 @@ public class TcpTimer {
             if (user_timeout > 0 && TcpClock.tcp_jiffies32() - tp.icsk_probes_tstamp >= TcpClock.msecs_to_jiffies(user_timeout)) {
 //                tp.logWarn("PROBE TIMEOUT");
                 log.info(logFormat(
-                        "TCP",
+                        "[TCP] [TIMER]",
                         tp.ir_loc_addr, tp.ir_num,
                         tp.ir_rmt_addr, tp.ir_rmt_port,
                         "PROBE TIMEOUT"
@@ -578,7 +578,7 @@ public class TcpTimer {
         if (tp.icsk_probes_out >= max_probes) {
 //            tp.logWarn("TOO MANY PROBES");
             log.info(logFormat(
-                    "TCP",
+                        "[TCP] [TIMER]",
                     tp.ir_loc_addr, tp.ir_num,
                     tp.ir_rmt_addr, tp.ir_rmt_port,
                     "TOO MANY PROBES"
@@ -642,7 +642,7 @@ public class TcpTimer {
             if ((user_timeout != 0 && elapsed >= TcpClock.msecs_to_jiffies(user_timeout) && tp.icsk_probes_out > 0)
                     || (user_timeout == 0 && tp.icsk_probes_out >= keepalive_probes(tp))) {
                 log.info(logFormat(
-                        "TCP",
+                        "[TCP] [TIMER]",
                         tp.ir_loc_addr, tp.ir_num,
                         tp.ir_rmt_addr, tp.ir_rmt_port,
                         "KEEPALIVE TIMEOUT"

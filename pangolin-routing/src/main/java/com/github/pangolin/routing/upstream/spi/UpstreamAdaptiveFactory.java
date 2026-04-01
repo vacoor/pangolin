@@ -100,6 +100,9 @@ public class UpstreamAdaptiveFactory implements UpstreamCombiner {
                     log.warn("[SELECT] {} No available server", stringify(destination));
                     return new ChannelHandler[0];
                 }
+                if (log.isDebugEnabled()) {
+                    log.debug("[SELECT] {} => \n{}", stringify(destination), qualityTable.dumpRoutes());
+                }
                 log.info("[SELECT] {} => [{}] => [{}]", stringify(destination), name, selected.name());
                 final ChannelHandler proxy = selected.newSocketProxyHandler(destination);
                 if (proxy == null) {

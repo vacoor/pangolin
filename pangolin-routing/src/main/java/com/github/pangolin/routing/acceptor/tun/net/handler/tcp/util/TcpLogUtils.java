@@ -39,13 +39,16 @@ public class TcpLogUtils {
         return buff.toString();
     }
 
-    public static String logFormat(final TcpPacketBuf pkt, final Object... extra) {
+    public static String logFormat(final String protocol, final TcpPacketBuf pkt, final Object... extra) {
+        return logFormat(protocol, pkt.srcAddr(), pkt.tcpSrcPort(), pkt.dstAddr(), pkt.tcpDstPort(), extra);
+        /*
         final StringBuilder buf = new StringBuilder();
         stringify(buf, pkt);
         for (final Object o : extra) {
             buf.append(o);
         }
         return buf.toString();
+         */
     }
 
     public static String logFormat(final String protocol,
@@ -62,7 +65,7 @@ public class TcpLogUtils {
 
     public static StringBuilder stringify(final StringBuilder buf, final TcpPacketBuf pkt) {
         return stringify(
-                buf, "TCP",
+                buf, "[TCP]",
                 pkt.srcAddr(), pkt.tcpSrcPort(),
                 pkt.dstAddr(), pkt.tcpDstPort()
         );
