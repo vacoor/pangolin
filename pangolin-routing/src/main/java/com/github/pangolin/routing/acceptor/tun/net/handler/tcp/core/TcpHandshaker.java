@@ -110,11 +110,9 @@ public class TcpHandshaker {
         req.childCloseListener = new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
-                // for TCP_NEW_SYN_RECV, TCP_SYN_RECV
+                // for TCP_NEW_SYN_RECV waiting SYN-ACK -> ACK
                 log.debug(logFormat("[TCP] [STATE]", pkt, "Connection to {}:{} has been disconnected"), resolved.getHostString(), resolved.getPort());
-                log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 3/3: ABORT"));
 
-                // af_ops.send_synack(net, parent, req, pkt);
                 // FIXME RESET set reset.
                 rsk_ops.send_reset(net, parent, pkt, -100);
                 // output.tcp_send_active_reset(net, req, "Abort");
@@ -141,10 +139,12 @@ public class TcpHandshaker {
                                 "Connection handshake 2/3: SYN-ACK"
                         ));
                         af_ops.send_synack(net, parent, req, pkt);
+                        future.channel().closeFuture().addListener(req.childCloseListener);
                     } else {
                         // FIXME conflict and child close listener send two RESET.
                         // FIXME RESET
                         log.info(logFormat("[TCP] [STATE]", pkt, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
+                        log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 3/3: ABORT"));
                         rsk_ops.send_reset(net, parent, pkt, -88);
                         // FIXME clean queue
                         demultiplexer.inet_csk_destroy_sock(req);
@@ -153,7 +153,7 @@ public class TcpHandshaker {
                     pkt.release();
                 }
             }
-        }).channel().closeFuture().addListener(req.childCloseListener);
+        });
 
         af_ops.addToHalfQueue(parent, req);
 
