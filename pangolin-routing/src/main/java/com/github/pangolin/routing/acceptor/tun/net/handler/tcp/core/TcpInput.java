@@ -1709,7 +1709,7 @@ public class TcpInput {
                     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
                         // FIXME RESET
                         log.info(logFormat("[TCP] [STATE]", pkt, "Connection aborted: {}"), cause.getMessage(), cause);
-                        demultiplexer.send_reset(net, sk.rawIpHeader, -1);
+                        output.tcp_send_active_reset(net, sk, cause.getMessage());
                         demultiplexer.tcp_done(sk);
                         if (ctx.channel().isOpen()) {
                             ctx.channel().close();

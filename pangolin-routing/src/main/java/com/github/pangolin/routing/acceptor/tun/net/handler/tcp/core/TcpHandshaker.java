@@ -117,6 +117,7 @@ public class TcpHandshaker {
                 // af_ops.send_synack(net, parent, req, pkt);
                 // FIXME RESET set reset.
                 rsk_ops.send_reset(net, parent, pkt, -100);
+                // output.tcp_send_active_reset(net, req, "Abort");
                 // FIXME clean queue
                 demultiplexer.inet_csk_destroy_sock(req);
             }

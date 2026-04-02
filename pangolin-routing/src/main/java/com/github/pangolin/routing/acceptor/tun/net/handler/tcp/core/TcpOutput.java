@@ -1118,8 +1118,7 @@ public class TcpOutput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3640">tcp_send_active_reset</a>
      */
-    void tcp_send_active_reset(final Channel net, final TcpSock tp, final String reason) {
-        //
+    public void tcp_send_active_reset(final Channel net, final TcpSock tp, final String reason) {
         TcpBuffer skb = tcp_init_nondata_skb(tp, tcp_acceptable_seq(tp), TcpConstants.ACK | TcpConstants.RST);
         tcp_mstamp_refresh(tp);
 
