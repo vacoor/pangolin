@@ -112,19 +112,23 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         }
 
         if (TcpState.TCP_NEW_SYN_RECV.equals(sk.state())) {
+            final tcp_request_sock request = (tcp_request_sock) sk;
+
+            final TcpSock nsk = tcp_check_req(net, (TcpSock) request.skc_listener, pkt, request);
+            if (nsk == null) {
+                // RST or SYN retransmit handled inside tcp_check_req — drop packet
+                return;
+            }
+
             if (log.isDebugEnabled()) {
                 log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 3/3: ACK"));
             }
 
-            final tcp_request_sock request = (tcp_request_sock) sk;
-
-            // Cancel SYN-ACK retransmission timer — three-way handshake is completing
+            // Cancel SYN-ACK retransmission timer only after handshake is confirmed valid
             if (request.rsk_timer != null) {
                 timer.sk_stop_timer(request.rsk_timer);
                 request.rsk_timer = null;
             }
-
-            final TcpSock nsk = tcp_check_req(net, (TcpSock) request.skc_listener, pkt, request);
 
             nsk.state(TcpState.TCP_SYN_RECV);
             moveToEstablished(request, nsk);

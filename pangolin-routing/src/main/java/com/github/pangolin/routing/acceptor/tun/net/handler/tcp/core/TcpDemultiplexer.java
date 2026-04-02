@@ -118,9 +118,40 @@ public abstract class TcpDemultiplexer {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1742">tcp_v4_syn_recv_sock</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L518">tcp_create_openreq_child</a> <==
      */
-    public TcpSock tcp_check_req(final Channel net, TcpSock listenSock, TcpPacketBuf pkt, tcp_request_sock request) {
-        TcpSock nsk = listenSock.icsk_af_ops.syn_recv_sock(net, listenSock, pkt, request);
-        return nsk;
+    public TcpSock tcp_check_req(final Channel net, TcpSock listenSock, TcpPacketBuf pkt, tcp_request_sock req) {
+        // Step 1: RST — validate seq, then clean up the half-open connection
+        if (pkt.isRst()) {
+            if (pkt.tcpSeq() == req.rcv_nxt) {
+                inet_csk_destroy_sock(req);
+            }
+            // out-of-window RST: drop silently
+            return null;
+        }
+
+        // Step 2: SYN retransmit — only retransmit SYN-ACK if it was already sent
+        // (rsk_timer != null means scheduleReqskTimer fired after a successful SYN-ACK write)
+        // If backend is still connecting, SYN-ACK has not been sent yet — drop silently
+        if (pkt.isSyn()) {
+            if (pkt.tcpSeq() == req.rcv_isn && req.rsk_timer != null) {
+                inet_rtx_syn_ack(net, listenSock, req);
+                req.num_retrans++;
+            }
+            return null;
+        }
+
+        // Step 3: Only ACK can complete the handshake
+        if (!pkt.isAck()) {
+            return null;
+        }
+
+        // Step 4: ACK number must acknowledge exactly our SYN-ACK (snt_isn + 1)
+        if (pkt.tcpAckNum() != req.snt_isn + 1) {
+            send_reset(net, pkt, -1);
+            return null;
+        }
+
+        // Step 5: All checks passed — create the child socket
+        return listenSock.icsk_af_ops.syn_recv_sock(net, listenSock, pkt, req);
     }
 
 
