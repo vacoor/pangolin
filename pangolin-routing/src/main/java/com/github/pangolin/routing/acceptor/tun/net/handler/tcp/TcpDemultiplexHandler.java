@@ -42,6 +42,7 @@ public abstract class TcpDemultiplexHandler extends IpPacketHandler<TcpPacketBuf
             final TcpPacketBuf pkt = prepare(rawPkt);
             demultiplexer.tcp_rcv(ctx.channel(), pkt);
         } catch (final Exception ex) {
+            // FIXME RESET nosocket ?
             log.error("Failed to process TCP packet", ex);
             demultiplexer.send_reset(ctx.channel(), rawPkt, -77);
         }

@@ -1707,16 +1707,13 @@ public class TcpInput {
 
                     @Override
                     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
+                        // FIXME RESET
                         log.info(logFormat("[TCP] [STATE]", pkt, "Connection aborted: {}"), cause.getMessage(), cause);
                         demultiplexer.send_reset(net, sk.rawIpHeader, -1);
                         demultiplexer.tcp_done(sk);
-//                        try {
                         if (ctx.channel().isOpen()) {
                             ctx.channel().close();
                         }
-//                        } finally {
-//                            demultiplexer.tcp_done(sk);
-//                        }
                     }
                 });
 
@@ -1768,7 +1765,7 @@ public class TcpInput {
                      */
                     final tcp_request_sock tcpRequestSock = sk.icsk_af_ops.conn_request(net, sk, pkt);
                     if (null == tcpRequestSock) {
-                        log.warn(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection reset: Reject SYN request"));
+                        log.warn(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection reset: REJECTED SYN request"));
                         return TcpDropReason.SKB_DROP_REASON_NO_SOCKET;
                     }
 

@@ -122,6 +122,10 @@ public abstract class IpPacketBuf {
         return buf;
     }
 
+    public void retain() {
+        buf.retain();
+    }
+
     public void release() {
         buf.release();
     }

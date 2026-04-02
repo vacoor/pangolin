@@ -6,11 +6,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.EventLoop;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.Inet4Address;
@@ -94,8 +90,20 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
     private void tcp_v4_rcv(final Channel net, final TcpPacketBuf pkt) {
         SockCommon sk = __inet_lookup_skb(pkt);
         if (null == sk) {
-            log.warn(logFormat("[TCP] [RCV]", pkt, "NO_TCP_SOCKET(-3)"));
-            send_reset(net, pkt, -3);
+            if (!pkt.isRst()) {
+                log.warn(logFormat("[TCP] [RCV]", pkt, "NO_TCP_SOCKET(-3)"));
+                /*-
+                 * FIXME RESET
+                 * If the ACK bit is off, sequence number zero is used,
+                 *   <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>
+                 * If the ACK bit is on,
+                 *   <SEQ=SEG.ACK><CTL=RST>
+                 *
+                 * @see https://www.rfc-editor.org/rfc/rfc793.txt
+                 * @see https://www.rfc-editor.org/rfc/rfc9293.txt
+                 */
+                send_reset(net, pkt, -3);
+            }
             return;
         }
 
@@ -130,28 +138,19 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         final TcpSock sockToUse = (TcpSock) sk;
         final Channel childChannel = innerChannel(sk);
         if (null != childChannel && childChannel.isRegistered()) {
-            try {
-                EventLoop loop = childChannel.eventLoop();
-                if (loop.inEventLoop()) {
-                    tcp_v4_do_rcv(net, sockToUse, pkt);
-                } else {
-                    // 否则提交到 event loop 中执行，并同步处理可能的异常
-                    loop.execute(() -> {
-                        try {
-                            tcp_v4_do_rcv(net, sockToUse, pkt);
-                        } catch (Throwable t) {
-                            log.error("Failed to process TCP packet in event loop", t);
-                            if (!TcpState.TCP_LISTEN.equals(sockToUse.state())) {
-                                inet_csk_destroy_sock(sockToUse);
-                            }
-                        }
-                    });
-                }
-            } catch (IllegalStateException e) {
-                // 通道未正确初始化或已关闭，发送 RST
-                log.error(logFormat("[TCP] [RCV]", pkt, "Channel is not properly initialized or closed"), e);
-                tcp_v4_send_reset(net, pkt, -102);
-                inet_csk_destroy_sock(sockToUse);
+            EventLoop loop = childChannel.eventLoop();
+            if (loop.inEventLoop()) {
+                tcp_v4_do_rcv(net, sockToUse, pkt);
+            } else {
+                // 否则提交到 event loop 中执行，并同步处理可能的异常
+                pkt.retain();
+                loop.execute(() -> {
+                    try {
+                        tcp_v4_do_rcv(net, sockToUse, pkt);
+                    } finally {
+                        pkt.release();
+                    }
+                });
             }
         } else {
             tcp_v4_do_rcv(net, sockToUse, pkt);
@@ -172,6 +171,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         try {
             int err = input.tcp_rcv_state_process(net, sock, pkt);
             if (0 != err) {
+                // FIXME RESET
                 tcp_v4_send_reset(net, pkt, err);
                 if (!TcpState.TCP_LISTEN.equals(sock.state())) {
                     inet_csk_destroy_sock(sock);
@@ -191,25 +191,35 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L740
-    static void tcp_v4_send_reset(final Channel net, final TcpPacketBuf pkt, int err) {
+    static void tcp_v4_send_reset(final Channel net, final TcpPacketBuf seg, int err) {
+        // FIXME RESET
         log.info("SEND-RST: {}", err);
 
         final TcpBuffer rst = new TcpBuffer().rst(true);
         /*-
          * Swap the send and the receive.
          */
-        rst.srcPort(pkt.tcpDstPort());
-        rst.dstPort(pkt.tcpSrcPort());
+        rst.srcPort(seg.tcpDstPort());
+        rst.dstPort(seg.tcpSrcPort());
 
-        if (pkt.isAck()) {
-            rst.sequenceNumber(pkt.tcpAckNum());
+        /*-
+         * If the ACK bit is off, sequence number zero is used,
+         *   <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>
+         * If the ACK bit is on,
+         *   <SEQ=SEG.ACK><CTL=RST>
+         *
+         * @see https://www.rfc-editor.org/rfc/rfc793.txt
+         * @see https://www.rfc-editor.org/rfc/rfc9293.txt
+         */
+        if (seg.isAck()) {
+            rst.sequenceNumber(seg.tcpAckNum());
         } else {
             rst.sequenceNumber(0);
             rst.ack(true);
-            rst.acknowledgmentNumber(determineEndSeq(pkt));
+            rst.acknowledgmentNumber(determineEndSeq(seg));
         }
 
-        sendRaw(net, rst, pkt.dstAddr(), pkt.srcAddr());
+        sendRaw(net, rst, seg.dstAddr(), seg.srcAddr());
     }
 
     /**
@@ -259,21 +269,27 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         skb.srcPort(req.ir_num);
         skb.dstPort(req.ir_rmt_port);
 
-        log.info(logFormat("[TCP] [HANDSHAKE]", syn, "SYNACK send starting..."));
+        syn.retain();
+        log.info(logFormat("[TCP] [HANDSHAKE]", req.ir_loc_addr, req.ir_num, req.ir_rmt_addr, req.ir_rmt_port, "SYNACK send starting..."));
         net.writeAndFlush(buildIp4Packet(skb, (Inet4Address) req.ir_loc_addr, (Inet4Address) req.ir_rmt_addr))
                 .addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(ChannelFuture future) throws Exception {
-                        if (future.isSuccess()) {
-                            log.info(logFormat("[TCP] [HANDSHAKE]", syn, "SYNACK send successful"));
-                            // Start SYN-ACK retransmission timer only after the initial send succeeds.
-                            // Deferring to here (instead of reqsk_queue_hash_req) because backend
-                            // connection is async: SYN-ACK is not sent until after backend connects.
-                            timer.scheduleReqskTimer(net, listenSock, req);
-                        } else {
-                            log.warn(logFormat("[TCP] [HANDSHAKE]", syn, "SYNACK send failed, sending RST and dropping half-open connection"));
-                            tcp_v4_send_reset(net, syn, -99);
-                            inet_csk_destroy_sock(req);
+                        try {
+                            if (future.isSuccess()) {
+                                log.info(logFormat("[TCP] [HANDSHAKE]", req.ir_loc_addr, req.ir_num, req.ir_rmt_addr, req.ir_rmt_port, "SYNACK send successful"));
+                                // Start SYN-ACK retransmission timer only after the initial send succeeds.
+                                // Deferring to here (instead of reqsk_queue_hash_req) because backend
+                                // connection is async: SYN-ACK is not sent until after backend connects.
+                                timer.scheduleReqskTimer(net, listenSock, req);
+                            } else {
+                                log.warn(logFormat("[TCP] [HANDSHAKE]", req.ir_loc_addr, req.ir_num, req.ir_rmt_addr, req.ir_rmt_port, "SYNACK send failed, sending RST and dropping half-open connection"));
+                                // FIXME RESET
+                                tcp_v4_send_reset(net, syn, -99);
+                                inet_csk_destroy_sock(req);
+                            }
+                        } finally {
+                            syn.release();
                         }
                     }
                 });

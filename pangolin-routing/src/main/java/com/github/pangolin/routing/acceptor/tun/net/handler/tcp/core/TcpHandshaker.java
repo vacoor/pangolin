@@ -115,7 +115,7 @@ public class TcpHandshaker {
                 log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 3/3: ABORT"));
 
                 // af_ops.send_synack(net, parent, req, pkt);
-                // FIXME set reset.
+                // FIXME RESET set reset.
                 rsk_ops.send_reset(net, parent, pkt, -100);
                 // FIXME clean queue
                 demultiplexer.inet_csk_destroy_sock(req);
@@ -123,41 +123,33 @@ public class TcpHandshaker {
         };
 
 
+        pkt.retain();
         log.info(logFormat("[TCP] [STATE]", pkt, "ESTABLISHING connection to {}:{}"), resolved.getHostString(), resolved.getPort());
         req.child = socketChannelFactory.open(resolved, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
-            private final AtomicBoolean initialized = new AtomicBoolean(false);
-
-            @Override
-            public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
-                try {
-                    if (initialized.compareAndSet(false, true)) {
-//                        log.info(logFormat(pkt, "Connection ESTABLISHED to {}"), resolved.getHostString());
-                    }
-                    ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
-                } finally {
-                    ReferenceCountUtil.release(msg);
-                }
-            }
         }).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
-                if (future.isSuccess()) {
-                    log.debug(logFormat("[TCP] [STATE]", pkt, "Connection ESTABLISHED to {}:{}"), resolved.getHostString(), resolved.getPort());
+                try {
+                    if (future.isSuccess()) {
+                        log.debug(logFormat("[TCP] [STATE]", pkt, "Connection ESTABLISHED to {}:{}"), resolved.getHostString(), resolved.getPort());
 
-                    log.debug(logFormat(
-                            "[TCP] [HANDSHAKE]",
-                            pkt.dstAddr(), pkt.tcpDstPort(),
-                            pkt.srcAddr(), pkt.tcpSrcPort(),
-                            "Connection handshake 2/3: SYN-ACK"
-                    ));
-                    af_ops.send_synack(net, parent, req, pkt);
-                } else {
-                    log.info(logFormat("[TCP] [STATE]", pkt, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
-                    rsk_ops.send_reset(net, parent, pkt, -88);
-                    // FIXME clean queue
-                    demultiplexer.inet_csk_destroy_sock(req);
+                        log.debug(logFormat(
+                                "[TCP] [HANDSHAKE]",
+                                pkt.dstAddr(), pkt.tcpDstPort(),
+                                pkt.srcAddr(), pkt.tcpSrcPort(),
+                                "Connection handshake 2/3: SYN-ACK"
+                        ));
+                        af_ops.send_synack(net, parent, req, pkt);
+                    } else {
+                        // FIXME RESET
+                        log.info(logFormat("[TCP] [STATE]", pkt, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
+                        rsk_ops.send_reset(net, parent, pkt, -88);
+                        // FIXME clean queue
+                        demultiplexer.inet_csk_destroy_sock(req);
+                    }
+                } finally {
+                    pkt.release();
                 }
-
             }
         }).channel().closeFuture().addListener(req.childCloseListener);
 
