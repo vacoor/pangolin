@@ -17,7 +17,7 @@
 | 6 | **SYN-SENT** | 任何非RST段，且 **`ACK=0`** (如SYN)，但连接条件不满足需拒绝 *(注：RFC 793 中的安全级别/优先级触发已在 RFC 9293 中移除)* | `<SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>` | 1 | 1 | 0 | `SEG.SEQ + SEG.LEN` | 3.10.7.3 节。SYN-SENT 状态，响应不带 ACK 的段，必须设置 ACK 位。 |
 | 7 | **SYN-RECEIVED** | 任何非RST段，其 `ACK` 字段确认了尚未发送的数据 (不可接受 ACK)。(通常指对端ACK号未确认本端的SYN) | `<SEQ=SEG.ACK><CTL=RST>` | 1 | 0 | `SEG.ACK` | (无) | 3.10.4 节。接收段有 ACK 字段，遵循对称性原则：不设置 ACK 位，序列号为 SEG.ACK。RFC 9293 与 RFC 793 均有相同明文规定。 |
 | 8 | **所有同步状态**<br>(ESTABLISHED, FIN-WAIT-1, CLOSE-WAIT, CLOSING, LAST-ACK, TIME-WAIT) | 任何需要发送 RST 的非法段 (如在已建立连接中收到 SYN)。*(注：RFC 793 中基于安全级别不匹配的触发已在 RFC 9293 中移除)* | 如果接收段 **`ACK=1`**：`<SEQ=SEG.ACK><CTL=RST>`<br>如果接收段 **`ACK=0`**：`<SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>` | 1 | **同左**<br>ACK=1: 0<br>ACK=0: 1 | ACK=1: `SEG.ACK`<br>ACK=0: 0 | ACK=0 时: `SEG.SEQ+SEG.LEN` | 3.10.7.1 节与 3.10.7.3 节。同步状态下，RST 必须遵守与 CLOSED/LISTEN 状态相同的“对称性”规则。**这修正了 RFC 793 中同步状态 RST 可能不带 ACK 的模糊描述**。 |
-| 9 | **所有状态** | 用户主动中止连接 (ABORT) | `<SEQ=SND.NXT><CTL=RST>` | 1 | 0 | `SND.NXT` | (无) | 3.10.7.5 节。这是唯一明确由本地主动发起、且不设置 ACK 位的 RST。 |
+| 9 | **所有状态** | 用户主动中止连接 (ABORT) | `<SEQ=SND.NXT><CTL=RST>` | 1 | 0 | `SND.NXT` | (无) | 3.10.7.5 节。RFC 规定不设置 ACK 位。**⚠️ 注意：Linux 内核 `tcp_send_active_reset`（`tcp_output.c`）实际使用 `TCPHDR_ACK \| TCPHDR_RST`，即 ACK=1，与 RFC 存在有意偏差**——内核加 ACK 位是为了让对端看到确认号，实践中被所有 TCP 实现接受。 |
 
 ## RFC 9293 核心更新与澄清 (与 RFC 793 的主要差异)
 
