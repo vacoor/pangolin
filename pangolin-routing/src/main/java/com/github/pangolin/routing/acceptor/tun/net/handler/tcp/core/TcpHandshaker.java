@@ -142,6 +142,7 @@ public class TcpHandshaker {
                         ));
                         af_ops.send_synack(net, parent, req, pkt);
                     } else {
+                        // FIXME conflict and child close listener send two RESET.
                         // FIXME RESET
                         log.info(logFormat("[TCP] [STATE]", pkt, "Unable to connect to {}:{}"), resolved.getHostString(), resolved.getPort());
                         rsk_ops.send_reset(net, parent, pkt, -88);
