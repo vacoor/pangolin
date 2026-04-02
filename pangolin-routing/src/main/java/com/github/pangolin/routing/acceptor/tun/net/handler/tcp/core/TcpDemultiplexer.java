@@ -373,9 +373,9 @@ public abstract class TcpDemultiplexer {
 //        if (!sock.child.isDone()) {
 //            throw new IllegalStateException("child channel future is not done yet");
 //        }
-        if (sock.child.cause() != null) {
-            throw new RuntimeException("child channel future failed", sock.child.cause());
-        }
+//        if (sock.child.cause() != null) {
+//            throw new RuntimeException("child channel future failed", sock.child.cause());
+//        }
         return sock.child.channel();
     }
 
