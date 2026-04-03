@@ -62,7 +62,7 @@ public class TcpHandshaker {
 
         tcp_parse_options(parent, tmp_opt, pkt, false);
 
-        tmp_opt.tstamp_ok = tmp_opt.saw_tstmap != 0;
+        tmp_opt.tstamp_ok = SysctlOptions.ipv4_sysctl_tcp_timestamps && tmp_opt.saw_tstmap != 0;
         tcp_openreq_init(req, tmp_opt, pkt);
 
         // dst = af_ops->route_req(sk, skb, &fl, req, isn)
@@ -242,6 +242,8 @@ public class TcpHandshaker {
         req.mss = rx_opt.mss_clamp;
         req.snd_wscale = rx_opt.snd_wscale;
         req.wscale_ok = rx_opt.wscale_ok;
+        req.tstamp_ok = rx_opt.tstamp_ok;
+        req.ts_recent = rx_opt.rcv_tsval;
 
         req.ir_rmt_port = pkt.tcpSrcPort();
         req.ir_num = pkt.tcpDstPort();
@@ -301,6 +303,14 @@ public class TcpHandshaker {
             if (wscale >= 0) {
                 opt_rx.wscale_ok = true;
                 opt_rx.snd_wscale = (byte) Math.min(wscale, TCP_MAX_WSCALE);
+            }
+        }
+        if (SysctlOptions.ipv4_sysctl_tcp_timestamps) {
+            final long[] ts = TcpOptionCodec.parseTimestamp(opts);
+            if (ts != null) {
+                opt_rx.saw_tstmap = 1;
+                opt_rx.rcv_tsval = ts[0];
+                opt_rx.rcv_tsecr = ts[1];
             }
         }
     }

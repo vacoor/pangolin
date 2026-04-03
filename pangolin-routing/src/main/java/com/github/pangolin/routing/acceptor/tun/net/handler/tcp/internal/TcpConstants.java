@@ -84,4 +84,25 @@ public interface TcpConstants {
     byte TCP_MAX_WSCALE = 14;
     int RTAX_WINDOW = 1;
     int RTAX_INITRWND = 2;
+
+    /**
+     * PAWS: 24 days in seconds. ts_recent older than this is considered stale and PAWS is skipped.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L405">TCP_PAWS_24DAYS</a>
+     */
+    int TCP_PAWS_24DAYS = 60 * 60 * 24 * 24;
+
+    /**
+     * PAWS: minimum time in seconds to hold ts_recent (MSL).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L406">TCP_PAWS_MSL</a>
+     */
+    int TCP_PAWS_MSL = 60;
+
+    /**
+     * PAWS: tolerance window in jiffies — timestamps within this window are accepted.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L407">TCP_PAWS_WINDOW</a>
+     */
+    int TCP_PAWS_WINDOW = 1;
 }

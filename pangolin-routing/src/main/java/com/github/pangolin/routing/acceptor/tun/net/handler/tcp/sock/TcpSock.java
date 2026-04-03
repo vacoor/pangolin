@@ -76,6 +76,12 @@ public class TcpSock extends inet_connection_sock {
     public int tcp_header_len;
     // TSval values in usec (使用微妙还是毫秒)
     public int tcp_usec_ts;
+    /**
+     * Offset added to the local clock when building TSval (RFC 7323 §5.4 — conceals real uptime).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L226">tcp_sock.tsoffset</a>
+     */
+    public long tsoffset;
     public int copied_seq;
     /*-
      * timestamp of last received ACK (for keepalives).

@@ -5,6 +5,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
@@ -45,8 +46,14 @@ public class TcpInput {
      */
     private static final int FLAG_WIN_UPDATE = 0x02;
 
+    /* "" "" some of which was acked.	*/
+    private static final int FLAG_DATA_ACKED = 0x04;
+
     /* "" "" some of which was retransmitted.	*/
     private static final int FLAG_RETRANS_DATA_ACKED = 0x08;
+
+    /* SYN acked */
+    private static final int FLAG_SYN_ACKED = 0x10;
 
     /**
      * Do not skip RFC checks for window update.
@@ -301,6 +308,65 @@ public class TcpInput {
         }
     }
 
+    // ---- RFC 7323 Timestamp / PAWS helpers -----------------------------------------------
+
+    /**
+     * Store the current rcv_tsval as the new ts_recent baseline.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L410">tcp_store_ts_recent</a>
+     */
+    private static void tcp_store_ts_recent(TcpSock tp) {
+        tp.rx_opt.ts_recent = tp.rx_opt.rcv_tsval;
+        tp.rx_opt.ts_recent_stamp = (int) (System.currentTimeMillis() / 1000);
+    }
+
+    /**
+     * Low-level PAWS check: returns true (accept) when the received TSval is within the window
+     * or ts_recent is too old to be trusted.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L416">tcp_paws_check</a>
+     */
+    private static boolean tcp_paws_check(tcp_options_received rx_opt, int paws_win) {
+        // Accept if ts_recent - rcv_tsval <= paws_win (signed 32-bit comparison)
+        if ((int) (rx_opt.ts_recent - rx_opt.rcv_tsval) <= paws_win) {
+            return true;
+        }
+        // Accept if ts_recent is stale (older than 24 days)
+        long age = (System.currentTimeMillis() / 1000) - (rx_opt.ts_recent_stamp & 0xFFFFFFFFL);
+        if (age >= TCP_PAWS_24DAYS) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if the segment should be discarded per PAWS.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L939">tcp_paws_discard</a>
+     */
+    private static boolean tcp_paws_discard(TcpSock tp) {
+        if (!tcp_paws_check(tp.rx_opt, TCP_PAWS_WINDOW)) {
+            return true;  // ts_recent too new: reject
+        }
+        return false;
+    }
+
+    /**
+     * Called after we are sure the packet is in-window: update ts_recent if appropriate.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L944">tcp_replace_ts_recent</a>
+     */
+    private static void tcp_replace_ts_recent(TcpSock tp, int seq) {
+        if (tp.rx_opt.saw_tstmap != 0 && !after(seq, tp.rcv_wup)) {
+            // PAWS bug workaround: only update for data segments (or ACKs in window)
+            if (tcp_paws_check(tp.rx_opt, 0)) {
+                tcp_store_ts_recent(tp);
+            }
+        }
+    }
+
+    // ---- end RFC 7323 helpers -------------------------------------------------------------
+
     /**
      * Called to compute a smoothed rtt estimate. The data fed to this
      * routine either comes from timestamps, or from segments that were
@@ -450,10 +516,30 @@ public class TcpInput {
         // minmax_running_min(rtt_min, wlen, tcp_jiffies32(), 0 != rtt_us ? rtt_us : jiffies_to_usecs(1));
     }
 
+    /**
+     * Compute RTT in microseconds from the echoed Timestamp (TSecr).
+     * <p>
+     * delta = now - TSecr (unsigned 32-bit wrap-safe subtraction).
+     * If the socket uses microsecond timestamps, delta is already in µs;
+     * otherwise delta is in milliseconds and is converted to µs.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3185">tcp_rtt_tsopt_us</a>
+     */
+    private static long tcp_rtt_tsopt_us(final TcpSock tp) {
+        long now = tp.tcp_usec_ts > 0 ? tcp_clock_us() : tcp_clock_ms();
+        // unsigned 32-bit delta (handles wraparound)
+        long delta = (now - tp.rx_opt.rcv_tsecr) & 0xFFFFFFFFL;
+        if (tp.tcp_usec_ts > 0) {
+            return delta;                   // already in microseconds
+        }
+        // delta is in ms → convert to µs; cap at U32_MAX to stay sane
+        return Math.min(delta * 1_000L, 0xFFFFFFFFL);
+    }
+
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3202
     private boolean tcp_ack_update_rtt(final TcpSock sk,
                                        final int flag, long seq_rtt_us,
-                                       final long sack_rtt_us, final long ca_rtt_us/*,
+                                       final long sack_rtt_us, long ca_rtt_us/*,
                                        struct rate_sample *rs*/) {
 
         /* Prefer RTT measured from ACK's timing to TS-ECR. This is because
@@ -471,8 +557,11 @@ public class TcpInput {
          * left edge of the send window.
          * See draft-ietf-tcplw-high-performance-00, section 3.3.
          */
-//        if (seq_rtt_us < 0 && tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr && flag & FLAG_ACKED)
-//            seq_rtt_us = ca_rtt_us = tcp_rtt_tsopt_us(tp);
+        if (seq_rtt_us < 0 && sk.rx_opt.saw_tstmap != 0
+                && sk.rx_opt.rcv_tsecr != 0
+                && 0 != (flag & (FLAG_DATA_ACKED | FLAG_SYN_ACKED))) {
+            seq_rtt_us = ca_rtt_us = tcp_rtt_tsopt_us(sk);
+        }
 
         // rs->rtt_us = ca_rtt_us; /* RTT of last (S)ACKed packet (or -1) */
         if (seq_rtt_us < 0) {
@@ -583,14 +672,11 @@ public class TcpInput {
 
             tp.packets_out -= acked_pcount;
 
-            /*
-            if (!th.getSyn()) {
+            if (!skb.syn()) {
                 flag |= FLAG_DATA_ACKED;
             } else {
                 flag |= FLAG_SYN_ACKED;
-                retrans_stamp = 0;
             }
-            */
 
 
             tp.tcp_rtx_queue.remove(skb);
@@ -863,7 +949,7 @@ public class TcpInput {
          * is in window.
          */
         if (0 != (flag & FLAG_UPDATE_TS_RECENT)) {
-//            flag |= tcp_replace_ts_recent(tp, tcpHdr.getSequenceNumber());
+            tcp_replace_ts_recent(tp, pkt.tcpSeq());
         }
 
         if ((flag & (FLAG_SLOWPATH | FLAG_SND_UNA_ADVANCED)) == FLAG_SND_UNA_ADVANCED) {
@@ -1492,6 +1578,19 @@ public class TcpInput {
         final int ack = pkt.tcpAckNum();
 
         int reason = 0; //tcp_disordered_ack_check(tp, skb);
+
+        /* PAWS check (RFC 7323 §5.1): discard if timestamps don't match expectations. */
+        if (tp.rx_opt.ts_recent_stamp != 0 && tp.rx_opt.saw_tstmap != 0
+                && tcp_paws_discard(tp)) {
+            if (!pkt.isRst()) {
+                tcp_send_dupack(net, tp, pkt);
+                reason = SKB_DROP_REASON_TCP_RFC7323_PAWS_ACK;
+                tcp_drop_reason(tp, reason);
+                return false;
+            }
+            // RST is accepted even if it did not pass PAWS
+        }
+
         if (0 == reason) {
             // goto step1;
         }
@@ -1789,6 +1888,19 @@ public class TcpInput {
          */
         tcp_mstamp_refresh(sk);
         sk.rx_opt.saw_tstmap = 0;
+
+        // Parse Timestamp option from incoming packet (RFC 7323)
+        if (sk.rx_opt.tstamp_ok) {
+            final ByteBuf opts = pkt.tcpOptionsSlice();
+            if (opts != null) {
+                final long[] ts = TcpOptionCodec.parseTimestamp(opts);
+                if (ts != null) {
+                    sk.rx_opt.saw_tstmap = 1;
+                    sk.rx_opt.rcv_tsval = ts[0];
+                    sk.rx_opt.rcv_tsecr = ts[1];
+                }
+            }
+        }
 
         /*-
          * XXX ... fastopen_request_socket ...

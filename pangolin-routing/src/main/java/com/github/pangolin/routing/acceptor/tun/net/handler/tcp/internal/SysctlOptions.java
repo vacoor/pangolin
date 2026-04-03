@@ -37,4 +37,22 @@ public class SysctlOptions {
    */
   public static boolean sysctl_tcp_ofo_enabled = true;
 
+  /**
+   * Enable TCP Timestamps (RFC 7323).
+   * When true, the server will negotiate Timestamps in SYN-ACK if the client advertised TSopt.
+   *
+   * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7214">tcp_conn_request</a>
+   * @see <a href="https://www.kernel.org/doc/html/latest/networking/ip-sysctl.html#tcp-timestamps">net.ipv4.tcp_timestamps</a>
+   */
+  public static boolean ipv4_sysctl_tcp_timestamps = true;
+
+  /**
+   * Allow reuse of TIME-WAIT sockets for new connections when safe from the protocol's view.
+   * Requires TCP Timestamps to be enabled.
+   * 0 = disabled (default), 1 = enabled for loopback, 2 = enabled for all.
+   *
+   * @see <a href="https://www.kernel.org/doc/html/latest/networking/ip-sysctl.html#tcp-tw-reuse">net.ipv4.tcp_tw_reuse</a>
+   */
+  public static int ipv4_sysctl_tcp_tw_reuse = 0;
+
 }
