@@ -13,7 +13,6 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpC
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/sock.h#L150">struct sock_common</a>
  */
 public class SockCommon {
-    public TcpPacketBuf rawIpHeader;
 
     /**
      * Foreign IPv4 addr.

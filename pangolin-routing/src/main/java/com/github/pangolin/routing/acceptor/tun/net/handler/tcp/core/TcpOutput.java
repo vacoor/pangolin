@@ -389,7 +389,7 @@ public class TcpOutput {
 
 
         // tp.icsk_af_ops.send_check();
-        Tcp4Demultiplexer._INDIRECT_CALL_INET(net, tp, tp.rawIpHeader, skb);
+        Tcp4Demultiplexer._INDIRECT_CALL_INET(net, tp, skb);
         // tp.INDIRECT_CALL_INET.accept(skb);
 
         if (skb.ack()) {

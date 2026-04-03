@@ -325,8 +325,8 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         return newsk;
     }
 
-    protected static void _INDIRECT_CALL_INET(Channel net, TcpSock tp, final TcpPacketBuf pkt, final TcpBuffer skb) {
-        log.trace(logify(pkt, tp.rx_opt.snd_wscale));
+    protected static void _INDIRECT_CALL_INET(Channel net, TcpSock tp, final TcpBuffer skb) {
+//        log.trace(logify(pkt, tp.rx_opt.snd_wscale));
         sendRaw(net, skb, tp.ir_loc_addr, tp.ir_rmt_addr);
     }
 

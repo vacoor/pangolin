@@ -44,7 +44,7 @@ public class TcpHandshaker {
          * 这里创建的 request_sock 状态是 TCP_NEW_SYN_RECV.
          * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L950">inet_reqsk_alloc</a>
          */
-        tcp_request_sock req = inet_reqsk_alloc(pkt, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, parent, true);
+        tcp_request_sock req = inet_reqsk_alloc(dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, parent, true);
         if (null == req) {
             return null;
         }
@@ -196,13 +196,13 @@ public class TcpHandshaker {
     /**
      * https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L891.
      */
-    private static tcp_request_sock inet_reqsk_alloc(TcpPacketBuf pkt,
+    private static tcp_request_sock inet_reqsk_alloc(
                                                      DnsEngine dnsEngine,
                                                      SocketChannelFactory socketChannelFactory,
                                                      int connTimeoutMs, EventLoopGroup childGroup,
                                                      TcpSock skListener,
                                                      boolean attachListener) {
-        tcp_request_sock req = reqsk_alloc(pkt, dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, skListener, attachListener);
+        tcp_request_sock req = reqsk_alloc(dnsEngine, socketChannelFactory, connTimeoutMs, childGroup, skListener, attachListener);
         if (null != req) {
             req.state(TCP_NEW_SYN_RECV);
             req.timeout = TCP_TIMEOUT_INIT;
@@ -211,7 +211,7 @@ public class TcpHandshaker {
         return req;
     }
 
-    private static tcp_request_sock reqsk_alloc(TcpPacketBuf pkt,
+    private static tcp_request_sock reqsk_alloc(
                                                 DnsEngine dnsEngine,
                                                 SocketChannelFactory socketChannelFactory,
                                                 int connTimeoutMs, EventLoopGroup childGroup, TcpSock skListener,
@@ -219,7 +219,6 @@ public class TcpHandshaker {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L891
 
         final tcp_request_sock req = new tcp_request_sock();
-        req.rawIpHeader = pkt;
         req.skc_listener = null;
         if (attachListener) {
             req.skc_listener = skListener;

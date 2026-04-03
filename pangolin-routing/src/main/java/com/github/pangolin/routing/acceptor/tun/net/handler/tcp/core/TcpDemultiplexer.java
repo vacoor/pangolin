@@ -250,7 +250,6 @@ public abstract class TcpDemultiplexer {
         newsk.sk_err = 0;
         newsk.sk_err_soft = 0;
 
-        newsk.rawIpHeader = req.rawIpHeader;
         newsk.ir_rmt_addr = req.ir_rmt_addr;
         newsk.ir_loc_addr = req.ir_loc_addr;
 
