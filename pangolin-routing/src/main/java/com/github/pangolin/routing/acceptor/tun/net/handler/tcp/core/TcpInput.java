@@ -498,10 +498,179 @@ public class TcpInput {
 
     // ...
 
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2190
-    public void tcp_enter_loss() {
+    // ---- RFC 5681 Congestion Control ----------------------------------------------------------
 
+    /**
+     * RFC 5681 §3.1 Slow Start:
+     * On each ACK that acknowledges new data, increase cwnd by min(N, SMSS) segments
+     * until cwnd reaches ssthresh.
+     * Returns the number of segments that could not be consumed by slow start
+     * (carry-over into congestion avoidance).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_cong.c#L392">tcp_slow_start</a>
+     */
+    private static int tcp_slow_start(TcpSock tp, int acked) {
+        int cwnd = Math.min(tp.snd_cwnd + acked, tp.snd_ssthresh);
+        acked -= cwnd - tp.snd_cwnd;
+        tp.snd_cwnd = Math.min(cwnd, tp.snd_cwnd_clamp);
+        return acked;
     }
+
+    /**
+     * RFC 5681 §3.1 Congestion Avoidance — Additive Increase.
+     * Approximates cwnd += 1 per RTT using a per-ACK fractional increment stored in
+     * {@code snd_cwnd_cnt} to avoid floating-point arithmetic.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_cong.c#L361">tcp_cong_avoid_ai</a>
+     */
+    private static void tcp_cong_avoid_ai(TcpSock tp, int w, int acked) {
+        if (tp.snd_cwnd_cnt >= w) {
+            tp.snd_cwnd_cnt = 0;
+            if (tp.snd_cwnd < tp.snd_cwnd_clamp) {
+                tp.snd_cwnd++;
+            }
+        }
+        tp.snd_cwnd_cnt += acked;
+        if (tp.snd_cwnd_cnt >= w) {
+            int delta = tp.snd_cwnd_cnt / w;
+            tp.snd_cwnd_cnt -= delta * w;
+            tp.snd_cwnd = Math.min(tp.snd_cwnd + delta, tp.snd_cwnd_clamp);
+        }
+    }
+
+    /**
+     * Congestion-avoidance entry point called after each valid ACK.
+     * Dispatches to slow start while cwnd &lt; ssthresh, then to additive-increase.
+     * Skips update when in Recovery or Loss state (those states manage cwnd directly).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3896">tcp_cong_avoid</a>
+     */
+    private static void tcp_cong_avoid(TcpSock tp, int acked) {
+        if (tp.icsk_ca_state != TCP_CA_Open
+                && tp.icsk_ca_state != TCP_CA_Disorder) {
+            return;
+        }
+        if (tp.snd_cwnd < tp.snd_ssthresh) {
+            acked = tcp_slow_start(tp, acked);
+            if (acked == 0) return;
+        }
+        tcp_cong_avoid_ai(tp, tp.snd_cwnd, acked);
+    }
+
+    /**
+     * RFC 5681 §3.2: Enter Fast Recovery.
+     * Sets ssthresh = max(FlightSize/2, 2), inflates cwnd by 3 (for the 3 dup ACKs
+     * that triggered this), records the recovery point in {@code high_seq}, and
+     * immediately retransmits the oldest unacknowledged segment.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3317">tcp_enter_recovery</a>
+     */
+    private void tcp_enter_fast_recovery(Channel net, TcpSock tp) {
+        // tcp_reno_ssthresh: max(snd_cwnd >> 1, 2) — Linux uses cwnd, not packets_out
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_cong.c#L416
+        tp.snd_ssthresh = Math.max(tp.snd_cwnd >> 1, 2);   // RFC 5681 §3.2 via Reno ssthresh
+        tp.snd_cwnd     = tp.snd_ssthresh + 3;             // inflate for 3 dup ACKs (RFC 5681 §3.2)
+        tp.snd_cwnd_cnt = 0;
+        tp.high_seq     = tp.snd_nxt;
+        tp.icsk_ca_state = TCP_CA_Recovery;
+        log.info("[CWND] Enter FastRecovery: ssthresh={} cwnd={}", tp.snd_ssthresh, tp.snd_cwnd);
+        output.tcp_retransmit_skb(net, tp, tp.tcp_rtx_queue.peek(), 1);
+    }
+
+    /**
+     * RFC 6582 §3 step 4: NewReno partial-ACK processing during Fast Recovery.
+     * A partial ACK advances SND.UNA but does not reach {@code high_seq}.
+     * cwnd is decremented by 1 per partial ACK and the next unacknowledged segment
+     * is retransmitted.  When SND.UNA surpasses {@code high_seq}, recovery completes.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3499">tcp_try_undo_partial</a>
+     */
+    private void tcp_update_cwnd_recovery(Channel net, TcpSock tp) {
+        if (!after(tp.snd_una, tp.high_seq)) {
+            if (tp.snd_cwnd > tp.snd_ssthresh) {
+                tp.snd_cwnd--;
+            }
+            output.tcp_retransmit_skb(net, tp, tp.tcp_rtx_queue.peek(), 1);
+        } else {
+            tcp_exit_fast_recovery(tp);
+        }
+    }
+
+    /**
+     * Exit Fast Recovery: deflate cwnd to ssthresh and return to Open state.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3494">tcp_try_to_open</a>
+     */
+    private void tcp_exit_fast_recovery(TcpSock tp) {
+        tp.snd_cwnd      = tp.snd_ssthresh;
+        tp.icsk_ca_state = TCP_CA_Open;
+        tp.dupacks       = 0;
+        log.info("[CWND] Exit FastRecovery: cwnd={}", tp.snd_cwnd);
+    }
+
+    /**
+     * RFC 5681 §3.2: Duplicate ACK detection and Fast Retransmit trigger.
+     * A duplicate ACK is an ACK that does not advance SND.UNA ({@code FLAG_SND_UNA_ADVANCED}
+     * is clear) and carries no payload ({@code FLAG_DATA} is clear).
+     * After 3 consecutive duplicate ACKs, fast recovery is entered.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3386">tcp_fastretrans_alert</a>
+     */
+    private void tcp_fastretrans_alert(Channel net, TcpSock tp, int flag) {
+        if (tp.icsk_ca_state == TCP_CA_Recovery) {
+            if (0 != (flag & FLAG_SND_UNA_ADVANCED)) {
+                tcp_update_cwnd_recovery(net, tp);
+            }
+            return;
+        }
+
+        // Loss state: dup ACKs must NOT trigger fast recovery entry.
+        // Only exit Loss when snd_una fully passes high_seq (all lost segments ACKed).
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3386
+        if (tp.icsk_ca_state == TCP_CA_Loss) {
+            if (0 != (flag & FLAG_SND_UNA_ADVANCED) && after(tp.snd_una, tp.high_seq)) {
+                tp.icsk_ca_state = TCP_CA_Open;
+                tp.dupacks = 0;
+            }
+            return;
+        }
+
+        boolean is_dupack = 0 == (flag & FLAG_SND_UNA_ADVANCED)
+                         && 0 == (flag & FLAG_DATA);
+        if (is_dupack) {
+            tp.dupacks++;
+            if (tp.dupacks == 3) {
+                tcp_enter_fast_recovery(net, tp);
+            }
+        } else if (0 != (flag & FLAG_SND_UNA_ADVANCED)) {
+            tp.dupacks = 0;
+        }
+    }
+
+    /**
+     * RFC 5681 §3.1: On Retransmission Timeout (RTO expiry), halve ssthresh and
+     * restart slow start from cwnd = 1.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2190">tcp_enter_loss</a>
+     */
+    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2190
+    public void tcp_enter_loss(TcpSock tp) {
+        // tcp_reno_ssthresh: max(snd_cwnd >> 1, 2) — based on cwnd, not packets_out
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_cong.c#L416
+        tp.snd_ssthresh  = Math.max(tp.snd_cwnd >> 1, 2);
+        // Linux sets cwnd = tcp_packets_in_flight() + 1, NOT 1.
+        // This avoids stalling while allowing the retransmit to proceed.
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2229
+        tp.snd_cwnd      = tp.tcp_packets_in_flight() + 1;
+        tp.snd_cwnd_cnt  = 0;
+        tp.snd_cwnd_stamp = tcp_jiffies32();
+        tp.icsk_ca_state = TCP_CA_Loss;
+        tp.high_seq      = tp.snd_nxt;
+        tp.dupacks       = 0;
+        log.info("[CWND] RTO Loss: ssthresh={} cwnd={}", tp.snd_ssthresh, tp.snd_cwnd);
+    }
+
+    // ---- end RFC 5681 Congestion Control -------------------------------------------------------
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3186
     private static void tcp_update_rtt_min(final TcpSock sk, final long rtt_us, final int flag) {
@@ -1024,10 +1193,17 @@ public class TcpInput {
 
 //        if (tp->tlp_high_seq)
 //            tcp_process_tlp_ack(sk, ack, flag);
-        // TODO ...
 
-        // tcp_cong_control();
-        // tcp_xmit_recovery
+        // RFC 5681 §3.2: duplicate-ACK / fast-retransmit / fast-recovery state machine.
+        tcp_fastretrans_alert(net, tp, flag);
+
+        // RFC 5681 §3.1: advance cwnd through slow start or congestion avoidance.
+        if (0 != (flag & FLAG_SND_UNA_ADVANCED)) {
+            int newly_acked = prior_packets_out - tp.packets_out;
+            if (newly_acked > 0) {
+                tcp_cong_avoid(tp, newly_acked);
+            }
+        }
 
         return 1;
     }

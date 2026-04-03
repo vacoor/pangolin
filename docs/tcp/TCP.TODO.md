@@ -2,6 +2,7 @@
 
 > 对标基准：Linux 内核 `net/ipv4/tcp_*.c`（v6.x）+ RFC 9293（TCP 规范）  
 > 分析日期：2026-04-03  
+> 修订日期：2026-04-04（核查修正：拥塞控制 RFC 5681/6582 全部已实现，cwnd 约束已集成；RFC 7323 Timestamp 生成 + PAWS 已完整实现）  
 > 包路径：`com.github.pangolin.routing.acceptor.tun.net.handler.tcp`
 
 ---
@@ -33,7 +34,7 @@
 - ✅ SYN 请求接收与验证，创建半连接 `tcp_request_sock`
 - ✅ ISN 生成（`secureSeq()` 使用 SipHash，对标 Linux `secure_tcp_seq()`）
 - ✅ SYN-ACK 发送，包含 MSS/WScale/SACK-Permitted 选项（`TcpOutput.tcp_synack_options()` → `TcpOptionCodec.writeSynOptions()`）
-- ❌ SYN-ACK 不包含 Timestamp 选项 — `writeTimestampOption()` 存在但未在 `tcp_synack_options()` 中调用
+- ✅ SYN-ACK 携带 Timestamp 选项 — `tcp_synack_options()` 在 `req.tstamp_ok` 时调用 `writeTimestampOption()`（590f393e）
 - ✅ SYN-ACK 超时重传
 - ✅ 第三次 ACK 验证（`req.snt_isn + 1`），升级为完整连接
 - ✅ 半连接队列 `synRegistry` / 全连接队列 `establishedRegistry`
@@ -87,6 +88,7 @@
 - ✅ RTO = `SRTT + 4×RTTVAR`，限制在 \[200ms, 120s\]（符合 RFC 6298 §2）— `__tcp_set_rto()` 代码为 `(srtt_us >> 3) + rttvar_us`，因 `srtt_us` 以 8×SRTT 存储、`rttvar_us` 以 4×RTTVAR 存储，展开后等价于 `SRTT + 4×RTTVAR`，与 Linux 内核实现完全一致
 - ✅ RTT 最小值跟踪（`tcp_update_rtt_min()`）
 - ✅ 首次测量初始化（`srtt = m << 3`）
+- ✅ Timestamp RTTM（`tcp_rtt_tsopt_us()`，RFC 7323 §4）— 590f393e 实现，330ecb8c 修复溢出保护（delta ≥ ~35 min 时丢弃样本）和 min_delta=1μs 下限
 
 ---
 
@@ -100,7 +102,7 @@
 | Window Scale | 3 | ✅ | ✅ | 仅 SYN/SYN-ACK |
 | SACK Permitted | 4 | ✅ | ✅ | 2 字节 |
 | SACK | 5 | ⚠️ 框架 | ❌ | 选项解析框架已有，未完整处理 |
-| Timestamp | 8 | ✅ | ⚠️ | 解析完整；生成：SYN-ACK 中**未写入**（`tcp_synack_options()` 未调用 `writeTimestampOption()`），数据包中 `tcp_established_options()` 返回 null（TODO 注释，未实现） |
+| Timestamp | 8 | ✅ | ✅ | 解析 + 生成均已实现；SYN-ACK 通过 `req.tstamp_ok` 控制；数据包通过 `tcp_established_options(tp)` 写入；PAWS 已集成 |
 
 ---
 
@@ -141,23 +143,21 @@
 ### ❌ 2.0 经核查发现的实现缺陷
 **来源**：对"已实现"功能逐项代码核查后发现
 
-**2.0.1 SYN-ACK 不携带 Timestamp 选项**  
+~~**2.0.1 SYN-ACK 不携带 Timestamp 选项**~~ — ✅ **已实现（590f393e）**  
 **Linux 对标**：`net/ipv4/tcp_output.c:tcp_synack_options()`  
-**RFC**：**RFC 7323 §3**（Timestamp 在所有报文中发送）
+**RFC**：**RFC 7323 §3**
 
-- `TcpOptionCodec.writeTimestampOption()` 已存在，但 `TcpOutput.tcp_synack_options()` 未调用它
-- 导致：对端无法用 Timestamp 做 RTT 测量，PAWS 也无法生效
-- [ ] 在 `tcp_synack_options()` 中补充调用 `writeTimestampOption()`
+- `TcpOutput.tcp_synack_options()` 在 `req.tstamp_ok` 时调用 `TcpOptionCodec.writeTimestampOption()`
+- `tcp_time_stamp_req()` 计算 tsval（含 `ts_off` 混淆），`req.ts_recent` 作为 tsecr
 
 ---
 
-**2.0.2 数据包（ESTABLISHED 状态）不携带 Timestamp 选项**  
+~~**2.0.2 数据包（ESTABLISHED 状态）不携带 Timestamp 选项**~~ — ✅ **已实现（590f393e）**  
 **Linux 对标**：`net/ipv4/tcp_output.c:tcp_established_options()`  
 **RFC**：**RFC 7323 §3**
 
-- `TcpOutput.tcp_established_options()`（第 310 行）仅有 `// TODO: timestamp option` 注释，直接返回 null
-- 导致：所有数据包、ACK 包均无 Timestamp，PAWS 和 Timestamp RTTM 完全失效
-- [ ] 实现 `tcp_established_options()` 中的 Timestamp 写入
+- `TcpOutput.tcp_established_options(tp)` 在 `tp.rx_opt.tstamp_ok` 时写入 Timestamp（tsval=`tcp_time_stamp(tp)`, tsecr=`tp.rx_opt.ts_recent`）
+- `__tcp_transmit_skb()` 同步更新为传入 `tp` 参数
 
 ---
 
@@ -204,22 +204,24 @@
 
 ---
 
-### ❌ 2.2 拥塞控制算法
-**Linux 对标**：`net/ipv4/tcp_cong.c`, `tcp_cubic.c`, `tcp_bbr.c`, `tcp_reno.c`  
-**RFC**：**RFC 5681**（TCP 拥塞控制）, **RFC 3390**（初始拥塞窗口）, **RFC 6928**（IW10）
+### ✅ 2.2 拥塞控制算法（Reno 已完整实现）
+**Linux 对标**：`net/ipv4/tcp_cong.c`, `tcp_input.c`  
+**RFC**：**RFC 5681**（TCP 拥塞控制）, **RFC 6582**（NewReno）, **RFC 6928**（IW10）
 
-**现状**：
-- `snd_cwnd`, `snd_ssthresh` 字段已定义，`tcp_init_cwnd()` 已实现
-- Van Jacobson RTT 测量已完成
-- 慢启动、拥塞避免、快速重传、快速恢复逻辑**未实现**
+**现状**（2026-04-04 核查）：
+- ✅ **慢启动**：`TcpInput.tcp_slow_start()` — `cwnd = min(cwnd + acked, ssthresh)`（RFC 5681 §3.1）
+- ✅ **拥塞避免**：`TcpInput.tcp_cong_avoid_ai()` — `snd_cwnd_cnt` 累加器实现整数 AI 增长（RFC 5681 §3.1）
+- ✅ **cwnd 更新入口**：`TcpInput.tcp_cong_avoid()` — 集成到 `tcp_ack()` 末尾
+- ✅ **快速重传**：`TcpInput.tcp_fastretrans_alert()` — 3 个重复 ACK 触发（RFC 5681 §3.2）
+- ✅ **快速恢复（NewReno）**：`TcpInput.tcp_enter_fast_recovery()` / `tcp_update_cwnd_recovery()` / `tcp_exit_fast_recovery()`（RFC 6582）
+- ✅ **RTO 丢失恢复**：`TcpInput.tcp_enter_loss()` — `ssthresh = max(cwnd>>1, 2)`，`cwnd = in_flight+1`（Linux v6.x `tcp_input.c:2229`）
+- ✅ **Loss 状态保护**：`tcp_fastretrans_alert()` 中 `TCP_CA_Loss` 分支防止 dup ACK 二次触发恢复
 
-**待实现**：
-- [ ] **慢启动**（Slow Start）：`cwnd < ssthresh` 时每收一个 ACK cwnd += 1 MSS（RFC 5681 §3.1）
-- [ ] **拥塞避免**（Congestion Avoidance）：`cwnd >= ssthresh` 时 cwnd += MSS²/cwnd（RFC 5681 §3.1）
-- [ ] **快速重传**（Fast Retransmit）：3 个重复 ACK 触发（RFC 5681 §3.2）
-- [ ] **快速恢复**（Fast Recovery）：RFC 5681 §3.2, RFC 6582（NewReno）
-- [ ] **ECN 通知响应**（RFC 3168 §6.1）
-- [ ] 可选：CUBIC（RFC 8312）、BBR（Google，无标准 RFC）
+**详细改造记录**：见 `docs/tcp/TCP.CWND.TODO.md`
+
+**仍未实现**：
+- [ ] **ECN 通知响应**（RFC 3168 §6.1）— 见 §2.3
+- [ ] CUBIC（RFC 8312）、BBR — 框架已预留，高 BDP 网络下吞吐受限
 
 ---
 
@@ -307,16 +309,14 @@ if (TCP_TIME_WAIT.equals(state)) {
 
 ---
 
-### ❌ 2.8 PAWS（防序列号回绕）完整实现
+### ✅ 2.8 PAWS（防序列号回绕）完整实现
 **Linux 对标**：`net/ipv4/tcp_input.c:tcp_paws_discard()`, `tcp_paws_check()`  
 **RFC**：**RFC 7323 §5**（PAWS）
 
-**现状**：Timestamp 选项已解析，`ts_recent` 字段存在，PAWS 检查逻辑未实现
-
-**待实现**：
-- [ ] `tcp_paws_check()` — 利用 Timestamp 检测回绕序列号（`tsval < ts_recent - PAWS_WINDOW`）
-- [ ] `tcp_paws_discard()` — 在 `tcp_validate_incoming()` 中集成 PAWS 丢弃逻辑
-- [ ] `ts_recent` 和 `ts_recent_stamp` 的更新逻辑
+**现状（2026-04-04 核查）**：已在 590f393e 完整实现，330ecb8c 修复 `ts_recent==0` 初始报文误判 bug：
+- ✅ `tcp_paws_check()` — 签名比较 `ts_recent - rcv_tsval`，24 天 stale 跳过，`ts_recent==0` 时直接接受（330ecb8c 修复）
+- ✅ `tcp_paws_discard()` — 集成到 `tcp_validate_incoming()`，`ts_recent_stamp != 0 && saw_tstmap != 0` 时执行检查
+- ✅ `tcp_store_ts_recent()` / `tcp_replace_ts_recent()` — 收到合法报文后更新 `ts_recent` 和 `ts_recent_stamp`
 
 ---
 
@@ -374,15 +374,16 @@ if (TCP_TIME_WAIT.equals(state)) {
 
 ---
 
-### ⚠️ 2.13 拥塞窗口（cwnd）实际约束发送
+### ✅ 2.13 拥塞窗口（cwnd）实际约束发送
 **Linux 对标**：`net/ipv4/tcp_output.c:tcp_cwnd_test()`, `tcp_snd_wnd_test()`  
 **RFC**：**RFC 5681 §3.1**
 
-**现状**：`snd_cwnd` 字段已定义且 `tcp_init_cwnd()` 已实现，但发送时**未检查 cwnd 约束**（`__tcp_transmit_skb()` 中未见 cwnd 限制逻辑）
+**现状**（2026-04-04 核查）：
+- ✅ `TcpOutput.tcp_cwnd_test()` 已实现（`TcpOutput.java:587`）：返回可发送的最大段数 `min(cwnd>>1, cwnd-in_flight)`
+- ✅ 已集成到 `tcp_write_xmit()` 发送循环（`TcpOutput.java:642`）：`cwnd_quota == 0` 时跳出发送循环
+- ✅ `tcp_packets_in_flight()` 已正确计算在途段数（`packets_out - tcp_left_out() + retrans_out`）
 
-**待实现**：
-- [ ] 在 `tcp_write_xmit()` 中检查 `min(snd_wnd, cwnd)` 限制可发送字节数
-- [ ] `tcp_cwnd_test()` 集成到发送路径
+**注意**：`tcp_left_out()` 目前仍返回 0（SACK 未实现），导致 in_flight 略有高估，但不影响 cwnd 约束的基本正确性，详见 §2.1。
 
 ---
 
@@ -404,16 +405,16 @@ if (TCP_TIME_WAIT.equals(state)) {
 | **RFC 2018** | TCP Selective Acknowledgment Options | SACK | ❌ 框架已有 | SACK block 解析框架存在但未处理；`tcp_sacktag_write_queue()`、SACK 重传、记分板均未实现 |
 | **RFC 2883** | An Extension to the Selective Acknowledgement (SACK) Option | D-SACK | ❌ 未实现 | `tcp_dsack_set()` / `tcp_check_dsack()` 均未实现；无法通知对端重复收到的段，无法撤销不必要重传 |
 | **RFC 3168** | The Addition of ECN to IP | ECN | ❌ 未实现 | SYN 中 ECE+CWR 协商、数据包 ECE 处理、CWR 标志发送、`ecn_flags` 管理均未实现 |
-| **RFC 3390** | Increasing TCP's Initial Window | 初始拥塞窗口 | ⚠️ 字段已有 | `tcp_init_cwnd()` 已实现 IW10，但发送路径不检查 cwnd，IW10 形同虚设 |
+| **RFC 3390** | Increasing TCP's Initial Window | 初始拥塞窗口 | ✅ 已实现 | `tcp_init_cwnd()` 实现 IW10；`tcp_cwnd_test()` 已集成到发送路径，cwnd 正确约束发送 |
 | **RFC 4821** | Packetization Layer PMTU Discovery | PMTUD | ⚠️ 被动支持 | `tcp_sync_mss()` 已有；主动 MTU 探测（`tcp_mtu_probe()`）、Black hole 检测、ICMP Frag Needed 响应未实现 |
 | **RFC 4987** | TCP SYN Flooding Attacks | SYN Flood 防护 | ❌ 未实现 | `synRegistry` 无大小限制；SYN Cookie 生成与验证未实现；无 SYN 速率限制 |
-| **RFC 5681** | TCP Congestion Control | 慢启动/拥塞避免/快重传/快恢复 | ❌ 未实现 | cwnd 不约束发送；慢启动、拥塞避免、快速重传（3 dup ACK）、快速恢复、RTO 后 cwnd=1 均未实现；详见 `TCP.CWND.TODO.md` |
+| **RFC 5681** | TCP Congestion Control | 慢启动/拥塞避免/快重传/快恢复 | ✅ 已实现（Reno） | 慢启动（`tcp_slow_start`）、拥塞避免（`tcp_cong_avoid_ai`）、快速重传（3 dup ACK）、RTO 丢失恢复（`tcp_enter_loss`，cwnd=in_flight+1）均已实现；Cubic/BBR 未实现；详见 `TCP.CWND.TODO.md` |
 | **RFC 5961** | Improving TCP's Robustness to Blind In-Window Attacks | Challenge ACK | ✅ 已实现 | — |
 | **RFC 6191** | Reducing the TIME-WAIT State | TIME_WAIT 优化 | ❌ 未实现 | 依赖 Timestamp；TIME_WAIT 本身跳过 2MSL，`tcp_tw_reuse` 亦未实现 |
 | **RFC 6298** | Computing TCP's Retransmission Timer | RTO 计算 | ✅ 已实现 | — |
-| **RFC 6582** | The NewReno Modification to TCP's Fast Recovery | NewReno 快速恢复 | ❌ 未实现 | 部分 ACK 处理（进入恢复后收到非完整 ACK 继续重传）未实现；依赖 §2.1 快速重传先实现 |
-| **RFC 6928** | Increasing TCP's Initial Window | IW10 | ⚠️ 字段已有 | 同 RFC 3390：`tcp_init_cwnd()` 存在但 cwnd 不约束发送，IW10 无实际效果 |
-| **RFC 7323** | TCP Extensions for High Performance | Timestamps / PAWS / WScale | ⚠️ 部分实现 | WScale 已完整实现；Timestamp 仅解析，SYN-ACK 和数据包均不发送；PAWS 检查未实现；详见 `TCP.TS.TODO.md` |
+| **RFC 6582** | The NewReno Modification to TCP's Fast Recovery | NewReno 快速恢复 | ✅ 已实现 | `tcp_enter_fast_recovery()`（ssthresh=cwnd>>1，cwnd=ssthresh+3）、`tcp_update_cwnd_recovery()`（部分 ACK 处理）、`tcp_exit_fast_recovery()`（cwnd=ssthresh）均已实现 |
+| **RFC 6928** | Increasing TCP's Initial Window | IW10 | ✅ 已实现 | `TCP_INIT_CWND=10`，`tcp_init_cwnd()` 已实现；发送路径 cwnd 约束已集成，IW10 正常生效 |
+| **RFC 7323** | TCP Extensions for High Performance | Timestamps / PAWS / WScale | ✅ 已实现 | WScale、Timestamp 生成（SYN-ACK + 数据包）、PAWS 全部实现（590f393e）；`ts_recent==0` 初始报文 bug 修复（330ecb8c）；详见 `TCP.TS.TODO.md` |
 | **RFC 7413** | TCP Fast Open | TFO | ❌ 未实现 | Cookie 生成/验证、SYN+data 发送、Kind=34 选项解析均未实现 |
 | **RFC 8311** | Relaxing Restrictions on ECN Experimentation | ECN 更新 | ❌ 未实现 | 同 RFC 3168，ECN 完全未实现 |
 | **RFC 8312** | CUBIC for Fast Long-Distance Networks | CUBIC 拥塞控制 | ❌ 未实现 | 需先完成 RFC 5681 基础拥塞控制框架后再实现 CUBIC 算法（`tcp_cubic.c` 对应） |
@@ -423,23 +424,25 @@ if (TCP_TIME_WAIT.equals(state)) {
 
 ## 四、优先级建议
 
+> 更新日期：2026-04-04（已完成：拥塞控制 Reno、cwnd 约束发送、RFC 7323 Timestamp 生成、PAWS）
+
 按实现收益和复杂度排序：
 
 | 优先级 | 功能 | 理由 |
 |--------|------|------|
-| P0 | **Timestamp 生成补全（2.0.1/2.0.2）** | SYN-ACK 和数据包均不携带 Timestamp，导致 PAWS 和 Timestamp RTTM 完全失效 |
-| P0 | **拥塞控制（cwnd 约束发送）** | 当前实际上未受 cwnd 约束，不符合 RFC 5681 |
-| P0 | **PAWS 完整实现** | Timestamp 生成修复后，PAWS 检查逻辑才能生效 |
+| ~~P0~~ | ~~拥塞控制（cwnd 约束发送）~~ | ✅ **已完成**（2026-04-04）：RFC 5681 Reno 全部实现 |
+| ~~P0~~ | ~~Timestamp 生成补全（2.0.1/2.0.2）~~ | ✅ **已完成**（590f393e）：SYN-ACK 和数据包均已写入 Timestamp |
+| ~~P0~~ | ~~PAWS 完整实现（2.8）~~ | ✅ **已完成**（590f393e + 330ecb8c）：`tcp_paws_check/discard/replace_ts_recent` 全部实现 |
 | P1 | **OFO 队列大小限制（2.0.3）** | 无限堆积存在内存耗尽风险 |
-| P1 | **SACK 完整实现** | 框架已有，影响丢包场景性能 |
-| P1 | **TIME_WAIT 状态机完整处理** | 当前立即跳过 2MSL 直接 CLOSE |
-| P1 | **快速重传 + 快速恢复（NewReno）** | RFC 5681 §3.2，基本拥塞恢复能力 |
+| P1 | **SACK 完整实现（2.1）** | 框架已有；`tcp_left_out()` 返回 0 导致 in_flight 略有高估，丢包场景恢复效率低 |
+| P1 | **TIME_WAIT 状态机完整处理（2.5）** | 当前立即跳过 2MSL 直接 CLOSE，违反 RFC 9293 |
 | P2 | **接收端 PSH 处理（2.0.5）** | 数据无法及时推送给上层，影响交互式应用延迟 |
-| P2 | **TLP（Tail Loss Probe）** | 框架已有，改善尾部丢包检测延迟 |
-| P2 | **Keepalive（修复 3 处差异）** | 主体逻辑已有，缺 `sk_keepopen` 检查、per-socket `keepalive_time`、ESTABLISHED 时启动定时器 |
-| P2 | **RACK** | 框架已有，现代 Linux 默认启用 |
-| P3 | **ECN** | 数据中心场景有益 |
-| P3 | **D-SACK** | 减少不必要重传 |
-| P3 | **SYN Flood 防护** | 面向公网时需要 |
-| P4 | **TFO** | 延迟优化，可选 |
-| P4 | **PMTU 主动探测** | `tcp_sync_mss()` 已有被动支持 |
+| P2 | **TLP（Tail Loss Probe）（2.6）** | 框架已有，改善尾部丢包检测延迟 |
+| P2 | **Keepalive 修复（2.4）** | 主体逻辑已有，缺 `sk_keepopen` 检查、per-socket `keepalive_time`、ESTABLISHED 时启动定时器 |
+| P2 | **RACK（2.7）** | 框架已有，现代 Linux 默认启用 |
+| P2 | **Cubic 拥塞控制** | 高 BDP 网络下 Reno 吞吐受限；框架已预留 |
+| P3 | **ECN（2.3）** | 数据中心场景有益 |
+| P3 | **D-SACK（2.9）** | 减少不必要重传，依赖 SACK 先实现 |
+| P3 | **SYN Flood 防护（2.12）** | 面向公网时需要 |
+| P4 | **TFO（2.11）** | 延迟优化，可选 |
+| P4 | **PMTU 主动探测（2.10）** | `tcp_sync_mss()` 已有被动支持 |

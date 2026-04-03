@@ -101,6 +101,39 @@ public class TcpSock extends inet_connection_sock {
 
     public int snd_ssthresh;
 
+    /**
+     * Congestion-avoidance additive-increase accumulator.
+     * Accumulates newly-acked segments; when it reaches {@code snd_cwnd} a full RTT
+     * has elapsed and {@code snd_cwnd} is incremented by 1 (RFC 5681 §3.1 AI phase).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L189">tcp_sock.snd_cwnd_cnt</a>
+     */
+    public int snd_cwnd_cnt;
+
+    /**
+     * Consecutive duplicate ACK counter.  When it reaches the duplicate-ACK threshold
+     * (dupthresh = 3, RFC 5681 §3.2) fast retransmit / fast recovery is triggered.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L347">tcp_sock.duplicate_sack / icsk</a>
+     */
+    public int dupacks;
+
+    /**
+     * Highest sequence number transmitted at the time fast retransmit or RTO recovery
+     * was entered.  Recovery is considered complete when {@code snd_una} passes this point.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L229">tcp_sock.high_seq</a>
+     */
+    public int high_seq;
+
+    /**
+     * Current congestion-control state machine state.
+     * Values: TCP_CA_Open=0, TCP_CA_Disorder=1, TCP_CA_CWR=2, TCP_CA_Recovery=3, TCP_CA_Loss=4.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L130">icsk_ca_state</a>
+     */
+    public int icsk_ca_state;
+
     public int segs_out;
     public int data_segs_out;
     public int bytes_sent;

@@ -1,6 +1,6 @@
 # Pangolin vs tun2socks 功能对比
 
-> 更新日期：2026-04-03
+> 更新日期：2026-04-04
 
 ## 背景
 
@@ -63,8 +63,8 @@
 | Keep-Alive | 已实现 | `TcpTimer`，参数对应内核 `sysctl` |
 | TIME_WAIT 复用（tw_reuse） | 框架存在 | `ipv4_sysctl_tcp_tw_reuse = 0`（默认关闭） |
 | RTO 计算（RFC 6298） | 已实现 | `TCP_TIMEOUT_INIT = 1s`，`srtt_us`、`rttvar_us` |
-| 拥塞控制（cwnd / ssthresh） | 基础框架 | 维护了 `snd_cwnd`、`snd_ssthresh`、`rcv_ssthresh`，但 Cubic/BBR 等算法**尚未实现**，注释中标注了 FIXME |
-| 快速重传 / 快速恢复 | 部分实现 | `retrans_out`、`tcp_rtx_queue` 存在，完整 SACK/Reno 待完善 |
+| 拥塞控制（cwnd / ssthresh） | ✅ 已实现（Reno） | RFC 5681 慢启动、拥塞避免、快速重传、快速恢复（NewReno/RFC 6582）、RTO 丢失恢复均已实现；Cubic/BBR 未实现 |
+| 快速重传 / 快速恢复 | ✅ 已实现 | `tcp_fastretrans_alert()` + `tcp_enter_fast_recovery()` + NewReno 部分 ACK 处理（RFC 5681 + RFC 6582） |
 | MSS 协商 | 已实现 | `TCP_MSS_DEFAULT = 536`，`TCP_MIN_MSS = 88` |
 | 紧急指针（URG） | 已弃用 | `snd_up` 标注 `@Deprecated` |
 | Challenge ACK（RFC 5961） | 已实现 | `tcp_challenge_ack_limit` 限速 |
@@ -111,7 +111,7 @@
 | 吞吐量 | 高（Netty 零拷贝、DirectBuffer） | 高（gVisor 优化较成熟） |
 | 延迟 | JVM 早期 JIT 暖机阶段略高，稳定后接近 | 低，Go runtime 调度开销小 |
 | GC 停顿 | 存在 JVM GC 停顿（可通过 ZGC/G1 优化） | 无 GC（Go 的 GC 停顿通常 < 1ms） |
-| 拥塞控制成熟度 | 基础框架（Cubic 等待实现） | 成熟（gVisor Cubic） |
+| 拥塞控制成熟度 | Reno 已完整实现（Cubic/BBR 待实现） | 成熟（gVisor Cubic） |
 | CPU 利用率 | EventLoop 单线程，CPU 亲和性好 | goroutine 多核可并行 |
 
 ---
@@ -139,7 +139,7 @@
 | 监控 / 可观测性 | 依赖 JVM 生态（Micrometer 等） | 内置 REST API（统计接口） |
 | TCP 协议栈定制 | 源码级修改（Java 可读性高） | 需修改 gVisor 依赖（复杂） |
 | 业务逻辑集成 | 高（JVM 生态，可集成 AI、数据库等） | 低（轻量工具定位） |
-| 拥塞控制算法替换 | 待实现，框架已预留接口 | 受限于 gVisor 支持的算法 |
+| 拥塞控制算法替换 | Reno 已实现；Cubic/BBR 框架预留接口，可扩展 | 受限于 gVisor 支持的算法 |
 
 ---
 
@@ -149,7 +149,7 @@
 |------|----------|-----------|
 | 协议栈实现 | 自研（Linux 内核移植） | gVisor（Google 用户态协议栈） |
 | TCP 精细度 | 极高（逐函数对照内核） | 高（gVisor 成熟实现） |
-| 拥塞控制 | 框架存在，算法待完善 | Cubic（成熟） |
+| 拥塞控制 | Reno 已实现，Cubic/BBR 待实现 | Cubic（成熟） |
 | UDP 支持 | 基础（当前仅 Fake-DNS） | 完整 |
 | ICMP 支持 | 无 | 可选 |
 | 代理协议丰富度 | 高（含 SSH、WS、链式） | 中（SOCKS5/HTTP/SS/WG） |
@@ -173,7 +173,7 @@
 
 ### Pangolin 的不足
 
-1. **拥塞控制尚不完整**：`snd_cwnd`、`ssthresh` 框架已有，但 Cubic/Reno/BBR 等具体算法标注了 FIXME，实际发送行为可能偏于保守。
+1. **Cubic/BBR 拥塞控制未实现**：RFC 5681 Reno（慢启动、拥塞避免、快速重传/恢复）已完整实现；Cubic 和 BBR 算法框架预留但尚未实现，高带宽长延迟（BDP 大）网络下吞吐上限低于 Cubic。
 2. **UDP 支持有限**：当前 `Udp4PacketHandler` 仅处理 Fake-DNS 的 UDP 查询，通用 UDP 转发尚未实现。
 3. **JVM 启动与内存开销**：对于嵌入式/边缘场景，JVM 的内存基线（100 MB+）和启动时间（秒级）是劣势。
 4. **平台适配维护成本**：Wintun（Windows）、utun（macOS）、tun（Linux）需各自维护 JNA 绑定。

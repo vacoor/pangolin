@@ -86,6 +86,41 @@ public interface TcpConstants {
     int RTAX_INITRWND = 2;
 
     /**
+     * Congestion-control state: normal operation, no loss detected.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L301">TCP_CA_Open</a>
+     */
+    int TCP_CA_Open     = 0;
+
+    /**
+     * Congestion-control state: duplicate ACKs or SACK seen, loss not yet confirmed.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L302">TCP_CA_Disorder</a>
+     */
+    int TCP_CA_Disorder = 1;
+
+    /**
+     * Congestion-control state: congestion window reduction in progress (ECN/SACK).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L303">TCP_CA_CWR</a>
+     */
+    int TCP_CA_CWR      = 2;
+
+    /**
+     * Congestion-control state: fast recovery (RFC 5681 §3.2 / RFC 6582).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L304">TCP_CA_Recovery</a>
+     */
+    int TCP_CA_Recovery = 3;
+
+    /**
+     * Congestion-control state: RTO-based loss recovery (slow start restart).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L305">TCP_CA_Loss</a>
+     */
+    int TCP_CA_Loss     = 4;
+
+    /**
      * PAWS: 24 days in seconds. ts_recent older than this is considered stale and PAWS is skipped.
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L405">TCP_PAWS_24DAYS</a>

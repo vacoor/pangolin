@@ -327,7 +327,7 @@ public class TcpTimer {
                 return;
             }
 
-            demultiplexer.input.tcp_enter_loss();
+            demultiplexer.input.tcp_enter_loss(tp);
             demultiplexer.output.tcp_retransmit_skb(net, tp, skb, 1);
             // __sk_dst_reset
         } else {
@@ -340,7 +340,7 @@ public class TcpTimer {
                 // ...
             }
 
-            demultiplexer.input.tcp_enter_loss();
+            demultiplexer.input.tcp_enter_loss(tp);
             tcp_update_rto_stats(tp);
 
             if (demultiplexer.output.tcp_retransmit_skb(net, tp, tp.tcp_rtx_queue_head(), 1) > 0) {
