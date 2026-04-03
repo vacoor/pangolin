@@ -1,20 +1,16 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.inet_connection_sock_af_ops;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstant;
 import lombok.extern.slf4j.Slf4j;
-
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L78">struct inet_connection_sock</a>
  */
 @Slf4j
 public class inet_connection_sock extends inet_sock {
-
-    // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L146
-    public static final int TCP_RTO_MAX = 120 * HZ;
-    public static final int TCP_RTO_MIN = HZ / 5;
 
     /**
      * timestamp of retransmission timeout.
@@ -26,8 +22,8 @@ public class inet_connection_sock extends inet_sock {
      * Retransmission timeout.
      */
     public int icsk_rto;
-    public int icsk_rto_min = TCP_RTO_MIN;
-    public int icsk_rto_max = TCP_RTO_MAX;
+    public int icsk_rto_min = TcpConstant.TCP_RTO_MIN;
+    public int icsk_rto_max = TcpConstant.TCP_RTO_MAX;
 
     public int icsk_delack_max;
     public int icsk_pmtu_cookie;
@@ -91,7 +87,7 @@ public class inet_connection_sock extends inet_sock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L340">inet_csk_in_pingpong_model</a>
      */
     public static boolean inet_csk_in_pingpong_model(final inet_connection_sock sk) {
-        return sk.icsk_ack.pingpong >= SysctlOptions.sysctl_tcp_pingpong_thresh;
+        return sk.icsk_ack.pingpong >= SysctlOptions.ipv4_sysctl_tcp_pingpong_thresh;
     }
 
     /**

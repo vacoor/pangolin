@@ -3,6 +3,10 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.Sock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.SockCommon;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
@@ -11,7 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.TCP_RTO_MAX;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstant.TCP_RTO_MAX;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
@@ -276,13 +280,13 @@ public abstract class TcpDemultiplexer {
 
         sk.icsk_rto = TcpConstants.TCP_TIMEOUT_INIT;
 
-        final int rto_max_ms = TcpSock.TCP_RTO_MAX; //sk.ipv4_sysctl_tcp_rto_max_ms;
+        final int rto_max_ms = TcpConstant.TCP_RTO_MAX; //sk.ipv4_sysctl_tcp_rto_max_ms;
         sk.icsk_rto_max = (int) msecs_to_jiffies(rto_max_ms);
 
-        final int rto_min_ms = TcpSock.TCP_RTO_MIN; //sk.ipv4_sysctl_tcp_rto_min_ms;
+        final int rto_min_ms = TcpConstant.TCP_RTO_MIN; //sk.ipv4_sysctl_tcp_rto_min_ms;
         sk.icsk_rto_min = (int) msecs_to_jiffies(rto_min_ms);
 
-        sk.icsk_delack_max = TcpTimer.TCP_DELACK_MAX;
+        sk.icsk_delack_max = TcpConstant.TCP_DELACK_MAX;
         sk.mdev_us = (int) jiffies_to_usecs(TCP_TIMEOUT_INIT);
 
 

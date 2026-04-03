@@ -4,15 +4,15 @@ import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.Tcp4PacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.channel.*;
-import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_MAX_WSCALE;
@@ -296,7 +296,7 @@ public class TcpHandshaker {
             int user_mss = opt_rx.user_mss;
             opt_rx.mss_clamp = user_mss > 0 && user_mss < mss ? user_mss : mss;
         }
-        if (SysctlOptions.sysctl_tcp_window_scaling) {
+        if (SysctlOptions.ipv4_sysctl_tcp_window_scaling) {
             final int wscale = TcpOptionCodec.parseWindowScale(opts);
             if (wscale >= 0) {
                 opt_rx.wscale_ok = true;

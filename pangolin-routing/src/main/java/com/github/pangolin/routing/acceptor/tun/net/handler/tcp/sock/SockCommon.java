@@ -1,6 +1,7 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;

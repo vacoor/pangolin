@@ -1,6 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
 import com.google.common.collect.Maps;
 import io.netty.channel.Channel;
@@ -16,8 +18,8 @@ import java.util.concurrent.TimeUnit;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_CLOSE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCPF_LISTEN;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_FIN_WAIT2;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.TCP_RTO_MAX;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.TCP_RTO_MIN;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstant.TCP_RTO_MAX;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstant.TCP_RTO_MIN;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils._ilog2;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.time_after;
@@ -158,9 +160,6 @@ public class TcpTimer {
 
     /* *********** DELAY ACK [[ ************** */
 
-    static final int TCP_DELACK_MIN = TcpConstants.HZ / 25;
-    static final int TCP_DELACK_MAX = TcpConstants.HZ / 5;
-
     /**
      * <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L161">inet_csk_ack_state_t</a>
      */
@@ -208,7 +207,7 @@ public class TcpTimer {
                  * ping-pong 模式触发了延迟ACK, 说明ATO周期内没有数据要发送, 退出 ping-pong 模式.
                  */
                 tp.inet_csk_exit_pingpong_mode(tp);
-                tp.icsk_ack.ato = TcpConstants.TCP_ATO_MIN;
+                tp.icsk_ack.ato = TcpConstant.TCP_ATO_MIN;
             }
 
             demultiplexer.output.tcp_mstamp_refresh(tp);
@@ -456,11 +455,11 @@ public class TcpTimer {
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_timer.c#L241
     private int tcp_write_timeout(TcpSock tp) {
         boolean expired = false;
-        int retry_until = SysctlOptions.sysctl_tcp_retries2;
+        int retry_until = SysctlOptions.ipv4_sysctl_tcp_retries2;
         int max_retransmits;
 
         if (0 != ((1 << tp.state().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV))) {
-            retry_until = tp.icsk_syn_retries > 0 ? tp.icsk_syn_retries : SysctlOptions.sysctl_tcp_syn_retries;
+            retry_until = tp.icsk_syn_retries > 0 ? tp.icsk_syn_retries : SysctlOptions.ipv4_sysctl_tcp_syn_retries;
 
             max_retransmits = retry_until;
 
@@ -474,7 +473,7 @@ public class TcpTimer {
 //            }
 
             // ...
-            retry_until = SysctlOptions.sysctl_tcp_retries2;
+            retry_until = SysctlOptions.ipv4_sysctl_tcp_retries2;
             // ...
         }
 
@@ -572,7 +571,7 @@ public class TcpTimer {
             }
         }
 
-        int max_probes = SysctlOptions.sysctl_tcp_retries2;
+        int max_probes = SysctlOptions.ipv4_sysctl_tcp_retries2;
 
         // ...
 
@@ -677,12 +676,12 @@ public class TcpTimer {
          */
         val = tp.keepalive_probes;
 
-        return 0 != val ? val : SysctlOptions.sysctl_tcp_keepalive_probes;
+        return 0 != val ? val : SysctlOptions.ipv4_sysctl_tcp_keepalive_probes;
     }
 
     int keepalive_time_when(final TcpSock tp) {
         // tp.keepalive_time;
-        return SysctlOptions.sysctl_tcp_keepalive_time;
+        return SysctlOptions.ipv4_sysctl_tcp_keepalive_time;
     }
 
     int keepalive_intvl_when(final TcpSock tp) {
@@ -691,7 +690,7 @@ public class TcpTimer {
          * and do_tcp_setsockopt().
          */
         int val = tp.keepalive_intvl;
-        return 0 != val ? val : SysctlOptions.sysctl_tcp_keepalive_intvl;
+        return 0 != val ? val : SysctlOptions.ipv4_sysctl_tcp_keepalive_intvl;
     }
 
     int keepalive_time_elapsed(final TcpSock tp) {
@@ -739,7 +738,7 @@ public class TcpTimer {
             return; // connection already completed or dropped
         }
 
-        final int maxRetries = SysctlOptions.sysctl_tcp_synack_retries;
+        final int maxRetries = SysctlOptions.ipv4_sysctl_tcp_synack_retries;
         if (req.num_retrans >= maxRetries) {
             log.warn("[REQ-TIMER] {}:{} SYN-ACK retries exhausted ({}), dropping",
                     req.ir_rmt_addr.getHostAddress(), req.ir_rmt_port, maxRetries);

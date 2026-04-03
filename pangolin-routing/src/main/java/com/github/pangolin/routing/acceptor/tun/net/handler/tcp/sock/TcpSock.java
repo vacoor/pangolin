@@ -1,8 +1,7 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
-import io.netty.channel.Channel;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayDeque;
@@ -10,7 +9,7 @@ import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.sysctl_tcp_fin_timeout;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions.ipv4_sysctl_tcp_fin_timeout;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.TCP_NAGLE_OFF;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.jiffies_to_usecs;
@@ -300,7 +299,7 @@ public class TcpSock extends inet_connection_sock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1510">tcp_probe0_base</a>
      */
     public long tcp_probe0_base() {
-        return Math.max(icsk_rto, TCP_RTO_MIN);
+        return Math.max(icsk_rto, TcpConstant.TCP_RTO_MIN);
     }
 
     /**
@@ -309,7 +308,7 @@ public class TcpSock extends inet_connection_sock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1516">tcp_probe0_when</a>
      */
     public long tcp_probe0_when(int max_when) {
-        final int backoff = Math.min(_ilog2(TCP_RTO_MAX / TCP_RTO_MIN) + 1, icsk_backoff);
+        final int backoff = Math.min(_ilog2(TcpConstant.TCP_RTO_MAX / TcpConstant.TCP_RTO_MIN) + 1, icsk_backoff);
         final long when = tcp_probe0_base() << backoff;
         return Math.min(when, max_when);
     }
@@ -340,8 +339,8 @@ public class TcpSock extends inet_connection_sock {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h#L329">inet_csk_enter_pingpong_mode</a>
      */
     public void inet_csk_enter_pingpong_mode() {
-        log.trace("[PING-PONG] enter PING-PONG mode, PING-PONG threshold = {}", SysctlOptions.sysctl_tcp_pingpong_thresh);
-        icsk_ack.pingpong = SysctlOptions.sysctl_tcp_pingpong_thresh;
+        log.trace("[PING-PONG] enter PING-PONG mode, PING-PONG threshold = {}", SysctlOptions.ipv4_sysctl_tcp_pingpong_thresh);
+        icsk_ack.pingpong = SysctlOptions.ipv4_sysctl_tcp_pingpong_thresh;
     }
 
 
@@ -367,7 +366,7 @@ public class TcpSock extends inet_connection_sock {
                 log.trace("[QUICK-ACK] decrement QUICK-ARK count: {} -> {}", icsk_ack.quick, 0);
                 icsk_ack.quick = 0;
                 /* Leaving quickack mode we deflate ATO. */
-                icsk_ack.ato = TcpConstants.TCP_ATO_MIN;
+                icsk_ack.ato = TcpConstant.TCP_ATO_MIN;
             } else if (pkts != 0) {
                 log.trace("[QUICK-ACK] decrement QUICK-ARK count: {} -> {}", icsk_ack.quick, icsk_ack.quick - pkts);
                 icsk_ack.quick -= pkts;
@@ -381,7 +380,7 @@ public class TcpSock extends inet_connection_sock {
 
     public int tcp_fin_time() {
         // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L1746
-        int fin_timeout = 0 != linger2 ? linger2 : sysctl_tcp_fin_timeout;
+        int fin_timeout = 0 != linger2 ? linger2 : ipv4_sysctl_tcp_fin_timeout;
         int rto = icsk_rto;
 
         // 3.5 * rto

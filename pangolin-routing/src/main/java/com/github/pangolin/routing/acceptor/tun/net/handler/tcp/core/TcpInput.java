@@ -2,6 +2,8 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
@@ -19,9 +21,10 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpO
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpDropReason.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock.inet_csk_schedule_ack;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock.inet_csk_schedule_ack;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.inet_connection_sock.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.inet_connection_sock.inet_csk_exit_pingpong_mode;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.inet_connection_sock.inet_csk_in_pingpong_model;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
@@ -129,7 +132,7 @@ public class TcpInput {
         log.trace("[QUICK-ACK] enter QUICK-ARK count: {} -> {}", sk.icsk_ack.quick, max_quickacks);
         tcp_incr_quickack(sk, max_quickacks);
         inet_csk_exit_pingpong_mode(sk);
-        sk.icsk_ack.ato = TCP_ATO_MIN;
+        sk.icsk_ack.ato = TcpConstant.TCP_ATO_MIN;
     }
 
     /*-
@@ -266,16 +269,16 @@ public class TcpInput {
              * delayed ACK engine.
              */
             tcp_incr_quickack(sk, TCP_MAX_QUICKACKS);
-            sk.icsk_ack.ato = TCP_ATO_MIN;
+            sk.icsk_ack.ato = TcpConstant.TCP_ATO_MIN;
         } else {
             long m = now - sk.icsk_ack.lrcvtime;
             /*-
              * 1. 如果两次收到数据的间隔 <= TCP_ATO_MIN / 2, ato = ato / 2 + TCP_ATO_MIN / 2
              * 2. 如果收到数据间隔 > TCP_ATO_MIN / 2 && < ato, ato = ato / 2 + 间隔, 最大不超过rto
              */
-            if (m <= TCP_ATO_MIN / 2) {
+            if (m <= TcpConstant.TCP_ATO_MIN / 2) {
                 /* The fastest case is the first. */
-                sk.icsk_ack.ato = (sk.icsk_ack.ato >> 1) + TCP_ATO_MIN / 2;
+                sk.icsk_ack.ato = (sk.icsk_ack.ato >> 1) + TcpConstant.TCP_ATO_MIN / 2;
             } else if (m < sk.icsk_ack.ato) {
                 sk.icsk_ack.ato = (sk.icsk_ack.ato >> 1) + m;
                 if (sk.icsk_ack.ato > sk.icsk_rto) {
@@ -637,7 +640,7 @@ public class TcpInput {
              * This function is not for random using!
              */
         } else {
-            long when = tp.tcp_probe0_when(TCP_RTO_MAX);
+            long when = tp.tcp_probe0_when(TcpConstant.TCP_RTO_MAX);
             when = tp.tcp_clamp_probe0_to_user_timeout(tp, when);
             tp.tcp_reset_xmit_timer(demultiplexer.timer, ICSK_TIME_PROBE0, when, true);
         }

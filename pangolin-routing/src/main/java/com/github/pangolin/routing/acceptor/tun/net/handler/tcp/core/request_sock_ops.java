@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.request_sock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.request_sock;
 import io.netty.channel.Channel;
 
 // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1705

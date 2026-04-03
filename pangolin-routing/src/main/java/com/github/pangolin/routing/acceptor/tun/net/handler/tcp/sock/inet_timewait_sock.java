@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal;
+package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock;
 
 /**
  * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_timewait_sock.h#L33">inet_timewait_sock</a>

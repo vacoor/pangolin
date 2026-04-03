@@ -1,12 +1,10 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.SysctlOptions;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpBuffer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -24,7 +22,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpC
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_CLOSE;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.*;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpSock.IP_HEADER_SIZE;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock.IP_HEADER_SIZE;
 import static com.sun.jna.platform.linux.ErrNo.EAGAIN;
 import static com.sun.jna.platform.linux.ErrNo.EINVAL;
 
@@ -1165,14 +1163,14 @@ public class TcpOutput {
      */
     void tcp_send_delayed_ack(final Channel net, final TcpSock tp) {
         long ato = tp.icsk_ack.ato;
-        if (ato > TCP_DELACK_MIN) {
+        if (ato > TcpConstant.TCP_DELACK_MIN) {
             int max_ato = TcpConstants.HZ / 2;
 
             /*-
              * ping-pong 模式应该使用最大容忍度的超时时间.
              */
             if (tp.inet_csk_in_pingpong_model(tp) || 0 != (tp.icsk_ack.pending & TcpTimer.ICSK_ACK_PUSHED)) {
-                max_ato = TCP_DELACK_MAX;
+                max_ato = TcpConstant.TCP_DELACK_MAX;
             }
 
             /* Slow path, intersegment interval is "high". */
@@ -1185,7 +1183,7 @@ public class TcpOutput {
              * Note: 为了避免浮点运算 srtt_us 是实际 SRTT 8 倍.
              */
             if (tp.srtt_us != 0) {
-                int rtt = (int) Math.max(TcpClock.usecs_to_jiffies(tp.srtt_us >> 3), TCP_DELACK_MIN);
+                int rtt = (int) Math.max(TcpClock.usecs_to_jiffies(tp.srtt_us >> 3), TcpConstant.TCP_DELACK_MIN);
                 if (rtt < max_ato) {
                     max_ato = rtt;
                 }
@@ -1340,7 +1338,7 @@ public class TcpOutput {
         tp.icsk_probes_out++;
         long timeout;
         if (err <= 0) {
-            if (tp.icsk_backoff < SysctlOptions.sysctl_tcp_retries2) {
+            if (tp.icsk_backoff < SysctlOptions.ipv4_sysctl_tcp_retries2) {
                 tp.icsk_backoff++;
             }
             timeout = tp.tcp_probe0_when(tp.tcp_rto_max());

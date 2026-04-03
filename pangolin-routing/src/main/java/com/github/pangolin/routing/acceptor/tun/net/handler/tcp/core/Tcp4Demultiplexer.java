@@ -3,6 +3,10 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.SockCommon;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.request_sock;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -267,6 +271,18 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
         );
     }
 
+    @Override
+    public void inet_rtx_syn_ack(final Channel net, final TcpSock listenSock, final tcp_request_sock req) {
+        // tcp_make_synack builds entirely from listenSock + req; the original syn packet is not needed
+        final TcpBuffer skb = output.tcp_make_synack(listenSock, req, null);
+        skb.srcPort(req.ir_num);
+        skb.dstPort(req.ir_rmt_port);
+
+        log.info(logFormat("[TCP] [HANDSHAKE]", req.ir_loc_addr, req.ir_num, req.ir_rmt_addr, req.ir_rmt_port, "SYNACK send starting..."));
+        net.writeAndFlush(buildIp4Packet(skb, (Inet4Address) req.ir_loc_addr, (Inet4Address) req.ir_rmt_addr));
+    }
+
+
     protected void tcp_v4_send_synack(Channel net, TcpSock listenSock, tcp_request_sock req, final TcpPacketBuf syn) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L1174
         final TcpBuffer skb = output.tcp_make_synack(listenSock, req, syn);
@@ -297,15 +313,6 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
                         }
                     }
                 });
-    }
-
-    @Override
-    public void inet_rtx_syn_ack(final Channel net, final TcpSock listenSock, final tcp_request_sock req) {
-        // tcp_make_synack builds entirely from listenSock + req; the original syn packet is not needed
-        final TcpBuffer skb = output.tcp_make_synack(listenSock, req, null);
-        skb.srcPort(req.ir_num);
-        skb.dstPort(req.ir_rmt_port);
-        net.writeAndFlush(buildIp4Packet(skb, (Inet4Address) req.ir_loc_addr, (Inet4Address) req.ir_rmt_addr));
     }
 
     /**

@@ -48,7 +48,6 @@ public interface TcpConstants {
     int TCP_MIN_MSS = 88;
     int U8_MAX = 255;
     int U16_MAX = 65535;
-    int TCP_ATO_MIN = HZ / 25;
     /**
      * Never offer a window over 32767 without using window scaling. Some
      * poor stacks do signed 16bit maths!
@@ -65,10 +64,12 @@ public interface TcpConstants {
     int TCP_TIMEWAIT_LEN = 60 * HZ;
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L86
     int TCP_MAX_QUICKACKS = 16;
+
     // https://github.com/torvalds/linux/blob/master/include/net/sock.h#L1472
     int RCV_SHUTDOWN = 1;
     int SEND_SHUTDOWN = 2;
     int SHUTDOWN_MASK = 3;
+
     // No options.
     int SIZE_OF_TCP_HDR = 20;
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L160
