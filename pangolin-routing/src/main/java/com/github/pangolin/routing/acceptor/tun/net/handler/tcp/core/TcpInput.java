@@ -331,9 +331,13 @@ public class TcpInput {
         if ((int) (rx_opt.ts_recent - rx_opt.rcv_tsval) <= paws_win) {
             return true;
         }
-        // Accept if ts_recent is stale (older than 24 days)
+        // Accept if ts_recent is stale (older than 24 days) — RFC 7323 §5.5
         long age = (System.currentTimeMillis() / 1000) - (rx_opt.ts_recent_stamp & 0xFFFFFFFFL);
         if (age >= TCP_PAWS_24DAYS) {
+            return true;
+        }
+        // Accept if no prior timestamp has been stored yet (ts_recent == 0)
+        if (rx_opt.ts_recent == 0) {
             return true;
         }
         return false;
@@ -520,20 +524,32 @@ public class TcpInput {
      * Compute RTT in microseconds from the echoed Timestamp (TSecr).
      * <p>
      * delta = now - TSecr (unsigned 32-bit wrap-safe subtraction).
-     * If the socket uses microsecond timestamps, delta is already in µs;
-     * otherwise delta is in milliseconds and is converted to µs.
+     * If the socket uses microsecond timestamps ({@code tcp_usec_ts != 0}), delta is
+     * already in µs and is returned directly.  Otherwise delta is in milliseconds;
+     * it is guarded against overflow before converting to µs.
+     * <p>
+     * Returns {@code -1} when the delta is unreasonably large (≥ ~35 min in ms mode),
+     * signalling the caller to discard this RTT sample.
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3185">tcp_rtt_tsopt_us</a>
      */
     private static long tcp_rtt_tsopt_us(final TcpSock tp) {
         long now = tp.tcp_usec_ts > 0 ? tcp_clock_us() : tcp_clock_ms();
-        // unsigned 32-bit delta (handles wraparound)
+        // Unsigned 32-bit delta — handles 32-bit timestamp wraparound correctly.
         long delta = (now - tp.rx_opt.rcv_tsecr) & 0xFFFFFFFFL;
         if (tp.tcp_usec_ts > 0) {
-            return delta;                   // already in microseconds
+            return delta;                       // already in microseconds
         }
-        // delta is in ms → convert to µs; cap at U32_MAX to stay sane
-        return Math.min(delta * 1_000L, 0xFFFFFFFFL);
+        // delta is in ms.  Guard against overflow before multiplying:
+        // Linux: delta < INT_MAX / (USEC_PER_SEC / TCP_TS_HZ)  →  delta < 2_147_483 ms  (~35 min).
+        // Values at or above this threshold mean the TSecr is too stale to be useful.
+        if (delta >= (long) Integer.MAX_VALUE / 1_000L) {
+            return -1;                          // discard: unreasonably large RTT sample
+        }
+        if (delta == 0) {
+            delta = 1;                          // min_delta: avoid feeding 0 into the estimator
+        }
+        return delta * 1_000L;                  // ms → µs
     }
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3202
