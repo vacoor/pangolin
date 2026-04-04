@@ -8,4 +8,6 @@ public class inet_request_sock extends request_sock {
     public int snd_wscale;
     public int rcv_wscale;
     public boolean wscale_ok;
+    /** Client advertised TSopt in SYN and server supports Timestamps — negotiate Timestamps. */
+    public boolean tstamp_ok;
 }

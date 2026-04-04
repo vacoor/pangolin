@@ -22,4 +22,11 @@ public class tcp_request_sock extends inet_request_sock {
     /** Number of SYN-ACK retransmissions sent (0 = only the initial send). */
     public int num_retrans;
 
+    /**
+     * Peer's TSval from SYN — used to seed ts_recent in the child socket.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/linux/tcp.h#L172">tcp_request_sock.ts_recent</a>
+     */
+    public long ts_recent;
+
 }

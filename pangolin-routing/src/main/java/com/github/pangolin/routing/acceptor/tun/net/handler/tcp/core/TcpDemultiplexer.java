@@ -202,7 +202,7 @@ public abstract class TcpDemultiplexer {
 
         // ... keepopen
 
-        // newtp.rx_opt.tstamp_ok = req.tstamp_ok;
+        newtp.rx_opt.tstamp_ok = req.tstamp_ok;
         newtp.window_clamp = req.rsk_window_clamp;
         newtp.rcv_ssthresh = req.rsk_rcv_wnd;
         newtp.rcv_wnd = req.rsk_rcv_wnd;
@@ -223,18 +223,18 @@ public abstract class TcpDemultiplexer {
         boolean rx_opt_tstamp = newtp.rx_opt.tstamp_ok;
         if (rx_opt_tstamp) {
             newtp.tcp_usec_ts = req.req_usec_ts ? 1 : 0;
-            // ts_recent = req_ts_recent ;
-            // ts_recent_stamp = ktime_get_seconds();
+            newtp.rx_opt.ts_recent = req.ts_recent;
+            newtp.rx_opt.ts_recent_stamp = (int) (System.currentTimeMillis() / 1000);
             newtp.tcp_header_len = SIZE_OF_TCP_HDR + TCPOLEN_TSTAMP_ALIGNED;
         } else {
             newtp.tcp_usec_ts = 0;
-            // ts_recent_stamp = 0;
+            newtp.rx_opt.ts_recent_stamp = 0;
             newtp.tcp_header_len = SIZE_OF_TCP_HDR;
         }
 
         // ...
 
-        // newtp.tsoffset = req.ts_off;
+        newtp.tsoffset = req.ts_off;
 
         newtp.rx_opt.mss_clamp = req.mss;
 

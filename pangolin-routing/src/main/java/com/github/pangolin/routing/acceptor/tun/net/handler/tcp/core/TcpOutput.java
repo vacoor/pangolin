@@ -17,7 +17,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpInput.tcp_rearm_rto;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_clock_ms;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_clock_ns;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_clock_us;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_CLOSE;
@@ -289,10 +291,15 @@ public class TcpOutput {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L902">tcp_synack_options</a>
      */
     private byte[] tcp_synack_options(TcpSock tp, tcp_request_sock req, int mss) {
-        ByteBuf optBuf = Unpooled.buffer(12);
+        ByteBuf optBuf = Unpooled.buffer(24);
         try {
             int wscale = req.wscale_ok ? req.rcv_wscale : -1;
             TcpOptionCodec.writeSynOptions(optBuf, mss, wscale);
+            if (req.tstamp_ok) {
+                long tsval = tcp_time_stamp_req(req);
+                long tsecr = req.ts_recent;
+                TcpOptionCodec.writeTimestampOption(optBuf, tsval, tsecr);
+            }
             byte[] bytes = new byte[optBuf.readableBytes()];
             optBuf.readBytes(bytes);
             return bytes;
@@ -302,14 +309,46 @@ public class TcpOutput {
     }
 
     /**
+     * Compute the TSval for a SYN-ACK: local clock plus ts_off (conceals uptime).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L771">tcp_time_stamp_raw</a>
+     */
+    private static long tcp_time_stamp_req(tcp_request_sock req) {
+        long base = req.req_usec_ts ? tcp_clock_us() : tcp_clock_ms();
+        return (base + req.ts_off) & 0xFFFFFFFFL;
+    }
+
+    /**
+     * Compute the TSval for an established socket: local clock plus tsoffset.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L771">tcp_time_stamp_raw</a>
+     */
+    static long tcp_time_stamp(TcpSock tp) {
+        long base = tp.tcp_usec_ts > 0 ? tcp_clock_us() : tcp_clock_ms();
+        return (base + tp.tsoffset) & 0xFFFFFFFFL;
+    }
+
+    /**
      * Build raw TCP options for ESTABLISHED sockets.
-     * Returns null if no options (common case).
+     * Returns null if no options (e.g. Timestamps not negotiated).
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L978">tcp_established_options</a>
      */
-    private byte[] tcp_established_options() {
-        // TODO: timestamp option
-        return null;
+    private byte[] tcp_established_options(TcpSock tp) {
+        if (!tp.rx_opt.tstamp_ok) {
+            return null;
+        }
+        ByteBuf optBuf = Unpooled.buffer(12);
+        try {
+            long tsval = tcp_time_stamp(tp);
+            long tsecr = tp.rx_opt.ts_recent;
+            TcpOptionCodec.writeTimestampOption(optBuf, tsval, tsecr);
+            byte[] bytes = new byte[optBuf.readableBytes()];
+            optBuf.readBytes(bytes);
+            return bytes;
+        } finally {
+            optBuf.release();
+        }
     }
 
     /**
@@ -342,7 +381,7 @@ public class TcpOutput {
         if (skb.syn()) {
             rawOptions = tcp_syn_options();
         } else {
-            rawOptions = tcp_established_options();
+            rawOptions = tcp_established_options(tp);
             /*-
              * Force a PSH flag on all (GSO) packets to expedite GRO flush
              * at receiver : This slightly improve GRO performance.
@@ -514,7 +553,7 @@ public class TcpOutput {
             mss_now = tcp_sync_mss(tp, mtu);
         }
 
-        byte[] opts = tcp_established_options();
+        byte[] opts = tcp_established_options(tp);
         int optLen = opts != null ? opts.length : 0;
         int header_len = optLen + SIZE_OF_TCP_HDR;
         if (header_len != tp.tcp_header_len) {

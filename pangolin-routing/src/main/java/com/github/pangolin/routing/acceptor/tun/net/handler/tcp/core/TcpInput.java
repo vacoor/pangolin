@@ -5,6 +5,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.*;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
@@ -45,8 +46,14 @@ public class TcpInput {
      */
     private static final int FLAG_WIN_UPDATE = 0x02;
 
+    /* "" "" some of which was acked.	*/
+    private static final int FLAG_DATA_ACKED = 0x04;
+
     /* "" "" some of which was retransmitted.	*/
     private static final int FLAG_RETRANS_DATA_ACKED = 0x08;
+
+    /* SYN acked */
+    private static final int FLAG_SYN_ACKED = 0x10;
 
     /**
      * Do not skip RFC checks for window update.
@@ -301,6 +308,69 @@ public class TcpInput {
         }
     }
 
+    // ---- RFC 7323 Timestamp / PAWS helpers -----------------------------------------------
+
+    /**
+     * Store the current rcv_tsval as the new ts_recent baseline.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L410">tcp_store_ts_recent</a>
+     */
+    private static void tcp_store_ts_recent(TcpSock tp) {
+        tp.rx_opt.ts_recent = tp.rx_opt.rcv_tsval;
+        tp.rx_opt.ts_recent_stamp = (int) (System.currentTimeMillis() / 1000);
+    }
+
+    /**
+     * Low-level PAWS check: returns true (accept) when the received TSval is within the window
+     * or ts_recent is too old to be trusted.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L416">tcp_paws_check</a>
+     */
+    private static boolean tcp_paws_check(tcp_options_received rx_opt, int paws_win) {
+        // Accept if ts_recent - rcv_tsval <= paws_win (signed 32-bit comparison)
+        if ((int) (rx_opt.ts_recent - rx_opt.rcv_tsval) <= paws_win) {
+            return true;
+        }
+        // Accept if ts_recent is stale (older than 24 days) — RFC 7323 §5.5
+        long age = (System.currentTimeMillis() / 1000) - (rx_opt.ts_recent_stamp & 0xFFFFFFFFL);
+        if (age >= TCP_PAWS_24DAYS) {
+            return true;
+        }
+        // Accept if no prior timestamp has been stored yet (ts_recent == 0)
+        if (rx_opt.ts_recent == 0) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if the segment should be discarded per PAWS.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L939">tcp_paws_discard</a>
+     */
+    private static boolean tcp_paws_discard(TcpSock tp) {
+        if (!tcp_paws_check(tp.rx_opt, TCP_PAWS_WINDOW)) {
+            return true;  // ts_recent too new: reject
+        }
+        return false;
+    }
+
+    /**
+     * Called after we are sure the packet is in-window: update ts_recent if appropriate.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L944">tcp_replace_ts_recent</a>
+     */
+    private static void tcp_replace_ts_recent(TcpSock tp, int seq) {
+        if (tp.rx_opt.saw_tstmap != 0 && !after(seq, tp.rcv_wup)) {
+            // PAWS bug workaround: only update for data segments (or ACKs in window)
+            if (tcp_paws_check(tp.rx_opt, 0)) {
+                tcp_store_ts_recent(tp);
+            }
+        }
+    }
+
+    // ---- end RFC 7323 helpers -------------------------------------------------------------
+
     /**
      * Called to compute a smoothed rtt estimate. The data fed to this
      * routine either comes from timestamps, or from segments that were
@@ -428,10 +498,179 @@ public class TcpInput {
 
     // ...
 
-    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2190
-    public void tcp_enter_loss() {
+    // ---- RFC 5681 Congestion Control ----------------------------------------------------------
 
+    /**
+     * RFC 5681 §3.1 Slow Start:
+     * On each ACK that acknowledges new data, increase cwnd by min(N, SMSS) segments
+     * until cwnd reaches ssthresh.
+     * Returns the number of segments that could not be consumed by slow start
+     * (carry-over into congestion avoidance).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_cong.c#L392">tcp_slow_start</a>
+     */
+    private static int tcp_slow_start(TcpSock tp, int acked) {
+        int cwnd = Math.min(tp.snd_cwnd + acked, tp.snd_ssthresh);
+        acked -= cwnd - tp.snd_cwnd;
+        tp.snd_cwnd = Math.min(cwnd, tp.snd_cwnd_clamp);
+        return acked;
     }
+
+    /**
+     * RFC 5681 §3.1 Congestion Avoidance — Additive Increase.
+     * Approximates cwnd += 1 per RTT using a per-ACK fractional increment stored in
+     * {@code snd_cwnd_cnt} to avoid floating-point arithmetic.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_cong.c#L361">tcp_cong_avoid_ai</a>
+     */
+    private static void tcp_cong_avoid_ai(TcpSock tp, int w, int acked) {
+        if (tp.snd_cwnd_cnt >= w) {
+            tp.snd_cwnd_cnt = 0;
+            if (tp.snd_cwnd < tp.snd_cwnd_clamp) {
+                tp.snd_cwnd++;
+            }
+        }
+        tp.snd_cwnd_cnt += acked;
+        if (tp.snd_cwnd_cnt >= w) {
+            int delta = tp.snd_cwnd_cnt / w;
+            tp.snd_cwnd_cnt -= delta * w;
+            tp.snd_cwnd = Math.min(tp.snd_cwnd + delta, tp.snd_cwnd_clamp);
+        }
+    }
+
+    /**
+     * Congestion-avoidance entry point called after each valid ACK.
+     * Dispatches to slow start while cwnd &lt; ssthresh, then to additive-increase.
+     * Skips update when in Recovery or Loss state (those states manage cwnd directly).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3896">tcp_cong_avoid</a>
+     */
+    private static void tcp_cong_avoid(TcpSock tp, int acked) {
+        if (tp.icsk_ca_state != TCP_CA_Open
+                && tp.icsk_ca_state != TCP_CA_Disorder) {
+            return;
+        }
+        if (tp.snd_cwnd < tp.snd_ssthresh) {
+            acked = tcp_slow_start(tp, acked);
+            if (acked == 0) return;
+        }
+        tcp_cong_avoid_ai(tp, tp.snd_cwnd, acked);
+    }
+
+    /**
+     * RFC 5681 §3.2: Enter Fast Recovery.
+     * Sets ssthresh = max(FlightSize/2, 2), inflates cwnd by 3 (for the 3 dup ACKs
+     * that triggered this), records the recovery point in {@code high_seq}, and
+     * immediately retransmits the oldest unacknowledged segment.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3317">tcp_enter_recovery</a>
+     */
+    private void tcp_enter_fast_recovery(Channel net, TcpSock tp) {
+        // tcp_reno_ssthresh: max(snd_cwnd >> 1, 2) — Linux uses cwnd, not packets_out
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_cong.c#L416
+        tp.snd_ssthresh = Math.max(tp.snd_cwnd >> 1, 2);   // RFC 5681 §3.2 via Reno ssthresh
+        tp.snd_cwnd     = tp.snd_ssthresh + 3;             // inflate for 3 dup ACKs (RFC 5681 §3.2)
+        tp.snd_cwnd_cnt = 0;
+        tp.high_seq     = tp.snd_nxt;
+        tp.icsk_ca_state = TCP_CA_Recovery;
+        log.info("[CWND] Enter FastRecovery: ssthresh={} cwnd={}", tp.snd_ssthresh, tp.snd_cwnd);
+        output.tcp_retransmit_skb(net, tp, tp.tcp_rtx_queue.peek(), 1);
+    }
+
+    /**
+     * RFC 6582 §3 step 4: NewReno partial-ACK processing during Fast Recovery.
+     * A partial ACK advances SND.UNA but does not reach {@code high_seq}.
+     * cwnd is decremented by 1 per partial ACK and the next unacknowledged segment
+     * is retransmitted.  When SND.UNA surpasses {@code high_seq}, recovery completes.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3499">tcp_try_undo_partial</a>
+     */
+    private void tcp_update_cwnd_recovery(Channel net, TcpSock tp) {
+        if (!after(tp.snd_una, tp.high_seq)) {
+            if (tp.snd_cwnd > tp.snd_ssthresh) {
+                tp.snd_cwnd--;
+            }
+            output.tcp_retransmit_skb(net, tp, tp.tcp_rtx_queue.peek(), 1);
+        } else {
+            tcp_exit_fast_recovery(tp);
+        }
+    }
+
+    /**
+     * Exit Fast Recovery: deflate cwnd to ssthresh and return to Open state.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3494">tcp_try_to_open</a>
+     */
+    private void tcp_exit_fast_recovery(TcpSock tp) {
+        tp.snd_cwnd      = tp.snd_ssthresh;
+        tp.icsk_ca_state = TCP_CA_Open;
+        tp.dupacks       = 0;
+        log.info("[CWND] Exit FastRecovery: cwnd={}", tp.snd_cwnd);
+    }
+
+    /**
+     * RFC 5681 §3.2: Duplicate ACK detection and Fast Retransmit trigger.
+     * A duplicate ACK is an ACK that does not advance SND.UNA ({@code FLAG_SND_UNA_ADVANCED}
+     * is clear) and carries no payload ({@code FLAG_DATA} is clear).
+     * After 3 consecutive duplicate ACKs, fast recovery is entered.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3386">tcp_fastretrans_alert</a>
+     */
+    private void tcp_fastretrans_alert(Channel net, TcpSock tp, int flag) {
+        if (tp.icsk_ca_state == TCP_CA_Recovery) {
+            if (0 != (flag & FLAG_SND_UNA_ADVANCED)) {
+                tcp_update_cwnd_recovery(net, tp);
+            }
+            return;
+        }
+
+        // Loss state: dup ACKs must NOT trigger fast recovery entry.
+        // Only exit Loss when snd_una fully passes high_seq (all lost segments ACKed).
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3386
+        if (tp.icsk_ca_state == TCP_CA_Loss) {
+            if (0 != (flag & FLAG_SND_UNA_ADVANCED) && after(tp.snd_una, tp.high_seq)) {
+                tp.icsk_ca_state = TCP_CA_Open;
+                tp.dupacks = 0;
+            }
+            return;
+        }
+
+        boolean is_dupack = 0 == (flag & FLAG_SND_UNA_ADVANCED)
+                         && 0 == (flag & FLAG_DATA);
+        if (is_dupack) {
+            tp.dupacks++;
+            if (tp.dupacks == 3) {
+                tcp_enter_fast_recovery(net, tp);
+            }
+        } else if (0 != (flag & FLAG_SND_UNA_ADVANCED)) {
+            tp.dupacks = 0;
+        }
+    }
+
+    /**
+     * RFC 5681 §3.1: On Retransmission Timeout (RTO expiry), halve ssthresh and
+     * restart slow start from cwnd = 1.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2190">tcp_enter_loss</a>
+     */
+    // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2190
+    public void tcp_enter_loss(TcpSock tp) {
+        // tcp_reno_ssthresh: max(snd_cwnd >> 1, 2) — based on cwnd, not packets_out
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_cong.c#L416
+        tp.snd_ssthresh  = Math.max(tp.snd_cwnd >> 1, 2);
+        // Linux sets cwnd = tcp_packets_in_flight() + 1, NOT 1.
+        // This avoids stalling while allowing the retransmit to proceed.
+        // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L2229
+        tp.snd_cwnd      = tp.tcp_packets_in_flight() + 1;
+        tp.snd_cwnd_cnt  = 0;
+        tp.snd_cwnd_stamp = tcp_jiffies32();
+        tp.icsk_ca_state = TCP_CA_Loss;
+        tp.high_seq      = tp.snd_nxt;
+        tp.dupacks       = 0;
+        log.info("[CWND] RTO Loss: ssthresh={} cwnd={}", tp.snd_ssthresh, tp.snd_cwnd);
+    }
+
+    // ---- end RFC 5681 Congestion Control -------------------------------------------------------
 
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3186
     private static void tcp_update_rtt_min(final TcpSock sk, final long rtt_us, final int flag) {
@@ -450,10 +689,42 @@ public class TcpInput {
         // minmax_running_min(rtt_min, wlen, tcp_jiffies32(), 0 != rtt_us ? rtt_us : jiffies_to_usecs(1));
     }
 
+    /**
+     * Compute RTT in microseconds from the echoed Timestamp (TSecr).
+     * <p>
+     * delta = now - TSecr (unsigned 32-bit wrap-safe subtraction).
+     * If the socket uses microsecond timestamps ({@code tcp_usec_ts != 0}), delta is
+     * already in µs and is returned directly.  Otherwise delta is in milliseconds;
+     * it is guarded against overflow before converting to µs.
+     * <p>
+     * Returns {@code -1} when the delta is unreasonably large (≥ ~35 min in ms mode),
+     * signalling the caller to discard this RTT sample.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3185">tcp_rtt_tsopt_us</a>
+     */
+    private static long tcp_rtt_tsopt_us(final TcpSock tp) {
+        long now = tp.tcp_usec_ts > 0 ? tcp_clock_us() : tcp_clock_ms();
+        // Unsigned 32-bit delta — handles 32-bit timestamp wraparound correctly.
+        long delta = (now - tp.rx_opt.rcv_tsecr) & 0xFFFFFFFFL;
+        if (tp.tcp_usec_ts > 0) {
+            return delta;                       // already in microseconds
+        }
+        // delta is in ms.  Guard against overflow before multiplying:
+        // Linux: delta < INT_MAX / (USEC_PER_SEC / TCP_TS_HZ)  →  delta < 2_147_483 ms  (~35 min).
+        // Values at or above this threshold mean the TSecr is too stale to be useful.
+        if (delta >= (long) Integer.MAX_VALUE / 1_000L) {
+            return -1;                          // discard: unreasonably large RTT sample
+        }
+        if (delta == 0) {
+            delta = 1;                          // min_delta: avoid feeding 0 into the estimator
+        }
+        return delta * 1_000L;                  // ms → µs
+    }
+
     // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3202
     private boolean tcp_ack_update_rtt(final TcpSock sk,
                                        final int flag, long seq_rtt_us,
-                                       final long sack_rtt_us, final long ca_rtt_us/*,
+                                       final long sack_rtt_us, long ca_rtt_us/*,
                                        struct rate_sample *rs*/) {
 
         /* Prefer RTT measured from ACK's timing to TS-ECR. This is because
@@ -471,8 +742,11 @@ public class TcpInput {
          * left edge of the send window.
          * See draft-ietf-tcplw-high-performance-00, section 3.3.
          */
-//        if (seq_rtt_us < 0 && tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr && flag & FLAG_ACKED)
-//            seq_rtt_us = ca_rtt_us = tcp_rtt_tsopt_us(tp);
+        if (seq_rtt_us < 0 && sk.rx_opt.saw_tstmap != 0
+                && sk.rx_opt.rcv_tsecr != 0
+                && 0 != (flag & (FLAG_DATA_ACKED | FLAG_SYN_ACKED))) {
+            seq_rtt_us = ca_rtt_us = tcp_rtt_tsopt_us(sk);
+        }
 
         // rs->rtt_us = ca_rtt_us; /* RTT of last (S)ACKed packet (or -1) */
         if (seq_rtt_us < 0) {
@@ -583,14 +857,11 @@ public class TcpInput {
 
             tp.packets_out -= acked_pcount;
 
-            /*
-            if (!th.getSyn()) {
+            if (!skb.syn()) {
                 flag |= FLAG_DATA_ACKED;
             } else {
                 flag |= FLAG_SYN_ACKED;
-                retrans_stamp = 0;
             }
-            */
 
 
             tp.tcp_rtx_queue.remove(skb);
@@ -863,7 +1134,7 @@ public class TcpInput {
          * is in window.
          */
         if (0 != (flag & FLAG_UPDATE_TS_RECENT)) {
-//            flag |= tcp_replace_ts_recent(tp, tcpHdr.getSequenceNumber());
+            tcp_replace_ts_recent(tp, pkt.tcpSeq());
         }
 
         if ((flag & (FLAG_SLOWPATH | FLAG_SND_UNA_ADVANCED)) == FLAG_SND_UNA_ADVANCED) {
@@ -922,10 +1193,17 @@ public class TcpInput {
 
 //        if (tp->tlp_high_seq)
 //            tcp_process_tlp_ack(sk, ack, flag);
-        // TODO ...
 
-        // tcp_cong_control();
-        // tcp_xmit_recovery
+        // RFC 5681 §3.2: duplicate-ACK / fast-retransmit / fast-recovery state machine.
+        tcp_fastretrans_alert(net, tp, flag);
+
+        // RFC 5681 §3.1: advance cwnd through slow start or congestion avoidance.
+        if (0 != (flag & FLAG_SND_UNA_ADVANCED)) {
+            int newly_acked = prior_packets_out - tp.packets_out;
+            if (newly_acked > 0) {
+                tcp_cong_avoid(tp, newly_acked);
+            }
+        }
 
         return 1;
     }
@@ -1492,6 +1770,19 @@ public class TcpInput {
         final int ack = pkt.tcpAckNum();
 
         int reason = 0; //tcp_disordered_ack_check(tp, skb);
+
+        /* PAWS check (RFC 7323 §5.1): discard if timestamps don't match expectations. */
+        if (tp.rx_opt.ts_recent_stamp != 0 && tp.rx_opt.saw_tstmap != 0
+                && tcp_paws_discard(tp)) {
+            if (!pkt.isRst()) {
+                tcp_send_dupack(net, tp, pkt);
+                reason = SKB_DROP_REASON_TCP_RFC7323_PAWS_ACK;
+                tcp_drop_reason(tp, reason);
+                return false;
+            }
+            // RST is accepted even if it did not pass PAWS
+        }
+
         if (0 == reason) {
             // goto step1;
         }
@@ -1789,6 +2080,19 @@ public class TcpInput {
          */
         tcp_mstamp_refresh(sk);
         sk.rx_opt.saw_tstmap = 0;
+
+        // Parse Timestamp option from incoming packet (RFC 7323)
+        if (sk.rx_opt.tstamp_ok) {
+            final ByteBuf opts = pkt.tcpOptionsSlice();
+            if (opts != null) {
+                final long[] ts = TcpOptionCodec.parseTimestamp(opts);
+                if (ts != null) {
+                    sk.rx_opt.saw_tstmap = 1;
+                    sk.rx_opt.rcv_tsval = ts[0];
+                    sk.rx_opt.rcv_tsecr = ts[1];
+                }
+            }
+        }
 
         /*-
          * XXX ... fastopen_request_socket ...
