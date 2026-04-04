@@ -8,6 +8,10 @@ DOMAIN-SUFFIX,w-3308-ecs-iosp-mm-prod.service.consul
 
 # OCTOPUS MYSQL
 DOMAIN-SUFFIX,w-3306-octopus-prod.service.consul
+DOMAIN-SUFFIX,w-bzrds-57421e65cfeeff50xeng.service.consul
+
+# HUB MYSQL
+DOMAIN-SUFFIX,w-3307-ecs-hub4-prod.service.consul
 
 # HUB MONGO
 DOMAIN-SUFFIX,mongodb-prod-hub3-rshub3-01.cloud.bz
@@ -40,3 +44,5 @@ IP-CIDR,10.41.8.0/24
 # REPORT MYSQL
 DOMAIN-SUFFIX,w-bzrds-i7qo52aefbbc9e24050.service.consul
 DOMAIN-SUFFIX,w-bzrds-cmqu23d67ce99ee0954.service.consul
+
+DOMAIN-SUFFIX,w-3306-ecs-hub4_jd_adapter-prod.service.consul

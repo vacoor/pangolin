@@ -1,0 +1,7 @@
+# JST Network
+
+DOMAIN-SUFFIX,rm-vy1020t7zv83s186o723.mysql.rds.aliyuncs.com
+DOMAIN-SUFFIX,rm-vy1020t7zv83s186o723.mysql.rds.aliyuncs.com
+
+IP-CIDR,10.82.11.1/24
+IP-CIDR,10.82.12.1/24
