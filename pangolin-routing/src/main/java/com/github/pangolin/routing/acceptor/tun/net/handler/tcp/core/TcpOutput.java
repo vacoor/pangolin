@@ -1254,11 +1254,8 @@ public class TcpOutput {
 
         // XXX smp_store_release
         tp.icsk_ack.pending |= TcpTimer.ICSK_ACK_SCHED | TcpTimer.ICSK_ACK_TIMER;
-
-        if (tp.icsk_delack_timeout() != timeout) {
-            tp.icsk_ack.timeout = tp.icsk_delack_timeout();
-            demultiplexer.timer.sk_reset_timer(tp, tp.icsk_delack_timer, timeout);
-        }
+        tp.icsk_ack.timeout = timeout;
+        demultiplexer.timer.sk_reset_timer(tp, tp.icsk_delack_timer, timeout);
     }
 
     /**
