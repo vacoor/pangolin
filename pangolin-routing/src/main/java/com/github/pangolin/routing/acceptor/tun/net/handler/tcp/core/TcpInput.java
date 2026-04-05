@@ -1705,16 +1705,25 @@ public class TcpInput {
      * https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5760.
      */
     private void __tcp_ack_snd_check(final Channel net, final TcpSock sk) {
-        if (
-            // (tp.rcv_nxt - tp.rcv_wup > tp.icsk_ack.rcv_mss
-            /* ... and right edge of window advances far enough.
-             * (tcp_recvmsg() will send ACK otherwise).
-             * If application uses SO_RCVLOWAT, we want send ack now if
-             * we have not received enough bytes to satisfy the condition.
-             */
-            // && (tp.rcv_nxt - tp.copied_seq < tp.sk_rcvlowat || tp.output.__tcp_select_window(tp) >= tp.rcv_wnd)
-            // ) ||
-                tcp_in_quickack_mode(sk) || 0 != (sk.icsk_ack.pending & ICSK_ACK_NOW)) {
+        /*-
+         * RFC 5681 §4.2 / RFC 9293 §3.8.6.3:
+         *   "A TCP receiver SHOULD send an ACK for at least every second
+         *    full-sized segment received."
+         *
+         * (rcv_nxt - rcv_wup) > rcv_mss: more than one MSS received since
+         * last ACK/window update → send ACK immediately to keep sender's
+         * cwnd growing at the correct rate.
+         *
+         * The second sub-condition (__tcp_select_window >= rcv_wnd) guards
+         * against shrinking the window (RFC 9293 §3.8.6.1).  In this proxy
+         * implementation sk_rcvlowat / copied_seq are not maintained, so we
+         * use only the window-advance check (always true in practice because
+         * data is forwarded immediately).
+         */
+        if ((after(sk.rcv_nxt, sk.rcv_wup + sk.icsk_ack.rcv_mss) &&
+                output.__tcp_select_window(sk) >= sk.rcv_wnd) ||
+                tcp_in_quickack_mode(sk) ||
+                0 != (sk.icsk_ack.pending & ICSK_ACK_NOW)) {
             output.tcp_send_ack(net, sk);
             return;
         }
