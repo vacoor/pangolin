@@ -369,6 +369,8 @@ public class TcpTimer {
          */
         // ...
 
+        tp.icsk_backoff++;
+        tp.icsk_rto = Math.min(tp.icsk_rto << 1, TCP_RTO_MAX);
         long l = tcp_clamp_rto_to_user_timeout(tp);
         if (log.isTraceEnabled()) {
             log.trace(logFormat(
