@@ -807,8 +807,8 @@ public class TcpInput {
         long last_ackt = 0;
         int flag = 0;
         boolean fully_acked = true;
-        long seq_rtt_us = 0;
-        long ca_rtt_us = 0;
+        long seq_rtt_us = -1;
+        long ca_rtt_us = -1;
 
         TcpBuffer skb;
         while (null != (skb = tp.tcp_rtx_queue.peek())) {
