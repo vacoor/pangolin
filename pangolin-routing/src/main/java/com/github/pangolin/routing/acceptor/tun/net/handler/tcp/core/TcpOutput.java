@@ -967,7 +967,9 @@ public class TcpOutput {
 				  READ_ONCE(sk->sk_backlog.len) -
 				  atomic_read(&sk->sk_rmem_alloc));
          */
-        return tcp_full_space(tp);
+        // OFO 队列是代理中唯一真实占用接收缓冲区的数据，对应 Linux sk_rmem_alloc。
+        // ofo_queue_bytes 在 tcp_data_queue_ofo / tcp_ofo_queue / tcp_prune_ofo_queue 中维护。
+        return Math.max(0, tcp_full_space(tp) - tp.ofo_queue_bytes);
     }
 
     /**
