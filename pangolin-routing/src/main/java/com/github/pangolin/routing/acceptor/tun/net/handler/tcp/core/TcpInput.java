@@ -1615,7 +1615,7 @@ public class TcpInput {
                  * because the FIN flag will simply be merged to the
                  * receive queue tail skb in most cases.
                  */
-                if (pkt.tcpPayloadLength() > 0 && pkt.isFin()) {
+                if (pkt.tcpPayloadLength() == 0 && pkt.isFin()) {
                     queue_and_out(net, tp, pkt);
                 } else {
                     out_of_window(tp, pkt, TcpDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
