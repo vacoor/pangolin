@@ -369,19 +369,19 @@ newtp.rx_opt.wscale_ok  = req.wscale_ok;
 
 ### P0（PAWS 正确性依赖于先完成 Timestamp 生成）
 
-- [ ] **3.0** `SysctlOptions` — 新增 `ipv4_sysctl_tcp_timestamps = true`
-- [ ] **3.0** `TcpHandshaker.tcp_conn_request()` — 协商判断加入开关检查：`tstamp_ok = sysctl_tcp_timestamps && saw_tstmap != 0`
-- [ ] **3.1** `TcpOutput.tcp_synack_options()` — 当 `req.tstamp_ok` 时调用 `writeTimestampOption()`
-- [ ] **3.2** `TcpOutput.tcp_established_options(TcpSock)` — 实现 Timestamp 写入，`__tcp_transmit_skb()` 改为传入 `tp`
-- [ ] **3.3** `TcpClock` — 添加 `tcp_clock_ms()` / `tcp_clock_us()`；`TcpOutput/TcpInput` 添加 `tcp_time_stamp(tp)`
-- [ ] **3.4** `TcpInput.tcp_replace_ts_recent()` — 实现并在 `tcp_validate_incoming()` 和 `tcp_ack()` 中调用
-- [ ] **3.5** `TcpInput.tcp_paws_discard()` — 实现并集成到 `tcp_validate_incoming()` 开头
-- [ ] **3.5** `TcpInput.tcp_validate_incoming()` — 在入口处解析本包 Timestamp 到 `rx_opt`（`saw_tstmap`, `rcv_tsval`, `rcv_tsecr`）
+- [x] **3.0** `SysctlOptions` — 新增 `ipv4_sysctl_tcp_timestamps = true` ✅ 已完成
+- [x] **3.0** `TcpHandshaker.tcp_conn_request()` — 协商判断加入开关检查：`tstamp_ok = sysctl_tcp_timestamps && saw_tstmap != 0` ✅ 已完成
+- [x] **3.1** `TcpOutput.tcp_synack_options()` — 当 `req.tstamp_ok` 时调用 `writeTimestampOption()` ✅ 已完成
+- [x] **3.2** `TcpOutput.tcp_established_options(TcpSock)` — 实现 Timestamp 写入，`__tcp_transmit_skb()` 改为传入 `tp` ✅ 已完成
+- [x] **3.3** `TcpClock` — 添加 `tcp_clock_ms()` / `tcp_clock_us()`；`TcpOutput/TcpInput` 添加 `tcp_time_stamp(tp)` ✅ 已完成
+- [x] **3.4** `TcpInput.tcp_replace_ts_recent()` — 实现并在 `tcp_validate_incoming()` 和 `tcp_ack()` 中调用 ✅ 已完成
+- [x] **3.5** `TcpInput.tcp_paws_discard()` — 实现并集成到 `tcp_validate_incoming()` 开头 ✅ 已完成
+- [x] **3.5** `TcpInput.tcp_validate_incoming()` — 在入口处解析本包 Timestamp 到 `rx_opt`（`saw_tstmap`, `rcv_tsval`, `rcv_tsecr`） ✅ 已完成
 
 ### P1（依赖 P0）
 
-- [ ] **握手层传递** `TcpDemultiplexer.tcp_create_openreq_child()` — 将 `req.tstamp_ok` / `ts_recent` 等传递给 `TcpSock`
-- [x] **3.6** `TcpInput.tcp_rcv_rtt_measure_ts()` — Timestamp 辅助 RTT 测量，在 `tcp_ack()` 中调用
+- [x] **握手层传递** `TcpDemultiplexer.tcp_create_openreq_child()` — 将 `req.tstamp_ok` / `ts_recent` 等传递给 `TcpSock` ✅ 已完成
+- [x] **3.6** `TcpInput.tcp_rcv_rtt_measure_ts()` — Timestamp 辅助 RTT 测量，在 `tcp_ack()` 中调用 ✅ 已完成
 
 ---
 
