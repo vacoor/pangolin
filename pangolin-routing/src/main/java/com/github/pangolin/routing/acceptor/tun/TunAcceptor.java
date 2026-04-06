@@ -20,6 +20,7 @@ import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.route.predicate.Subnet4RoutePredicate;
 import com.github.pangolin.routing.support.DatagramChannelFactory;
 import com.github.pangolin.routing.support.SocketChannelFactory;
+import com.github.pangolin.routing.upstream.DirectUpstream;
 import com.github.pangolin.routing.upstream.DynamicUpstream;
 import com.github.pangolin.routing.upstream.Upstream;
 import com.github.pangolin.routing.util.SocketUtils;
@@ -182,6 +183,9 @@ public class TunAcceptor implements Acceptor {
         final NetworkRoutingTable rt = NetworkRoutingTable.get();
         final Set<String> added = Sets.newHashSet();
         for (final Route<?> route : context.routes()) {
+            if (DirectUpstream.INSTANCE.name().equalsIgnoreCase(route.getUpstream())) {
+                continue;
+            }
             for (Object predicate : route.getPredicates()) {
                 if (!route.isUdf()) {
                     continue;
