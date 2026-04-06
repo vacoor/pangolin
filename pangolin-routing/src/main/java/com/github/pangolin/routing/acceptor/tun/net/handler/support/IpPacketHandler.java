@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.support;
 
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.util.ReferenceCountUtil;
 
 /**
  * Base handler that filters incoming {@link IpPacketBuf} messages by protocol number
@@ -33,7 +34,7 @@ public abstract class IpPacketHandler<P extends IpPacketBuf> extends ChannelDupl
                 try {
                     channelRead0(ctx, (P) pkt);
                 } finally {
-                    pkt.release();
+                    ReferenceCountUtil.release(pkt);
                 }
                 return;
             }

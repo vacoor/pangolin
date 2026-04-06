@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.support;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.util.ReferenceCounted;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -8,6 +9,11 @@ import java.net.UnknownHostException;
 /**
  * Lightweight zero-copy wrapper around a raw IP packet ByteBuf.
  * All field accesses use absolute byte offsets (getXxx) without moving readerIndex.
+ *
+ * <p>Implements {@link ReferenceCounted} by delegating all reference counting to the
+ * underlying {@link ByteBuf}. This allows Netty's {@code ReferenceCountUtil.release()}
+ * and leak detector to work correctly when {@code IpPacketBuf} flows through a pipeline
+ * as a channel message.
  *
  * <p>The factory ({@link #wrap}/{@link #retainedWrap}) dispatches to the most-specific
  * subclass based on IP version and next-protocol:
@@ -22,7 +28,7 @@ import java.net.UnknownHostException;
  * @see TcpPacketBuf
  * @see UdpPacketBuf
  */
-public abstract class IpPacketBuf {
+public abstract class IpPacketBuf implements ReferenceCounted {
 
     public static final byte PROTO_TCP = 6;
     public static final byte PROTO_UDP = 17;
@@ -116,18 +122,51 @@ public abstract class IpPacketBuf {
         return this;
     }
 
+    // ---- ReferenceCounted (delegated to buf) ----
+
+    @Override
+    public int refCnt() {
+        return buf.refCnt();
+    }
+
+    @Override
+    public IpPacketBuf retain() {
+        buf.retain();
+        return this;
+    }
+
+    @Override
+    public IpPacketBuf retain(int increment) {
+        buf.retain(increment);
+        return this;
+    }
+
+    @Override
+    public IpPacketBuf touch() {
+        buf.touch();
+        return this;
+    }
+
+    @Override
+    public IpPacketBuf touch(Object hint) {
+        buf.touch(hint);
+        return this;
+    }
+
+    @Override
+    public boolean release() {
+        return buf.release();
+    }
+
+    @Override
+    public boolean release(int decrement) {
+        return buf.release(decrement);
+    }
+
     // ---- raw buf ----
 
     public ByteBuf buf() {
         return buf;
-    }
-
-    public void retain() {
-        buf.retain();
-    }
-
-    public void release() {
-        buf.release();
     }
 
     // ---- helpers ----
