@@ -11,7 +11,7 @@ public class SysctlOptions {
   public static final int ipv4_sysctl_tcp_syn_retries = 5;
   public static final int ipv4_sysctl_tcp_synack_retries = 5;
   public static final int ipv4_sysctl_tcp_retries1 = 5;
-  public static final int ipv4_sysctl_tcp_retries2 = 5;
+  public static final int ipv4_sysctl_tcp_retries2 = 15;
   /**
    * 有符号Window.
    */

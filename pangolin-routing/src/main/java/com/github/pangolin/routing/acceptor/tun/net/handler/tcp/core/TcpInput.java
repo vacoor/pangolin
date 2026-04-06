@@ -890,7 +890,7 @@ public class TcpInput {
         // FIXME
         tcp_ack_update_rtt(tp, flag, seq_rtt_us, 0, ca_rtt_us);
 
-        return 0;
+        return flag;
     }
 
     /**

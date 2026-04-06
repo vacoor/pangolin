@@ -48,7 +48,7 @@
 - ✅ 序列号窗口验证（`tcp_sequence()`, `tcp_validate_incoming()`）
 - ✅ 发送队列 `sk_write_queue` + 重传队列 `tcp_rtx_queue`
 - ✅ Out-of-Order 队列（`TreeMap<Integer, OfoEntry>`）
-- ❌ OFO 队列大小限制 — `ofo_queue_bytes` 字段仅声明，从未被实际检查（无溢出丢弃逻辑）
+- ✅ OFO 队列大小限制 — `ofo_queue_bytes` 在入队/出队/裁剪中正确维护，`OFO_MAX_BYTES = 256KB` 预算检查已实现
 - ❌ PSH 标志接收端处理 — 接收路径无 PSH 处理逻辑（无立即 flush / 数据推送），发送端 `__tcp_transmit_skb()` 会设置 PSH 位，但属于发送标记而非 RFC 9293 §3.7.4 的接收端行为
 - ✅ 更新 `snd_nxt`, `rcv_nxt`
 
@@ -161,13 +161,13 @@
 
 ---
 
-**2.0.3 OFO 队列无大小限制**  
+~~**2.0.3 OFO 队列无大小限制**~~ — ✅ **已实现**  
 **Linux 对标**：`net/ipv4/tcp_input.c:tcp_data_queue_ofo()` 中的 `tcp_ofo_queue_prune()`  
 **RFC**：**RFC 9293 §3.7**
 
-- `TcpSock.ofo_queue_bytes` 字段声明存在，但在 `tcp_data_queue_ofo()` 中从未被检查或更新
-- 导致：失序报文可无限堆积，存在内存耗尽风险
-- [ ] 在入队时更新 `ofo_queue_bytes`，超限时调用 `tcp_ofo_queue_prune()` 裁剪
+- ✅ `ofo_queue_bytes` 在 `tcp_data_queue_ofo`（入队 +）、`tcp_ofo_queue`（出队 -）、`tcp_prune_ofo_queue`（裁剪 -）中正确维护
+- ✅ `OFO_MAX_BYTES = 256KB` 预算检查已实现（`TcpInput.java:1487`），超限时调用 `tcp_prune_ofo_queue()` 裁剪
+- ✅ D3 修复（`d71c0458`）：`tcp_space()` 已减去 `ofo_queue_bytes`，OFO 积压时窗口收窄
 
 ---
 
@@ -400,7 +400,7 @@ if (TCP_TIME_WAIT.equals(state)) {
 
 | RFC | 标题 | 相关功能 | 实现状态 | 未实现简述 |
 |-----|------|---------|---------|---------|
-| **RFC 9293** | Transmission Control Protocol | 核心 TCP 规范（替代 RFC 793） | ⚠️ 部分实现 | SYN_SENT（client 模式）未实现；TIME_WAIT 2MSL 等待跳过；PSH 接收端未处理；OFO 队列无大小限制 |
+| **RFC 9293** | Transmission Control Protocol | 核心 TCP 规范（替代 RFC 793） | ⚠️ 部分实现 | SYN_SENT（client 模式）未实现；TIME_WAIT 2MSL 等待跳过；PSH 接收端未处理 |
 | **RFC 1122** | Requirements for Internet Hosts | Keepalive, 错误处理 | ⚠️ 部分实现 | Keepalive 主体已有但 `sk_keepopen` 检查缺失、per-socket `keepalive_time` 未启用、ESTABLISHED 后未启动定时器 |
 | **RFC 2018** | TCP Selective Acknowledgment Options | SACK | ❌ 框架已有 | SACK block 解析框架存在但未处理；`tcp_sacktag_write_queue()`、SACK 重传、记分板均未实现 |
 | **RFC 2883** | An Extension to the Selective Acknowledgement (SACK) Option | D-SACK | ❌ 未实现 | `tcp_dsack_set()` / `tcp_check_dsack()` 均未实现；无法通知对端重复收到的段，无法撤销不必要重传 |
@@ -424,7 +424,8 @@ if (TCP_TIME_WAIT.equals(state)) {
 
 ## 四、优先级建议
 
-> 更新日期：2026-04-04（已完成：拥塞控制 Reno、cwnd 约束发送、RFC 7323 Timestamp 生成、PAWS）
+> 更新日期：2026-04-06（已完成：拥塞控制 Reno、cwnd 约束发送、RFC 7323 Timestamp 生成、PAWS、OFO 队列限制、Bug 1-4 修复、D2/D3 修复）  
+> 详细审查报告：`docs/tcp/TCP.REVIEW.md`
 
 按实现收益和复杂度排序：
 
@@ -433,7 +434,8 @@ if (TCP_TIME_WAIT.equals(state)) {
 | ~~P0~~ | ~~拥塞控制（cwnd 约束发送）~~ | ✅ **已完成**（2026-04-04）：RFC 5681 Reno 全部实现 |
 | ~~P0~~ | ~~Timestamp 生成补全（2.0.1/2.0.2）~~ | ✅ **已完成**（590f393e）：SYN-ACK 和数据包均已写入 Timestamp |
 | ~~P0~~ | ~~PAWS 完整实现（2.8）~~ | ✅ **已完成**（590f393e + 330ecb8c）：`tcp_paws_check/discard/replace_ts_recent` 全部实现 |
-| P1 | **OFO 队列大小限制（2.0.3）** | 无限堆积存在内存耗尽风险 |
+| ~~P1~~ | ~~OFO 队列大小限制（2.0.3）~~ | ✅ **已完成**：`OFO_MAX_BYTES` 限制 + `tcp_prune_ofo_queue` + D3 窗口收窄 |
+| ~~P0~~ | ~~`tcp_retries2` 改为 15~~ | ✅ **已完成**：`SysctlOptions.ipv4_sysctl_tcp_retries2` 从 5 改为 15 |
 | P1 | **SACK 完整实现（2.1）** | 框架已有；`tcp_left_out()` 返回 0 导致 in_flight 略有高估，丢包场景恢复效率低 |
 | P1 | **TIME_WAIT 状态机完整处理（2.5）** | 当前立即跳过 2MSL 直接 CLOSE，违反 RFC 9293 |
 | P2 | **接收端 PSH 处理（2.0.5）** | 数据无法及时推送给上层，影响交互式应用延迟 |
