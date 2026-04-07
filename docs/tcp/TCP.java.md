@@ -6,6 +6,142 @@
 
 ---
 
+## 零、架构总览
+
+### 0.1 当前架构（现状）
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       TUN 设备 I/O                              │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ IpPacketBuf
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              TcpDemultiplexer（God Facade，705行）               │
+│  synRegistry │ establishedRegistry │ TcpInput │ TcpOutput │ TcpTimer │
+└───────┬───────────────────────────────────────────────┬─────────┘
+        │                                               │
+        ▼                                               ▼
+┌───────────────────┐                      ┌───────────────────────┐
+│  TcpInput（2321行）│                      │ TcpOutput（1398行）   │
+│ ─────────────────  │                      │ ─────────────────────  │
+│ • 状态机           │◄────── TcpSock ──────►│ • 分段/发送           │
+│ • ACK处理          │   （615行贫血模型）    │ • 重传                │
+│ • RTT采样(RFC6298) │   50+个public字段     │ • 窗口探测            │
+│ • 拥塞控制(RFC5681)│                      │ • TLP空实现(RFC8985)  │
+│ • PAWS(RFC7323)   │                      │                       │
+│ • OFO队列          │                      │                       │
+└───────────────────┘                      └───────────────────────┘
+        ▲                                               ▲
+        └────────────────── TcpTimer ───────────────────┘
+                         （778行：全局Map + 所有handler）
+```
+
+**问题一览**：
+- `TcpInput`/`TcpOutput` 是 God Class，RFC 关注点完全混合
+- `TcpSock` 是贫血模型，50+ public 字段被任意修改
+- `TcpTimer` 用全局 `ConcurrentMap<Runnable,Future>` 管理所有连接的所有定时器
+- 无任何可插拔扩展点，RFC6298/5681/7323/8985 均硬编码
+
+---
+
+### 0.2 目标架构（重构后）
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       TUN 设备 I/O                              │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ IpPacketBuf
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              TcpDemultiplexer（轻量 Facade）                     │
+│              HalfOpenRegistry │ ConnectionRegistry               │
+└──────────┬────────────────────────────────────────┬─────────────┘
+           │ 按五元组查找 TcpConnection              │
+           ▼                                        ▼
+┌──────────────────────────────────┐   ┌───────────────────────────┐
+│         TcpConnection            │   │     TcpHandshaker         │
+│   （富域模型，private 字段）       │   │  （握手状态机，阶段判断）   │
+│ ┌──────────────────────────────┐ │   └───────────────────────────┘
+│ │   TcpConnectionTimers        │ │
+│ │  retransSlot│delackSlot│...  │ │   ┌───────────────────────────┐
+│ └──────────────────────────────┘ │   │     TcpTimerManager       │
+│ ┌──────────────────────────────┐ │   │  HashedWheelTimer(RTO)    │
+│ │   RFC Extensions（组合注入）  │ │◄──┤  EventLoop.schedule(DACK) │
+│ │  RttEstimator                │ │   │  per-conn TimerHandle[]   │
+│ │  CongestionControl           │ │   └───────────────────────────┘
+│ │  LossDetector                │ │
+│ │  TcpTimestampExtension       │ │
+│ └──────────────────────────────┘ │
+└──────────────────────────────────┘
+           │ 入站                         出站
+           ▼                              ▼
+┌──────────────────┐          ┌──────────────────────┐
+│  RFC9293 接收路径 │          │   RFC9293 发送路径    │
+│ ┌──────────────┐ │          │ ┌────────────────────┐│
+│ │TcpReceiver   │ │          │ │TcpSegmentizer      ││
+│ │TcpAckProcessor│ │          │ │TcpRetransmitter    ││
+│ │TcpStateMachine│ │          │ └────────────────────┘│
+│ └──────────────┘ │          └──────────────────────┘
+└──────────────────┘
+           │ 调用扩展接口
+           ▼
+┌──────────────────────────────────────────────────────┐
+│               可插拔 RFC 扩展层（ext/）               │
+│                                                      │
+│  ┌─────────────┐  ┌──────────────────┐               │
+│  │RttEstimator │  │CongestionControl │               │
+│  │(RFC6298)    │  │(RFC5681 NewReno) │               │
+│  └─────────────┘  └──────────────────┘               │
+│  ┌──────────────────┐  ┌────────────────────────┐    │
+│  │TcpTimestampExt   │  │LossDetector            │    │
+│  │(RFC7323 PAWS)    │  │(RFC8985 TLP)           │    │
+│  └──────────────────┘  └────────────────────────┘    │
+│  每个扩展均有 Noop 实现，关闭时退化为 RFC9293 兜底      │
+└──────────────────────────────────────────────────────┘
+```
+
+---
+
+### 0.3 数据流：入站包处理
+
+```
+TUN 读取 IpPacketBuf
+    │
+    ▼
+TcpDemultiplexer.dispatch(pkt)
+    │ 按 <srcIP:srcPort:dstIP:dstPort> 查找
+    ├─► HalfOpenRegistry → TcpHandshaker.onSyn(pkt)         [SYN 握手]
+    └─► ConnectionRegistry → TcpStateMachine.process(pkt)   [已建立]
+            │
+            ├─ validate(pkt)          # RFC9293：序列号、RST、PAWS（调 TcpTimestampExt）
+            ├─ TcpAckProcessor.onAck  # RFC9293 + RttEstimator + CongestionControl
+            ├─ TcpReceiver.onData     # RFC9293：数据入队、OFO
+            └─ postProcess            # ACK 发送检查、发送队列推进
+```
+
+---
+
+### 0.4 数据流：定时器触发
+
+```
+HashedWheelTimer tick（10ms）
+    │ RTO 到期
+    └─► conn.eventLoop().execute(retransmitAction)
+            │
+            ▼
+        TcpRetransmitHandler.onTimeout(conn)
+            ├─ rttEstimator.backoff(conn)         # RFC6298 退避
+            ├─ congestionControl.onTimeout(conn)  # RFC5681 cwnd 降为 1
+            └─ TcpRetransmitter.retransmit(conn)  # 重传队头 skb
+
+EventLoop.schedule tick（DelAck 到期）
+    └─► TcpDelAckHandler.onTimeout(conn)
+            └─ TcpSegmentizer.sendAck(conn)
+```
+
+---
+
 ## 一、现状诊断
 
 ### 1.1 规模与职责
