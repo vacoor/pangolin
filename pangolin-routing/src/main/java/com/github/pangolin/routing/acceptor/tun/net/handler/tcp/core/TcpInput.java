@@ -760,8 +760,6 @@ public class TcpInput {
         tcp_update_rtt_min(sk, ca_rtt_us, flag);
         tcp_rtt_estimator(sk, seq_rtt_us);
 
-        // 116.228.111.118 180.168.255.18
-        // TODO OPEN ME
         tcp_set_rto(sk);
 
         /* RFC6298: only reset backoff on valid RTT measurement. */
