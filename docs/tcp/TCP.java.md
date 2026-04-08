@@ -219,8 +219,9 @@ tcp/
 │   └── TcpAckProcessor   # ACK 处理（替代 TcpInput ACK 部分）
 │
 ├── timer/                # 定时器（重构 TcpTimer）
-│   ├── TcpTimerManager   # 统一管理，key 为 (Connection, TimerType)
-│   └── TimerType         # 枚举：RETRANS / DACK / PROBE0 / LOSS_PROBE / REO
+│   ├── TcpTimerManager      # per-conn slot + EventLoop.schedule()，无全局 Map
+│   ├── TcpConnectionTimers  # 每个连接的 ScheduledFuture slot（write/delack/keepalive）
+│   └── TimerType            # 枚举：RETRANS / DACK / PROBE0 / LOSS_PROBE / REO
 │
 ├── handshake/            # 三次握手（重构 TcpHandshaker）
 │   ├── TcpHandshaker     # 握手状态机
