@@ -64,12 +64,16 @@
 │   （富域模型，private 字段）       │   │  （握手状态机，阶段判断）   │
 │ ┌──────────────────────────────┐ │   └───────────────────────────┘
 │ │   TcpConnectionTimers        │ │
-│ │  retransSlot│delackSlot│...  │ │   ┌───────────────────────────┐
+│ │  writeSlot│delackSlot│...    │ │   ┌───────────────────────────┐
 │ └──────────────────────────────┘ │   │     TcpTimerManager       │
-│ ┌──────────────────────────────┐ │   │  HashedWheelTimer(RTO)    │
-│ │   RFC Extensions（组合注入）  │ │◄──┤  EventLoop.schedule(DACK) │
-│ │  RttEstimator                │ │   │  per-conn TimerHandle[]   │
-│ │  CongestionControl           │ │   └───────────────────────────┘
+│ ┌──────────────────────────────┐ │   │  EventLoop.schedule()     │
+│ │   Map<ConnectionKey<?>,Object>│ │◄──┤  per-conn ScheduledFuture │
+│ │  （RFC 扩展状态存储）          │ │   │  slots（无全局 Map）       │
+│ └──────────────────────────────┘ │   └───────────────────────────┘
+│ ┌──────────────────────────────┐ │
+│ │   RFC Extensions（组合注入）  │ │
+│ │  RttEstimator                │ │
+│ │  CongestionControl           │ │
 │ │  LossDetector                │ │
 │ │  TcpTimestampExtension       │ │
 │ └──────────────────────────────┘ │
@@ -125,12 +129,8 @@ TcpDemultiplexer.dispatch(pkt)
 ### 0.4 数据流：定时器触发
 
 ```
-HashedWheelTimer tick（10ms）
-    │ RTO 到期
-    └─► conn.eventLoop().execute(retransmitAction)
-            │
-            ▼
-        TcpRetransmitHandler.onTimeout(conn)
+EventLoop.schedule tick（RTO 到期）
+    └─► TcpRetransmitHandler.onTimeout(conn)
             ├─ rttEstimator.backoff(conn)         # RFC6298 退避
             ├─ congestionControl.onTimeout(conn)  # RFC5681 cwnd 降为 1
             └─ TcpRetransmitter.retransmit(conn)  # 重传队头 skb
@@ -138,6 +138,10 @@ HashedWheelTimer tick（10ms）
 EventLoop.schedule tick（DelAck 到期）
     └─► TcpDelAckHandler.onTimeout(conn)
             └─ TcpSegmentizer.sendAck(conn)
+
+# 所有定时器均使用 EventLoop.schedule()
+# per-conn ScheduledFuture slot 直接存于 TcpConnectionTimers，无全局 Map
+# O(log n) 调度/取消，5000 连接×3 定时器≈15000 节点，开销可忽略
 ```
 
 ---
@@ -264,7 +268,10 @@ tcp/
 
 ```java
 // RFC 6298: RTO 自适应
+// 状态（srtt、rttvar、backoff 计数）通过 ConnectionKey 存于 TcpConnection
 public interface RttEstimator {
+    /** 连接初始化，分配 per-conn 状态 */
+    void init(TcpConnection conn);
     /** 新 RTT 样本到达，更新 SRTT/RTTVAR */
     void update(TcpConnection conn, long rttUs);
     /** 返回当前 RTO（jiffies） */
@@ -273,42 +280,68 @@ public interface RttEstimator {
     void backoff(TcpConnection conn);
     /** 重置退避计数 */
     void resetBackoff(TcpConnection conn);
+    /** 连接关闭，清理 per-conn 状态 */
+    void onConnectionClosed(TcpConnection conn);
 }
 
-// RFC 5681: 拥塞控制
+// RFC 5681: 拥塞控制（含完整状态机）
+//
+// 设计要点：RFC9293（TcpAckProcessor）仅通知 onAck 事件和查询 getCwnd()。
+// dupACK 计数、ca_state 切换、快速重传触发、cwnd 变化等 RFC5681 全部状态机
+// 逻辑封装在实现类内部，RFC9293 层无需感知。
+// 重传执行仍由 RFC9293（TcpRetransmitter）完成，CC 通过 init() 注入的
+// retransmitCallback 回调触发，实现决策与执行的分离。
 public interface CongestionControl {
-    /** 新数据被 ACK，更新 cwnd（慢启动或拥塞避免） */
-    void onAcked(TcpConnection conn, int ackedSegments);
-    /** 进入快速重传/恢复 */
-    void onLoss(TcpConnection conn);
-    /** 退出快速恢复 */
-    void onRecovery(TcpConnection conn);
-    /** 超时丢包 */
+    String name();
+
+    /**
+     * 连接初始化：分配 per-conn 状态，绑定重传回调。
+     * @param retransmitCallback CC 决定需要快速重传时回调，由 RFC9293 实际执行重传
+     */
+    void init(TcpConnection conn, Consumer<TcpConnection> retransmitCallback);
+
+    /**
+     * ACK 到达通知（RFC5681 全状态机入口）。
+     * dupACK 计数、快速重传判断、cwnd 更新均在实现内部完成。
+     * @param ackedSegments 本次确认的新 segment 数（0 表示 dupACK）
+     * @param sndUnaAdvanced SND.UNA 是否前进（区分新 ACK 与 dupACK）
+     */
+    void onAck(TcpConnection conn, int ackedSegments, boolean sndUnaAdvanced);
+
+    /** RTO 超时（RFC5681 §5.4）：ssthresh = cwnd/2，cwnd = 1 */
     void onTimeout(TcpConnection conn);
-    /** 返回发送限额（cwnd quota） */
-    int cwndQuota(TcpConnection conn);
+
+    /** 返回当前 cwnd（MSS 个数） */
+    int getCwnd(TcpConnection conn);
+
+    /** 是否处于快速恢复或丢包恢复阶段 */
+    boolean isInRecovery(TcpConnection conn);
+
+    /** 连接关闭，清理 per-conn 状态 */
+    void onConnectionClosed(TcpConnection conn);
 }
 
 // RFC 8985: 丢包检测（TLP / RACK）
 public interface LossDetector {
+    void init(TcpConnection conn);
     /** 每次成功发送后尝试调度 TLP 定时器 */
     void scheduleProbe(TcpConnection conn);
     /** TLP 定时器触发，发送探测包 */
     void sendProbe(Channel net, TcpConnection conn);
     /** ACK 到达时检查是否确认了探测包 */
     void onAck(TcpConnection conn, int ack, int flag);
+    void onConnectionClosed(TcpConnection conn);
 }
 
 // RFC 7323: 时间戳 / PAWS
 public interface TcpTimestampExtension {
-    /** 判断是否需要发送时间戳选项 */
+    void init(TcpConnection conn);
     boolean isEnabled(TcpConnection conn);
-    /** 构造发送时间戳（TSval） */
     int buildTsval(TcpConnection conn);
-    /** PAWS 检查（返回 true 表示丢弃） */
+    /** PAWS 检查（返回 true 表示丢弃该包） */
     boolean pawsDiscard(TcpConnection conn);
-    /** 更新 ts_recent */
     void updateRecent(TcpConnection conn, int seq);
+    void onConnectionClosed(TcpConnection conn);
 }
 ```
 
@@ -317,7 +350,7 @@ public interface TcpTimestampExtension {
 ```java
 public class TcpConnection {
 
-    // ── RFC9293 核心状态（package-private，通过方法访问）──
+    // ── RFC9293 核心状态（private，只通过方法访问）──
     private TcpConnectionState state;
     private int sndUna;      // SND.UNA
     private int sndNxt;      // SND.NXT
@@ -326,27 +359,44 @@ public class TcpConnection {
     private int rcvWnd;      // RCV.WND
     private int mssCache;
 
-    // ── 扩展状态（由各扩展模块通过 accessor 读写）──
-    final RttState rttState = new RttState();          // RFC6298
-    final CongestionState ccState = new CongestionState(); // RFC5681
-    final TimestampState tsState = new TimestampState();   // RFC7323
-    int tlpHighSeq;                                        // RFC8985
+    // ── 可插拔扩展状态存储（Netty AttributeKey 模式）──
+    // 每个 RFC 扩展通过自己私有的 ConnectionKey<StateType> 读写状态，
+    // TcpConnection 本身对状态内容完全不可见（类型擦除为 Object）。
+    private final Map<ConnectionKey<?>, Object> attributes = new HashMap<>();
 
     // ── 队列 ──
     private final TcpSendBuffer sendBuffer;
     private final TcpReceiveBuffer receiveBuffer;
 
-    // ── 可插拔扩展（构造时注入）──
+    // ── 可插拔扩展实例（构造时注入）──
     private final RttEstimator rttEstimator;
     private final CongestionControl congestionControl;
     private final LossDetector lossDetector;
     private final TcpTimestampExtension timestampExt;
 
-    // 只暴露必要的方法，不暴露原始字段
+    // ── 定时器（per-conn slot，无全局 Map）──
+    private final TcpConnectionTimers timers = new TcpConnectionTimers();
+
+    // ── 泛型属性访问（供 RFC 扩展模块使用）──
+    @SuppressWarnings("unchecked")
+    public <T> T attr(ConnectionKey<T> key) { return (T) attributes.get(key); }
+    public <T> void attr(ConnectionKey<T> key, T value) { attributes.put(key, value); }
+    public void removeAttr(ConnectionKey<?> key) { attributes.remove(key); }
+
+    // ── 核心字段访问器 ──
     public int getSndUna() { return sndUna; }
+    public int getSndNxt() { return sndNxt; }
     public void advanceSndUna(int ack) { ... }
-    public boolean isInRecovery() { return ccState.isRecovering(); }
-    // ...
+    public boolean isInRecovery() {
+        return congestionControl.isInRecovery(this);
+    }
+
+    // ── 扩展实例访问器 ──
+    public RttEstimator rttEstimator() { return rttEstimator; }
+    public CongestionControl congestionControl() { return congestionControl; }
+    public LossDetector lossDetector() { return lossDetector; }
+    public TcpTimestampExtension timestampExt() { return timestampExt; }
+    public TcpConnectionTimers timers() { return timers; }
 }
 ```
 
@@ -374,37 +424,178 @@ public abstract class TcpStateMachine {
 }
 ```
 
-### 5.4 `TcpTimerManager`（消除 Runnable 作 key 的问题）
+### 5.4 `TcpTimerManager` + `TcpConnectionTimers`
+
+详细设计见 `TCP.timer.md`。核心思路：消除全局 `ConcurrentMap<Runnable, Future>`，  
+改为 per-connection `ScheduledFuture` slot，所有定时器使用 `EventLoop.schedule()`。
 
 ```java
-public class TcpTimerManager {
+/**
+ * 每个 TcpConnection 持有的定时器 slot（无全局 Map）。
+ * 所有字段只在该 connection 的 EventLoop 线程访问，无需同步。
+ */
+public final class TcpConnectionTimers {
+    // write_timer 组（RETRANS / LOSS_PROBE / PROBE0 / REO_TIMEOUT 共用）
+    ScheduledFuture<?> writeTimer;
+    TimerType          writeTimerType;    // 当前激活类型（替代 icsk_pending int）
+    long               writeTimerExpires; // 绝对到期时间（jiffies）
 
-    // key = (connectionId, TimerType)，唯一且可 remove
-    private final ConcurrentMap<TimerKey, ScheduledFuture<?>> timers = new ConcurrentHashMap<>();
+    ScheduledFuture<?> delackTimer;
+    ScheduledFuture<?> keepaliveTimer;
 
-    public void schedule(TcpConnection conn, TimerType type, long delayMs, Runnable action) {
-        TimerKey key = new TimerKey(conn.id(), type);
-        ScheduledFuture<?> old = timers.put(key, conn.eventLoop().schedule(action, delayMs, MILLISECONDS));
-        if (old != null) old.cancel(false);
+    /** 连接关闭：O(1) 取消所有定时器 */
+    public void cancelAll() {
+        cancel(writeTimer); cancel(delackTimer); cancel(keepaliveTimer);
+        writeTimer = delackTimer = keepaliveTimer = null;
+        writeTimerType = null;
+    }
+    private static void cancel(ScheduledFuture<?> f) {
+        if (f != null && !f.isDone()) f.cancel(false);  // 始终 cancel(false)，不中断 EventLoop
+    }
+}
+
+/**
+ * 无状态调度器，可被多个 TcpConnection 共享。
+ * 不包含任何 TCP 业务逻辑，约 80 行。
+ */
+public final class TcpTimerManager {
+    public void scheduleWriteTimer(TcpConnection conn, TimerType type,
+                                   long delayMs, Runnable action) {
+        TcpConnectionTimers slots = conn.timers();
+        if (slots.writeTimer != null && !slots.writeTimer.isDone()) {
+            slots.writeTimer.cancel(false);
+        }
+        long delay = Math.max(delayMs, 1);
+        slots.writeTimerType    = type;
+        slots.writeTimerExpires = TcpClock.jiffies() + TcpClock.msecs_to_jiffies(delay);
+        slots.writeTimer        = conn.eventLoop().schedule(action, delay, MILLISECONDS);
     }
 
-    public void cancel(TcpConnection conn, TimerType type) {
-        ScheduledFuture<?> f = timers.remove(new TimerKey(conn.id(), type));
-        if (f != null) f.cancel(false);
+    public void scheduleDelAck(TcpConnection conn, long delayMs, Runnable action) { ... }
+    public void scheduleKeepalive(TcpConnection conn, long delayMs, Runnable action) { ... }
+    public void cancelWriteTimer(TcpConnection conn) { ... }
+    public void cancelAll(TcpConnection conn) { conn.timers().cancelAll(); }
+}
+```
+
+业务逻辑从 `TcpTimer`（778 行）中剥离到对应 Handler：`TcpRetransmitHandler`、  
+`TcpDelAckHandler`、`TcpProbeHandler`、`TcpKeepAliveHandler`、`TcpReqskHandler`。
+
+---
+
+### 5.5 `ConnectionKey<T>`（RFC 扩展状态隔离）
+
+类比 Netty 的 `AttributeKey<T>`，使各 RFC 扩展将 per-connection 状态存入  
+`TcpConnection.attributes`，同时保持类型安全和模块隔离：
+
+```java
+/**
+ * 类型安全的连接属性 key，类似 Netty AttributeKey。
+ * 每个 RFC 扩展模块声明自己的私有静态 key，TcpConnection 对值内容不可见。
+ */
+public final class ConnectionKey<T> {
+    private final String name;
+    private ConnectionKey(String name) { this.name = name; }
+    public static <T> ConnectionKey<T> newKey(String name) {
+        return new ConnectionKey<>(name);
+    }
+    @Override public String toString() { return name; }
+}
+```
+
+**各扩展如何使用**（以 NewReno 为例）：
+
+```java
+public class NewRenoCongestionControl implements CongestionControl {
+
+    // 私有 key——只有本类能访问 RenoState，TcpConnection 完全不感知
+    private static final ConnectionKey<RenoState> KEY =
+        ConnectionKey.newKey("rfc5681.newreno");
+
+    static class RenoState {
+        int cwnd    = TCP_INIT_CWND;
+        int ssthresh = Integer.MAX_VALUE;
+        int dupacks  = 0;
+        int caState  = CA_OPEN;    // CA_OPEN / CA_RECOVERY / CA_LOSS
+        int highSeq;               // recovery_point（enter_recovery 时的 snd_nxt）
+        Consumer<TcpConnection> retransmitCallback;
     }
 
-    /** 连接关闭时清理该连接所有定时器 */
-    public void cancelAll(TcpConnection conn) {
-        timers.entrySet().removeIf(e -> {
-            if (e.getKey().connectionId().equals(conn.id())) {
-                e.getValue().cancel(false);
-                return true;
+    @Override
+    public void init(TcpConnection conn, Consumer<TcpConnection> retransmit) {
+        RenoState s = new RenoState();
+        s.retransmitCallback = retransmit;
+        conn.attr(KEY, s);
+    }
+
+    @Override
+    public void onAck(TcpConnection conn, int ackedSegments, boolean sndUnaAdvanced) {
+        RenoState s = conn.attr(KEY);
+        if (!sndUnaAdvanced) {
+            // dupACK
+            if (++s.dupacks == 3 && s.caState == CA_OPEN) {
+                // 进入快速恢复（RFC5681 §3.2）
+                s.ssthresh = Math.max(s.cwnd / 2, 2);
+                s.cwnd     = s.ssthresh + 3;
+                s.highSeq  = conn.getSndNxt();
+                s.caState  = CA_RECOVERY;
+                s.retransmitCallback.accept(conn);   // 触发 RFC9293 执行重传
+            } else if (s.caState == CA_RECOVERY) {
+                s.cwnd++;    // 每收一个 dupACK，cwnd 膨胀 1
             }
-            return false;
-        });
+        } else {
+            if (s.caState == CA_RECOVERY && after(conn.getSndUna(), s.highSeq)) {
+                s.cwnd    = s.ssthresh;  // 退出快速恢复
+                s.caState = CA_OPEN;
+            }
+            s.dupacks = 0;
+            if (s.cwnd < s.ssthresh) {
+                s.cwnd += ackedSegments;           // 慢启动
+            } else {
+                s.cwnd += Math.max(1, ackedSegments / s.cwnd);  // 拥塞避免
+            }
+        }
     }
 
-    record TimerKey(String connectionId, TimerType type) {}
+    @Override
+    public void onTimeout(TcpConnection conn) {
+        RenoState s = conn.attr(KEY);
+        s.ssthresh = Math.max(s.cwnd / 2, 2);
+        s.cwnd = 1; s.dupacks = 0; s.caState = CA_LOSS;
+    }
+
+    @Override public int getCwnd(TcpConnection conn) { return conn.attr(KEY).cwnd; }
+    @Override public boolean isInRecovery(TcpConnection conn) {
+        RenoState s = conn.attr(KEY);
+        return s != null && s.caState != CA_OPEN;
+    }
+    @Override public void onConnectionClosed(TcpConnection conn) { conn.removeAttr(KEY); }
+}
+```
+
+**`TcpAckProcessor`（RFC9293 核心，无 ca_state / dupACK 感知）**：
+
+```java
+public class TcpAckProcessor {
+    public int onAck(TcpConnection conn, TcpPacketBuf pkt) {
+        // RFC9293：推进 SND.UNA，清理重传队列，更新发送窗口
+        int prevUna      = conn.getSndUna();
+        int ackedBytes   = tcpSndUnaUpdate(conn, pkt.ackSeq());
+        boolean advanced = after(conn.getSndUna(), prevUna);
+        int ackedSegs    = ackedBytes / conn.getMss();
+
+        // RFC6298：RTT 采样
+        conn.rttEstimator().update(conn, rttSample(conn, pkt));
+
+        // RFC5681：全状态机（dupACK/快速重传/cwnd）由 CC 内部处理
+        conn.congestionControl().onAck(conn, ackedSegs, advanced);
+
+        // RFC8985：TLP ACK 确认检查
+        conn.lossDetector().onAck(conn, pkt.ackSeq(), flag);
+
+        return flag;
+        // 不再有 tcp_cong_avoid / tcp_fastretrans_alert 调用
+    }
 }
 ```
 
@@ -417,9 +608,9 @@ public class TcpTimerManager {
 | 新类 | 来自 TcpInput 的方法 | RFC 归属 |
 |------|---------------------|---------|
 | `TcpReceiver` | `tcp_validate_incoming`, `tcp_sequence`, `tcp_data_queue`, `tcp_ofo_queue`, `tcp_prune_ofo_queue`, `tcp_rcv_established`, `tcp_rcv_state_process` | RFC9293 |
-| `TcpAckProcessor` | `tcp_ack`, `tcp_ack_update_window`, `tcp_clean_rtx_queue`, `tcp_snd_una_update`, `tcp_ack_snd_check` | RFC9293 |
+| `TcpAckProcessor` | `tcp_ack`, `tcp_ack_update_window`, `tcp_clean_rtx_queue`, `tcp_snd_una_update`, `tcp_ack_snd_check` | RFC9293，仅调用 `cc.onAck()` 事件，不含 RFC5681 逻辑 |
 | `Rfc6298RttEstimator` | `tcp_rtt_estimator`, `tcp_set_rto`, `tcp_ack_update_rtt`, `tcp_update_rtt_min`, `tcp_rcv_rtt_measure` | RFC6298 |
-| `NewRenoCongestionControl` | `tcp_cong_avoid`, `tcp_slow_start`, `tcp_fastretrans_alert`, `tcp_enter_fast_recovery`, `tcp_exit_fast_recovery`, `tcp_enter_loss` | RFC5681 |
+| `NewRenoCongestionControl` | `tcp_cong_avoid`, `tcp_slow_start`, `tcp_cong_avoid_ai`, `tcp_fastretrans_alert`, `tcp_enter_fast_recovery`, `tcp_update_cwnd_recovery`, `tcp_exit_fast_recovery`, `tcp_enter_loss` | RFC5681（完整状态机，含 dupACK 计数、ca_state） |
 
 > `tcp_store_ts_recent`, `tcp_paws_check`, `tcp_paws_discard`, `tcp_replace_ts_recent` → `Rfc7323TimestampExtension`
 
