@@ -2,8 +2,8 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.Tcp4Demultiplexer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.Tcp4Multiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpMultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
@@ -14,9 +14,9 @@ import java.net.UnknownHostException;
 import java.util.Map;
 
 @Slf4j
-public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler {
+public class Tcp4MultiplexHandler extends TcpMultiplexHandler {
 
-    public Tcp4DemultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
+    public Tcp4MultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
         super(dnsEngine, factory);
     }
 
@@ -31,11 +31,11 @@ public class Tcp4DemultiplexHandler extends TcpDemultiplexHandler {
     }
 
     @Override
-    protected TcpDemultiplexer create(
+    protected TcpMultiplexer create(
             final Map<String, tcp_request_sock> synRegistry,
             final Map<String, TcpSock> establishedRegistry,
             final EventLoopGroup childGroup, final DnsEngine dnsEngine,
             final SocketChannelFactory socketChannelFactory) {
-        return new Tcp4Demultiplexer(synRegistry, establishedRegistry, childGroup, dnsEngine, socketChannelFactory);
+        return new Tcp4Multiplexer(synRegistry, establishedRegistry, childGroup, dnsEngine, socketChannelFactory);
     }
 }

@@ -3,7 +3,7 @@ package com.github.pangolin.routing.acceptor.tun.net.handler.tcp;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketHandler;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpMultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
 import com.github.pangolin.routing.support.SocketChannelFactory;
@@ -19,7 +19,7 @@ import java.net.UnknownHostException;
 import java.util.Map;
 
 @Slf4j
-public abstract class TcpDemultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
+public abstract class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
 
     private static final byte PROTO_TCP = 6;
 
@@ -28,23 +28,23 @@ public abstract class TcpDemultiplexHandler extends IpPacketHandler<TcpPacketBuf
 
     private final Map<String, tcp_request_sock> synRegistry = Maps.newConcurrentMap();
     private final Map<String, TcpSock> establishedRegistry = Maps.newConcurrentMap();
-    private final TcpDemultiplexer demultiplexer;
+    private final TcpMultiplexer multiplexer;
 
-    public TcpDemultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
+    public TcpMultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory factory) {
         super(PROTO_TCP);
         this.dnsEngine = dnsEngine;
-        this.demultiplexer = create(synRegistry, establishedRegistry, childGroup, dnsEngine, factory);
+        this.multiplexer = create(synRegistry, establishedRegistry, childGroup, dnsEngine, factory);
     }
 
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final TcpPacketBuf rawPkt) throws Exception {
         try {
             final TcpPacketBuf pkt = prepare(rawPkt);
-            demultiplexer.tcp_rcv(ctx.channel(), pkt);
+            multiplexer.tcp_rcv(ctx.channel(), pkt);
         } catch (final Exception ex) {
             // FIXME RESET nosocket or other.
             log.error("Failed to process TCP packet", ex);
-            demultiplexer.send_reset(ctx.channel(), rawPkt, -77);
+            multiplexer.send_reset(ctx.channel(), rawPkt, -77);
         }
     }
 
@@ -66,7 +66,7 @@ public abstract class TcpDemultiplexHandler extends IpPacketHandler<TcpPacketBuf
         return InetAddress.getByAddress(NetUtil.bytesToIpAddress(address), address);
     }
 
-    protected abstract TcpDemultiplexer create(
+    protected abstract TcpMultiplexer create(
             Map<String, tcp_request_sock> synRegistry,
             Map<String, TcpSock> establishedRegistry,
             EventLoopGroup childGroup,

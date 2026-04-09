@@ -25,9 +25,9 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpU
  * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c">tcp_ipv4.c</a>
  */
 @Slf4j
-public class Tcp4Demultiplexer extends TcpDemultiplexer {
+public class Tcp4Multiplexer extends TcpMultiplexer {
 
-    public Tcp4Demultiplexer(
+    public Tcp4Multiplexer(
             Map<String, tcp_request_sock> synRegistry,
             Map<String, TcpSock> establishedRegistry,
             final EventLoopGroup childGroup,
@@ -263,7 +263,7 @@ public class Tcp4Demultiplexer extends TcpDemultiplexer {
 
                     @Override
                     public void addToHalfQueue(TcpSock listenSock, tcp_request_sock req) {
-                        Tcp4Demultiplexer.super.addToHalfQueue(listenSock, req);
+                        Tcp4Multiplexer.super.addToHalfQueue(listenSock, req);
                     }
                 },
                 listenSock, pkt,

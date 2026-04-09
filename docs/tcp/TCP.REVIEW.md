@@ -2,7 +2,7 @@
 
 > 对标基准：Linux 内核 `net/ipv4/tcp_*.c`（v6.x）  
 > 审查日期：2026-04-05  
-> 审查范围：`TcpInput.java`, `TcpOutput.java`, `TcpTimer.java`, `TcpDemultiplexer.java`, `TcpSock.java`, `SysctlOptions.java`  
+> 审查范围：`TcpInput.java`, `TcpOutput.java`, `TcpTimer.java`, `TcpMultiplexer.java`, `TcpSock.java`, `SysctlOptions.java`  
 > 前置修复：Bug 1–4、D2、D3 已在本轮修复（详见 `TCP.TODO2.md`、`tcp_space.TODO.md`）
 
 ---

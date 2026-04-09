@@ -14,7 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpMultiplexer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpInput.tcp_rearm_rto;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_clock_ms;
@@ -34,10 +34,10 @@ import static com.sun.jna.platform.linux.ErrNo.EINVAL;
 @Slf4j
 public class TcpOutput {
 
-    private final TcpDemultiplexer demultiplexer;
+    private final TcpMultiplexer multiplexer;
 
-    public TcpOutput(TcpDemultiplexer demultiplexer) {
-        this.demultiplexer = demultiplexer;
+    public TcpOutput(TcpMultiplexer multiplexer) {
+        this.multiplexer = multiplexer;
     }
 
     /**
@@ -71,7 +71,7 @@ public class TcpOutput {
         tp.packets_out += tcp_skb_pcount(skb);
 
         if (prior_packets <= 0 || tp.icsk_pending == ICSK_TIME_LOSS_PROBE) {
-            tcp_rearm_rto(tp, demultiplexer.timer);
+            tcp_rearm_rto(tp, multiplexer.timer);
         }
 
         // tp.input.tcp_check_space();
@@ -134,7 +134,7 @@ public class TcpOutput {
          * 如果最后一个收到的包也 ACK 了, 快速ACK次数 - 1, 不需要再执行延迟 ACK.
          */
         tp.tcp_dec_quickack_mode();
-        tp.inet_csk_clear_xmit_timer(demultiplexer.timer, TcpTimer.ICSK_TIME_DACK);
+        tp.inet_csk_clear_xmit_timer(multiplexer.timer, TcpTimer.ICSK_TIME_DACK);
     }
 
 
@@ -426,7 +426,7 @@ public class TcpOutput {
 
 
         // tp.icsk_af_ops.send_check();
-        Tcp4Demultiplexer._INDIRECT_CALL_INET(net, tp, skb);
+        Tcp4Multiplexer._INDIRECT_CALL_INET(net, tp, skb);
         // tp.INDIRECT_CALL_INET.accept(skb);
 
         if (skb.ack()) {
@@ -1034,7 +1034,7 @@ public class TcpOutput {
             return;
         }
         if (tcp_write_xmit(net, tp, mss, nonagle, 0)) {
-            tp.tcp_check_probe_timer(demultiplexer.timer);
+            tp.tcp_check_probe_timer(multiplexer.timer);
         }
     }
 
@@ -1257,7 +1257,7 @@ public class TcpOutput {
         // XXX smp_store_release
         tp.icsk_ack.pending |= TcpTimer.ICSK_ACK_SCHED | TcpTimer.ICSK_ACK_TIMER;
         tp.icsk_ack.timeout = timeout;
-        demultiplexer.timer.sk_reset_timer(tp, tp.icsk_delack_timer, timeout);
+        multiplexer.timer.sk_reset_timer(tp, tp.icsk_delack_timer, timeout);
     }
 
     /**
@@ -1388,7 +1388,7 @@ public class TcpOutput {
         }
 
         timeout = tp.tcp_clamp_probe0_to_user_timeout(tp, timeout);
-        tp.tcp_reset_xmit_timer(demultiplexer.timer, TcpTimer.ICSK_TIME_PROBE0, timeout, true);
+        tp.tcp_reset_xmit_timer(multiplexer.timer, TcpTimer.ICSK_TIME_PROBE0, timeout, true);
     }
 
 

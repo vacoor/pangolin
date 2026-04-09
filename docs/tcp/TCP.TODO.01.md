@@ -16,7 +16,7 @@
 // L110: 定义时混用了两种场景
 req.childCloseListener = future -> {
     rsk_ops.send_reset(net, parent, pkt, -100);  // pkt 是 SYN 包，握手后早应释放
-    demultiplexer.inet_csk_destroy_sock(req);
+    multiplexer.inet_csk_destroy_sock(req);
 };
 
 // L141-142: 注册时机
@@ -65,9 +65,9 @@ private final ConcurrentMap<Runnable, Future<?>> timers = Maps.newConcurrentMap(
 
 ---
 
-### S4. `TcpDemultiplexHandler` 每实例创建线程池
+### S4. `TcpMultiplexHandler` 每实例创建线程池
 
-**文件**：`TcpDemultiplexHandler.java:27`
+**文件**：`TcpMultiplexHandler.java:27`
 
 ```java
 private final EventLoopGroup childGroup = new NioEventLoopGroup();  // 默认 2×CPU 线程
@@ -138,7 +138,7 @@ new TreeMap<>((a, b) -> a - b)  // 序列号相减在距离超过 2^31 时溢出
 | **P1** | P1 | TLP 实现（调度 + 执行 + ACK 确认） | 见 `TCP.TLP.TODO.md` | ~90 行 |
 | **P1** | S2 | 定时器 map 清理路径审查 | `TcpTimer.java:132` | 小 |
 | **P2** | P2 | OFO TreeMap 比较器 | `TcpSock.java:251` | 1 行 |
-| **P3** | S3 | 线程池生命周期外部注入 | `TcpDemultiplexHandler.java:27` | 小 |
+| **P3** | S3 | 线程池生命周期外部注入 | `TcpMultiplexHandler.java:27` | 小 |
 | **P3** | S4 | `pkt.retain()` 异常路径保护 | `TcpHandshaker.java:125` | 小 |
 
 ---

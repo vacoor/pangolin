@@ -27,7 +27,7 @@ public class TcpHandshaker {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
     public static tcp_request_sock tcp_conn_request(Channel net,
-                                                    TcpDemultiplexer demultiplexer,
+                                                    TcpMultiplexer multiplexer,
                                                     request_sock_ops rsk_ops,
                                                     tcp_request_sock_ops af_ops,
                                                     TcpSock parent,
@@ -36,7 +36,7 @@ public class TcpHandshaker {
                                                     SocketChannelFactory socketChannelFactory,
                                                     int connTimeoutMs, EventLoopGroup childGroup,
                                                     TcpOutput output) {
-        if (demultiplexer.sk_acceptq_is_full()) {
+        if (multiplexer.sk_acceptq_is_full()) {
             return null;
         }
 
@@ -83,7 +83,7 @@ public class TcpHandshaker {
 
         tcp_openreq_init_rwin(parent, output, req, pkt);
 
-        req.timeout = demultiplexer.tcp_timeout_init(req);
+        req.timeout = multiplexer.tcp_timeout_init(req);
         if (!inet_csk_reqsk_queue_hash_add(parent, req, req.timeout)) {
             return null;
         }
@@ -117,7 +117,7 @@ public class TcpHandshaker {
                 rsk_ops.send_reset(net, parent, pkt, -100);
                 // output.tcp_send_active_reset(net, req, "Abort");
                 // FIXME clean queue
-                demultiplexer.inet_csk_destroy_sock(req);
+                multiplexer.inet_csk_destroy_sock(req);
             }
         };
 
@@ -147,7 +147,7 @@ public class TcpHandshaker {
                         log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 3/3: ABORT"));
                         rsk_ops.send_reset(net, parent, pkt, -88);
                         // FIXME clean queue
-                        demultiplexer.inet_csk_destroy_sock(req);
+                        multiplexer.inet_csk_destroy_sock(req);
                     }
                 } finally {
                     pkt.release();

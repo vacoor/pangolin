@@ -5,7 +5,7 @@ import com.github.pangolin.routing.acceptor.tun.fakedns.FakeNameService;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.Tcp4DemultiplexHandler;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.Tcp4MultiplexHandler;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import io.netty.bootstrap.Bootstrap;
@@ -34,7 +34,7 @@ public class TunTest2 {
                         @Override
                         protected void initChannel(final Channel ch) throws Exception {
                             ch.pipeline().addLast(new IpPacketCodec());
-                            ch.pipeline().addLast(new Tcp4DemultiplexHandler(dnsEngine, new StandardSocketChannelFactory(null)));
+                            ch.pipeline().addLast(new Tcp4MultiplexHandler(dnsEngine, new StandardSocketChannelFactory(null)));
                         }
                     });
             final InterfaceAddressEx ifa = InterfaceAddressEx.of("172.16.0.1", 24);

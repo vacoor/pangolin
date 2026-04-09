@@ -45,7 +45,7 @@ static inline int tcp_space(const struct sock *sk)
 | `sk_backlog.len` | 软中断待处理队列 | 不适用（Netty 事件循环无此概念） |
 | `sk_rmem_alloc` | 已分配接收内存（含 OFO 队列） | **`tp.ofo_queue_bytes`**（已维护） |
 
-在此代理中，数据到达即通过 `demultiplexer.consume` / `writeAndFlush` 转发，
+在此代理中，数据到达即通过 `multiplexer.consume` / `writeAndFlush` 转发，
 唯一真正"占用缓冲区"的是尚未投递的 **OFO 队列**。
 
 > **注**：`ofo_queue_bytes` 已在 `tcp_data_queue_ofo`（入队 +）、`tcp_ofo_queue`（出队 −）、
@@ -95,11 +95,11 @@ private int tcp_space(TcpSock tp) {
 
 ## 方案 B：Netty 下游背压
 
-**改动位置**：`TcpOutput.java` `tcp_space()`，通过 `TcpDemultiplexer.innerChannel` 读取 Netty 水位。
+**改动位置**：`TcpOutput.java` `tcp_space()`，通过 `TcpMultiplexer.innerChannel` 读取 Netty 水位。
 
 ```java
 private int tcp_space(TcpSock tp) {
-    Channel child = TcpDemultiplexer.innerChannel(tp);
+    Channel child = TcpMultiplexer.innerChannel(tp);
     if (child == null || !child.isWritable()) {
         // 下游 Channel 不可写（写缓冲已超高水位），广播零窗口暂停接收
         return 0;
@@ -139,7 +139,7 @@ private int tcp_space(TcpSock tp) {
     int space = Math.max(0, tcp_full_space(tp) - tp.ofo_queue_bytes);
 
     // 2. 感知下游背压（Netty 写缓冲）
-    Channel child = TcpDemultiplexer.innerChannel(tp);
+    Channel child = TcpMultiplexer.innerChannel(tp);
     if (child != null && !child.isWritable()) {
         space = (int) Math.min(space, child.bytesBeforeUnwritable());
     }

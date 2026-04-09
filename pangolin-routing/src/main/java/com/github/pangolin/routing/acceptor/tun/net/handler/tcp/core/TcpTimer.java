@@ -40,10 +40,10 @@ public class TcpTimer {
     /* Reordering timer */
     public static final int ICSK_TIME_REO_TIMEOUT = 6;
 
-    private final TcpDemultiplexer demultiplexer;
+    private final TcpMultiplexer multiplexer;
 
-    public TcpTimer(TcpDemultiplexer demultiplexer) {
-        this.demultiplexer = demultiplexer;
+    public TcpTimer(TcpMultiplexer multiplexer) {
+        this.multiplexer = multiplexer;
     }
 
     /**
@@ -182,8 +182,8 @@ public class TcpTimer {
 
         /* Handling the sack compression case */
         if (tp.compressed_ack) {
-            demultiplexer.output.tcp_mstamp_refresh(tp);
-            demultiplexer.input.tcp_sack_compress_send_ack(tp);
+            multiplexer.output.tcp_mstamp_refresh(tp);
+            multiplexer.input.tcp_sack_compress_send_ack(tp);
             return;
         }
 
@@ -210,8 +210,8 @@ public class TcpTimer {
                 tp.icsk_ack.ato = TcpConstant.TCP_ATO_MIN;
             }
 
-            demultiplexer.output.tcp_mstamp_refresh(tp);
-            demultiplexer.output.tcp_send_ack(net, tp);
+            multiplexer.output.tcp_mstamp_refresh(tp);
+            multiplexer.output.tcp_send_ack(net, tp);
         }
     }
 
@@ -262,7 +262,7 @@ public class TcpTimer {
             return;
         }
 
-        demultiplexer.output.tcp_mstamp_refresh(tp);
+        multiplexer.output.tcp_mstamp_refresh(tp);
 
         int event = tp.icsk_pending;
         switch (event) {
@@ -271,7 +271,7 @@ public class TcpTimer {
                 // tcp_rack_reo_timeout(sk);
                 break;
             case ICSK_TIME_LOSS_PROBE:
-                demultiplexer.output.tcp_send_loss_probe();
+                multiplexer.output.tcp_send_loss_probe();
                 break;
             case ICSK_TIME_RETRANS:
                 tp.icsk_pending = 0;
@@ -323,12 +323,12 @@ public class TcpTimer {
                         tp.ir_rmt_addr, tp.ir_rmt_port,
                         "RTX PROBE0 TIMEOUT"
                 ));
-                demultiplexer.tcp_write_err(tp);
+                multiplexer.tcp_write_err(tp);
                 return;
             }
 
-            demultiplexer.input.tcp_enter_loss(tp);
-            demultiplexer.output.tcp_retransmit_skb(net, tp, skb, 1);
+            multiplexer.input.tcp_enter_loss(tp);
+            multiplexer.output.tcp_retransmit_skb(net, tp, skb, 1);
             // __sk_dst_reset
         } else {
             //....
@@ -340,10 +340,10 @@ public class TcpTimer {
                 // ...
             }
 
-            demultiplexer.input.tcp_enter_loss(tp);
+            multiplexer.input.tcp_enter_loss(tp);
             tcp_update_rto_stats(tp);
 
-            if (demultiplexer.output.tcp_retransmit_skb(net, tp, tp.tcp_rtx_queue_head(), 1) > 0) {
+            if (multiplexer.output.tcp_retransmit_skb(net, tp, tp.tcp_rtx_queue_head(), 1) > 0) {
                 /* Retransmission failed because of local congestion,
                  * Let senders fight for local resources conservatively.
                  */
@@ -410,7 +410,7 @@ public class TcpTimer {
         if (timeout == 0) {
             long rto_base = TCP_RTO_MIN;
             if (0 != ((1 << tp.state().ordinal()) & (TcpConstants.TCPF_SYN_SENT | TcpConstants.TCPF_SYN_RECV))) {
-                rto_base = demultiplexer.tcp_timeout_init(tp);
+                rto_base = multiplexer.tcp_timeout_init(tp);
             }
             timeout = tcp_model_timeout(boundary, rto_base);
         }
@@ -494,7 +494,7 @@ public class TcpTimer {
                     tp.ir_rmt_addr, tp.ir_rmt_port,
                     "RETRANSMIT WRITE TIMEOUT"
             ));
-            demultiplexer.tcp_write_err(tp);
+            multiplexer.tcp_write_err(tp);
             return 1;
         }
         return 0;
@@ -568,7 +568,7 @@ public class TcpTimer {
                         tp.ir_rmt_addr, tp.ir_rmt_port,
                         "PROBE TIMEOUT"
                 ));
-                demultiplexer.tcp_write_err(tp);
+                multiplexer.tcp_write_err(tp);
                 return;
             }
         }
@@ -585,10 +585,10 @@ public class TcpTimer {
                     tp.ir_rmt_addr, tp.ir_rmt_port,
                     "TOO MANY PROBES"
             ));
-            demultiplexer.tcp_write_err(tp);
+            multiplexer.tcp_write_err(tp);
         } else {
             /* Only send another probe if we didn't close things up. */
-            demultiplexer.output.tcp_send_probe0(net, tp);
+            multiplexer.output.tcp_send_probe0(net, tp);
         }
     }
 
@@ -608,19 +608,19 @@ public class TcpTimer {
             return;
         }
 
-        demultiplexer.output.tcp_mstamp_refresh(tp);
+        multiplexer.output.tcp_mstamp_refresh(tp);
 
         if (TCP_FIN_WAIT2.equals(state)) {
             if (tp.linger2 >= 0) {
                 final int tmo = tp.tcp_fin_time() - TcpConstants.TCP_TIMEWAIT_LEN;
                 if (tmo > 0) {
-                    demultiplexer.tcp_time_wait(tp, TCP_FIN_WAIT2, tmo);
+                    multiplexer.tcp_time_wait(tp, TCP_FIN_WAIT2, tmo);
                     return;
                 }
             }
             log.warn("TCP_FIN_WAIT2 TIMEOUT RESET");
-            demultiplexer.output.tcp_send_active_reset(net, tp, "SK_RST_REASON_TCP_STATE");
-            demultiplexer.tcp_done(tp);
+            multiplexer.output.tcp_send_active_reset(net, tp, "SK_RST_REASON_TCP_STATE");
+            multiplexer.tcp_done(tp);
             return;
         }
 
@@ -649,12 +649,12 @@ public class TcpTimer {
                         tp.ir_rmt_addr, tp.ir_rmt_port,
                         "KEEPALIVE TIMEOUT"
                 ));
-                demultiplexer.output.tcp_send_active_reset(net, tp, "SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT");
-                demultiplexer.tcp_write_err(tp);
+                multiplexer.output.tcp_send_active_reset(net, tp, "SK_RST_REASON_TCP_KEEPALIVE_TIMEOUT");
+                multiplexer.tcp_write_err(tp);
                 return;
             }
 
-            if (demultiplexer.output.tcp_write_wakeup(net, tp, 1) <= 0) {
+            if (multiplexer.output.tcp_write_wakeup(net, tp, 1) <= 0) {
                 tp.icsk_probes_out++;
                 elapsed = keepalive_intvl_when(tp);
             } else {
@@ -736,7 +736,7 @@ public class TcpTimer {
         // Remove the fired Runnable from the map (it is done, but clean up eagerly)
         timers.remove(req.rsk_timer);
 
-        if (demultiplexer.synRegistry.get(req.uniqueKey()) != req) {
+        if (multiplexer.synRegistry.get(req.uniqueKey()) != req) {
             return; // connection already completed or dropped
         }
 
@@ -753,7 +753,7 @@ public class TcpTimer {
         scheduleReqskTimer(net, listenSock, req);
 
         // 2. Retransmit SYN-ACK
-        demultiplexer.inet_rtx_syn_ack(net, listenSock, req);
+        multiplexer.inet_rtx_syn_ack(net, listenSock, req);
         req.num_retrans++;
 
         log.debug("[REQ-TIMER] {}:{} retransmit SYN-ACK #{}/{}",
@@ -772,7 +772,7 @@ public class TcpTimer {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L989">inet_csk_reqsk_queue_drop</a>
      */
     public void inet_csk_reqsk_queue_drop(final tcp_request_sock req) {
-        demultiplexer.inet_csk_destroy_sock(req);
+        multiplexer.inet_csk_destroy_sock(req);
     }
 
     /* ]] *********** SYN-ACK RETRANSMIT TIMER ************** */

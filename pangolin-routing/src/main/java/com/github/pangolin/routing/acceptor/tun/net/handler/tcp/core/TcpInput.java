@@ -17,7 +17,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.TreeMap;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpDemultiplexer.*;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpMultiplexer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpOutput.tcp_mstamp_refresh;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpTimer.*;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.*;
@@ -77,11 +77,11 @@ public class TcpInput {
     private static final int CA_ACK_WIN_UPDATE = FLAG_WIN_UPDATE;
     private static final int CA_ACK_SLOWPATH = FLAG_SLOWPATH;
 
-    private final TcpDemultiplexer demultiplexer;
+    private final TcpMultiplexer multiplexer;
     private final TcpOutput output;
 
-    public TcpInput(TcpDemultiplexer demultiplexer, final TcpOutput output) {
-        this.demultiplexer = demultiplexer;
+    public TcpInput(TcpMultiplexer multiplexer, final TcpOutput output) {
+        this.multiplexer = multiplexer;
         this.output = output;
     }
 
@@ -904,14 +904,14 @@ public class TcpInput {
         if (!after(determineEndSeq(head), tp.tcp_wnd_end())) {
             tp.icsk_backoff = 0;
             tp.icsk_probes_tstamp = 0;
-            tp.inet_csk_clear_xmit_timer(demultiplexer.timer, ICSK_TIME_PROBE0);
+            tp.inet_csk_clear_xmit_timer(multiplexer.timer, ICSK_TIME_PROBE0);
             /* Socket must be waked up by subsequent tcp_data_snd_check().
              * This function is not for random using!
              */
         } else {
             long when = tp.tcp_probe0_when(TcpConstant.TCP_RTO_MAX);
             when = tp.tcp_clamp_probe0_to_user_timeout(tp, when);
-            tp.tcp_reset_xmit_timer(demultiplexer.timer, ICSK_TIME_PROBE0, when, true);
+            tp.tcp_reset_xmit_timer(multiplexer.timer, ICSK_TIME_PROBE0, when, true);
         }
     }
 
@@ -1265,7 +1265,7 @@ public class TcpInput {
 
         // tcp_write_queue_purge(sk);
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4515
-        demultiplexer.tcp_done(tp);
+        multiplexer.tcp_done(tp);
 
         // if (!sock_flag(sk, SOCK_DEAD))
         //    sk_error_report(sk);
@@ -1357,7 +1357,7 @@ public class TcpInput {
                         "(LOCAL->REMOTE) Connection handshake 4/4: ACK"
                 ));
                 output.tcp_send_ack(net, tp);
-                demultiplexer.tcp_time_wait(tp, TcpState.TCP_TIME_WAIT, 0);
+                multiplexer.tcp_time_wait(tp, TcpState.TCP_TIME_WAIT, 0);
                 break;
             default:
                 /* Only TCP_LISTEN and TCP_CLOSE are left, in these
@@ -1436,7 +1436,7 @@ public class TcpInput {
 
             if (deliverLen > 0) {
                 final ByteBuf data = entry.payload.slice(trimOffset, deliverLen);
-                demultiplexer.consumeRaw(tp, data);
+                multiplexer.consumeRaw(tp, data);
             }
 
             tcp_rcv_nxt_update(tp, entry.endSeq);
@@ -1582,7 +1582,7 @@ public class TcpInput {
         // https://www.cnblogs.com/wanpengcoder/p/11752122.html
         final int len = pkt.tcpPayloadLength();
         if (len > 0) {
-            demultiplexer.consume(tp, pkt);
+            multiplexer.consume(tp, pkt);
         }
         tcp_rcv_nxt_update(tp, determineEndSeq(pkt));
         return len;
@@ -1764,7 +1764,7 @@ public class TcpInput {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5664">tcp_data_snd_check</a>
      */
     protected void tcp_data_snd_check(final Channel net, final TcpSock tp) {
-        demultiplexer.tcp_push_pending_frames(net, tp);
+        multiplexer.tcp_push_pending_frames(net, tp);
         tcp_check_space(tp);
     }
 
@@ -1935,13 +1935,13 @@ public class TcpInput {
      */
     public void tcp_init_transfer(final Channel net, final TcpSock sk, final TcpPacketBuf pkt) {
         output.tcp_mtup_init(sk);
-        demultiplexer.tcp_init_metrics(sk);
+        multiplexer.tcp_init_metrics(sk);
 
         sk.tcp_snd_cwnd_set(tcp_init_cwnd(sk));
 
         sk.snd_cwnd_stamp = tcp_jiffies32();
 
-        demultiplexer.tcp_init_congestion_control(sk);
+        multiplexer.tcp_init_congestion_control(sk);
 
         // innerChannel(sk).closeFuture().removeListener()
 
@@ -1955,7 +1955,7 @@ public class TcpInput {
                 hostname = null != hostname ? hostname : sk.ir_loc_addr.getHostAddress();
                 log.info(logFormat("[TCP] [STATE]", pkt, "Connection to {}:{} has been disconnected"), hostname, sk.ir_num);
                 TcpState state = sk.state();
-                if (demultiplexer.tcp_close_state(sk)) {
+                if (multiplexer.tcp_close_state(sk)) {
                     if (TCP_CLOSE_WAIT.equals(state)) {
                         log.debug(logFormat(
                                 "[TCP] [HANDSHAKE]",
@@ -1971,7 +1971,7 @@ public class TcpInput {
                                 "(LOCAL->REMOTE) Connection handshake 1/4: FIN"
                         ));
                     }
-                    demultiplexer.output.tcp_send_fin(net, sk);
+                    multiplexer.output.tcp_send_fin(net, sk);
                 } else {
                     // FIXME clean queue
                 }
@@ -1986,7 +1986,7 @@ public class TcpInput {
                     public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                         try {
                             final ByteBuf buf = (ByteBuf) msg;
-                            final int mss = demultiplexer.output.tcp_current_mss(sk);
+                            final int mss = multiplexer.output.tcp_current_mss(sk);
                             final int total = buf.readableBytes();
 
                             // Read each MSS-sized chunk directly from the ByteBuf — avoids the
@@ -1996,7 +1996,7 @@ public class TcpInput {
                             for (int offset = 0; offset < total; ) {
                                 final int len = Math.min(total - offset, mss);
                                 final boolean flush = offset + len >= total;
-                                demultiplexer.tcp_sendmsg2(net, sk, new TcpBuffer().ack(true)
+                                multiplexer.tcp_sendmsg2(net, sk, new TcpBuffer().ack(true)
                                         .rawPayload(buf.retainedSlice(buf.readerIndex() + offset, len)),
                                         flush);
                                 offset += len;
@@ -2011,7 +2011,7 @@ public class TcpInput {
                         // FIXME RESET
                         log.info(logFormat("[TCP] [STATE]", pkt, "Connection aborted: {}"), cause.getMessage(), cause);
                         output.tcp_send_active_reset(net, sk, cause.getMessage());
-                        demultiplexer.tcp_done(sk);
+                        multiplexer.tcp_done(sk);
                         if (ctx.channel().isOpen()) {
                             ctx.channel().close();
                         }
@@ -2058,7 +2058,7 @@ public class TcpInput {
                         return discard(TcpDropReason.SKB_DROP_REASON_TCP_FLAGS);
                     }
 
-                    log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 1/3: SYN (req: {}, est: {})"), demultiplexer.synRegistry.size(), demultiplexer.establishedRegistry.size());
+                    log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 1/3: SYN (req: {}, est: {})"), multiplexer.synRegistry.size(), multiplexer.establishedRegistry.size());
 
                     /*-
                      * Linux此处为创建状态为TCP_NEW_SYN_RECV的请求套接字(request_sock)放入半连接队列即可结束,
@@ -2169,7 +2169,7 @@ public class TcpInput {
                 // ...
 
                 if (0 != (sk.sk_shutdown & SEND_SHUTDOWN)) {
-                    demultiplexer.tcp_shutdown(net, sk, SEND_SHUTDOWN);
+                    multiplexer.tcp_shutdown(net, sk, SEND_SHUTDOWN);
                 }
 
                 break;
@@ -2191,7 +2191,7 @@ public class TcpInput {
 
                 if (sk.linger2 < 0) {
                     log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(REMOTE->LOCAL) Connection handshake aborted: linger2 < 0"));
-                    demultiplexer.tcp_done(sk);
+                    multiplexer.tcp_done(sk);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
 
@@ -2200,7 +2200,7 @@ public class TcpInput {
                 if (end_seq != seq && after(end_seq - (pkt.isFin() ? 1 : 0), sk.rcv_nxt)) {
                     /* Receive out of order FIN after close() */
                     log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(REMOTE->LOCAL) Connection handshake 2/4 aborted: out of order FIN"));
-                    demultiplexer.tcp_done(sk);
+                    multiplexer.tcp_done(sk);
                     return SKB_DROP_REASON_TCP_ABORT_ON_DATA;
                 }
 
@@ -2210,7 +2210,7 @@ public class TcpInput {
                      * FIN_WAIT2 开始的总超时时间 > TIME_WAIT 的 2MSL, 则等待 tmo - TCP_TIMEWAIT_LEN 后进入 TIME_WAIT.
                      */
                     log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(REMOTE->LOCAL) Connection handshake 2/4, FIN_WAIT2 timeout={}"), tmo - TcpConstants.TCP_TIMEWAIT_LEN);
-                    demultiplexer.timer.tcp_reset_keepalive_timer(sk, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
+                    multiplexer.timer.tcp_reset_keepalive_timer(sk, tmo - TcpConstants.TCP_TIMEWAIT_LEN);
                 } else if (pkt.isFin()) {
                     /* Bad case. We could lose such FIN otherwise.
                      * It is not a big problem, but it looks confusing
@@ -2219,16 +2219,16 @@ public class TcpInput {
                      * marginal case.
                      */
                     log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(RETMOTE->LOCAL) Connection handshake 2/4, FIN_WAIT2 timeout={}(tmo)"), tmo);
-                    demultiplexer.timer.tcp_reset_keepalive_timer(sk, tmo);
+                    multiplexer.timer.tcp_reset_keepalive_timer(sk, tmo);
                 } else {
                     log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(REMOTE->LOCAL) Connection handshake 2/4, 2MSL timeout={}(tmo)"), tmo);
-                    demultiplexer.tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
+                    multiplexer.tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
                 break;
             case TCP_CLOSING:
                 if (sk.snd_una == sk.write_seq) {
-                    demultiplexer.tcp_time_wait(sk, TCP_TIME_WAIT, 0);
+                    multiplexer.tcp_time_wait(sk, TCP_TIME_WAIT, 0);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
                 break;
@@ -2236,7 +2236,7 @@ public class TcpInput {
                 if (sk.snd_una == sk.write_seq) {
                     log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "(REMOTE->LOCAL) Connection handshake 4/4: ACK"));
                     // tcp_update_metrics
-                    demultiplexer.tcp_done(sk);
+                    multiplexer.tcp_done(sk);
                     return TcpDropReason.SKB_DROP_REASON_NOT_SPECIFIED;
                 }
                 break;

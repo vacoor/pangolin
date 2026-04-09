@@ -178,8 +178,8 @@ public class TcpSock extends inet_connection_sock {
     /**
      * 已发送未ACK的数据包数量.
      * <p>
-     * x@see TcpOutput#tcp_event_new_data_sent(TcpDemultiplexer, TcpBuffer)
-     * x@see TcpInput#tcp_clean_rtx_queue(TcpDemultiplexer, int)
+     * x@see TcpOutput#tcp_event_new_data_sent(TcpMultiplexer, TcpBuffer)
+     * x@see TcpInput#tcp_clean_rtx_queue(TcpMultiplexer, int)
      */
     public int packets_out;
     /**

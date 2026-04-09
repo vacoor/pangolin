@@ -86,7 +86,7 @@ private boolean tcp_schedule_loss_probe(TcpSock tp, boolean advancing_rto) {
     // 不超过 RTO 上限
     timeout = Math.min(timeout, (long) tp.icsk_rto_max);
 
-    tp.tcp_reset_xmit_timer(demultiplexer.timer, ICSK_TIME_LOSS_PROBE, (int) timeout, false);
+    tp.tcp_reset_xmit_timer(multiplexer.timer, ICSK_TIME_LOSS_PROBE, (int) timeout, false);
     return true;
 }
 ```
@@ -116,7 +116,7 @@ if (push_one != 2) {
  * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2796">tcp_send_loss_probe</a>
  */
 public void tcp_send_loss_probe() {
-    final TcpSock tp = demultiplexer.sock;
+    final TcpSock tp = multiplexer.sock;
 
     // 若有新数据可发，优先发新数据（作为探测）
     if (!tp.sk_write_queue_empty()) {
@@ -132,14 +132,14 @@ public void tcp_send_loss_probe() {
     TcpBuffer skb = tcp_rtx_queue_tail(tp);
     if (skb == null) {
         // 队列为空，不应到达此处；回退到重置 RTO
-        tcp_rearm_rto(tp, demultiplexer.timer);
+        tcp_rearm_rto(tp, multiplexer.timer);
         return;
     }
 
     // 重传该段
     if (0 != tcp_retransmit_skb(net, tp, skb, 1)) {
         // 重传失败（如被 cwnd 限制），回退到 RTO
-        tcp_rearm_rto(tp, demultiplexer.timer);
+        tcp_rearm_rto(tp, multiplexer.timer);
         return;
     }
 
@@ -218,7 +218,7 @@ if (tp.tlp_high_seq != 0) {
 
 ```java
 if (prior_packets <= 0 || tp.icsk_pending == ICSK_TIME_LOSS_PROBE) {
-    tcp_rearm_rto(tp, demultiplexer.timer);
+    tcp_rearm_rto(tp, multiplexer.timer);
 }
 ```
 

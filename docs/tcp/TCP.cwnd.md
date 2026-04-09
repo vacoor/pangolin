@@ -80,7 +80,7 @@ TcpAckProcessor.onAck()
 
 ### per-connection 状态存储（ConnectionKey 模式）
 
-CC 算法以**单例**形式共享（一个 `TcpDemultiplexer` 共享同一实例），  
+CC 算法以**单例**形式共享（一个 `TcpMultiplexer` 共享同一实例），  
 per-connection 状态通过私有 `ConnectionKey<StateType>` 存入 `TcpConnection.attributes`，  
 `TcpConnection` 对状态内容完全不可见：
 

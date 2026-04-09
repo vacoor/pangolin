@@ -21,7 +21,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.*;
 
 @Slf4j
-public abstract class TcpDemultiplexer {
+public abstract class TcpMultiplexer {
 
     // https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L943
     public static final int TCPCB_SACKED_ACKED = (1 << 0);    /* SKB ACK'd by a SACK block	*/
@@ -58,7 +58,7 @@ public abstract class TcpDemultiplexer {
     protected request_sock_ops requestSockOps;
     protected tcp_request_sock_ops tcpRequestSockOps;
 
-    protected TcpDemultiplexer(
+    protected TcpMultiplexer(
             Map<String, tcp_request_sock> synRegistry,
             Map<String, TcpSock> establishedRegistry,
             final EventLoopGroup childGroup,
@@ -493,11 +493,11 @@ public abstract class TcpDemultiplexer {
     }
 
     public boolean tcp_close_state(SockCommon sk) {
-        int next = TcpDemultiplexer.NEW_STATE[sk.state().ordinal() + 1];
-        int ns = next & TcpDemultiplexer.TCP_STATE_MASK;
+        int next = TcpMultiplexer.NEW_STATE[sk.state().ordinal() + 1];
+        int ns = next & TcpMultiplexer.TCP_STATE_MASK;
 
         sk.state(TcpState.values()[ns]);
-        return 0 != (next & TcpDemultiplexer.TCP_ACTION_FIN);
+        return 0 != (next & TcpMultiplexer.TCP_ACTION_FIN);
     }
 
     /**

@@ -380,7 +380,7 @@ newtp.rx_opt.wscale_ok  = req.wscale_ok;
 
 ### P1（依赖 P0）
 
-- [x] **握手层传递** `TcpDemultiplexer.tcp_create_openreq_child()` — 将 `req.tstamp_ok` / `ts_recent` 等传递给 `TcpSock` ✅ 已完成
+- [x] **握手层传递** `TcpMultiplexer.tcp_create_openreq_child()` — 将 `req.tstamp_ok` / `ts_recent` 等传递给 `TcpSock` ✅ 已完成
 - [x] **3.6** `TcpInput.tcp_rcv_rtt_measure_ts()` — Timestamp 辅助 RTT 测量，在 `tcp_ack()` 中调用 ✅ 已完成
 
 ---

@@ -15,9 +15,9 @@
 
 | 状态 | 实现类 | 状态 |
 |------|--------|------|
-| `TCP_LISTEN` | `Tcp4Demultiplexer` | ✅ |
+| `TCP_LISTEN` | `Tcp4Multiplexer` | ✅ |
 | `TCP_SYN_SENT` | `TcpInput` | ❌ 仅枚举/掩码，处理路径明确标注 `client mode not supported` |
-| `TCP_SYN_RECV` / `TCP_NEW_SYN_RECV` | `TcpHandshaker`, `Tcp4Demultiplexer` | ✅ |
+| `TCP_SYN_RECV` / `TCP_NEW_SYN_RECV` | `TcpHandshaker`, `Tcp4Multiplexer` | ✅ |
 | `TCP_ESTABLISHED` | `TcpInput.tcp_rcv_established()` | ✅ |
 | `TCP_FIN_WAIT1` / `FIN_WAIT2` | `TcpInput.tcp_fin()` | ✅ |
 | `TCP_CLOSE_WAIT` / `LAST_ACK` | `TcpInput.tcp_fin()` | ✅ |
@@ -263,7 +263,7 @@
 **现状**：入口已接通，但实际是空实现——`tcp_time_wait()` 进入后被标注 `// FIXME`，
 状态先被设为 `TCP_TIME_WAIT` 后立即覆盖为 `TCP_CLOSE` 并销毁连接，完全跳过了 2MSL 等待：
 ```
-// TcpDemultiplexer.java:567-571  // FIXME
+// TcpMultiplexer.java:567-571  // FIXME
 if (TCP_TIME_WAIT.equals(state)) {
     tp.state(TCP_CLOSE);   // 直接关闭，无 2MSL 等待
     tcp_done(tp);
