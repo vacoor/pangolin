@@ -1,12 +1,29 @@
 # TCP 协议栈 Java 重构方案
 
-> 版本：v3.5 | 更新日期：2026-04-09
+> 版本：v3.7 | 更新日期：2026-04-09
 > 分析基准：branch `feature/v1.2.3-ai-lb`
 > 目标：OOP 化、关注点分离、RFC9293 之外的扩展可插拔
 
 ---
 
 ## 更新日志
+
+### v3.7 — 2026-04-09
+
+- §6.2 `TcpMultiplexHandler.channelRead` 修复引用计数 bug：`pkt.retain()` 后必须在 TUN 线程配对 `pkt.release()`
+- §6.2 `worker.register(connCh)` 处理失败路径：注册失败时从 registry 移除 + 发 RST
+- §6.2 删除 `@ChannelHandler.Sharable`：`TcpMultiplexHandler` 持有 per-实例 `registry`，不能跨 TUN Channel 共享
+- §7.3 `TcpAckProcessor.onAck()` 改为 `void`（原 `return 0` 无语义）
+- §9 Builder 补全完整字段定义，明确 `congestionControl(cc, callback)` 两参数方法签名及 `build()` 内 `init()` 调用顺序
+
+### v3.6 — 2026-04-09
+
+- §6.2 `doRegister()` 修复：移除错误的 `pipeline().fireChannelRegistered()` / `fireChannelActive()` 调用（AbstractChannel 已处理，手动调用导致重复触发）
+- §6.2 `doDeregister()` 修复：移除错误的 `pipeline().fireChannelInactive()` / `fireChannelUnregistered()` 调用（同上）
+- §6.2 `TcpConnectionChannel` 构造函数新增 `deregisterCallback` 参数（替代直接引用 `registry`，解决 `registry` 不可访问问题）
+- §6.2 `TcpMultiplexHandler.channelRead` 同步修正构造调用，传入 `() -> registry.remove(fourTuple)` 作为 callback
+- §9 Builder 明确 `retransmitCallback` 注入方式：`.congestionControl(impl, retransmitter::retransmit)`，build() 内调用 `cc.init(conn, callback)`
+- §6.4 新增"上游代理连接的 EventLoop 绑定"节：说明上游 Bootstrap 应复用 `conn.eventLoop()`（assignedWorker），消除跨线程 execute()，同时废除 S4 中的 `childGroup`
 
 ### v3.5 — 2026-04-09
 
@@ -293,8 +310,12 @@ EventLoop tick（DelAck 到期）
 
 ## 5. 目标包结构
 
+所有新代码放入独立包，不触碰现有代码：
+
 ```
-tcp/
+com.github.pangolin.routing.acceptor.tun.net.v2/   ← 新包根，与原 tun.net 并列
+│
+└── tcp/
 ├── pipeline/                          # per-connection pipeline 基础设施（见 §6，二选一）
 │   ├── [方案 A] TcpConnectionPipeline      # 自定义轻量 pipeline，~120 行
 │   ├── [方案 A] TcpConnectionContext       # 对标 ChannelHandlerContext，~80 行
@@ -504,17 +525,20 @@ registry.get(fourTuple).fireChannelRead(pkt);
 ```java
 public class TcpConnectionChannel extends AbstractChannel {
 
-    private final Channel              tunChannel;      // 父 TUN Channel（仅用于 doWrite 写回）
+    private final Channel              tunChannel;          // 父 TUN Channel（仅用于 doWrite 写回）
     private final FourTuple            fourTuple;
-    private final EventLoop            assignedWorker;  // 由 TcpMultiplexHandler 按四元组哈希分配
-    private       ChannelHandlerContext parentCtx;      // 用于 doWrite() 写入父 pipeline
+    private final EventLoop            assignedWorker;      // 由 TcpMultiplexHandler 按四元组哈希分配
+    private final Runnable             deregisterCallback;  // TUN EventLoop 上执行 registry.remove()
+    private       ChannelHandlerContext parentCtx;          // 用于 doWrite() 写入父 pipeline
     private volatile boolean           active;
 
-    public TcpConnectionChannel(Channel tunChannel, FourTuple fourTuple, EventLoop assignedWorker) {
+    public TcpConnectionChannel(Channel tunChannel, FourTuple fourTuple,
+                                EventLoop assignedWorker, Runnable deregisterCallback) {
         super(null);
-        this.tunChannel     = tunChannel;
-        this.fourTuple      = fourTuple;
-        this.assignedWorker = assignedWorker;
+        this.tunChannel          = tunChannel;
+        this.fourTuple           = fourTuple;
+        this.assignedWorker      = assignedWorker;
+        this.deregisterCallback  = deregisterCallback;
     }
 
     /** 在注册前由 TcpMultiplexHandler 设置 */
@@ -534,21 +558,21 @@ public class TcpConnectionChannel extends AbstractChannel {
 
     @Override
     protected void doRegister() {
-        // 虚拟 Channel，无 selector fd。
-        // 参考 AbstractHttp2StreamChannel：注册后触发 channelActive，
+        // 虚拟 Channel，无 selector fd，不需要注册到 Selector。
+        // 只需将 active 置 true，AbstractChannel.AbstractUnsafe.register0() 在本方法
+        // 返回后自动触发 pipeline.fireChannelRegistered() + fireChannelActive()，
         // 让 TcpHandshakeHandler 可在 channelActive() 中做初始化。
+        // ⚠️ 禁止在此处主动调用 pipeline().fireChannelRegistered() / fireChannelActive()，
+        //    否则 AbstractChannel 会再触发一次，造成重复调用。
         active = true;
-        pipeline().fireChannelRegistered();
-        pipeline().fireChannelActive();
     }
 
     @Override
     protected void doDeregister() {
-        // 参考 Http2StreamChannel：注销时触发 channelInactive，
-        // 让各阶段 handler 在 channelInactive() 中取消定时器、释放 buffer。
-        active = false;
-        pipeline().fireChannelInactive();
-        pipeline().fireChannelUnregistered();
+        // AbstractChannel.AbstractUnsafe.deregister0() 在本方法返回后自动触发
+        // pipeline.fireChannelUnregistered()，channelInactive 由 AbstractUnsafe.close()
+        // 在检测到 wasActive && !isActive 后触发。
+        // ⚠️ 禁止在此处主动调用 pipeline().fireChannelInactive() / fireChannelUnregistered()。
     }
 
     @Override protected void doBind(SocketAddress local) { /* no-op */ }
@@ -558,20 +582,20 @@ public class TcpConnectionChannel extends AbstractChannel {
     protected void doClose() {
         if (!active) return;
         active = false;
-        // 调用顺序：
-        //   1. TcpConnection.close() 不在此处调用——TcpConnection 由业务 handler 持有，
-        //      handler 在 channelInactive() 中负责调用 conn.close()（取消定时器、释放扩展状态）
-        //   2. registry.remove() 在此处执行，确保后续包不再路由到本 Channel
-        //   3. doDeregister() 由 Netty 在 doClose() 完成后自动调用
-        //      → pipeline().fireChannelInactive() + fireChannelUnregistered()
-        //      → 触发各 handler 的 channelInactive()，handler 在其中调用 conn.close()
+        // 调用顺序（由 AbstractUnsafe 驱动）：
+        //   1. doClose()（本方法）：将 active 置 false，提交 registry 注销任务
+        //   2. AbstractUnsafe 检测到 wasActive && !isActive → pipeline.fireChannelInactive()
+        //      → 各 handler.channelInactive()：业务 handler 在此调用 conn.close()
+        //        （取消定时器、释放扩展 per-conn 状态）
+        //   3. AbstractUnsafe.deregister0() → pipeline.fireChannelUnregistered()
         //
         // 触发时机：TcpActiveCloseHandler 在 TIME_WAIT 到期，或
         //          TcpPassiveCloseHandler 在 LAST_ACK 收到对端 ACK 后，
         //          调用 ctx.channel().close() → pipeline unsafe.close() → 此方法。
         //
-        // registry 写操作回投 TUN EventLoop，保持单写者（registry 用普通 HashMap，无锁）。
-        tunChannel.eventLoop().execute(() -> registry.remove(fourTuple));
+        // deregisterCallback 回投到 TUN EventLoop 执行 registry.remove(fourTuple)，
+        // 保持 registry 单写者（registry 用普通 HashMap，无需 ConcurrentMap）。
+        tunChannel.eventLoop().execute(deregisterCallback);
     }
 
     @Override
@@ -658,7 +682,8 @@ public class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPacketBu
  * 对标 Http2MultiplexHandler(childHandler)。
  * TUN EventLoop 仅做路由，TCP 处理分发到 workerGroup（见 §6.4）。
  */
-@ChannelHandler.Sharable
+// 注意：不加 @ChannelHandler.Sharable。handler 持有 per-实例的 registry 和 workers[]，
+// 每个 TUN Channel 必须使用独立实例，不能共享。
 public class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
 
     private final TcpConfig              config;
@@ -686,19 +711,34 @@ public class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
 
             // 首次 SYN：按四元组哈希选定 Worker，同一连接始终落同一线程
             EventLoop worker = workers[Math.abs(fourTuple.hashCode()) % workers.length];
-            connCh = new TcpConnectionChannel(ctx.channel(), fourTuple, worker);
+            // deregisterCallback 在 TUN EventLoop 执行 registry.remove，保持单写者
+            connCh = new TcpConnectionChannel(ctx.channel(), fourTuple, worker,
+                () -> registry.remove(fourTuple));
             connCh.setParentContext(ctx);
             connCh.pipeline().addLast(childHandler);
-            worker.register(connCh);          // doRegister() → channelActive()
+            // AbstractChannel.AbstractUnsafe.register() 在当前线程（TUN EventLoop）设置
+            // this.eventLoop = worker（volatile 写），然后提交 register0 任务到 Worker。
+            // 因此后续 connCh.eventLoop() 立即可用，不存在 eventLoop==null 的窗口。
+            ChannelFuture regFuture = worker.register(connCh);
+            regFuture.addListener((ChannelFutureListener) f -> {
+                if (!f.isSuccess()) {
+                    // 注册失败（Worker 已关闭等）：从注册表移除，防止后续包投递到损坏 Channel
+                    registry.remove(fourTuple);
+                    sendRst(ctx, pkt);
+                }
+            });
             registry.put(fourTuple, connCh);  // registry 写只在 TUN EventLoop
         }
 
         final TcpConnectionChannel ch = connCh;
+        // retain() 为 Worker lambda 增加一份引用；TUN 线程自身的引用在 execute() 后释放。
+        // 两次 release 对应两份引用：Worker lambda 的 finally + TUN 线程自身。
         pkt.retain();
         ch.eventLoop().execute(() -> {        // TUN线程 → Worker线程，跨线程投递
             try { ch.fireChildRead(pkt); }
-            finally { pkt.release(); }
+            finally { pkt.release(); }        // Worker 释放 lambda 持有的引用
         });
+        pkt.release();                        // TUN 线程释放自身的引用（retain 配对）
     }
 }
 ```
@@ -799,6 +839,45 @@ Worker-2  NioEventLoop  { conn-C, conn-F, ... }   ← fourTuple.hashCode() % N =
 #### 定时器
 
 `conn.eventLoop().schedule(...)` 直接调度到 `assignedWorker`，与 TCP 处理同线程，无额外同步。
+
+#### 上游代理连接的 EventLoop 绑定
+
+TUN TCP 连接（`TcpConnectionChannel`）处理在 `assignedWorker`；对应的上游代理连接（`NioSocketChannel`）应**复用同一个 `assignedWorker`**，使两端数据交换无跨线程开销：
+
+```java
+// TcpEstablishedHandler 在 channelActive() 或首包到达时建立上游连接
+Bootstrap upstream = new Bootstrap()
+    .group(ctx.channel().eventLoop())   // ← assignedWorker，与 TcpConnectionChannel 同线程
+    .channel(NioSocketChannel.class)
+    .handler(new UpstreamChannelInitializer(...));
+
+upstream.connect(proxyAddress).addListener((ChannelFutureListener) future -> {
+    if (future.isSuccess()) {
+        Channel upstreamCh = future.channel();
+        // 此时 upstreamCh.eventLoop() == ctx.channel().eventLoop()
+        // TcpEstablishedHandler ↔ UpstreamHandler 的数据交换全在同一线程，无锁无 execute()
+        conn.setAttr(UPSTREAM_CHANNEL_KEY, upstreamCh);
+        ...
+    }
+});
+```
+
+**线程模型对比**
+
+```
+改造前（TcpDemultiplexHandler 私有 childGroup）：
+  TUN EventLoop   → TCP 处理（单线程，所有连接串行）
+  childGroup      → 上游连接（独立线程池）
+  数据转发需跨线程 execute()
+
+改造后（Worker 分发 + 复用 assignedWorker）：
+  TUN EventLoop        → 路由（仅 registry 查找 + 跨线程投递）
+  Worker-0 EventLoop   → conn-A TCP 处理 + conn-A 上游连接  ← 同线程，零锁
+  Worker-1 EventLoop   → conn-B TCP 处理 + conn-B 上游连接  ← 同线程，零锁
+  ...
+```
+
+**原 `TcpDemultiplexHandler.childGroup`（TCP.TODO.01.md S4）因此可删除**，不再需要独立线程池；外层只传入 `workerGroup`，上游连接统一通过 `conn.eventLoop()` 创建。
 
 ---
 
@@ -1431,16 +1510,16 @@ public class NewRenoCongestionControl implements CongestionControl {
 
 ```java
 public class TcpAckProcessor {
-    public int onAck(TcpConnection conn, TcpPacketBuf pkt) {
+    // void：ACK 处理结果通过 conn 状态变更体现，无需返回标志位
+    public void onAck(TcpConnection conn, TcpPacketBuf pkt) {
         int prevUna    = conn.sndUna();
         int ackedBytes = tcpSndUnaUpdate(conn, pkt.ackSeq());
         boolean advanced = TcpSequence.after(conn.sndUna(), prevUna);
         int ackedSegs    = ackedBytes / conn.mss();
 
-        conn.rttEstimator().addSample(conn, rttSample(conn, pkt));          // RFC6298
-        conn.congestionControl().onAck(conn, ackedSegs, advanced);          // RFC5681
+        conn.rttEstimator().addSample(conn, rttSample(conn, pkt));                  // RFC6298
+        conn.congestionControl().onAck(conn, ackedSegs, advanced);                  // RFC5681
         conn.lossDetector().onAck(conn, pkt.ackSeq(), computeAckFlags(conn, pkt)); // RFC8985
-        return 0;
     }
 }
 ```
@@ -1530,20 +1609,59 @@ public final class TcpTimerScheduler {
 
 ## 9. `TcpConnection` 构建（Builder 模式）
 
+Builder 内部结构（关键字段）：
+
+```java
+public static final class Builder {
+    private Channel                  channel;
+    private RttEstimator             rttEstimator       = NoopRttEstimator.INSTANCE;
+    private CongestionControl        congestionControl  = NoopCongestionControl.INSTANCE;
+    private Consumer<TcpConnection>  retransmitCallback = conn -> {};  // Noop 默认
+    private LossDetector             lossDetector       = NoopLossDetector.INSTANCE;
+    private TcpTimestampExtension    timestampExt       = NoopTimestampExtension.INSTANCE;
+
+    public Builder channel(Channel channel)                           { this.channel = channel; return this; }
+    public Builder rttEstimator(RttEstimator e)                       { this.rttEstimator = e; return this; }
+    /** CC 与 retransmitCallback 必须成对设置：CC 决策触发，RFC9293（TcpRetransmitter）执行 */
+    public Builder congestionControl(CongestionControl cc,
+                                     Consumer<TcpConnection> callback) {
+        this.congestionControl  = cc;
+        this.retransmitCallback = callback;
+        return this;
+    }
+    public Builder lossDetector(LossDetector d)                       { this.lossDetector = d; return this; }
+    public Builder timestampExt(TcpTimestampExtension t)              { this.timestampExt = t; return this; }
+
+    public TcpConnection build() {
+        TcpConnection conn = new TcpConnection(channel, rttEstimator, congestionControl,
+                                               lossDetector, timestampExt);
+        rttEstimator.init(conn);
+        congestionControl.init(conn, retransmitCallback);  // ← callback 在此注入
+        lossDetector.init(conn);
+        timestampExt.init(conn);
+        return conn;
+    }
+}
+```
+
+使用示例：
+
 ```java
 // 完整配置（所有 RFC 扩展启用）
+TcpRetransmitter retransmitter = new TcpRetransmitter();   // RFC9293 执行重传
 TcpConnection conn = TcpConnection.builder()
     .channel(channel)                              // TcpConnectionChannel 实例（方案 B）
     .rttEstimator(new Rfc6298RttEstimator())
-    .congestionControl(new NewRenoCongestionControl())
+    .congestionControl(new NewRenoCongestionControl(),
+        retransmitter::retransmit)                 // CC 触发重传决策，RFC9293 TcpRetransmitter 执行
     .lossDetector(new TlpLossDetector())
     .timestampExt(new Rfc7323TimestampExtension())
-    .build();   // build() 内部依次调用各扩展的 init(conn)
+    .build();
 
 // 最简配置（仅 RFC9293，所有扩展退化为 Noop）
 TcpConnection minimal = TcpConnection.builder()
     .channel(channel)
-    .build();   // 未指定的扩展自动填充对应 Noop 实现
+    .build();   // 未指定扩展自动填充 Noop 实现；retransmitCallback 默认为空 lambda
 ```
 
 ---
@@ -1610,6 +1728,7 @@ TcpConnection minimal = TcpConnection.builder()
 
 ## 11. 重构约束
 
+- **新旧代码物理隔离**：所有新代码放入 `com.github.pangolin.routing.acceptor.tun.net.v2` 包，不修改现有包（`tun.net`）中的任何文件；新旧实现可同时编译和运行，切换由上层装配点（`TunAcceptor` 或 pipeline 配置）控制
 - **每个 Phase 独立可合并**：每步结束后代码必须可编译，现有功能不回退
 - **禁止提前设计**：不为"将来可能需要"的场景增加抽象层，只为已知的 RFC 扩展点设计接口
 - **Netty 线程模型不变**：所有 `TcpConnection` 的状态修改必须在其绑定的 EventLoop 中执行，不引入 `synchronized` 或额外锁
