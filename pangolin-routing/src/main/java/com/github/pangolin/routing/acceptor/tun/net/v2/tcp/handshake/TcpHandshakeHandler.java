@@ -51,8 +51,9 @@ public final class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPa
             if (conn != null) {
                 log.debug("[TCP] [HANDSHAKE] 3WH complete — switching to established handler");
                 ctx.pipeline().replace(this, "established", new TcpEstablishedHandler(conn));
-                // Fire the establishing packet into the new handler in case it carries data
-                // (simultaneous data with ACK). TcpEstablishedHandler handles gracefully.
+                // Fire the ACK into the newly installed handler: TCP allows data to be piggybacked
+                // on the final ACK (RFC 9293 §3.4). Without this, that data would be silently dropped.
+                ctx.fireChannelRead(pkt);
             }
         }
         // All other packets during handshake are silently dropped.

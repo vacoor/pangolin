@@ -1,12 +1,27 @@
 # TCP 协议栈 Java 重构方案
 
-> 版本：v3.9 | 更新日期：2026-04-09
+> 版本：v4.0 | 更新日期：2026-04-10
 > 分析基准：branch `feature/v1.2.3-ai-lb`
 > 目标：OOP 化、关注点分离、RFC9293 之外的扩展可插拔
 
 ---
 
 ## 更新日志
+
+### v4.0 — 2026-04-10
+
+**RFC 9293 TCP 协议栈实现完成**（`tun.net.v2.tcp` 包，共 38 个生产类 + 5 个测试类，54 个单元测试全部通过）
+
+- §6 Phase 0 基础设施：`FourTuple`、`TcpConnectionChannel`（继承 `AbstractChannel`，实现 `config()` 抽象方法）、`TcpConnectionRegistry`、`TcpMultiplexHandler`（Worker 分发、引用计数、RST 回复）
+- §7 RFC9293 核心：`TcpHandshakeHandler/TcpHandshaker/TcpHandshakerFactory`（3WH）、`TcpEstablishedHandler`（数据传输、延迟 ACK）、`TcpActiveCloseHandler`（FIN_WAIT_1/2 → TIME_WAIT）、`TcpPassiveCloseHandler`（CLOSE_WAIT → LAST_ACK）
+- §7 算法层：`TcpSegmenter`（分段、cwnd 窗口控制）、`TcpAckProcessor`（ACK 推进、RTT 采样）、`TcpRetransmitter`（RTO 重传）、`TcpPacketBuilder`（IPv4+TCP 报文组装 + 校验和）
+- §8 扩展层：`Rfc6298RttEstimator`（SRTT/RTTVAR/退避）、`NewRenoCongestionControl`（RFC 5681 含全部 v3.9 修正）、`TcpReceiveBuffer`（OFO 乱序重组）、`TcpSendBuffer`（RTX 队列）
+
+**代码审查发现并修复 3 个 Bug**
+
+- §8.1 `TcpHandshaker.sendSynAck()`：`synAckSent` 原在 `writeAndFlush()` 的异步 listener 中设置。`writeAndFlush()` 内部经 TUN EventLoop 完成，listener 回调时 Worker 上可能已处理了重传 SYN 或最终 ACK，导致 `finishHandshake()` 误判"ACK 在 SYN-ACK 之前"而丢弃握手。修复：`synAckSent = true` 改为在调用 `writeAndFlush()` 前同步设置。
+- §7.1 `TcpHandshakeHandler.channelRead0()`：注释声明 "Fire the establishing packet into the new handler in case it carries data"，但实际缺少 `ctx.fireChannelRead(pkt)` 调用。RFC 9293 §3.4 允许最终 ACK 携带数据，缺少该调用导致数据静默丢弃。修复：`pipeline().replace()` 后补充 `ctx.fireChannelRead(pkt)`。
+- §8.3 `TcpSegmenter.sendPending()`：内循环中 `payload = data.slice().retain()` 后调用 `sendSegment()`，`sendSegment()` 内部通过 `payload.retainedSlice()` 为 RTX 队列保留一份引用，但 `payload` 自身的 `retain()` 贡献始终未被释放，造成底层 `data` ByteBuf 引用计数永远不归零（内存泄漏）。修复：`sendSegment()` 调用后补充 `payload.release()`。
 
 ### v3.9 — 2026-04-09
 

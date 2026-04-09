@@ -43,6 +43,10 @@ public final class TcpSegmenter {
                 ByteBuf payload = data.slice(offset, segLen).retain();
                 offset += segLen;
                 sendSegment(conn, payload, false);
+                // Release the local retain: sendSegment enqueues a retainedSlice into the RTX
+                // queue (which holds its own +1), so payload's +1 from .retain() is no longer
+                // needed here and must be released to avoid a reference-count leak.
+                payload.release();
                 inFlight++;
             }
 

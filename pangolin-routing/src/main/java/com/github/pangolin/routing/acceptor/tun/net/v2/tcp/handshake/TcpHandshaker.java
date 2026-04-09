@@ -142,9 +142,13 @@ public final class TcpHandshaker {
                 opts, null, 0
         );
 
+        // Mark synAckSent synchronously: both this method and finishHandshake() run on the same
+        // Worker EventLoop, but writeAndFlush() is async (dispatched to TUN EventLoop). If the
+        // final ACK arrives before the write-complete callback fires, the async flag would still
+        // be false and finishHandshake() would incorrectly reject the handshake.
+        synAckSent = true;
         connChannel.writeAndFlush(buf).addListener((ChannelFutureListener) f -> {
             if (f.isSuccess()) {
-                synAckSent = true;
                 log.debug("[TCP] [HANDSHAKE] SYN-ACK sent (isn={})", Integer.toUnsignedString(sndIsn));
             } else {
                 log.warn("[TCP] [HANDSHAKE] SYN-ACK send failed", f.cause());
