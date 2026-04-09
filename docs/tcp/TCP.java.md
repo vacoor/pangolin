@@ -1,12 +1,39 @@
 # TCP 协议栈 Java 重构方案
 
-> 版本：v3.1 | 更新日期：2026-04-09
+> 版本：v3.5 | 更新日期：2026-04-09
 > 分析基准：branch `feature/v1.2.3-ai-lb`
 > 目标：OOP 化、关注点分离、RFC9293 之外的扩展可插拔
 
 ---
 
 ## 更新日志
+
+### v3.5 — 2026-04-09
+
+- §6.4 重命名为"Worker EventLoop 分发"，删除选项1（单 EventLoop）和选项对比表，内容聚焦 Worker 分发方案
+- §6.2 `TcpConnectionChannel` 构造函数改为必须传入 `assignedWorker`，`isCompatible()` 绑定 `assignedWorker`，`doClose()` 回投 TUN EventLoop 清理 registry
+- §6.2 `TcpMultiplexHandler` 构造函数增加 `workerGroup` 参数，`channelRead` 改为 Worker 分发
+- §6.5 已对齐设计表 EventLoop 归属行更新为 `assignedWorker`
+- §9 Builder 注释去掉方案A引用
+- §10 Phase 0 重写，明确采用方案B + Worker 分发
+
+### v3.4 — 2026-04-09
+
+- §5 包结构说明 `pipeline/` 为二选一，标注推荐方案 B
+- §6.3 对比表后新增推荐说明（方案 B，含理由）
+- §6.4 修正 `workerGroup.next(int)` 不存在的 API，改为 `workers[]` 数组取模，并补充构造函数示例
+- §6.2 `TcpConnectionChannel.doClose()` 补充 `TcpConnection.close()` 与 `doClose()` 的调用关系说明
+- §6.2 `TcpMultiplexHandler` 代码补充 `registry` 字段声明
+- §6.6 借鉴点1 `TcpConnectionState` 补充 `LISTEN` / `SYN_RECEIVED` 不由 `TcpConnection` 持有的说明
+- §6.6 借鉴点1 修正 `FIN_WAIT_2` 注释："FIN-ACK" → "对本端 FIN 的 ACK"
+
+### v3.3 — 2026-04-09
+
+- 新增 §6.6 HTTP/2 代码组织结构借鉴：6 个可落地的设计模式（`State` 行为方法、`LifecycleManager`、`Connection.Listener`、`FlowControlled.merge`、`Visitor`、Codec/Multiplexer 分层）
+
+### v3.2 — 2026-04-09
+
+- 新增 §6.5 `AbstractHttp2StreamChannel` 完整对比分析：已对齐项、5 个 Gap、以及各 Gap 在 TUN 场景的适用性判定
 
 ### v3.1 — 2026-04-09
 
@@ -268,13 +295,11 @@ EventLoop tick（DelAck 到期）
 
 ```
 tcp/
-├── pipeline/                          # per-connection pipeline 基础设施（见 §6）
-│   ├── 方案 A（自定义轻量 pipeline）
-│   │   ├── TcpConnectionPipeline      # 对标 ChannelPipeline（~120 行）
-│   │   ├── TcpConnectionContext       # 对标 ChannelHandlerContext（~80 行）
-│   │   └── TcpConnectionHandler       # 对标 ChannelInboundHandler
-│   └── 方案 B（自实现 Netty Channel）
-│       └── TcpConnectionChannel       # extends AbstractChannel（~230 行）
+├── pipeline/                          # per-connection pipeline 基础设施（见 §6，二选一）
+│   ├── [方案 A] TcpConnectionPipeline      # 自定义轻量 pipeline，~120 行
+│   ├── [方案 A] TcpConnectionContext       # 对标 ChannelHandlerContext，~80 行
+│   ├── [方案 A] TcpConnectionHandler       # 对标 ChannelInboundHandler
+│   └── [方案 B] TcpConnectionChannel       # extends AbstractChannel，~230 行（推荐）
 │
 ├── demux/
 │   ├── TcpMultiplexHandler          # 对标 Http2MultiplexHandler，分发入站包（~80 行）
@@ -471,8 +496,7 @@ registry.get(fourTuple).fireChannelRead(pkt);
 
 ### 6.2 方案 B：自实现 Netty Channel
 
-每条 TCP 连接对应一个 `TcpConnectionChannel`（`extends AbstractChannel`），注册在 TUN Channel
-的 EventLoop 上，使用**真实** Netty `ChannelPipeline`。
+每条 TCP 连接对应一个 `TcpConnectionChannel`（`extends AbstractChannel`），注册在由 `TcpMultiplexHandler` 按四元组哈希分配的 **Worker EventLoop** 上，使用**真实** Netty `ChannelPipeline`。TUN EventLoop 仅做路由，不处理 TCP 状态机（见 §6.4）。
 参考先例：Netty HTTP/2 的 `AbstractHttp2StreamChannel`，同样是多路复用在单一物理 Channel 上的虚拟子 Channel。
 
 **TcpConnectionChannel**
@@ -480,15 +504,17 @@ registry.get(fourTuple).fireChannelRead(pkt);
 ```java
 public class TcpConnectionChannel extends AbstractChannel {
 
-    private final Channel              tunChannel;   // 父 TUN Channel
+    private final Channel              tunChannel;      // 父 TUN Channel（仅用于 doWrite 写回）
     private final FourTuple            fourTuple;
-    private       ChannelHandlerContext parentCtx;   // 用于 doWrite() 写入父 pipeline
+    private final EventLoop            assignedWorker;  // 由 TcpMultiplexHandler 按四元组哈希分配
+    private       ChannelHandlerContext parentCtx;      // 用于 doWrite() 写入父 pipeline
     private volatile boolean           active;
 
-    public TcpConnectionChannel(Channel tunChannel, FourTuple fourTuple) {
+    public TcpConnectionChannel(Channel tunChannel, FourTuple fourTuple, EventLoop assignedWorker) {
         super(null);
-        this.tunChannel = tunChannel;
-        this.fourTuple  = fourTuple;
+        this.tunChannel     = tunChannel;
+        this.fourTuple      = fourTuple;
+        this.assignedWorker = assignedWorker;
     }
 
     /** 在注册前由 TcpMultiplexHandler 设置 */
@@ -501,9 +527,9 @@ public class TcpConnectionChannel extends AbstractChannel {
 
     @Override
     protected boolean isCompatible(EventLoop loop) {
-        // 默认：共享 TUN Channel 的 EventLoop，所有连接单线程无锁。
-        // 若需 Worker 分发（见 §6.4），改为接受 workerGroup 中的任意 EventLoop。
-        return loop == tunChannel.eventLoop();
+        // 接受构造时按四元组哈希分配的 Worker EventLoop（见 §6.4）。
+        // 同一连接的所有 TCP 处理始终在同一个 Worker 线程执行，无需锁。
+        return loop == assignedWorker;
     }
 
     @Override
@@ -532,7 +558,20 @@ public class TcpConnectionChannel extends AbstractChannel {
     protected void doClose() {
         if (!active) return;
         active = false;
-        // 从 TcpConnectionRegistry 注销，触发 doDeregister()
+        // 调用顺序：
+        //   1. TcpConnection.close() 不在此处调用——TcpConnection 由业务 handler 持有，
+        //      handler 在 channelInactive() 中负责调用 conn.close()（取消定时器、释放扩展状态）
+        //   2. registry.remove() 在此处执行，确保后续包不再路由到本 Channel
+        //   3. doDeregister() 由 Netty 在 doClose() 完成后自动调用
+        //      → pipeline().fireChannelInactive() + fireChannelUnregistered()
+        //      → 触发各 handler 的 channelInactive()，handler 在其中调用 conn.close()
+        //
+        // 触发时机：TcpActiveCloseHandler 在 TIME_WAIT 到期，或
+        //          TcpPassiveCloseHandler 在 LAST_ACK 收到对端 ACK 后，
+        //          调用 ctx.channel().close() → pipeline unsafe.close() → 此方法。
+        //
+        // registry 写操作回投 TUN EventLoop，保持单写者（registry 用普通 HashMap，无锁）。
+        tunChannel.eventLoop().execute(() -> registry.remove(fourTuple));
     }
 
     @Override
@@ -546,9 +585,9 @@ public class TcpConnectionChannel extends AbstractChannel {
         // 参考 AbstractHttp2StreamChannel.doWrite()：
         // 写入父 pipeline（非直接 flush），使 TUN Channel codec 可处理出站包；批量合并写，减少系统调用。
         //
-        // 线程安全说明：Netty Channel.write() / ChannelHandlerContext.write() 本身线程安全——
-        // 若调用方不在目标 EventLoop，Netty 内部自动将写操作提交到 TUN EventLoop 的任务队列。
-        // 因此 Worker 分发方案（§6.4）下 doWrite() 无需额外跨线程包装。
+        // 线程安全说明：本方法运行在 Worker EventLoop（见 §6.4），
+        // parentCtx.write() 检测到跨线程后自动将写操作提交到 TUN EventLoop 任务队列，
+        // 因此 doWrite() 无需额外跨线程包装。
         for (;;) {
             Object msg = buf.current();
             if (msg == null) break;
@@ -615,18 +654,25 @@ public class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPacketBu
 
 ```java
 /**
- * 构造时注入 childHandler（ChannelInitializer），对标 Http2MultiplexHandler(childHandler)。
- * 收到首次 SYN 时创建 TcpConnectionChannel 并装载 childHandler。
+ * 构造时注入 childHandler（ChannelInitializer）和 workerGroup，
+ * 对标 Http2MultiplexHandler(childHandler)。
+ * TUN EventLoop 仅做路由，TCP 处理分发到 workerGroup（见 §6.4）。
  */
 @ChannelHandler.Sharable
 public class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
 
-    private final TcpConfig      config;
-    private final ChannelHandler childHandler;
+    private final TcpConfig              config;
+    private final ChannelHandler         childHandler;
+    private final TcpConnectionRegistry  registry = new TcpConnectionRegistry();
+    private final EventLoop[]            workers;   // 从 workerGroup 提取，用于一致性哈希
 
-    public TcpMultiplexHandler(TcpConfig config, ChannelHandler childHandler) {
-        this.config      = config;
+    public TcpMultiplexHandler(TcpConfig config, ChannelHandler childHandler,
+                                EventLoopGroup workerGroup) {
+        this.config       = config;
         this.childHandler = childHandler;
+        List<EventLoop> list = new ArrayList<>();
+        workerGroup.forEach(e -> list.add((EventLoop) e));
+        this.workers = list.toArray(new EventLoop[0]);
     }
 
     @Override
@@ -635,20 +681,24 @@ public class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
         FourTuple fourTuple = pkt.fourTuple();
 
         TcpConnectionChannel connCh = registry.get(fourTuple);
-        if (connCh != null) {
-            connCh.fireChildRead(pkt);
-            return;
+        if (connCh == null) {
+            if (!pkt.isSyn()) { sendRst(ctx, pkt); return; }
+
+            // 首次 SYN：按四元组哈希选定 Worker，同一连接始终落同一线程
+            EventLoop worker = workers[Math.abs(fourTuple.hashCode()) % workers.length];
+            connCh = new TcpConnectionChannel(ctx.channel(), fourTuple, worker);
+            connCh.setParentContext(ctx);
+            connCh.pipeline().addLast(childHandler);
+            worker.register(connCh);          // doRegister() → channelActive()
+            registry.put(fourTuple, connCh);  // registry 写只在 TUN EventLoop
         }
 
-        if (!pkt.isSyn()) { sendRst(ctx, pkt); return; }
-
-        // 首次 SYN：创建子 Channel，装载 childHandler
-        connCh = new TcpConnectionChannel(ctx.channel(), fourTuple);
-        connCh.setParentContext(ctx);
-        connCh.pipeline().addLast(childHandler);
-        ctx.channel().eventLoop().register(connCh);  // doRegister() → channelActive()
-        registry.put(fourTuple, connCh);
-        connCh.fireChildRead(pkt);
+        final TcpConnectionChannel ch = connCh;
+        pkt.retain();
+        ch.eventLoop().execute(() -> {        // TUN线程 → Worker线程，跨线程投递
+            try { ch.fireChildRead(pkt); }
+            finally { pkt.release(); }
+        });
     }
 }
 ```
@@ -657,13 +707,15 @@ public class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
 
 ```java
 // TUN Channel pipeline 配置，对标 Http2MultiplexHandler 的写法
+EventLoopGroup workerGroup = new NioEventLoopGroup();  // 线程数 = CPU 核数
 tunPipeline.addLast(new TcpMultiplexHandler(config,
     new ChannelInitializer<TcpConnectionChannel>() {
         protected void initChannel(TcpConnectionChannel ch) {
             ch.pipeline().addLast("handshake",
                 new TcpHandshakeHandler(handshakerFactory, config));
         }
-    }
+    },
+    workerGroup
 ));
 ```
 
@@ -672,7 +724,7 @@ tunPipeline.addLast(new TcpMultiplexHandler(config,
 | 项目 | 说明 |
 |------|------|
 | 实现规模 | `TcpConnectionChannel` ~230 行，`TcpMultiplexHandler` ~80 行 |
-| EventLoop 集成 | 默认 `isCompatible()` 共用 TUN EventLoop（单线程无锁）；可扩展为 Worker 分发（见 §6.4） |
+| EventLoop 集成 | `isCompatible()` 绑定 `assignedWorker`；TUN EventLoop 仅路由，TCP 处理分散到 workerGroup（见 §6.4） |
 | 出站写路径 | `doWrite()` → `parentCtx.write()` 写入父 pipeline，批量 flush，不逐包 flush |
 | 生命周期事件 | `doRegister()` 触发 `channelActive()`；`doDeregister()` 触发 `channelInactive()` |
 | pipeline 配置 | `childHandler`（`ChannelInitializer`）注入构造函数，对标 `Http2MultiplexHandler(childHandler)` |
@@ -690,123 +742,479 @@ tunPipeline.addLast(new TcpMultiplexHandler(config,
 | 基础设施代码量 | ~200 行 | ~310 行 |
 | handler 接口 | 自定义 `TcpConnectionHandler` | Netty `ChannelHandler` 体系 |
 | `pipeline.replace()` | 自实现，语义相同 | 真实 Netty API |
-| EventLoop 访问 | `ctx.channel()` 返回 TUN Channel（间接） | `ctx.channel()` 返回 `TcpConnectionChannel`，`eventLoop()` 直接可用 |
+| EventLoop 访问 | `ctx.channel()` 返回 TUN Channel（间接） | `ctx.channel()` 返回 `TcpConnectionChannel`；`eventLoop()` 即分配的 Worker |
 | 出站写路径 | `ctx.writeAndFlush()` → `tunChannel` | `doWrite()` → `parentCtx.write()` + 批量 flush |
 | 生命周期事件 | 需手动触发 | `channelActive()` / `channelInactive()` 自动触发 |
 | Netty 生态 handler 复用 | ✗ | ✓ |
 | 流控扩展点 | 需自行实现 | `doBeginRead()` 天然扩展点 |
 
+**推荐方案 B。** 理由：
+- `pipeline.replace()` 直接复用 Netty 真实 API，与 WebSocket 升级完全同构，行为有保证
+- `channelActive()` / `channelInactive()` 自动触发，生命周期事件无需手动管理
+- `doBeginRead()` 是将来实现 TCP ↔ upstream 流控（Gap 5）的天然扩展点
+- 额外基础设施（~110 行 vs 方案A ~200 行）由 Netty 本身提供，维护负担不增加
+
+方案 A 仅在需要将整个 TCP 栈移植到非 Netty 环境时才值得考虑。
+
 ---
 
-### 6.4 EventLoop 线程模型分析
+### 6.4 Worker EventLoop 分发
 
-#### HTTP/2 类比的局限性
+#### 为什么不能沿用 HTTP/2 的单 EventLoop 模式
 
-方案 B 的 `isCompatible()` 设计参考了 `AbstractHttp2StreamChannel`，但两者的多路复用层级不同：
+TUN 是单一 OS 设备，`AbstractHttp2StreamChannel` 的 "子 channel 共享父 channel EventLoop" 模式在 TUN 场景会产生瓶颈：
 
 ```
-HTTP/2（适配）：
+HTTP/2：
   Client-A → TCP连接1 → EventLoop-1  { Stream-1, Stream-2, ... }
   Client-B → TCP连接2 → EventLoop-2  { Stream-1, Stream-2, ... }
-  可水平扩展：N 连接 → N 个 EventLoop 线程
+  ✓ N 条物理连接 → N 个线程，天然水平扩展
 
-TUN（不适配）：
+TUN（若直接套用 HTTP/2 模式）：
   所有应用 → TUN设备(唯一) → EventLoop(唯一)  { conn-A, conn-B, conn-C, ... }
-  无法水平扩展：全机所有连接 → 始终 1 个线程
+  ✗ 全机所有连接 → 始终 1 个线程，无法利用多核
 ```
 
-HTTP/2 中每条物理连接独占一个 EventLoop，多连接天然分散到 EventLoopGroup 的多个线程；TUN 是单一 OS 设备，所有连接共用同一个 EventLoop，无法通过增加连接数来分散负载。
+因此采用 Worker 分发：TUN EventLoop **只做路由**，按四元组哈希将每条连接的 TCP 处理固定分派到 workerGroup 中的某个 EventLoop 线程。
 
-#### 选项 1：维持单 EventLoop（当前默认）
-
-所有连接共享 TUN EventLoop，无锁，适合轻载或连接数较少的场景。
-
-#### 选项 2：Worker EventLoop 分发
+#### 线程模型
 
 ```
-TUN EventLoop（唯一，仅做路由）
+TUN EventLoop（唯一）
      │  channelRead(pkt)
-     │  1. 按 fourTuple 查 registry
+     │  1. 按 fourTuple 查 registry（HashMap，单写者）
      │  2. pkt.retain()
-     └─► workerLoop.execute(() -> connCh.fireChildRead(pkt); pkt.release())
+     └─► worker.execute(() -> connCh.fireChildRead(pkt); pkt.release())
 
-Worker-0  { conn-A, conn-D, ... }   ← fourTuple.hashCode() % N == 0
-Worker-1  { conn-B, conn-E, ... }   ← fourTuple.hashCode() % N == 1
-Worker-2  { conn-C, conn-F, ... }   ← fourTuple.hashCode() % N == 2
+Worker-0  NioEventLoop  { conn-A, conn-D, ... }   ← fourTuple.hashCode() % N == 0
+Worker-1  NioEventLoop  { conn-B, conn-E, ... }   ← fourTuple.hashCode() % N == 1
+Worker-2  NioEventLoop  { conn-C, conn-F, ... }   ← fourTuple.hashCode() % N == 2
 ```
 
-**TcpMultiplexHandler 改动**（仅路由层变化）：
+**线程安全保证**（三点，均无需加锁）：
+- **入站**：`fireChildRead()` 始终在 `assignedWorker` 线程调用（由 `execute()` 保证）
+- **出站**：`doWrite()` 在 Worker 线程调用，`parentCtx.write()` 检测跨线程后自动 submit 到 TUN EventLoop
+- **registry**：读写只在 TUN EventLoop（写：首次 SYN；删：`doClose()` 回投），普通 `HashMap` 无需 ConcurrentMap
+
+#### 定时器
+
+`conn.eventLoop().schedule(...)` 直接调度到 `assignedWorker`，与 TCP 处理同线程，无额外同步。
+
+---
+
+### 6.5 与 `AbstractHttp2StreamChannel` 完整对比
+
+对照 `netty-codec-http2:4.2.7.Final` 源码，系统梳理 `TcpConnectionChannel` / `TcpMultiplexHandler` 与 HTTP/2 的异同，并确认各项在 TUN 场景的适用性。
+
+#### 已对齐的设计
+
+| 设计点 | HTTP/2 实现 | 我们的设计 |
+|--------|------------|-----------|
+| 入站分发命名 | `fireChildRead(Http2Frame)` | `fireChildRead(TcpPacketBuf)` |
+| EventLoop 归属 | `eventLoop() { return parent().eventLoop(); }` | `isCompatible(loop) { return loop == assignedWorker; }`（§6.4 Worker 分发） |
+| 出站写路径 | `write0(parentContext(), frame)` | `parentCtx.write(msg)` |
+| EventLoop 断言 | `assert eventLoop().inEventLoop()` in `fireChildRead()` | 同上 |
+| childHandler 注入 | `Http2MultiplexHandler(ChannelHandler inboundStreamHandler)` | `TcpMultiplexHandler(config, ChannelHandler childHandler)` |
+| 注册触发 channelActive | `register()` → `fireChannelRegistered()` + `fireChannelActive()` | `doRegister()` → 同上 |
+
+#### Gap 分析与 TUN 适用性
+
+**Gap 1：`channelReadComplete` 每包触发（设计缺陷，低紧迫）**
+
+HTTP/2 做法（`AbstractHttp2StreamChannel.java:594-619`）：
+- `fireChildRead()` 只调 `pipeline().fireChannelRead(frame)`
+- `channelReadComplete` 通过 `readCompletePendingQueue` 延迟，**一次 read cycle 整体触发一次**
+
+我们的做法：
+```java
+public void fireChildRead(TcpPacketBuf pkt) {
+    pipeline().fireChannelRead(pkt);
+    pipeline().fireChannelReadComplete();  // ← 每个包都触发，违反 Netty 契约
+}
+```
+
+TUN 适用性：**✅ 缺陷存在，但暂无实际影响。**  
+`TunChannel.doRead()`（`TunChannel.java:171-198`）一次读 N 包，同一连接可能在一个 read cycle 内收到多包（burst 场景）。每包触发 `channelReadComplete` 违反"一批读完才通知"的 Netty 契约。  
+但当前 TCP handler（`TcpInput` 状态机）不依赖 `channelReadComplete` 做批量汇聚，**实际运行不受影响**。等引入依赖 `channelReadComplete` 的 handler 时再修复。
+
+---
+
+**Gap 2：flush 未批量化（性能优化，TUN 场景收益有限）**
+
+HTTP/2 做法（`Http2MultiplexHandler.java:366-386`）：
+- `parentReadInProgress = true` → 子 channel 的 `flush()` 被抑制（NOOP）
+- `channelReadComplete` 时统一 `ctx.flush()` — **整个 read cycle 只 flush 一次**
+
+我们的做法：`doWrite()` 末尾 `parentCtx.flush()`，N 个连接写 → N 次 flush。
+
+TUN 适用性：**⚠️ 优化存在，但收益受限。**
+
+HTTP/2 批量 flush 的收益是把 N 次 TCP `writev()` 合并成 1 次。TUN 的情况不同：
 
 ```java
-@Override
-public void channelRead(ChannelHandlerContext ctx, Object msg) {
-    TcpPacketBuf pkt = (TcpPacketBuf) msg;
-    FourTuple fourTuple = pkt.fourTuple();
+// TunChannel.doWrite()：每个 IP 包必须独立写，无法合并
+while (true) {
+    device.write(((ByteBuf) msg).nioBuffer());  // WinTUN ring buf / Linux tun fd
+    in.remove();
+}
+```
 
-    TcpConnectionChannel connCh = registry.get(fourTuple);
-    if (connCh == null) {
-        if (!pkt.isSyn()) { sendRst(ctx, pkt); return; }
-        // 按四元组 hash 选定 Worker，同一连接始终落同一线程
-        EventLoop worker = workerGroup.next(Math.abs(fourTuple.hashCode()));
-        connCh = new TcpConnectionChannel(ctx.channel(), fourTuple, worker);
-        connCh.pipeline().addLast(childHandler);
-        worker.register(connCh);          // doRegister() → channelActive()
-        registry.put(fourTuple, connCh);  // registry 写只在 TUN EventLoop
+批量 flush 对 TUN 的效果：
+- 减少的只是 `doWrite()` 调用次数（pipeline 遍历开销），**不减少实际 `device.write()` 次数**
+- WinTUN（内存映射写）：差异可忽略
+- Linux tun（fd write）：每个包仍是独立 syscall
+
+另一个障碍：`TunChannel` 用独立 `readLoop` 执行阻塞读（`TunChannel.java:39`），然后跨线程 submit 到 Channel EventLoop。HTTP/2 中批次处理是在同一 EventLoop task 内原子完成，`parentReadInProgress` flag 天然准确；TUN 中 N 包 = N 个 EventLoop task，批次间 timer task 可能插队，flag 跨 task 不可靠。
+
+**结论**：不值得为 TUN 场景引入 `readCompletePendingQueue` 的复杂度。若将来有强需求，可以在 `TunChannel` 层面将整批包包在单个 EventLoop task 里提交，比 handler 层 flag 更可靠。
+
+---
+
+**Gap 3：`channelWritabilityChanged` 传播（不适用）**
+
+HTTP/2 做法（`Http2MultiplexHandler.java:209-217`）：父 channel 可写时，广播给所有子 channel → 触发 `trySetWritable()` → 通知业务层恢复写。
+
+TUN 适用性：**❌ 当前不适用。**  
+`TunChannel.doWrite()` 无背压处理：
+
+```java
+try {
+    device.write(((ByteBuf) msg).nioBuffer());
+} finally {
+    in.remove();   // ← 写失败静默丢弃，无错误通知
+}
+```
+
+`TunChannel` 目前不处理写错误、不实现背压，即使 outbound buffer 满也不会触发有意义的 `channelWritabilityChanged`。传播过去无意义。  
+前置条件：先修复 `TunChannel.doWrite()` 的错误处理与背压机制。
+
+---
+
+**Gap 4：`isWritable()` 水位追踪（不适用，依赖 Gap 3）**
+
+HTTP/2 做法：`totalPendingSize` + `WriteBufferWaterMark` 高低水位，`isWritable()` 基于 `unwritable == 0`。  
+我们的做法：`isWritable()` 直接返回 `active`。
+
+TUN 适用性：**❌ 依赖 Gap 3，Gap 3 不适用则此项同样不适用。**
+
+---
+
+**Gap 5：`inboundBuffer` + `ReadStatus`（未来需要）**
+
+HTTP/2 做法：`ReadStatus`（IDLE / IN_PROGRESS / REQUESTED）+ `ArrayDeque<Object> inboundBuffer`，支持 `autoRead=false` 时缓冲帧，等 `beginRead()` 再排空。
+
+TUN 适用性：**🔮 将来需要，现阶段不适用。**
+
+TUN 是推模型，`TcpConnectionChannel.doBeginRead()` 为 no-op。对 TUN 来说，真正的流控入口不是 `autoRead`，而是 TCP `rcv_wnd`：
+
+```
+upstream socket 慢 → 缩 rcv_wnd → 0 → 远端停发
+                   ↓ autoRead=false + inboundBuffer
+                   在 rcv_wnd 缩窗期间，少量 in-flight 包进 inboundBuffer 缓冲
+upstream 恢复     → 展 rcv_wnd → autoRead=true → 排空 inboundBuffer
+```
+
+这套联动在实现 TCP ↔ upstream 流控之前不需要。
+
+---
+
+#### 额外发现：`TunChannel` 读写 EventLoop 分离
+
+```
+readLoop（独立 DefaultEventLoop）   ← device.read()，阻塞
+   │ fireChannelRead(pkt) × N       ← 跨线程，每次 submit 一个 task
+   │ fireChannelReadComplete()       ← 跨线程，submit
+   ↓
+Channel EventLoop                    ← 处理 N+1 个 task，timer task 可能插队
+```
+
+这与 HTTP/2（父子 channel 共享同一 EventLoop，批次内原子处理）有本质差异，是 `parentReadInProgress` flag 无法直接移植的根本原因。
+
+#### 汇总
+
+| Gap | TUN 适用？ | 结论 |
+|-----|-----------|------|
+| Gap 1：`channelReadComplete` 每包 | ✅ 缺陷存在 | 当前 handler 不受影响，低优先级 |
+| Gap 2：flush 批量化 | ⚠️ 受限 | TUN 写不可合并，EventLoop 分离使 flag 不可靠，暂不实现 |
+| Gap 3：writabilityChanged 传播 | ❌ 不适用 | `TunChannel.doWrite()` 无背压处理 |
+| Gap 4：isWritable() 水位 | ❌ 不适用 | 依赖 Gap 3 |
+| Gap 5：inboundBuffer + ReadStatus | 🔮 将来 | TCP ↔ upstream 流控实现时的前置依赖 |
+
+---
+
+### 6.6 HTTP/2 代码组织结构借鉴
+
+对照 `netty-codec-http2:4.2.7.Final` 源码，梳理 HTTP/2 的整体分层结构，提取可直接落地到 TUN TCP 栈的 6 个设计模式。
+
+#### HTTP/2 整体分层
+
+```
+Http2FrameCodec          ← Netty handler 层：字节 ↔ Http2Frame，持有 Http2Connection
+    │
+    ├─ Http2Connection           ← 连接级状态管理器
+    │    ├─ Http2Stream          ← 单条流的状态机
+    │    ├─ Endpoint<FC>         ← 本端/远端对称视图
+    │    ├─ Listener             ← 流生命周期事件
+    │    └─ PropertyKey          ← 类型安全属性 key
+    │
+    ├─ Http2LocalFlowController  ← 入站流控（RCV_WND 类比）
+    └─ Http2RemoteFlowController ← 出站流控（SND_WND 类比）
+             └─ FlowControlled  ← 出站数据单元（支持 merge/coalesce）
+
+Http2MultiplexHandler    ← 独立于 FrameCodec，只做子 Channel 路由
+    └─ AbstractHttp2StreamChannel
+```
+
+我们现状对照：
+
+```
+IpPacketCodec            ← 字节 → IpPacketBuf（对标 Http2FrameCodec 编解码部分）
+TcpMultiplexHandler      ← 职责叠加：路由 + 注册表 + 状态机驱动
+    TcpMultiplexer       ← 注册表 + TCP 状态机（对标 Http2Connection，但耦合严重）
+    TcpSock              ← 连接数据（对标 Http2Stream，贫血模型）
+```
+
+---
+
+#### 借鉴点 1：`Http2Stream.State` 加行为方法（**立即可落地**）
+
+HTTP/2 的做法（`Http2Stream.java`）：
+
+```java
+enum State {
+    IDLE              (false, false),
+    OPEN              (true,  true),
+    HALF_CLOSED_LOCAL (false, true),    // 本端发了 FIN
+    HALF_CLOSED_REMOTE(true,  false),   // 对端发了 FIN
+    CLOSED            (false, false);
+
+    final boolean localSideOpen;
+    final boolean remoteSideOpen;
+
+    public boolean localSideOpen()  { return localSideOpen; }
+    public boolean remoteSideOpen() { return remoteSideOpen; }
+}
+```
+
+调用侧：`if (state.localSideOpen()) { ... }` 替代 `state == ESTABLISHED || state == FIN_WAIT_1 || ...`
+
+**对应改造**（`TcpConnectionState`）：
+
+```java
+public enum TcpConnectionState {
+    // 注意：LISTEN 由 TcpMultiplexHandler 管理，SYN_RECEIVED 由 TcpHandshaker 内部持有；
+    // TcpConnection 在 TcpHandshaker.finishHandshake() 完成后创建，初始状态直接为 ESTABLISHED。
+    // LISTEN 和 SYN_RECEIVED 保留在枚举中是为了与 RFC9293 状态机对应，但 TcpConnection
+    // 实例不会处于这两个状态。
+    CLOSED        (false, false),
+    LISTEN        (false, false),   // 不由 TcpConnection 持有
+    SYN_RECEIVED  (false, false),   // 不由 TcpConnection 持有（由 TcpHandshaker 内部持有）
+    ESTABLISHED   (true,  true),
+    FIN_WAIT_1    (false, true),   // 本端已发 FIN，等对端 ACK 或同时收 FIN
+    FIN_WAIT_2    (false, true),   // 已收对端对本端 FIN 的 ACK，等对端 FIN
+    CLOSE_WAIT    (true,  false),  // 已收对端 FIN，等本端 close()
+    CLOSING       (false, false),
+    LAST_ACK      (false, false),
+    TIME_WAIT     (false, false);
+
+    private final boolean canSend;    // 本端还能发数据
+    private final boolean canReceive; // 远端还能发数据
+
+    TcpConnectionState(boolean canSend, boolean canReceive) {
+        this.canSend = canSend;
+        this.canReceive = canReceive;
     }
 
-    final TcpConnectionChannel ch = connCh;
-    pkt.retain();
-    ch.eventLoop().execute(() -> {        // TUN线程 ≠ Worker线程，始终跨线程投递
-        try { ch.fireChildRead(pkt); }
-        finally { pkt.release(); }
-    });
+    /** 本端仍可发送数据（未发 FIN） */
+    public boolean canSend()    { return canSend; }
+    /** 远端仍可发送数据（未收其 FIN） */
+    public boolean canReceive() { return canReceive; }
+    /** 双端均已关闭 */
+    public boolean isFullyClosed() { return !canSend && !canReceive; }
 }
 ```
 
-**`TcpConnectionChannel` 改动**（仅两处）：
+收益：消灭 `TcpInput` / `TcpOutput` 里几十行重复的状态枚举判断。
+
+---
+
+#### 借鉴点 2：`Http2LifecycleManager` — 连接关闭协调接口
+
+HTTP/2 的做法（`Http2LifecycleManager.java`）：
 
 ```java
-// 1. isCompatible() 放开限制
-@Override
-protected boolean isCompatible(EventLoop loop) {
-    return loop == assignedWorker;  // 接受构造时分配的 Worker，而非 TUN EventLoop
+interface Http2LifecycleManager {
+    void closeStreamLocal(Http2Stream stream, ChannelFuture future);   // 我方发 END_STREAM
+    void closeStreamRemote(Http2Stream stream, ChannelFuture future);  // 对方发 END_STREAM
+    void closeStream(Http2Stream stream, ChannelFuture future);        // 双端完成
+    ChannelFuture resetStream(ctx, streamId, errorCode, promise);      // 发 RST
+    ChannelFuture goAway(ctx, lastStreamId, errorCode, ...);           // 连接级关闭
+    void onError(ctx, outbound, cause);                                // 错误处理
+}
+```
+
+关键设计：所有组件（Input / Output / Timer）统一通过这一个接口触发关闭，不直接操作连接状态。
+
+**我们的现状**：TCP 四次挥手的状态转移分散在 `TcpInput.tcp_fin()` / `TcpOutput.tcp_send_fin()` / `TcpTimer` 各处，没有统一的协调点，难以保证时序和幂等性。
+
+**可借鉴的接口**：
+
+```java
+// 对标 Http2LifecycleManager，集中管理 TCP 连接关闭路径
+interface TcpConnectionLifecycle {
+    /** 本端发出 FIN（进入 FIN_WAIT_1 / LAST_ACK） */
+    void closeLocal(TcpConnection conn, ChannelPromise promise);
+
+    /** 收到对端 FIN（进入 CLOSE_WAIT） */
+    void closeRemote(TcpConnection conn);
+
+    /** 发送 RST，立即强制关闭 */
+    void reset(TcpConnection conn, int errorCode);
+
+    /** 进入 TIME_WAIT，2MSL 后 destroy */
+    void enterTimeWait(TcpConnection conn);
+
+    /** 从注册表移除，释放所有资源 */
+    void destroy(TcpConnection conn);
+
+    /** 处理连接级错误 */
+    void onError(TcpConnection conn, boolean outbound, Throwable cause);
+}
+```
+
+---
+
+#### 借鉴点 3：`Http2Connection.Listener` + `Http2ConnectionAdapter` — 注册表生命周期通知
+
+HTTP/2 的做法：
+
+```java
+// Http2Connection.java
+interface Listener {
+    void onStreamAdded(Http2Stream stream);      // 进入注册表（SYN_RECEIVED 类比）
+    void onStreamActive(Http2Stream stream);     // 变为 ESTABLISHED 类比
+    void onStreamHalfClosed(Http2Stream stream); // FIN_WAIT_2 / CLOSE_WAIT
+    void onStreamClosed(Http2Stream stream);     // 双端关闭
+    void onStreamRemoved(Http2Stream stream);    // 从注册表移除
 }
 
-// 2. doWrite() 无需改动
-// parentCtx.write() 本身线程安全：Netty 内部检测跨线程后自动提交到 TUN EventLoop 任务队列
-@Override
-protected void doWrite(ChannelOutboundBuffer buf) throws Exception {
-    for (;;) {
-        Object msg = buf.current();
-        if (msg == null) break;
-        parentCtx.write(msg);   // 跨线程安全，Netty 自动 execute()
-        buf.remove();
+// Http2ConnectionAdapter.java — 空实现，只需重写关心的方法
+public class Http2ConnectionAdapter implements Http2Connection.Listener { ... }
+```
+
+任何组件（日志、监控、路由表更新）都可以注册 Listener，无需耦合注册表实现本身。
+
+**可借鉴的接口**：
+
+```java
+interface TcpConnectionListener {
+    default void onConnectionCreated(TcpConnection conn)     {}  // SYN_RECEIVED（半开）
+    default void onConnectionEstablished(TcpConnection conn) {}  // ESTABLISHED
+    default void onConnectionHalfClosed(TcpConnection conn)  {}  // 单向 FIN
+    default void onConnectionClosed(TcpConnection conn)      {}  // TIME_WAIT/CLOSED
+    default void onConnectionRemoved(TcpConnection conn)     {}  // 从注册表移除
+}
+```
+
+用 Java `default` 方法替代 Adapter 类，实现侧只重写关心的方法。
+
+---
+
+#### 借鉴点 4：`FlowControlled.merge()` — 出站数据合并（中期目标）
+
+HTTP/2 的做法（`Http2RemoteFlowController.java`）：
+
+```java
+interface FlowControlled {
+    int size();
+    void write(ChannelHandlerContext ctx, int allowedBytes);
+    boolean merge(ChannelHandlerContext ctx, FlowControlled next);  // ← 合并小包
+    void writeComplete();
+    void error(ChannelHandlerContext ctx, Throwable cause);
+}
+```
+
+`merge()` 让流控器在窗口打开时，把队列里相邻的小单元合并成一个大单元写出——这是 Nagle 算法的框架级抽象。流控器调用 `writePendingBytes()` 按窗口逐步排空队列，每步都尝试 merge。
+
+**我们的现状**：Nagle 判断、MSS 分段、窗口检查三者硬编码混在 `TcpOutput.tcp_write_xmit()` 里。
+
+**可借鉴的方向**：把出站数据封装为 `TcpSendUnit`（含 `size()`、`write()`、`merge()`），流控器持有发送队列，按 `snd_cwnd` 限额依次调用 `write()` 并按需 `merge()`，使 Nagle 逻辑从 `TcpOutput` 中分离出来。
+
+---
+
+#### 借鉴点 5：`forEachActiveStream(Visitor)` — 可中断的遍历接口（**立即可落地**）
+
+HTTP/2 的做法（`Http2FrameStreamVisitor.java`）：
+
+```java
+@FunctionalInterface
+interface Http2FrameStreamVisitor {
+    boolean visit(Http2FrameStream stream);  // 返回 false 终止遍历
+}
+// 使用：
+forEachActiveStream(WRITABLE_VISITOR);   // 广播可写事件
+forEachActiveStream(stream -> {          // lambda，支持提前退出
+    if (stream.id() > threshold) {
+        doSomething(stream);
     }
-    parentCtx.flush();
-}
+    return true;
+});
 ```
 
-**连接关闭时的 registry 清理**（回投 TUN EventLoop 保持单写者）：
+`boolean` 返回值支持提前终止，比 `forEach(Consumer)` 更灵活（查找第一个匹配、遍历到满足条件即停）。
+
+**可借鉴的改造**：
 
 ```java
-@Override
-protected void doClose() {
-    if (!active) return;
-    active = false;
-    tunChannel.eventLoop().execute(() -> registry.remove(fourTuple));
+@FunctionalInterface
+interface TcpConnectionVisitor {
+    /** @return false 终止遍历 */
+    boolean visit(TcpConnection conn);
 }
+
+// TcpMultiplexer 上增加：
+void forEachEstablished(TcpConnectionVisitor visitor);
 ```
 
-**选项对比：**
+---
 
-| | 选项 1（单 EventLoop） | 选项 2（Worker 分发） |
-|---|---|---|
-| `isCompatible()` | `loop == tunChannel.eventLoop()` | `loop == assignedWorker` |
-| `TcpMultiplexHandler` | 直接调用 `fireChildRead()` | `workerLoop.execute()` 投递 |
-| `doWrite()` | 不变 | **不变**（`parentCtx.write()` 已线程安全） |
-| registry | 单线程 `HashMap` | 单线程 `HashMap`（写操作回投 TUN） |
-| timer | `tunLoop.schedule()` | `workerLoop.schedule()`（自动） |
-| 适用场景 | 轻载、连接数少 | 高并发、多核利用 |
+#### 借鉴点 6：`Http2FrameCodec` / `Http2MultiplexHandler` 职责分离（长期目标）
+
+HTTP/2 的两个 handler 严格单一职责：
+
+| Handler | 职责 |
+|---------|------|
+| `Http2FrameCodec` | 字节 ↔ 帧对象；持有 `Http2Connection`；处理 SETTINGS / PING / GOAWAY |
+| `Http2MultiplexHandler` | 仅做子 Channel 创建与帧分发，不关心协议细节 |
+
+**我们的现状**：`TcpMultiplexHandler` 承担 IP 包过滤 + 四元组路由 + 注册表管理 + 状态机驱动，职责过重。
+
+**长期分层目标**：
+
+```
+IpPacketCodec              ← 字节 → IpPacketBuf（已有）
+TcpConnectionCodec（新）   ← 对标 Http2FrameCodec：
+                               持有 TcpConnectionRegistry
+                               处理连接级事件（RST 广播、超时清理）
+                               维护 TcpConnectionListener 通知链
+    ↓ pipeline
+TcpMultiplexHandler（精简）← 对标 Http2MultiplexHandler：
+                               只做四元组 → TcpConnectionChannel 路由
+                               首包 SYN 时创建子 Channel，装载 childHandler
+```
+
+---
+
+#### 汇总
+
+| 借鉴点 | HTTP/2 来源 | 对标组件 | 优先级 |
+|--------|------------|---------|--------|
+| State 枚举加行为方法 | `Http2Stream.State` | `TcpConnectionState` | **立即** |
+| Visitor 可中断遍历 | `Http2FrameStreamVisitor` | `TcpConnectionVisitor` | **立即** |
+| LifecycleManager 关闭协调 | `Http2LifecycleManager` | `TcpConnectionLifecycle` | Phase 2 |
+| Connection.Listener 注册表通知 | `Http2Connection.Listener` | `TcpConnectionListener` | Phase 2 |
+| FlowControlled.merge 发送合并 | `Http2RemoteFlowController` | `TcpSendUnit` | Phase 3 |
+| Codec/Multiplexer 分层 | `Http2FrameCodec` vs `Http2MultiplexHandler` | TcpConnectionCodec + 精简 MultiplexHandler | 长期 |
 
 ---
 
@@ -1125,7 +1533,7 @@ public final class TcpTimerScheduler {
 ```java
 // 完整配置（所有 RFC 扩展启用）
 TcpConnection conn = TcpConnection.builder()
-    .channel(channel)                              // 方案A：tunChannel；方案B：TcpConnectionChannel
+    .channel(channel)                              // TcpConnectionChannel 实例（方案 B）
     .rttEstimator(new Rfc6298RttEstimator())
     .congestionControl(new NewRenoCongestionControl())
     .lossDetector(new TlpLossDetector())
@@ -1144,14 +1552,14 @@ TcpConnection minimal = TcpConnection.builder()
 
 ### Phase 0 — Per-Connection Pipeline 基础设施
 
-选定方案 A 或方案 B（见 §6），完成：
+采用方案 B（`TcpConnectionChannel`）+ Worker 分发（§6.4），完成：
 
-1. **pipeline 基础设施**：方案 A 实现 `TcpConnectionHandler` / `TcpConnectionContext` / `TcpConnectionPipeline`；方案 B 实现 `TcpConnectionChannel`
-2. **合并注册表**：`HalfOpenRegistry` + `ConnectionRegistry` → `TcpConnectionRegistry`
-3. **`TcpHandshakerFactory`**：从 `TcpHandshaker` 拆出工厂类，`newHandshaker(config, synPkt)`
-4. **`TcpHandshakeHandler`**：握手完成后调用 `pipeline.replace()`；重传 SYN 复用已有 handshaker（幂等）
-5. **占位 handler**：`TcpEstablishedHandler` / `TcpActiveCloseHandler` / `TcpPassiveCloseHandler` 先空实现占位
-6. **更新 `TcpMultiplexHandler`**：首次 SYN 创建 pipeline，后续包直接分发
+1. **`TcpConnectionChannel`**：实现 `extends AbstractChannel`，构造函数接受 `assignedWorker`，`isCompatible()` 绑定 Worker，`doWrite()` 跨线程回写父 pipeline，`doClose()` 回投 TUN EventLoop 清理 registry
+2. **合并注册表**：`HalfOpenRegistry` + `ConnectionRegistry` → `TcpConnectionRegistry`（普通 HashMap，读写限定在 TUN EventLoop）
+3. **`TcpMultiplexHandler`**：构造时接受 `workerGroup`，首次 SYN 按四元组哈希选 Worker，后续包 `worker.execute()` 跨线程投递
+4. **`TcpHandshakerFactory`**：从 `TcpHandshaker` 拆出工厂类，`newHandshaker(config, synPkt)`
+5. **`TcpHandshakeHandler`**：握手完成后调用 `pipeline.replace()`；重传 SYN 复用已有 handshaker（幂等）
+6. **占位 handler**：`TcpEstablishedHandler` / `TcpActiveCloseHandler` / `TcpPassiveCloseHandler` 先空实现占位
 
 > Phase 0 结束：三次握手可走通，传输 / 挥手逻辑由后续 Phase 补充。
 
