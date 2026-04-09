@@ -1,12 +1,31 @@
 # TCP 协议栈 Java 重构方案
 
-> 版本：v3.7 | 更新日期：2026-04-09
+> 版本：v3.9 | 更新日期：2026-04-09
 > 分析基准：branch `feature/v1.2.3-ai-lb`
 > 目标：OOP 化、关注点分离、RFC9293 之外的扩展可插拔
 
 ---
 
 ## 更新日志
+
+### v3.9 — 2026-04-09
+
+- §6.2 `workers[]` 修复 `Integer.MIN_VALUE` 崩溃 bug：`Math.abs(Integer.MIN_VALUE)` 在 Java 中仍为负数，取模导致 `ArrayIndexOutOfBoundsException`；改为 `(hashCode & Integer.MAX_VALUE) % length`
+- §6.2 `TcpConnectionChannel.metadata()` 改为静态常量，避免每次调用创建新对象
+- §6.6 `TcpConnectionState` 补充 `SYN_SENT`（RFC 9293 第 11 个标准状态，Phase 4 重命名表中已有对应项但枚举漏列）
+- §7.1 `RttEstimator.addSample()` 补充 Karn 算法说明：重传段不能用于 RTT 采样（RFC 6298 §4）；`rttSample()` 须对重传段返回哨兵值，实现层跳过采样
+- §7.3 `TcpAckProcessor` 修复 `ackedSegs` 下溢：末包 `ackedBytes < mss` 时整除为 0，导致 `sndUnaAdvanced=true` 但 CC 不增长 cwnd；改为 `ackedBytes > 0 ? Math.max(1, ackedBytes/mss) : 0`
+- §7.3 `NewRenoCongestionControl` 修复拥塞避免增长过快：原 `Math.max(1, ackedSegs/cwnd)` 每 ACK 至少 +1，与 RFC 5681 "每 RTT 增长约 1 SMSS" 不符；改用分数计数器 `caIncrCounter`（对标 Linux `snd_cwnd_cnt`）
+- §7.3 `NewRenoCongestionControl` 修复 LOSS 状态不退出 bug：`onTimeout()` 进入 LOSS 后，`sndUnaAdvanced=true` 时缺少退出逻辑，导致 cwnd 永久卡在 1；修复：收到新 ACK 时退出 LOSS → OPEN，进入慢启动
+- §7.4 `TimerType` 补充 `FIN_WAIT_2_TIMEOUT`：RFC 9293 §3.9.1 要求 FIN_WAIT_2 不可永久等待；Linux 通过 `tcp_fin_timeout` sysctl（默认 60s）实现强制关闭
+
+### v3.8 — 2026-04-09
+
+- §4.3 `TcpActiveCloseHandler` 补全 FIN_WAIT_1 三条转换路径：ACK → FIN_WAIT_2、FIN → CLOSING（同时关闭）、FIN+ACK → TIME_WAIT（同时关闭）；原 "FIN-ACK" 表述歧义消除
+- §4.3 被动关闭机制补充：明确 `TcpPassiveCloseHandler` 通过覆盖 `ChannelDuplexHandler.close()` 拦截应用层关闭，延迟 Netty 实际关闭直至 LAST_ACK 收到对端 ACK
+- §6.2 `regFuture.addListener` 修复线程安全 bug：listener 在 Worker EventLoop 执行时直接修改 registry 违反单写者约束，改为 `ctx.channel().eventLoop().execute()` 回投 TUN EventLoop
+- §6.2 `fireChildRead` 增加 `isActive()` 前置检查：注册失败后 Worker 队列中残留的 `fireChildRead` 任务在无效 Channel 上执行时安全退出，引用释放由调用方 lambda finally 负责
+- §6.2 `channelRead` 补充 `RejectedExecutionException` 处理：Worker 已关闭时 `execute()` 抛出异常，`pkt.retain()` 无法配对，catch 块补充 `pkt.release()` 防止引用计数泄漏
 
 ### v3.7 — 2026-04-09
 
@@ -217,7 +236,7 @@ TCP 四元组唯一标识一条连接，因此可为每条连接建立独立 pip
       ▼                            ▼
   [TcpPassiveCloseHandler]    [TcpActiveCloseHandler]
   CLOSE_WAIT → LAST_ACK       FIN_WAIT_1 → FIN_WAIT_2 → TIME_WAIT
-      │                            │
+      │                            │  ↘ CLOSING ──────────────↗
       └─── registry.deregister() ──┘
 ```
 
@@ -277,17 +296,22 @@ TcpEstablishedHandler.initiateClose(ctx)
        ctx.pipeline().replace("established","close", TcpActiveCloseHandler)
 
 TcpActiveCloseHandler.channelRead(ctx, pkt)
-    FIN_WAIT_1 + FIN-ACK → FIN_WAIT_2
-    FIN_WAIT_2 + FIN     → TIME_WAIT，调度 2MSL 定时器
-    CLOSING    + ACK     → TIME_WAIT，调度 2MSL 定时器
-    TIME_WAIT  到期      → registry.deregister(fourTuple)
+    FIN_WAIT_1 + ACK（对本端 FIN 的 ACK）      → FIN_WAIT_2，调度 FIN_WAIT_2_TIMEOUT 定时器
+    FIN_WAIT_1 + FIN（同时关闭）               → CLOSING，发 ACK
+    FIN_WAIT_1 + FIN+ACK（同时关闭）           → TIME_WAIT，发 ACK，调度 2MSL 定时器
+    FIN_WAIT_2 + FIN                           → TIME_WAIT，发 ACK，调度 2MSL 定时器
+    FIN_WAIT_2 + 超时（FIN_WAIT_2_TIMEOUT）    → TIME_WAIT（RFC9293 §3.9.1，对标 Linux tcp_fin_timeout=60s）
+    CLOSING    + ACK                           → TIME_WAIT，调度 2MSL 定时器
+    TIME_WAIT  到期                            → registry.deregister(fourTuple)
 
 # 被动关闭（对端 FIN）
-TcpPassiveCloseHandler.initiateClose()   # 应用层 close() 时调用
-    └─ TcpSegmenter.sendFin(conn) → conn.state(LAST_ACK)
+TcpPassiveCloseHandler.close(ctx, promise)   # 覆盖 ChannelDuplexHandler.close()
+    # 应用层调用 channel.close() → Netty 路由到此方法
+    # 不立即调用 super.close()，延迟到 LAST_ACK 收到 ACK 后再触发实际关闭
+    └─ TcpSegmenter.sendFin(conn) → conn.state(LAST_ACK)，保存 closePromise
 
 TcpPassiveCloseHandler.channelRead(ctx, pkt)
-    LAST_ACK + ACK → registry.deregister(fourTuple)
+    LAST_ACK + ACK → ctx.close(closePromise)  # 触发实际 Netty 生命周期 → doClose() → registry.deregister()
 ```
 
 **定时器触发**
@@ -621,19 +645,29 @@ public class TcpConnectionChannel extends AbstractChannel {
         parentCtx.flush();
     }
 
+    private static final ChannelMetadata METADATA = new ChannelMetadata(false);
+
     @Override protected SocketAddress localAddress0()  { return fourTuple.local(); }
     @Override protected SocketAddress remoteAddress0() { return fourTuple.remote(); }
     @Override public boolean isOpen()   { return active; }
     @Override public boolean isActive() { return active; }
-    @Override public ChannelMetadata metadata() { return new ChannelMetadata(false); }
+    @Override public ChannelMetadata metadata() { return METADATA; }
 
     /**
      * 将入站包注入本连接 pipeline，由 TcpMultiplexHandler 调用。
      * 命名对标 AbstractHttp2StreamChannel.fireChildRead()，遵循 Netty fire* 约定。
      * 必须在本 Channel 的 EventLoop 线程调用。
+     *
+     * <p>若 Channel 处于非活跃状态（注册失败或已关闭），直接返回，
+     * 引用计数由调用方 lambda 的 finally 块负责释放。
      */
     public void fireChildRead(TcpPacketBuf pkt) {
         assert eventLoop().inEventLoop();
+        if (!isActive()) {
+            // 注册失败或 Channel 已关闭：丢弃包，不触发 pipeline
+            // pkt 引用由外层 execute lambda 的 finally { pkt.release() } 负责
+            return;
+        }
         pipeline().fireChannelRead(pkt);
         pipeline().fireChannelReadComplete();
     }
@@ -710,7 +744,10 @@ public class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
             if (!pkt.isSyn()) { sendRst(ctx, pkt); return; }
 
             // 首次 SYN：按四元组哈希选定 Worker，同一连接始终落同一线程
-            EventLoop worker = workers[Math.abs(fourTuple.hashCode()) % workers.length];
+            // ⚠️ 禁止用 Math.abs()：Math.abs(Integer.MIN_VALUE) == Integer.MIN_VALUE（负数），
+            // 取模后仍为负数，导致 ArrayIndexOutOfBoundsException。
+            // 正确做法：用位与清除符号位，保证结果非负。
+            EventLoop worker = workers[(fourTuple.hashCode() & Integer.MAX_VALUE) % workers.length];
             // deregisterCallback 在 TUN EventLoop 执行 registry.remove，保持单写者
             connCh = new TcpConnectionChannel(ctx.channel(), fourTuple, worker,
                 () -> registry.remove(fourTuple));
@@ -722,9 +759,13 @@ public class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
             ChannelFuture regFuture = worker.register(connCh);
             regFuture.addListener((ChannelFutureListener) f -> {
                 if (!f.isSuccess()) {
-                    // 注册失败（Worker 已关闭等）：从注册表移除，防止后续包投递到损坏 Channel
-                    registry.remove(fourTuple);
-                    sendRst(ctx, pkt);
+                    // 注册失败（Worker 已关闭等）：从注册表移除，防止后续包投递到损坏 Channel。
+                    // ⚠️ listener 执行线程不确定（register0 内部失败时在 Worker EventLoop 执行），
+                    // 必须回投 TUN EventLoop 以维持 registry 单写者约束（见 §6.4 线程安全保证）。
+                    ctx.channel().eventLoop().execute(() -> {
+                        registry.remove(fourTuple);
+                        sendRst(ctx, pkt);
+                    });
                 }
             });
             registry.put(fourTuple, connCh);  // registry 写只在 TUN EventLoop
@@ -733,11 +774,17 @@ public class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
         final TcpConnectionChannel ch = connCh;
         // retain() 为 Worker lambda 增加一份引用；TUN 线程自身的引用在 execute() 后释放。
         // 两次 release 对应两份引用：Worker lambda 的 finally + TUN 线程自身。
+        // 若 Worker 已关闭，execute() 抛出 RejectedExecutionException，
+        // lambda 永不执行，需 catch 块补充 release() 防止引用计数泄漏。
         pkt.retain();
-        ch.eventLoop().execute(() -> {        // TUN线程 → Worker线程，跨线程投递
-            try { ch.fireChildRead(pkt); }
-            finally { pkt.release(); }        // Worker 释放 lambda 持有的引用
-        });
+        try {
+            ch.eventLoop().execute(() -> {    // TUN线程 → Worker线程，跨线程投递
+                try { ch.fireChildRead(pkt); }
+                finally { pkt.release(); }    // Worker 释放 lambda 持有的引用
+            });
+        } catch (RejectedExecutionException e) {
+            pkt.release();                    // lambda 未提交，补充释放 retain() 增加的引用
+        }
         pkt.release();                        // TUN 线程释放自身的引用（retain 配对）
     }
 }
@@ -1081,12 +1128,14 @@ enum State {
 
 ```java
 public enum TcpConnectionState {
-    // 注意：LISTEN 由 TcpMultiplexHandler 管理，SYN_RECEIVED 由 TcpHandshaker 内部持有；
+    // 注意：LISTEN / SYN_SENT / SYN_RECEIVED 均不由 TcpConnection 持有；
     // TcpConnection 在 TcpHandshaker.finishHandshake() 完成后创建，初始状态直接为 ESTABLISHED。
-    // LISTEN 和 SYN_RECEIVED 保留在枚举中是为了与 RFC9293 状态机对应，但 TcpConnection
-    // 实例不会处于这两个状态。
+    // 三者保留在枚举中仅为与 RFC9293 完整状态机对应（RFC9293 共 11 个标准状态），
+    // TcpConnection 实例实际不会处于这些状态。
+    // TUN 场景为被动接入（passive open），SYN_SENT 永不使用；保留供枚举完整性。
     CLOSED        (false, false),
     LISTEN        (false, false),   // 不由 TcpConnection 持有
+    SYN_SENT      (false, false),   // 不由 TcpConnection 持有（主动侧才有，TUN 场景不使用）
     SYN_RECEIVED  (false, false),   // 不由 TcpConnection 持有（由 TcpHandshaker 内部持有）
     ESTABLISHED   (true,  true),
     FIN_WAIT_1    (false, true),   // 本端已发 FIN，等对端 ACK 或同时收 FIN
@@ -1305,7 +1354,14 @@ TcpMultiplexHandler（精简）← 对标 Http2MultiplexHandler：
 // RFC 6298：RTO 自适应，per-conn 状态通过 ConnectionKey 存于 TcpConnection.attributes
 public interface RttEstimator {
     void init(TcpConnection conn);
-    /** 加入 RTT 采样，rttUs 单位微秒 */
+    /**
+     * 加入 RTT 采样，rttUs 单位微秒。
+     *
+     * <p><b>Karn 算法（RFC 6298 §4）</b>：调用方（TcpAckProcessor）必须确保
+     * 仅对<b>未重传</b>的报文做 RTT 采样；若 ACK 对应的段曾被重传（Karn 标记），
+     * 则 rttSample() 返回 -1，此方法应忽略该调用（rttUs &lt; 0 时直接返回）。
+     * 违反此约束会导致 SRTT / RTTVAR 被重传歧义污染，RTO 估算失准。
+     */
     void addSample(TcpConnection conn, long rttUs);
     /** 返回当前 RTO，单位毫秒 */
     long rtoMs(TcpConnection conn);
@@ -1450,8 +1506,12 @@ public class NewRenoCongestionControl implements CongestionControl {
 
     static class RenoState {
         int cwnd = TCP_INIT_CWND, ssthresh = Integer.MAX_VALUE, dupacks = 0;
+        // 拥塞避免阶段的分数计数器，对标 Linux tcp_sock.snd_cwnd_cnt。
+        // 累积到 cwnd 时才执行 cwnd++，确保每 RTT（约 cwnd 个 ACK）只增长 1 段。
+        // 原 Math.max(1, ackedSegs/cwnd) 每 ACK 至少 +1，远快于 RFC 5681 §3.1 要求。
+        int caIncrCounter = 0;
         CongestionState caState = CongestionState.OPEN;
-        int highSeq;
+        int highSeq;             // 进入 RECOVERY 时的 SND.NXT，用于判断全 ACK 退出恢复
         Consumer<TcpConnection> retransmitCallback;
     }
 
@@ -1468,38 +1528,66 @@ public class NewRenoCongestionControl implements CongestionControl {
     public void onAck(TcpConnection conn, int ackedSegments, boolean sndUnaAdvanced) {
         RenoState s = conn.getAttr(KEY);
         if (!sndUnaAdvanced) {
+            // 重复 ACK
             if (++s.dupacks == 3 && s.caState == CongestionState.OPEN) {
+                // 进入 Fast Recovery（RFC 5681 §3.2）
                 s.ssthresh = Math.max(s.cwnd / 2, 2);
-                s.cwnd     = s.ssthresh + 3;
-                s.highSeq  = conn.sndNxt();
+                s.cwnd     = s.ssthresh + 3;   // inflate：3 个 dupACK 各代表一个离开网络的段
+                s.highSeq  = conn.sndNxt();    // recovery point
                 s.caState  = CongestionState.RECOVERY;
+                s.caIncrCounter = 0;
                 s.retransmitCallback.accept(conn);
             } else if (s.caState == CongestionState.RECOVERY) {
-                s.cwnd++;
+                s.cwnd++;   // RFC 5681 §3.2：每个额外 dupACK inflate 1 段
             }
         } else {
+            // 新数据被确认（sndUna 前进）
             if (s.caState == CongestionState.RECOVERY
                     && TcpSequence.after(conn.sndUna(), s.highSeq)) {
+                // Full ACK：退出 Fast Recovery（RFC 5681 §3.2 step 6）
                 s.cwnd = s.ssthresh;
                 s.caState = CongestionState.OPEN;
+                s.caIncrCounter = 0;
+            } else if (s.caState == CongestionState.LOSS) {
+                // 超时重传后首次收到新 ACK：退出 LOSS，重新进入慢启动。
+                // ⚠️ 原代码无此分支：LOSS 状态 cwnd 永久卡在 1，连接吞吐无法恢复。
+                // 对标 Linux：Loss 状态收到新 ACK 即退回 Open，cwnd 按慢启动增长。
+                s.caState = CongestionState.OPEN;
+                s.caIncrCounter = 0;
             }
             s.dupacks = 0;
-            s.cwnd += (s.cwnd < s.ssthresh)
-                ? ackedSegments
-                : Math.max(1, ackedSegments / s.cwnd);
+            // 慢启动：指数增长，cwnd < ssthresh（RFC 5681 §3.1）
+            if (s.cwnd < s.ssthresh) {
+                s.cwnd += ackedSegments;
+            } else {
+                // 拥塞避免：每 RTT 增长约 1 MSS（RFC 5681 §3.1）
+                // 对标 Linux tcp_cong_avoid_ai：累积计数器达到 cwnd 时才 +1，
+                // 避免每 ACK 都 +1（后者使 cwnd 每 RTT 增长 cwnd 倍，远超 RFC 要求）。
+                s.caIncrCounter += ackedSegments;
+                if (s.caIncrCounter >= s.cwnd) {
+                    s.cwnd++;
+                    s.caIncrCounter = 0;
+                }
+            }
         }
     }
 
     @Override
     public void onTimeout(TcpConnection conn) {
         RenoState s = conn.getAttr(KEY);
+        // RFC 5681 §3.1：ssthresh = max(FlightSize/2, 2)，cwnd 重置为 1 进入慢启动
+        // 注：此处用 cwnd 近似 FlightSize（严格应用 min(cwnd, flightSize) / 2）
         s.ssthresh = Math.max(s.cwnd / 2, 2);
-        s.cwnd = 1; s.dupacks = 0; s.caState = CongestionState.LOSS;
+        s.cwnd = 1;
+        s.dupacks = 0;
+        s.caIncrCounter = 0;
+        s.caState = CongestionState.LOSS;
     }
 
     @Override public int     cwnd(TcpConnection conn)         { return conn.getAttr(KEY).cwnd; }
     @Override public boolean isInRecovery(TcpConnection conn) {
         RenoState s = conn.getAttr(KEY);
+        // RECOVERY（Fast Retransmit）或 LOSS（RTO 触发）均视为"非正常路径"
         return s != null && s.caState != CongestionState.OPEN;
     }
     @Override public void onConnectionClosed(TcpConnection conn) { conn.removeAttr(KEY); }
@@ -1515,8 +1603,15 @@ public class TcpAckProcessor {
         int prevUna    = conn.sndUna();
         int ackedBytes = tcpSndUnaUpdate(conn, pkt.ackSeq());
         boolean advanced = TcpSequence.after(conn.sndUna(), prevUna);
-        int ackedSegs    = ackedBytes / conn.mss();
 
+        // 将字节数折算为段数。
+        // ⚠️ 不能直接用 ackedBytes / mss：末尾小包（ackedBytes < mss，如最后一段数据或 FIN）
+        //    会导致 ackedSegs=0，此时 advanced=true 但 CC 不增长 cwnd。
+        //    修复：有字节被确认时至少计 1 段（对标 Linux min(acked, 1) in slow start）。
+        int ackedSegs = ackedBytes > 0 ? Math.max(1, ackedBytes / conn.mss()) : 0;
+
+        // Karn 算法（RFC 6298 §4）：rttSample() 对重传段返回 -1；
+        // RttEstimator.addSample() 在 rttUs < 0 时直接跳过，不更新 SRTT/RTTVAR。
         conn.rttEstimator().addSample(conn, rttSample(conn, pkt));                  // RFC6298
         conn.congestionControl().onAck(conn, ackedSegs, advanced);                  // RFC5681
         conn.lossDetector().onAck(conn, pkt.ackSeq(), computeAckFlags(conn, pkt)); // RFC8985
@@ -1550,11 +1645,18 @@ public final class TcpConnectionTimers {
 }
 
 public enum TimerType {
-    RETRANSMIT,         // Linux: ICSK_TIME_RETRANS
-    DELAYED_ACK,        // Linux: ICSK_TIME_DACK
-    ZERO_WINDOW_PROBE,  // Linux: ICSK_TIME_PROBE0
-    TLP_PROBE,          // Linux: ICSK_TIME_LOSS_PROBE
-    REORDER_TIMEOUT     // Linux: ICSK_TIME_REO_TIMEOUT
+    RETRANSMIT,           // Linux: ICSK_TIME_RETRANS
+    DELAYED_ACK,          // Linux: ICSK_TIME_DACK
+    ZERO_WINDOW_PROBE,    // Linux: ICSK_TIME_PROBE0
+    TLP_PROBE,            // Linux: ICSK_TIME_LOSS_PROBE
+    REORDER_TIMEOUT,      // Linux: ICSK_TIME_REO_TIMEOUT
+    /**
+     * FIN_WAIT_2 超时（RFC 9293 §3.9.1）：进入 FIN_WAIT_2 后若对端始终不发 FIN，
+     * 连接将永占资源。对标 Linux tcp_fin_timeout sysctl（默认 60s），
+     * 超时后强制调用 ctx.close() 进入 TIME_WAIT 或直接 CLOSED。
+     * 实现上复用 keepaliveTimer slot（与 Linux 共享 keepalive 定时器槽位一致）。
+     */
+    FIN_WAIT_2_TIMEOUT    // Linux: 通过 inet_csk_reset_keepalive_timer 实现
 }
 
 /** 无状态调度器，可被多个 TcpConnection 共享，约 80 行 */
