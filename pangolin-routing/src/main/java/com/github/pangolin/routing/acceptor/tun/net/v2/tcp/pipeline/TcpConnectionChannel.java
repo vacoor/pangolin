@@ -154,14 +154,26 @@ public final class TcpConnectionChannel extends AbstractChannel {
      *
      * <p>Must be called on the {@code assignedWorker} EventLoop.
      *
-     * <p>If the channel is not active (registration failed or already closed), this is a no-op;
-     * the caller's lambda {@code finally { pkt.release() }} handles reference counting.
+     * <p><b>Reference-count contract (this method owns the lifecycle):</b>
+     * <ul>
+     *   <li>Active path: ownership is transferred to the pipeline. The pipeline handler
+     *       ({@code SimpleChannelInboundHandler} auto-release, or {@code TailContext}) releases
+     *       {@code pkt} exactly once. Do NOT release {@code pkt} in the caller after this call.</li>
+     *   <li>Inactive path: this method releases {@code pkt} directly via
+     *       {@code ReferenceCountUtil.release()}. The caller still must not release after this call.</li>
+     * </ul>
+     * The caller (TUN EventLoop) is responsible only for the reference it added via
+     * {@code pkt.retain()} before cross-thread dispatch and its own original reference.
      */
     public void fireChildRead(TcpPacketBuf pkt) {
         assert eventLoop().inEventLoop();
         if (!isActive()) {
+            // Channel already closed or registration failed — release the reference
+            // the Worker lambda was given (the caller's retain() in TcpMultiplexHandler).
+            io.netty.util.ReferenceCountUtil.release(pkt);
             return;
         }
+        // Transfer ownership to the pipeline. The handler (or TailContext) will release pkt.
         pipeline().fireChannelRead(pkt);
         pipeline().fireChannelReadComplete();
     }

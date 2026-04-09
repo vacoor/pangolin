@@ -673,16 +673,23 @@ public class TcpConnectionChannel extends AbstractChannel {
      * 命名对标 AbstractHttp2StreamChannel.fireChildRead()，遵循 Netty fire* 约定。
      * 必须在本 Channel 的 EventLoop 线程调用。
      *
-     * <p>若 Channel 处于非活跃状态（注册失败或已关闭），直接返回，
-     * 引用计数由调用方 lambda 的 finally 块负责释放。
+     * <p><b>引用计数契约（本方法负责生命周期）：</b>
+     * <ul>
+     *   <li>active 路径：所有权转交 pipeline。pipeline handler（SimpleChannelInboundHandler
+     *       自动释放）或 TailContext 恰好释放一次。调用方在本方法返回后不得再 release。</li>
+     *   <li>inactive 路径：本方法直接调用 ReferenceCountUtil.release() 释放。
+     *       调用方同样不得再 release。</li>
+     * </ul>
+     * TUN EventLoop 侧仅负责其通过 retain() 添加的那份引用以及自身持有的原始引用。
      */
     public void fireChildRead(TcpPacketBuf pkt) {
         assert eventLoop().inEventLoop();
         if (!isActive()) {
-            // 注册失败或 Channel 已关闭：丢弃包，不触发 pipeline
-            // pkt 引用由外层 execute lambda 的 finally { pkt.release() } 负责
+            // 注册失败或 Channel 已关闭：释放 Worker lambda 所持有的引用（来自调用方 retain()）
+            ReferenceCountUtil.release(pkt);
             return;
         }
+        // 将所有权转交 pipeline；handler（或 TailContext）负责最终释放
         pipeline().fireChannelRead(pkt);
         pipeline().fireChannelReadComplete();
     }
@@ -777,30 +784,29 @@ public class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                     // 注册失败（Worker 已关闭等）：从注册表移除，防止后续包投递到损坏 Channel。
                     // ⚠️ listener 执行线程不确定（register0 内部失败时在 Worker EventLoop 执行），
                     // 必须回投 TUN EventLoop 以维持 registry 单写者约束（见 §6.4 线程安全保证）。
-                    ctx.channel().eventLoop().execute(() -> {
-                        registry.remove(fourTuple);
-                        sendRst(ctx, pkt);
-                    });
+                    // ⚠️ 不可在此处访问 pkt：listener 异步触发时 TUN 线程已完成 pkt.release()，
+                    // 引用计数可能已归零，访问 pkt 是 use-after-free。
+                    ctx.channel().eventLoop().execute(() -> registry.remove(fourTuple));
                 }
             });
             registry.put(fourTuple, connCh);  // registry 写只在 TUN EventLoop
         }
 
         final TcpConnectionChannel ch = connCh;
-        // retain() 为 Worker lambda 增加一份引用；TUN 线程自身的引用在 execute() 后释放。
-        // 两次 release 对应两份引用：Worker lambda 的 finally + TUN 线程自身。
-        // 若 Worker 已关闭，execute() 抛出 RejectedExecutionException，
-        // lambda 永不执行，需 catch 块补充 release() 防止引用计数泄漏。
+        // 引用计数契约：
+        //   retain()         → Worker lambda 获得一份引用（refcount +1）
+        //   execute lambda   → fireChildRead() 负责释放该引用（active: pipeline 释放；inactive: 直接释放）
+        //                      lambda 内部【不】额外 release——pipeline（SimpleChannelInboundHandler /
+        //                      TailContext）已恰好释放一次，多余的 release 会导致 refcount < 0
+        //   RejectedExec     → lambda 未提交，catch 块手动释放 retain() 添加的引用
+        //   pkt.release()    → TUN 线程释放自身持有的原始引用
         pkt.retain();
         try {
-            ch.eventLoop().execute(() -> {    // TUN线程 → Worker线程，跨线程投递
-                try { ch.fireChildRead(pkt); }
-                finally { pkt.release(); }    // Worker 释放 lambda 持有的引用
-            });
+            ch.eventLoop().execute(() -> ch.fireChildRead(pkt));  // fireChildRead 负责引用生命周期
         } catch (RejectedExecutionException e) {
-            pkt.release();                    // lambda 未提交，补充释放 retain() 增加的引用
+            pkt.release();   // lambda 未提交，补充释放 retain() 增加的引用
         }
-        pkt.release();                        // TUN 线程释放自身的引用（retain 配对）
+        pkt.release();       // TUN 线程释放自身的引用（与 retain 配对）
     }
 }
 ```
@@ -885,12 +891,17 @@ TUN（若直接套用 HTTP/2 模式）：
 TUN EventLoop（唯一）
      │  channelRead(pkt)
      │  1. 按 fourTuple 查 registry（HashMap，单写者）
-     │  2. pkt.retain()
-     └─► worker.execute(() -> connCh.fireChildRead(pkt); pkt.release())
+     │  2. pkt.retain()                     ← Worker lambda 获得引用
+     │  3. worker.execute(() -> connCh.fireChildRead(pkt))
+     │                                       // fireChildRead 负责 pkt 生命周期：
+     │                                       //   inactive → ReferenceCountUtil.release(pkt)
+     │                                       //   active   → pipeline 消费（TailContext release）
+     │  4. pkt.release()                     ← TUN 线程释放自己的引用
+     └─► （RejectedExecutionException: catch 块 pkt.release() + TUN 底部 pkt.release()）
 
-Worker-0  NioEventLoop  { conn-A, conn-D, ... }   ← fourTuple.hashCode() % N == 0
-Worker-1  NioEventLoop  { conn-B, conn-E, ... }   ← fourTuple.hashCode() % N == 1
-Worker-2  NioEventLoop  { conn-C, conn-F, ... }   ← fourTuple.hashCode() % N == 2
+Worker-0  NioEventLoop  { conn-A, conn-D, ... }   ← (fourTuple.hashCode() & MAX_VALUE) % N == 0
+Worker-1  NioEventLoop  { conn-B, conn-E, ... }   ← (fourTuple.hashCode() & MAX_VALUE) % N == 1
+Worker-2  NioEventLoop  { conn-C, conn-F, ... }   ← (fourTuple.hashCode() & MAX_VALUE) % N == 2
 ```
 
 **线程安全保证**（三点，均无需加锁）：

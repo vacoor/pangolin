@@ -95,33 +95,39 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
             // register() sets eventLoop on the channel (volatile write), then posts register0 to Worker.
             // After this line, connCh.eventLoop() is immediately usable even before register0 runs.
             ChannelFuture regFuture = worker.register(connCh);
-            final TcpConnectionChannel finalCh = connCh;
             regFuture.addListener((ChannelFutureListener) f -> {
                 if (!f.isSuccess()) {
-                    // Worker shut down or register0 failed — clean up; must be on TUN EventLoop.
-                    ctx.channel().eventLoop().execute(() -> {
-                        registry.remove(fourTuple);
-                        sendRst(ctx, pkt);
-                    });
+                    // Worker shut down or register0 failed — remove from registry on TUN EventLoop
+                    // (single-writer constraint). Do NOT access pkt here: by the time this listener
+                    // fires asynchronously, pkt's refcount is already at 0 (TUN has released its ref).
+                    log.warn("[{}] TcpConnectionChannel registration failed, removing from registry: {}",
+                             fourTuple, f.cause() != null ? f.cause().getMessage() : "unknown");
+                    ctx.channel().eventLoop().execute(() -> registry.remove(fourTuple));
                 }
             });
             registry.put(fourTuple, connCh);
         }
 
         // Cross-thread dispatch to Worker EventLoop.
-        // retain() adds a reference for the lambda; the TUN thread releases its own reference below.
+        //
+        // Reference-count contract:
+        //   pkt enters this method with refcount = N (typically 1, from the upstream codec).
+        //   retain() gives the Worker lambda one extra reference.
+        //   TUN releases its own reference at the bottom (regardless of Worker outcome).
+        //   fireChildRead() owns the lambda's reference: it either transfers it to the pipeline
+        //   (active path — pipeline handler / TailContext releases) or releases directly
+        //   (inactive path). The Worker lambda therefore has NO explicit release.
+        //
+        // Why no `finally { pkt.release() }` in the lambda:
+        //   Pipeline handlers (SimpleChannelInboundHandler auto-release, or TailContext)
+        //   release exactly once. A redundant release in the lambda would cause refcount < 0.
         pkt.retain();
         final TcpConnectionChannel ch = connCh;
         try {
-            ch.eventLoop().execute(() -> {
-                try {
-                    ch.fireChildRead(pkt);
-                } finally {
-                    pkt.release();   // Worker releases lambda's reference
-                }
-            });
+            ch.eventLoop().execute(() -> ch.fireChildRead(pkt));
         } catch (RejectedExecutionException e) {
-            // Worker already shut down: lambda never runs, must release the retain() we just did.
+            // Worker already shut down: lambda never runs, release the retain() we added.
+            log.warn("[{}] Worker rejected packet dispatch (EventLoop shut down?)", fourTuple);
             pkt.release();
         }
         pkt.release();   // TUN thread releases its own reference
