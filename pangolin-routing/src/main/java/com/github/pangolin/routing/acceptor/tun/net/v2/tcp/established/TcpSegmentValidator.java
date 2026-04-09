@@ -1,0 +1,88 @@
+package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established;
+
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
+
+/**
+ * RFC 9293 §3.4 segment validation: sequence number check + RST processing + PAWS (RFC 7323).
+ * Stateless — all state is in {@link TcpConnection}.
+ */
+public final class TcpSegmentValidator {
+
+    public static final TcpSegmentValidator INSTANCE = new TcpSegmentValidator();
+
+    private TcpSegmentValidator() {}
+
+    /**
+     * Validate an incoming segment.
+     *
+     * @return {@code true} if the segment is acceptable and processing should continue;
+     *         {@code false} if it should be silently dropped or a RST was sent
+     */
+    public boolean validate(TcpConnection conn, TcpPacketBuf pkt) {
+        // PAWS check (RFC 7323 §5) — must run before sequence check
+        if (conn.timestampExt().isEnabled(conn)) {
+            // Parse TSval from the incoming segment's options
+            io.netty.buffer.ByteBuf opts = pkt.tcpOptionsSlice();
+            long[] ts = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util
+                             .TcpOptionCodec.parseTimestamp(opts);
+            if (ts != null && conn.timestampExt().isPawsRejected(conn, (int) ts[0])) {
+                // PAWS: send ACK and drop the segment (RFC 7323 §5.1)
+                TcpSegmenter.INSTANCE.sendAck(conn);
+                return false;
+            }
+        }
+
+        // RST processing (RFC 9293 §3.5.2)
+        if (pkt.isRst()) {
+            int seq = pkt.tcpSeq();
+            if (seq == conn.rcvNxt() || isInWindow(conn, seq)) {
+                return false;   // valid RST: caller will close the connection
+            }
+            // Out-of-window RST: ignore
+            return false;
+        }
+
+        // Sequence number acceptability (RFC 9293 §3.4)
+        if (!isAcceptable(conn, pkt)) {
+            if (!pkt.isRst()) {
+                TcpSegmenter.INSTANCE.sendAck(conn);
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * RFC 9293 §3.4 — segment acceptability test.
+     * A segment is acceptable if it overlaps the receive window.
+     */
+    private boolean isAcceptable(TcpConnection conn, TcpPacketBuf pkt) {
+        int seq    = pkt.tcpSeq();
+        int segLen = pkt.tcpPayloadLength() + (pkt.isSyn() ? 1 : 0) + (pkt.isFin() ? 1 : 0);
+        int rcvNxt = conn.rcvNxt();
+        int rcvEnd = rcvNxt + conn.rcvWnd();
+
+        if (segLen == 0) {
+            if (conn.rcvWnd() == 0) {
+                return seq == rcvNxt;
+            }
+            return isInWindow(conn, seq);
+        } else {
+            if (conn.rcvWnd() == 0) {
+                return false;
+            }
+            // At least one byte must be in window
+            return isInWindow(conn, seq) || isInWindow(conn, seq + segLen - 1);
+        }
+    }
+
+    private boolean isInWindow(TcpConnection conn, int seq) {
+        int rcvNxt = conn.rcvNxt();
+        int rcvEnd = rcvNxt + conn.rcvWnd();
+        return TcpSequence.between(rcvNxt, seq, rcvEnd);
+    }
+}
