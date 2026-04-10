@@ -43,6 +43,14 @@ public final class TcpConstants {
     /** Maximum delayed ACK delay: 40 ms (RFC 9293 §3.8.6.2.2) */
     public static final long DELAYED_ACK_MS    = 40L;
 
+    // ---- ACK-pending bitmask flags (≈ Linux ICSK_ACK_* in inet_connection_sock.h) ----
+    /** ACK is owed to the peer — set when data is received, cleared when ACK is sent. */
+    public static final int ACK_SCHED = 0x01;   // ≈ ICSK_ACK_SCHED
+    /** Delayed-ACK timer is armed. */
+    public static final int ACK_TIMER = 0x02;   // ≈ ICSK_ACK_TIMER
+    /** Send ACK immediately without delay (e.g. quickack mode). */
+    public static final int ACK_NOW   = 0x10;   // ≈ ICSK_ACK_NOW
+
     // ---- Buffer sizes ----
     public static final int  TCP_DEFAULT_RCV_BUF = 87380;
 

@@ -8,6 +8,10 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnect
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
+
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.ACK_NOW;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.ACK_SCHED;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.ACK_TIMER;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -37,7 +41,11 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
     private static final Logger log = LoggerFactory.getLogger(TcpEstablishedHandler.class);
 
     private final TcpConnection conn;
-    private boolean delAckPending = false;
+    /**
+     * ACK-pending bitmask — mirrors Linux {@code icsk_ack.pending}.
+     * Bits: {@link TcpConstants#ACK_SCHED} | {@link TcpConstants#ACK_TIMER} | {@link TcpConstants#ACK_NOW}
+     */
+    private int ackPending = 0;
 
     public TcpEstablishedHandler(TcpConnection conn) {
         this.conn = conn;
@@ -72,14 +80,10 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
 
         // Data
         if (pkt.tcpPayloadLength() > 0 && conn.state().canReceive()) {
-            int sndNxtBefore = conn.sndNxt();
+            ackPending |= ACK_SCHED;   // we owe the peer an ACK for this data
             TcpDataHandler.INSTANCE.onData(ctx, conn, pkt);
-            // onData() may have triggered a synchronous write (via fireChannelRead → app handler
-            // → write() → sendPending() → sendSegment()), which sends a PSH+ACK that already
-            // contains the acknowledgment. Only schedule delayed ACK if no data was sent.
-            if (conn.sndNxt() == sndNxtBefore) {
-                scheduleDelayedAck(ctx);
-            }
+            // write() called synchronously inside onData() (app handler piggybacked a response)
+            // will have cleared ACK_SCHED; the ackSndCheck() below handles that cleanly.
         }
 
         // FIN from peer → passive close
@@ -87,11 +91,16 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
             conn.rcvNxt(conn.rcvNxt() + 1);   // FIN consumes one sequence number
             conn.state(TcpConnectionState.CLOSE_WAIT);
             log.debug("[TCP] [ESTABLISHED] FIN received — entering CLOSE_WAIT");
-            // Send ACK immediately
-            TcpSegmenter.INSTANCE.sendAck(conn);
+            // FIN must be ACK'd immediately without delay (RFC 9293 §3.10.7.4).
+            // ACK_NOW implies ACK_SCHED: setting both ensures ackSndCheck() doesn't
+            // skip the send when no data was received in the same segment.
+            ackPending |= ACK_SCHED | ACK_NOW;
             // Replace handler with passive close handler
             ctx.pipeline().replace(this, "close", new TcpPassiveCloseHandler(conn));
         }
+
+        // Single ACK decision point — mirrors Linux tcp_ack_snd_check().
+        ackSndCheck(ctx);
     }
 
     // ── Outbound ───────────────────────────────────────────────────────────
@@ -106,11 +115,15 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
             conn.sendBuffer().enqueue(data);
             int sndNxtBefore = conn.sndNxt();
             TcpSegmenter.INSTANCE.sendPending(conn);
-            // If a data segment was sent (PSH+ACK), it already carries the ACK field.
-            // Cancel any pending delayed ACK to avoid sending a redundant pure ACK.
-            if (conn.sndNxt() != sndNxtBefore && delAckPending) {
-                TcpTimerScheduler.INSTANCE.cancelDelayedAck(conn);
-                delAckPending = false;
+            // If sendPending() actually transmitted a segment (sndNxt advanced),
+            // the PSH+ACK already carries the acknowledgment:
+            //   sync path  — clear ACK_SCHED before ackSndCheck() at end of channelRead fires
+            //   async path — clear ACK_TIMER and cancel the running delayed-ACK timer
+            if (conn.sndNxt() != sndNxtBefore) {
+                if ((ackPending & ACK_TIMER) != 0) {
+                    TcpTimerScheduler.INSTANCE.cancelDelayedAck(conn);
+                }
+                ackPending &= ~(ACK_SCHED | ACK_TIMER);
             }
             promise.setSuccess();
         } else {
@@ -143,13 +156,36 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
         ctx.channel().close();
     }
 
-    // ── Delayed ACK ───────────────────────────────────────────────────────
+    // ── ACK scheduling — mirrors Linux tcp_ack_snd_check / __tcp_ack_snd_check ──────────────
 
+    /**
+     * Single ACK decision point, called at the end of every {@link #channelRead} invocation.
+     * Mirrors Linux {@code tcp_ack_snd_check()}: if ACK_SCHED is clear (write() already
+     * piggybacked the ACK in a PSH+ACK), nothing to do; otherwise send now (ACK_NOW) or
+     * arm the delayed-ACK timer.
+     */
+    private void ackSndCheck(ChannelHandlerContext ctx) {
+        if ((ackPending & ACK_SCHED) == 0) return;   // ACK already sent (piggybacked)
+        ackPending &= ~ACK_SCHED;
+
+        if ((ackPending & ACK_NOW) != 0) {
+            // Immediate ACK required (e.g. FIN received — RFC 9293 §3.10.7.4)
+            if ((ackPending & ACK_TIMER) != 0) {
+                TcpTimerScheduler.INSTANCE.cancelDelayedAck(conn);
+            }
+            ackPending &= ~(ACK_NOW | ACK_TIMER);
+            TcpSegmenter.INSTANCE.sendAck(conn);
+        } else {
+            scheduleDelayedAck(ctx);
+        }
+    }
+
+    /** Arm the delayed-ACK timer if not already running ({@code ACK_TIMER} not set). */
     private void scheduleDelayedAck(ChannelHandlerContext ctx) {
-        if (delAckPending) return;
-        delAckPending = true;
+        if ((ackPending & ACK_TIMER) != 0) return;   // timer already armed
+        ackPending |= ACK_TIMER;
         TcpTimerScheduler.INSTANCE.scheduleDelayedAck(conn, TcpConstants.DELAYED_ACK_MS, () -> {
-            delAckPending = false;
+            ackPending &= ~ACK_TIMER;
             if (ctx.channel().isActive()) {
                 TcpSegmenter.INSTANCE.sendAck(conn);
             }
