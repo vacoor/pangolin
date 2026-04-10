@@ -11,10 +11,11 @@ import io.netty.util.concurrent.EventExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.Inet4Address;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.RejectedExecutionException;
+
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 
 /**
  * TUN-EventLoop–side TCP packet dispatcher (analogous to {@code Http2MultiplexHandler}).
@@ -39,10 +40,10 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(TcpMultiplexHandler.class);
 
-    private final TcpConfig              config;
-    private final ChannelHandler         childHandler;
-    private final TcpConnectionRegistry  registry = new TcpConnectionRegistry();
-    private final EventLoop[]            workers;
+    private final TcpConfig config;
+    private final ChannelHandler childHandler;
+    private final TcpConnectionRegistry registry = new TcpConnectionRegistry();
+    private final EventLoop[] workers;
 
     /**
      * @param config       shared TCP configuration
@@ -50,9 +51,9 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
      * @param workerGroup  worker threads; each TCP connection is pinned to one worker
      */
     public TcpMultiplexHandler(TcpConfig config,
-                                ChannelHandler childHandler,
-                                EventLoopGroup workerGroup) {
-        this.config       = config;
+                               ChannelHandler childHandler,
+                               EventLoopGroup workerGroup) {
+        this.config = config;
         this.childHandler = childHandler;
         List<EventLoop> list = new ArrayList<>();
         for (EventExecutor e : workerGroup) {
@@ -70,24 +71,52 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
             ctx.fireChannelRead(msg);
             return;
         }
-        TcpPacketBuf pkt      = (TcpPacketBuf) msg;
-        FourTuple    fourTuple = FourTuple.of(pkt);
+        TcpPacketBuf pkt = (TcpPacketBuf) msg;
+        FourTuple fourTuple = FourTuple.of(pkt);
+
+        /*-
+         * XXX: CHECK listen sock in here, but this is an unnecessary operation for proxy scenario.
+         */
 
         TcpConnectionChannel connCh = registry.get(fourTuple);
         if (connCh == null) {
-            if (!pkt.isSyn()) {
+            /*-
+             * listen sock in TCP_LISTEN state.
+             *   ACK -> CONNECT REST
+             *   RST -> DISCARD
+             *   SYN-FIN -> DISCARD
+             *   SYN -> conn_request
+             *   * -> DISCARD
+             *
+             * @see https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_rcv_state_process
+             */
+            if (pkt.isAck()) {
+                log.info(logFormat("[TCP] [RCV]", pkt, "Connection reset: SKB_DROP_REASON_TCP_FLAGS Invalid TCP flag(LISTEN <- ACK)"));
                 sendRst(ctx, pkt);
                 pkt.release();
                 return;
             }
+
+            if (pkt.isRst()) {
+                log.info(logFormat("[TCP] [RCV]", pkt, "Packet discard: Connection reset not required"));
+                pkt.release();
+                return;
+            }
+
+            if (!pkt.isSyn() || pkt.isFin()) {
+                log.info(logFormat("[TCP] [RCV]", pkt, "Packet discard: TCP_FLAGS"));
+                pkt.release();
+                return;
+            }
+
             // First SYN: select Worker via consistent hash (bit-AND clears sign bit safely).
             // ⚠ Math.abs(Integer.MIN_VALUE) == Integer.MIN_VALUE (still negative in Java);
             //   use (hash & Integer.MAX_VALUE) to guarantee non-negative result.
             EventLoop worker = workers[(fourTuple.hashCode() & Integer.MAX_VALUE) % workers.length];
 
             connCh = new TcpConnectionChannel(
-                ctx.channel(), fourTuple, worker,
-                () -> registry.remove(fourTuple)   // deregisterCallback — runs on TUN EventLoop
+                    ctx.channel(), fourTuple, worker,
+                    () -> registry.remove(fourTuple)   // deregisterCallback — runs on TUN EventLoop
             );
             connCh.pipeline().addLast(childHandler);
 
@@ -100,7 +129,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                     // (single-writer constraint). Do NOT access pkt here: by the time this listener
                     // fires asynchronously, pkt's refcount is already at 0 (TUN has released its ref).
                     log.warn("[{}] TcpConnectionChannel registration failed, removing from registry: {}",
-                             fourTuple, f.cause() != null ? f.cause().getMessage() : "unknown");
+                            fourTuple, f.cause() != null ? f.cause().getMessage() : "unknown");
                     ctx.channel().eventLoop().execute(() -> registry.remove(fourTuple));
                 }
             });
@@ -120,8 +149,8 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
         // Why no `finally { pkt.release() }` in the lambda:
         //   Pipeline handlers (SimpleChannelInboundHandler auto-release, or TailContext)
         //   release exactly once. A redundant release in the lambda would cause refcount < 0.
-        pkt.retain();
         final TcpConnectionChannel ch = connCh;
+        pkt.retain();
         try {
             ch.eventLoop().execute(() -> ch.fireChildRead(pkt));
         } catch (RejectedExecutionException e) {
@@ -143,19 +172,19 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
 
         byte[] srcIp = pkt.dstAddrBytes();
         byte[] dstIp = pkt.srcAddrBytes();
-        int    srcPort = pkt.tcpDstPort();
-        int    dstPort = pkt.tcpSrcPort();
+        int srcPort = pkt.tcpDstPort();
+        int dstPort = pkt.tcpSrcPort();
 
         int seq;
         int ack;
         int flags;
         if (pkt.isAck()) {
-            seq   = pkt.tcpAckNum();
-            ack   = 0;
+            seq = pkt.tcpAckNum();
+            ack = 0;
             flags = 0x04;   // RST only
         } else {
-            seq   = 0;
-            ack   = pkt.tcpSeq() + pkt.tcpPayloadLength() + (pkt.isSyn() ? 1 : 0);
+            seq = 0;
+            ack = pkt.tcpSeq() + pkt.tcpPayloadLength() + (pkt.isSyn() ? 1 : 0);
             flags = 0x14;   // RST + ACK
         }
 
@@ -168,11 +197,11 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
      * Re-implements the essential logic of {@code Tcp4Multiplexer.buildIp4Packet()}.
      */
     static ByteBuf buildIp4TcpPacket(byte[] srcIp, int srcPort,
-                                      byte[] dstIp, int dstPort,
-                                      int seq, int ack, int tcpFlags,
-                                      int window, byte[] options) {
-        int optLen     = options != null ? options.length : 0;
-        int tcpHdrLen  = 20 + optLen;
+                                     byte[] dstIp, int dstPort,
+                                     int seq, int ack, int tcpFlags,
+                                     int window, byte[] options) {
+        int optLen = options != null ? options.length : 0;
+        int tcpHdrLen = 20 + optLen;
         int ipTotalLen = 20 + tcpHdrLen;
 
         ByteBuf buf = Unpooled.buffer(ipTotalLen);
@@ -220,7 +249,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
     }
 
     private static int computeTcpChecksum(ByteBuf buf, byte[] srcIp, byte[] dstIp,
-                                           int tcpStart, int tcpLen) {
+                                          int tcpStart, int tcpLen) {
         long sum = 0;
         // Pseudo-header
         sum += ((srcIp[0] & 0xFF) << 8) | (srcIp[1] & 0xFF);
