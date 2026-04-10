@@ -913,29 +913,11 @@ Worker-2  NioEventLoop  { conn-C, conn-F, ... }   ← (fourTuple.hashCode() & MA
 
 `conn.eventLoop().schedule(...)` 直接调度到 `assignedWorker`，与 TCP 处理同线程，无额外同步。
 
-#### 上游代理连接的 EventLoop 绑定
+#### 上游代理连接设计
 
-TUN TCP 连接（`TcpConnectionChannel`）处理在 `assignedWorker`；对应的上游代理连接（`NioSocketChannel`）应**复用同一个 `assignedWorker`**，使两端数据交换无跨线程开销：
+上游代理连接（`NioSocketChannel`）必须**复用 `TcpConnectionChannel` 的 `assignedWorker`**，使两端数据交换在同一线程内完成，无需任何锁或 `execute()` 跨线程投递。**原 `TcpDemultiplexHandler.childGroup`（TCP.TODO.01.md S4）因此可删除**，不再需要独立线程池。
 
-```java
-// TcpEstablishedHandler 在 channelActive() 或首包到达时建立上游连接
-Bootstrap upstream = new Bootstrap()
-    .group(ctx.channel().eventLoop())   // ← assignedWorker，与 TcpConnectionChannel 同线程
-    .channel(NioSocketChannel.class)
-    .handler(new UpstreamChannelInitializer(...));
-
-upstream.connect(proxyAddress).addListener((ChannelFutureListener) future -> {
-    if (future.isSuccess()) {
-        Channel upstreamCh = future.channel();
-        // 此时 upstreamCh.eventLoop() == ctx.channel().eventLoop()
-        // TcpEstablishedHandler ↔ UpstreamHandler 的数据交换全在同一线程，无锁无 execute()
-        conn.setAttr(UPSTREAM_CHANNEL_KEY, upstreamCh);
-        ...
-    }
-});
-```
-
-**线程模型对比**
+**线程模型**
 
 ```
 改造前（TcpDemultiplexHandler 私有 childGroup）：
@@ -950,7 +932,304 @@ upstream.connect(proxyAddress).addListener((ChannelFutureListener) future -> {
   ...
 ```
 
-**原 `TcpDemultiplexHandler.childGroup`（TCP.TODO.01.md S4）因此可删除**，不再需要独立线程池；外层只传入 `workerGroup`，上游连接统一通过 `conn.eventLoop()` 创建。
+**共用接口：`TcpUpstreamConnector`**
+
+两种接入方案共用同一接口。实现类内部持有 `DnsEngine`（Fake IP → 真实域名解析）和 `Upstream`（代理路由），对 TCP 栈完全透明：
+
+```java
+public interface TcpUpstreamConnector {
+    /**
+     * 连接上游代理。必须在 worker EventLoop 线程调用；
+     * callback 也在同一 worker 线程回调（Bootstrap.group(worker) 保证）。
+     */
+    void connect(SocketAddress resolvedAddress, EventLoop worker, ConnectCallback callback);
+
+    interface ConnectCallback {
+        void onConnected(Channel upstreamChannel);
+        void onFailed(Throwable cause);
+    }
+}
+```
+
+**pipeline 数据流（两种方案共同部分）**
+
+```
+TcpConnectionChannel.pipeline()
+    TcpEstablishedHandler
+        inbound : TcpPacketBuf → 解封装 → fireChannelRead(ByteBuf) → 传给 BridgeHandler
+        outbound: ByteBuf → TcpSegmenter（封装 TCP segment）→ TcpConnectionChannel.doWrite() → TUN
+    TcpUpstreamBridgeHandler
+        channelRead(ByteBuf) → upstreamCh.write(data)
+        upstream channelRead → ctx.channel().write(ByteBuf)  ← 回流给 TcpEstablishedHandler.write()
+```
+
+---
+
+#### 方案一：握手时连上游（Eager Connect）
+
+**行为**：收到 SYN → 先连上游 → 上游通了才回 SYN-ACK → 等 ACK → ESTABLISHED。
+
+**语义**：与现有 `TcpHandshaker`（老代码）一致。上游不通，客户端永远收不到 SYN-ACK，直接超时；不会出现"连上了随即断开"的情况。
+
+**`TcpHandshaker` 改动**：`handshake()` 不再直接调 `sendSynAck()`，改为先调 connector，上游成功后才发 SYN-ACK：
+
+```java
+// TcpHandshaker 新增字段
+private final TcpUpstreamConnector connector;
+private boolean connectPending = false;   // 防止 SYN 重传重复发起连接
+
+public void handshake(Channel connChannel, TcpPacketBuf pkt) {
+    if (connectPending) return;           // SYN 重传：上游连接中，忽略
+    connectPending = true;
+    connector.connect(resolvedAddress, connChannel.eventLoop(), new ConnectCallback() {
+        public void onConnected(Channel upstreamCh) {
+            connChannel.attr(UPSTREAM_KEY).set(upstreamCh);
+            sendSynAck(connChannel);      // 上游通了才发 SYN-ACK
+        }
+        public void onFailed(Throwable cause) {
+            log.warn("[TCP] [HANDSHAKE] upstream connect failed — sending RST");
+            sendRst(connChannel);
+            connChannel.close();
+        }
+    });
+}
+```
+
+**`TcpHandshakerFactory`**：增加 `TcpUpstreamConnector` 构造参数。
+
+**`childHandler` 组装**：
+
+```java
+ch.pipeline().addLast(new TcpHandshakeHandler(
+    new TcpHandshakerFactory(config, eagerConnector)));
+// TcpEstablishedHandler 由 TcpHandshakeHandler 在 3WH 完成时自动 replace 进去
+// TcpUpstreamBridgeHandler 在 3WH 完成时追加（此时 UPSTREAM_KEY 已存好上游 Channel）
+```
+
+**pipeline 时序**：
+
+```
+SYN 收到
+ └─► connector.connect()
+         onConnected → UPSTREAM_KEY 存入 attr → sendSynAck()
+         onFailed    → sendRst → close()
+
+ACK 收到（3WH 完成）
+ └─► pipeline: TcpHandshakeHandler → replace → TcpEstablishedHandler
+                                              → addLast  → TcpUpstreamBridgeHandler
+                                                            （直接取 UPSTREAM_KEY，无需再连接）
+```
+
+---
+
+#### 方案二：握手后连上游（Lazy Connect + 零窗口）
+
+**行为**：收到 SYN → 立即回 SYN-ACK（`rcvWnd=0`）→ 等 ACK → ESTABLISHED → 连上游 → 发窗口更新 ACK。
+
+**语义**：握手始终成功。`rcvWnd=0` 使客户端发送方进入 zero-window probe 模式，期间不发送数据，**无需应用层缓冲**。上游连通后发窗口更新，客户端自动恢复发送。上游失败时发 FIN/RST，客户端感知为"连上后随即断开"。
+
+**`TcpHandshaker` 改动**：`initialRcvWnd` 改为构造参数（方案二传 0）：
+
+```java
+// 方案一：config.initialRcvWnd()（正常窗口）
+// 方案二：0（零窗口，客户端发送方暂停）
+private final int initialRcvWnd;
+
+private void sendSynAck(Channel connChannel) {
+    int window = initialRcvWnd >> (clientWscale >= 0 ? config.windowScale() : 0);
+    // window = 0 → 客户端发送方暂停，进入 zero-window probe 模式
+    ...
+}
+```
+
+`TcpConnection.Builder.rcvWnd` 初始值同步设为 0，`TcpSegmenter.scaledWindow()` 已有 `Math.max(wnd, 0)` 保护，无需修改。
+
+**`TcpUpstreamBridgeHandler`（新增）**：
+
+```java
+@Override
+public void channelActive(ChannelHandlerContext ctx) {
+    connector.connect(resolvedAddress, ctx.channel().eventLoop(), new ConnectCallback() {
+        public void onConnected(Channel upstreamCh) {
+            conn.rcvWnd(config.initialRcvWnd());        // 恢复真实窗口
+            TcpSegmenter.INSTANCE.sendAck(conn);        // 窗口更新 ACK（sendAck 读 conn.rcvWnd()）
+            bindPipe(ctx, upstreamCh);                  // 绑定双向 pipe
+        }
+        public void onFailed(Throwable cause) {
+            log.warn("[TCP] upstream connect failed — closing");
+            ctx.channel().close();                      // 触发 FIN/RST 给客户端
+        }
+    });
+}
+
+@Override
+public void channelRead(ChannelHandlerContext ctx, Object msg) {
+    // ByteBuf 来自 TcpEstablishedHandler（解封装后的应用层数据）
+    if (upstreamCh != null && msg instanceof ByteBuf) {
+        upstreamCh.writeAndFlush(msg);
+    }
+}
+```
+
+**`childHandler` 组装**：
+
+```java
+ch.pipeline()
+  .addLast(new TcpHandshakeHandler(
+      new TcpHandshakerFactory(config, /* initialRcvWnd= */ 0)))  // 无 connector
+  .addLast(new TcpUpstreamBridgeHandler(lazyConnector, config));
+```
+
+**pipeline 时序**：
+
+```
+SYN 收到
+ └─► sendSynAck(rcvWnd=0)    ← 立即回，客户端进入 zero-window probe
+
+ACK 收到（3WH 完成）
+ └─► TcpHandshakeHandler → replace → TcpEstablishedHandler
+     TcpUpstreamBridgeHandler.channelActive()
+         → connector.connect()
+               onConnected → conn.rcvWnd = 实际值 → sendAck（窗口更新）→ bindPipe
+               onFailed    → close()
+```
+
+---
+
+#### 两种方案对比
+
+| | 方案一（Eager） | 方案二（Lazy + 零窗口） |
+|---|---|---|
+| SYN-ACK 时机 | 上游连通后 | 立即（rcvWnd=0） |
+| 上游失败表现 | 客户端 SYN 超时 | 客户端收到 FIN/RST |
+| 客户端感知 | 连接超时 | 连接建立后断开 |
+| 实现复杂度 | 较高（handshake 异步化） | 较低（标准 TCP 流控） |
+| 适用场景 | 对连接质量敏感（失败快速告知） | 握手速度优先（上游慢不影响握手） |
+
+---
+
+#### 统一兼容：`UpstreamConnectMode`
+
+两种方案的差异仅体现在两个维度（`initialRcvWnd` 和连接时机），通过一个枚举统一驱动，`childHandler` 组装逻辑完全一致。
+
+**`UpstreamConnectMode` 枚举**：
+
+```java
+public enum UpstreamConnectMode {
+    /** 握手时连上游，上游通了才发 SYN-ACK（保留现有代码语义） */
+    EAGER,
+    /** 立即发 SYN-ACK（rcvWnd=0），ESTABLISHED 后再连上游（零窗口流控代替应用层缓冲） */
+    LAZY
+}
+```
+
+**`TcpHandshakerFactory`** 按 mode 决定 `initialRcvWnd` 和是否注入 connector：
+
+```java
+public TcpHandshaker newHandshaker(TcpPacketBuf synPkt) {
+    int initialRcvWnd = (mode == EAGER) ? config.initialRcvWnd() : 0;
+    TcpUpstreamConnector c = (mode == EAGER) ? connector : null;
+    return new TcpHandshaker(synPkt, config, initialRcvWnd, c);
+}
+```
+
+**`TcpUpstreamBridgeHandler`** 按 mode 决定 `channelActive()` 行为：
+
+```java
+@Override
+public void channelActive(ChannelHandlerContext ctx) {
+    if (mode == LAZY) {
+        // 方案二：此时才连上游
+        connector.connect(resolvedAddress, ctx.channel().eventLoop(), new ConnectCallback() {
+            public void onConnected(Channel upstreamCh) {
+                conn.rcvWnd(config.initialRcvWnd());     // 恢复真实窗口
+                TcpSegmenter.INSTANCE.sendAck(conn);     // 窗口更新 ACK
+                bindPipe(ctx, upstreamCh);
+            }
+            public void onFailed(Throwable cause) { ctx.channel().close(); }
+        });
+    } else {
+        // 方案一：上游 Channel 已在握手阶段存入 attr，直接绑定 pipe
+        Channel upstreamCh = ctx.channel().attr(UPSTREAM_KEY).get();
+        bindPipe(ctx, upstreamCh);
+    }
+}
+```
+
+**`childHandler` 组装**：两种模式 pipeline 结构完全相同，仅 `mode` 参数不同：
+
+```java
+// EAGER 或 LAZY 均使用相同的 pipeline 结构
+ch.pipeline()
+  .addLast(new TcpHandshakeHandler(
+      new TcpHandshakerFactory(config, connector, mode)))
+  .addLast(new TcpUpstreamBridgeHandler(connector, config, mode));
+```
+
+---
+
+#### 代理 vs 直连：`TcpUpstreamConnector` 实现
+
+`UpstreamConnectMode`（EAGER/LAZY）控制**连接时机**，是否走代理由 `TcpUpstreamConnector` 的**实现**决定，二者正交。`pipeline` 结构和 `mode` 配置完全不变，调用方只换 connector 实例。
+
+**`ProxyUpstreamConnector`**（走上游代理）：
+
+```java
+public final class ProxyUpstreamConnector implements TcpUpstreamConnector {
+    private final Upstream  upstream;    // pangolin 现有 Upstream 抽象（SOCKS5/HTTP CONNECT/…）
+    private final DnsEngine dnsEngine;
+
+    public void connect(SocketAddress address, EventLoop worker, ConnectCallback cb) {
+        SocketAddress real = dnsEngine.resolve(address);   // Fake IP → 真实域名
+        upstream.connect(real, worker)
+                .addListener(f -> {
+                    if (f.isSuccess()) cb.onConnected(((ChannelFuture) f).channel());
+                    else               cb.onFailed(f.cause());
+                });
+    }
+}
+```
+
+**`DirectTcpConnector`**（直连，不走代理）：
+
+```java
+public final class DirectTcpConnector implements TcpUpstreamConnector {
+    private final DnsEngine dnsEngine;
+
+    public void connect(SocketAddress address, EventLoop worker, ConnectCallback cb) {
+        SocketAddress real = dnsEngine.resolve(address);   // Fake IP → 真实 IP
+        new Bootstrap()
+            .group(worker)                                 // 复用 assignedWorker，零跨线程
+            .channel(NioSocketChannel.class)
+            .handler(new DirectChannelInitializer())
+            .connect(real)
+            .addListener(f -> {
+                if (f.isSuccess()) cb.onConnected(((ChannelFuture) f).channel());
+                else               cb.onFailed(f.cause());
+            });
+    }
+}
+```
+
+**组装示例**：路由规则决定走代理还是直连，只替换 connector，其余不变：
+
+```java
+TcpUpstreamConnector connector = routeToProxy
+    ? new ProxyUpstreamConnector(upstream, dnsEngine)
+    : new DirectTcpConnector(dnsEngine);
+
+ch.pipeline()
+  .addLast(new TcpHandshakeHandler(
+      new TcpHandshakerFactory(config, connector, mode)))
+  .addLast(new TcpUpstreamBridgeHandler(connector, config, mode));
+```
+
+**mode 选型建议**：
+
+| connector | 推荐 mode | 原因 |
+|---|---|---|
+| `ProxyUpstreamConnector` | EAGER 或 LAZY | 跨境代理延迟高，LAZY 可加快客户端握手感知速度 |
+| `DirectTcpConnector` | **EAGER** | 直连速度快，SYN-ACK 等上游通了再发语义更干净；无需零窗口暂停 |
 
 ---
 
