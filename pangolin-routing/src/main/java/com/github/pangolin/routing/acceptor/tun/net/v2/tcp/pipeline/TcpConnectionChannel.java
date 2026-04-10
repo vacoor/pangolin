@@ -17,7 +17,7 @@ import java.net.SocketAddress;
  * <ul>
  *   <li>Registration: called by TUN EventLoop</li>
  *   <li>All TCP state machine work: executed in {@code assignedWorker} via {@code execute()}</li>
- *   <li>Outbound writes: {@code doWrite()} runs on Worker, {@code parentCtx.write()} auto-routes
+ *   <li>Outbound writes: {@code doWrite()} runs on Worker, {@code parent().write()} auto-routes
  *       to the TUN EventLoop pipeline</li>
  *   <li>Registry cleanup: {@code doClose()} posts {@code deregisterCallback} to TUN EventLoop</li>
  * </ul>
@@ -28,35 +28,27 @@ public final class TcpConnectionChannel extends AbstractChannel {
 
     private static final ChannelMetadata METADATA = new ChannelMetadata(false);
 
-    private final Channel              tunChannel;
     private final FourTuple            fourTuple;
     private final EventLoop            assignedWorker;
     private final Runnable             deregisterCallback;
-    private       ChannelHandlerContext parentCtx;
     private volatile boolean           closed = false;  // true only after doClose()
     private volatile boolean           active = false;  // true after doRegister(), false after doClose()
     private final ChannelConfig        config = new DefaultChannelConfig(this);
 
     /**
-     * @param tunChannel          parent TUN Channel (write target for outbound packets)
-     * @param fourTuple           the TCP 4-tuple identifying this connection
-     * @param assignedWorker      Worker EventLoop bound to this connection (consistent hash)
-     * @param deregisterCallback  run on TUN EventLoop when the channel closes
+     * @param parent            parent TUN Channel (parent() returns this; write target for outbound packets)
+     * @param fourTuple         the TCP 4-tuple identifying this connection
+     * @param assignedWorker    Worker EventLoop bound to this connection (consistent hash)
+     * @param deregisterCallback run on TUN EventLoop when the channel closes
      */
-    public TcpConnectionChannel(Channel tunChannel,
+    public TcpConnectionChannel(Channel parent,
                                  FourTuple fourTuple,
                                  EventLoop assignedWorker,
                                  Runnable deregisterCallback) {
-        super(null);
-        this.tunChannel         = tunChannel;
+        super(parent);  // Declare parent Channel: parent() = tunChannel, analogous to SocketChannel.parent()
         this.fourTuple          = fourTuple;
         this.assignedWorker     = assignedWorker;
         this.deregisterCallback = deregisterCallback;
-    }
-
-    /** Must be called before {@code worker.register(this)}. */
-    public void setParentContext(ChannelHandlerContext parentCtx) {
-        this.parentCtx = parentCtx;
     }
 
     // ── AbstractChannel overrides ────────────────────────────────────────────
@@ -118,7 +110,7 @@ public final class TcpConnectionChannel extends AbstractChannel {
         if (closed) return;
         closed = true;
         active = false;
-        tunChannel.eventLoop().execute(deregisterCallback);
+        parent().eventLoop().execute(deregisterCallback);
     }
 
     /**
@@ -134,10 +126,10 @@ public final class TcpConnectionChannel extends AbstractChannel {
      * submits to the TUN EventLoop task queue automatically — no explicit wrapping needed.
      */
     /**
-     * Forward all pending outbound messages to the parent TUN pipeline.
+     * Write all pending outbound messages to the parent TUN pipeline.
      *
      * <p><b>Refcount contract:</b> {@code buf.current()} returns the msg still owned by the
-     * outbound-buffer entry (refcount = N). {@code parentCtx.write(msg)} posts a cross-thread
+     * outbound-buffer entry (refcount = N). {@code parent().write(msg)} posts a cross-thread
      * {@code WriteTask} to the TUN EventLoop — it does NOT retain {@code msg}. Then
      * {@code buf.remove()} releases the entry's reference (refcount N→N-1). If N was 1, the
      * ByteBuf reaches refcount 0 and is recycled <em>before</em> the TUN EventLoop runs the
@@ -153,10 +145,10 @@ public final class TcpConnectionChannel extends AbstractChannel {
             Object msg = buf.current();
             if (msg == null) break;
             ReferenceCountUtil.retain(msg);  // keep alive across cross-thread write task
-            parentCtx.write(msg);
+            parent().write(msg);
             buf.remove();                    // releases the outbound-buffer's own reference
         }
-        parentCtx.flush();
+        parent().flush();
     }
 
     @Override protected SocketAddress localAddress0()  { return fourTuple.local(); }
@@ -210,14 +202,15 @@ public final class TcpConnectionChannel extends AbstractChannel {
      * packets (ACK, FIN, RST, retransmits) built by {@code TcpSegmenter} /
      * {@code TcpRetransmitter} must bypass that handler and go directly to the TUN interface.
      *
-     * <p>Called from the connection's Worker EventLoop; {@code parentCtx.writeAndFlush()}
+     * <p>Called from the connection's Worker EventLoop; {@code parent().writeAndFlush()}
      * cross-posts write + flush tasks to the TUN EventLoop automatically.
      *
      * <p>Ownership of {@code buf}: transferred to the TUN pipeline.
      * The caller must not release {@code buf} after this call.
      */
     public void writeRaw(ByteBuf buf) {
-        parentCtx.writeAndFlush(buf);
+        // FIXME
+        parent().writeAndFlush(buf);
     }
 
     // ── Unsafe ──────────────────────────────────────────────────────────────

@@ -606,11 +606,10 @@ registry.get(fourTuple).fireChannelRead(pkt);
 ```java
 public class TcpConnectionChannel extends AbstractChannel {
 
-    private final Channel              tunChannel;          // 父 TUN Channel（仅用于 doWrite 写回）
+    private final Channel              tunChannel;          // 父 TUN Channel（parent() 返回此值）
     private final FourTuple            fourTuple;
     private final EventLoop            assignedWorker;      // 由 TcpMultiplexHandler 按四元组哈希分配
     private final Runnable             deregisterCallback;  // TUN EventLoop 上执行 registry.remove()
-    private       ChannelHandlerContext parentCtx;          // 用于 doWrite() 写入父 pipeline
     // ⚠️ closed 和 active 必须分开：AbstractUnsafe.register() 在 doRegister() 之前调用
     // ensureOpen() → isOpen()，此时 active 尚未置 true，若 isOpen() 复用 active 则注册
     // 直接失败（StacklessClosedChannelException）。closed 初始 false 保证 isOpen() 始终
@@ -620,16 +619,11 @@ public class TcpConnectionChannel extends AbstractChannel {
 
     public TcpConnectionChannel(Channel tunChannel, FourTuple fourTuple,
                                 EventLoop assignedWorker, Runnable deregisterCallback) {
-        super(null);
+        super(tunChannel);   // 声明父 Channel：parent() = tunChannel，对标 SocketChannel.parent()
         this.tunChannel          = tunChannel;
         this.fourTuple           = fourTuple;
         this.assignedWorker      = assignedWorker;
         this.deregisterCallback  = deregisterCallback;
-    }
-
-    /** 在注册前由 TcpMultiplexHandler 设置 */
-    public void setParentContext(ChannelHandlerContext parentCtx) {
-        this.parentCtx = parentCtx;
     }
 
     @Override
@@ -694,41 +688,25 @@ public class TcpConnectionChannel extends AbstractChannel {
     @Override
     protected void doWrite(ChannelOutboundBuffer buf) throws Exception {
         // 参考 AbstractHttp2StreamChannel.doWrite()：
-        // 写入父 pipeline（非直接 flush），使 TUN Channel codec 可处理出站包；批量合并写，减少系统调用。
+        // 写入父 Channel（tunChannel.write()），使 IpPacketCodec 可处理出站包；
+        // 批量收集后统一 flush，减少系统调用。
         //
-        // 线程安全说明：本方法运行在 Worker EventLoop（见 §6.4），
-        // parentCtx.write() 检测到跨线程后自动将写操作提交到 TUN EventLoop 任务队列，
-        // 因此 doWrite() 无需额外跨线程包装。
+        // 线程安全：本方法运行在 Worker EventLoop；tunChannel.write() 检测到跨线程后
+        // 自动将 WriteTask 提交到 TUN EventLoop 任务队列，无需额外包装。
         //
-        // ⚠️ 引用计数陷阱：parentCtx.write(msg) 将 WriteTask 异步提交给 TUN EventLoop，
-        // 提交时【不】retain msg。紧接着 buf.remove() 调用 safeRelease(msg)，若 refcount
-        // 原为 1，ByteBuf 在 TUN EventLoop 处理 WriteTask 之前已被回收 → use-after-free。
-        // 修复：每条消息在跨线程写之前先 retain()，buf.remove() 释放出站缓冲区的引用，
+        // ⚠️ 引用计数陷阱：tunChannel.write(msg) 异步提交 WriteTask，提交时【不】retain msg。
+        // 紧接着 buf.remove() 调用 safeRelease(msg)，若 refcount 原为 1，ByteBuf 在
+        // TUN EventLoop 处理 WriteTask 之前已被回收 → use-after-free。
+        // 修复：跨线程写前先 retain()；buf.remove() 释放出站缓冲区引用；
         // WriteTask（最终由 IpPacketCodec.encode）持有并释放 retain() 增加的引用。
         for (;;) {
             Object msg = buf.current();
             if (msg == null) break;
             ReferenceCountUtil.retain(msg);  // 跨线程 WriteTask 持有期间保活
-            parentCtx.write(msg);
+            tunChannel.write(msg);
             buf.remove();                    // 释放出站缓冲区自身的引用
         }
-        parentCtx.flush();
-    }
-
-    /**
-     * 将预构建的原始 IP 包直接写入父 TUN pipeline，绕过本 Channel 的出站 pipeline。
-     *
-     * <p><b>为何不能用 channel().writeAndFlush()?</b>
-     * {@code TcpConnectionChannel} pipeline 含 {@code TcpEstablishedHandler}，其 {@code write()}
-     * 拦截所有 {@link ByteBuf} 写操作，将其视为应用层 TCP 数据（进入发送缓冲区排队）。
-     * 协议控制包（ACK、FIN、RST、重传）由 {@code TcpSegmenter} / {@code TcpRetransmitter} 构建，
-     * 必须绕过该 handler 直达 TUN 接口。
-     *
-     * <p>本方法在 Worker EventLoop 调用；{@code parentCtx.writeAndFlush()} 自动跨线程提交到
-     * TUN EventLoop 任务队列。{@code buf} 所有权转交 TUN pipeline，调用方不得在此后释放。
-     */
-    public void writeRaw(ByteBuf buf) {
-        parentCtx.writeAndFlush(buf);
+        tunChannel.flush();
     }
 
     private static final ChannelMetadata METADATA = new ChannelMetadata(false);

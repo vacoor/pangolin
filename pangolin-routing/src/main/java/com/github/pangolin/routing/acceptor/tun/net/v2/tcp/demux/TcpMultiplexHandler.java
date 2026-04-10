@@ -89,7 +89,6 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                 ctx.channel(), fourTuple, worker,
                 () -> registry.remove(fourTuple)   // deregisterCallback — runs on TUN EventLoop
             );
-            connCh.setParentContext(ctx);
             connCh.pipeline().addLast(childHandler);
 
             // register() sets eventLoop on the channel (volatile write), then posts register0 to Worker.

@@ -12,7 +12,7 @@ import io.netty.channel.ChannelFuture;
  * Builds and sends raw IPv4+TCP packets for an established connection.
  *
  * <p>All outbound packets are written to the connection's {@code TcpConnectionChannel},
- * which routes them via {@code doWrite()} → {@code parentCtx.write()} → TUN Channel pipeline.
+ * which routes them via {@code doWrite()} → {@code parent().write()} → TUN Channel pipeline.
  */
 public final class TcpPacketBuilder {
 
