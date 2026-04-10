@@ -11,10 +11,12 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.util.concurrent.ScheduledFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.security.SecureRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Per-connection TCP 3-way handshake state machine.
@@ -35,6 +37,11 @@ public final class TcpHandshaker {
     private static final Logger log = LoggerFactory.getLogger(TcpHandshaker.class);
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    /** Maximum SYN-ACK retransmissions before giving up (≈ Linux tcp_synack_retries, default 5). */
+    private static final int  MAX_SYNACK_RETRIES  = 5;
+    /** Initial SYN-ACK RTO: 1 s, doubled on each retransmit (RFC 6298 §5.5). */
+    private static final long SYNACK_RTO_INIT_MS  = 1_000L;
+
     // SYN-extracted client parameters
     private final int    rcvIsn;        // client's initial sequence number (from SYN)
     private final int    rcvNxt;        // rcvIsn + 1
@@ -51,7 +58,9 @@ public final class TcpHandshaker {
     private final TcpConfig config;
 
     // State
-    private boolean synAckSent = false;
+    private boolean          synAckSent    = false;
+    private int              synAckRetries = 0;          // retransmit counter
+    private ScheduledFuture<?> synAckTimer = null;       // retransmit timer handle
 
     TcpHandshaker(TcpPacketBuf synPkt, TcpConfig config) {
         this.config      = config;
@@ -74,28 +83,87 @@ public final class TcpHandshaker {
         this.sndIsn = RANDOM.nextInt();
     }
 
+    // ── Public API ─────────────────────────────────────────────────────────
+
     /**
-     * Process a SYN (or retransmitted SYN). Idempotent — sends SYN-ACK on first call,
-     * re-sends on retransmit.
+     * RFC 9293 §3.5.2 — RST acceptability in SYN-RECEIVED state.
+     * A RST is valid only when {@code SEG.SEQ == RCV.NXT}.
+     * Call this before closing the channel on RST to avoid blind RST attacks.
+     */
+    boolean isRstAcceptable(TcpPacketBuf pkt) {
+        return pkt.tcpSeq() == rcvNxt;
+    }
+
+    /**
+     * Cancel the SYN-ACK retransmit timer.
+     * Must be called on handshake completion ({@link #finishHandshake}) or channel close.
+     * Safe to call multiple times.
+     */
+    void cancelRetransmitTimer() {
+        if (synAckTimer != null) {
+            synAckTimer.cancel(false);
+            synAckTimer = null;
+        }
+    }
+
+    /**
+     * Process the initial SYN: sends SYN-ACK and arms the retransmit timer.
+     * Called exactly once — SYN retransmits are handled by {@link #finishHandshake}.
      *
      * @param connChannel the {@code TcpConnectionChannel} for this connection
-     * @param pkt         the SYN packet (must not be retained after return)
+     * @param pkt         the SYN packet (not retained after return)
      */
     public void handshake(Channel connChannel, TcpPacketBuf pkt) {
         sendSynAck(connChannel);
     }
 
     /**
-     * Process the final ACK completing the 3-way handshake.
+     * Process all packets after the initial SYN (≈ Linux {@code tcp_check_req}).
      *
-     * @return the created {@link TcpConnection}, or {@code null} if the ACK is invalid
+     * <p>Handles, in order:
+     * <ol>
+     *   <li>RST — validate sequence (RFC 9293 §3.5.2); if acceptable, cancel timer and close.</li>
+     *   <li>SYN retransmit — client re-sent SYN; reset backoff and re-send SYN-ACK.</li>
+     *   <li>Non-ACK — drop silently.</li>
+     *   <li>Final ACK — validate ACK number; on success create and return {@link TcpConnection}.</li>
+     * </ol>
+     *
+     * @return the created {@link TcpConnection} on handshake completion, {@code null} otherwise
      */
     public TcpConnection finishHandshake(Channel connChannel, TcpPacketBuf pkt) {
+        // Step 1: RST — validate seq before closing (RFC 9293 §3.5.2)
+        if (pkt.isRst()) {
+            if (isRstAcceptable(pkt)) {
+                log.debug("[TCP] [HANDSHAKE] RST received — aborting handshake");
+                cancelRetransmitTimer();
+                connChannel.close();
+            }
+            // out-of-window RST: drop silently
+            return null;
+        }
+
+        // Step 2: SYN retransmit — client re-sent SYN (tcpSeq == rcvIsn); re-send SYN-ACK
+        if (pkt.isSyn()) {
+            if (pkt.tcpSeq() == rcvIsn && synAckSent) {
+                synAckRetries = 0;   // reset backoff: client restart implies fresh start
+                sendSynAck(connChannel);
+            }
+            return null;
+        }
+
+        // Step 3: Only ACK can complete the handshake
+        if (!pkt.isAck()) {
+            return null;
+        }
+
+        // Step 4: Guard — SYN-ACK must have been sent (async write may still be in-flight,
+        // but synAckSent is set synchronously in sendSynAck() before writeAndFlush())
         if (!synAckSent) {
             log.warn("[TCP] [HANDSHAKE] ACK received before SYN-ACK was sent — dropping");
             return null;
         }
-        // ACK must acknowledge exactly snd_isn + 1
+
+        // Step 5: ACK number must acknowledge exactly sndIsn + 1
         if (pkt.tcpAckNum() != sndIsn + 1) {
             log.warn("[TCP] [HANDSHAKE] ACK number mismatch: expected {}, got {}",
                     Integer.toUnsignedString(sndIsn + 1),
@@ -104,12 +172,14 @@ public final class TcpHandshaker {
             return null;
         }
 
+        // Step 6: All checks passed — build the established connection
         int negotiatedMss = Math.min(clientMss, config.mss());
         int peerWnd = pkt.tcpWindow();
         if (clientWscale >= 0) {
             peerWnd <<= clientWscale;
         }
 
+        cancelRetransmitTimer();  // handshake done — stop retransmitting SYN-ACK
         log.debug("[TCP] [HANDSHAKE] 3WH complete: mss={}, peerWscale={}", negotiatedMss, clientWscale);
 
         return TcpConnection.builder()
@@ -142,6 +212,11 @@ public final class TcpHandshaker {
                 opts, null, 0
         );
 
+        // Cancel any running retransmit timer before (re-)sending.
+        // A client SYN retransmit resets the backoff counter (synAckRetries already set to 0
+        // by the caller); cancelling here ensures a clean timer state for the new attempt.
+        cancelRetransmitTimer();
+
         // Mark synAckSent synchronously: both this method and finishHandshake() run on the same
         // Worker EventLoop, but writeAndFlush() is async (dispatched to TUN EventLoop). If the
         // final ACK arrives before the write-complete callback fires, the async flag would still
@@ -149,11 +224,34 @@ public final class TcpHandshaker {
         synAckSent = true;
         connChannel.writeAndFlush(buf).addListener((ChannelFutureListener) f -> {
             if (f.isSuccess()) {
-                log.debug("[TCP] [HANDSHAKE] SYN-ACK sent (isn={})", Integer.toUnsignedString(sndIsn));
+                log.debug("[TCP] [HANDSHAKE] SYN-ACK sent (isn={}, retry={})",
+                        Integer.toUnsignedString(sndIsn), synAckRetries);
+                scheduleRetransmit(connChannel);   // arm retransmit timer (RFC 6298 §5.5)
             } else {
                 log.warn("[TCP] [HANDSHAKE] SYN-ACK send failed", f.cause());
             }
         });
+    }
+
+    /**
+     * Schedule the next SYN-ACK retransmission with exponential backoff.
+     * Mirrors Linux {@code tcp_timeout_init()} / {@code inet_csk_reset_xmit_timer()}.
+     * Gives up after {@link #MAX_SYNACK_RETRIES} and closes the channel.
+     */
+    private void scheduleRetransmit(Channel connChannel) {
+        if (synAckRetries >= MAX_SYNACK_RETRIES) {
+            log.debug("[TCP] [HANDSHAKE] SYN-ACK max retransmits ({}) reached — closing",
+                    MAX_SYNACK_RETRIES);
+            connChannel.close();
+            return;
+        }
+        // Exponential backoff: 1 s, 2 s, 4 s, 8 s, 16 s (capped at 64 s)
+        long delayMs = SYNACK_RTO_INIT_MS << Math.min(synAckRetries, 6);
+        synAckTimer = connChannel.eventLoop().schedule(() -> {
+            synAckRetries++;
+            log.debug("[TCP] [HANDSHAKE] SYN-ACK retransmit #{}", synAckRetries);
+            sendSynAck(connChannel);
+        }, delayMs, TimeUnit.MILLISECONDS);
     }
 
     private byte[] buildSynAckOptions() {

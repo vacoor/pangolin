@@ -30,45 +30,53 @@ public final class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPa
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
-        if (pkt.isRst()) {
-            log.debug("[TCP] [HANDSHAKE] RST received during handshake — closing");
-            ctx.channel().close();
-            return;
-        }
-
-        if (pkt.isSyn() && !pkt.isAck()) {
-            // SYN (or retransmitted SYN)
-            if (handshaker == null) {
-                handshaker = factory.newHandshaker(pkt);
-            }
+        if (handshaker == null) {
+            // ── First packet: must be SYN (TcpMultiplexHandler already filters non-SYN) ──
+            // Defensive guard in case a stray packet arrives before the SYN is processed.
+            if (!pkt.isSyn() || pkt.isFin()) return;
+            handshaker = factory.newHandshaker(pkt);
             handshaker.handshake(ctx.channel(), pkt);
             return;
         }
 
-        if (pkt.isAck() && handshaker != null) {
-            // Final ACK of 3-way handshake
-            TcpConnection conn = handshaker.finishHandshake(ctx.channel(), pkt);
-            if (conn != null) {
-                log.debug("[TCP] [HANDSHAKE] 3WH complete — switching to established handler");
-                ctx.pipeline().replace(this, "established", new TcpEstablishedHandler(conn));
-                // Fire the ACK into the newly installed handler: TCP allows data to be piggybacked
-                // on the final ACK (RFC 9293 §3.4). Without this, that data would be silently dropped.
-                //
-                // MUST use pipeline().fireChannelRead(), NOT ctx.fireChannelRead().
-                // After replace(), `ctx` is the removed handler's context; its `next` pointer
-                // still points to the handler that was after TcpHandshakeHandler BEFORE the
-                // replace (i.e., SimpleChannelInboundHandler), skipping TcpEstablishedHandler.
-                // pipeline().fireChannelRead() starts from HeadContext and correctly reaches
-                // TcpEstablishedHandler at its new position.
-                ctx.pipeline().fireChannelRead(pkt);
-            }
+        // ── All subsequent packets — delegate to handshaker (≈ tcp_check_req) ──
+        // finishHandshake() handles RST, SYN retransmit, and the final ACK in one place.
+        TcpConnection conn = handshaker.finishHandshake(ctx.channel(), pkt);
+        if (conn != null) {
+            log.debug("[TCP] [HANDSHAKE] 3WH complete — switching to established handler");
+            handshaker = null;
+            ctx.pipeline().replace(this, "established", new TcpEstablishedHandler(conn));
+            // Fire the ACK into the newly installed handler: TCP allows data to be piggybacked
+            // on the final ACK (RFC 9293 §3.4). Without this, that data would be silently dropped.
+            //
+            // MUST use pipeline().fireChannelRead(), NOT ctx.fireChannelRead().
+            // After replace(), `ctx` is the removed handler's context; its `next` pointer
+            // still points to the handler that was after TcpHandshakeHandler BEFORE the
+            // replace (i.e., SimpleChannelInboundHandler), skipping TcpEstablishedHandler.
+            // pipeline().fireChannelRead() starts from HeadContext and correctly reaches
+            // TcpEstablishedHandler at its new position.
+            ctx.pipeline().fireChannelRead(pkt);
         }
-        // All other packets during handshake are silently dropped.
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) {
+        // Channel closed before handshake completed — cancel the SYN-ACK retransmit timer.
+        cancelHandshaker();
+        ctx.fireChannelInactive();
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         log.warn("[TCP] [HANDSHAKE] Exception — closing connection", cause);
+        cancelHandshaker();
         ctx.channel().close();
+    }
+
+    private void cancelHandshaker() {
+        if (handshaker != null) {
+            handshaker.cancelRetransmitTimer();
+            handshaker = null;
+        }
     }
 }
