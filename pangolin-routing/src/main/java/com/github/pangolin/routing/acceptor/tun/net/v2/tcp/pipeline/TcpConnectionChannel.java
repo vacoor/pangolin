@@ -2,7 +2,9 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
+import io.netty.util.ReferenceCountUtil;
 
 import java.net.SocketAddress;
 
@@ -31,7 +33,8 @@ public final class TcpConnectionChannel extends AbstractChannel {
     private final EventLoop            assignedWorker;
     private final Runnable             deregisterCallback;
     private       ChannelHandlerContext parentCtx;
-    private volatile boolean           active;
+    private volatile boolean           closed = false;  // true only after doClose()
+    private volatile boolean           active = false;  // true after doRegister(), false after doClose()
     private final ChannelConfig        config = new DefaultChannelConfig(this);
 
     /**
@@ -83,7 +86,7 @@ public final class TcpConnectionChannel extends AbstractChannel {
      */
     @Override
     protected void doRegister() {
-        active = true;
+        active = true;   // channel is now registered and active
     }
 
     /**
@@ -112,7 +115,8 @@ public final class TcpConnectionChannel extends AbstractChannel {
      */
     @Override
     protected void doClose() {
-        if (!active) return;
+        if (closed) return;
+        closed = true;
         active = false;
         tunChannel.eventLoop().execute(deregisterCallback);
     }
@@ -129,20 +133,35 @@ public final class TcpConnectionChannel extends AbstractChannel {
      * Runs on Worker EventLoop; {@code parentCtx.write()} detects the cross-thread call and
      * submits to the TUN EventLoop task queue automatically — no explicit wrapping needed.
      */
+    /**
+     * Forward all pending outbound messages to the parent TUN pipeline.
+     *
+     * <p><b>Refcount contract:</b> {@code buf.current()} returns the msg still owned by the
+     * outbound-buffer entry (refcount = N). {@code parentCtx.write(msg)} posts a cross-thread
+     * {@code WriteTask} to the TUN EventLoop — it does NOT retain {@code msg}. Then
+     * {@code buf.remove()} releases the entry's reference (refcount N→N-1). If N was 1, the
+     * ByteBuf reaches refcount 0 and is recycled <em>before</em> the TUN EventLoop runs the
+     * WriteTask → use-after-free / silent discard.
+     *
+     * <p>Fix: {@code retain()} before the cross-thread write; {@code buf.remove()} balances that
+     * original reference; the WriteTask (and ultimately {@code IpPacketCodec.encode}) holds and
+     * releases the retained reference.
+     */
     @Override
     protected void doWrite(ChannelOutboundBuffer buf) throws Exception {
         for (;;) {
             Object msg = buf.current();
             if (msg == null) break;
+            ReferenceCountUtil.retain(msg);  // keep alive across cross-thread write task
             parentCtx.write(msg);
-            buf.remove();
+            buf.remove();                    // releases the outbound-buffer's own reference
         }
         parentCtx.flush();
     }
 
     @Override protected SocketAddress localAddress0()  { return fourTuple.local(); }
     @Override protected SocketAddress remoteAddress0() { return fourTuple.remote(); }
-    @Override public    boolean isOpen()               { return active; }
+    @Override public    boolean isOpen()               { return !closed; }
     @Override public    boolean isActive()             { return active; }
     @Override public    ChannelMetadata metadata()     { return METADATA; }
 
@@ -170,7 +189,7 @@ public final class TcpConnectionChannel extends AbstractChannel {
         if (!isActive()) {
             // Channel already closed or registration failed — release the reference
             // the Worker lambda was given (the caller's retain() in TcpMultiplexHandler).
-            io.netty.util.ReferenceCountUtil.release(pkt);
+            ReferenceCountUtil.release(pkt);
             return;
         }
         // Transfer ownership to the pipeline. The handler (or TailContext) will release pkt.
@@ -179,6 +198,27 @@ public final class TcpConnectionChannel extends AbstractChannel {
     }
 
     public FourTuple fourTuple() { return fourTuple; }
+
+    /**
+     * Write a pre-built raw IP packet directly to the parent TUN pipeline,
+     * bypassing this channel's own outbound pipeline.
+     *
+     * <p><b>Why not {@code channel().writeAndFlush()}?</b>
+     * The {@code TcpConnectionChannel}'s pipeline contains {@code TcpEstablishedHandler},
+     * which overrides {@code write()} to intercept <em>all</em> {@link ByteBuf} writes and
+     * treat them as application TCP data (enqueueing into the send buffer). Raw IP control
+     * packets (ACK, FIN, RST, retransmits) built by {@code TcpSegmenter} /
+     * {@code TcpRetransmitter} must bypass that handler and go directly to the TUN interface.
+     *
+     * <p>Called from the connection's Worker EventLoop; {@code parentCtx.writeAndFlush()}
+     * cross-posts write + flush tasks to the TUN EventLoop automatically.
+     *
+     * <p>Ownership of {@code buf}: transferred to the TUN pipeline.
+     * The caller must not release {@code buf} after this call.
+     */
+    public void writeRaw(ByteBuf buf) {
+        parentCtx.writeAndFlush(buf);
+    }
 
     // ── Unsafe ──────────────────────────────────────────────────────────────
 

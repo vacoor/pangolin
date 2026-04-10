@@ -8,6 +8,42 @@
 
 ## 更新日志
 
+### v4.1 — 2026-04-10
+
+**联调过程中发现并修复 5 个运行时 Bug**
+
+#### Bug 1 — `TunTest2`：`TcpHandshakeHandler` 直接挂在 `TunChannel` pipeline 导致 `ClassCastException`
+
+- **现象**：启动后收到 SYN 即崩溃：`ClassCastException: TunChannel cannot be cast to TcpConnectionChannel`（栈顶：`TcpSegmenter.sendAck:85`）。
+- **根因**：`TunTest2` 把 `TcpHandshakeHandler` 直接 `addLast` 到 `TunChannel`（TUN channel）的 pipeline，此时 `ctx.channel()` 返回 `TunChannel`，存入 `TcpConnection.channel`；后续 `TcpSegmenter` 将其强转 `TcpConnectionChannel` 失败。
+- **修复**：`TunTest2` 改为正确架构——`TunChannel` pipeline 挂 `IpPacketCodec` + `TcpMultiplexHandler`；`TcpHandshakeHandler` 作为 `childHandler` 安装在 `TcpConnectionChannel` 的 pipeline 上，确保 `ctx.channel()` 始终是 `TcpConnectionChannel`。同时拆分 `tunGroup`（1 线程）和 `workerGroup`（4 线程）。
+
+#### Bug 2 — `TcpConnectionChannel`：`isOpen()` 在注册前返回 `false` 导致 `StacklessClosedChannelException`
+
+- **现象**：`worker.register(connCh)` 失败：`StacklessClosedChannelException at AbstractUnsafe.ensureOpen()`。
+- **根因**：`isOpen()` 和 `isActive()` 共用同一个 `active` 字段（初始 `false`）。Netty 的 `AbstractUnsafe.register()` 在调用 `doRegister()`（设置 `active=true`）之前先调用 `ensureOpen()` → `isOpen()` → 返回 `false` → 抛异常。
+- **修复**：将字段拆分为 `closed`（`isOpen = !closed`，初始 `false`，仅在 `doClose()` 置 `true`）和 `active`（`isActive = active`，仅在 `doRegister()` 置 `true`）。注册前：`isOpen()=true`，`isActive()=false`；注册后：两者均为 `true`；关闭后：两者均转为目标值。
+
+#### Bug 3 — `TcpConnectionChannel.doWrite()`：跨线程写时 `ByteBuf` 提前释放
+
+- **现象**：SYN-ACK 触发但未真正写入 TUN，抓包无出站数据。
+- **根因**：`doWrite()` 运行在 Worker EventLoop。`parentCtx.write(msg)` 跨线程投递 `WriteTask` 到 TUN EventLoop——**不 retain**，仅把引用存入任务。随后 `buf.remove()` 立即调用 `ReferenceCountUtil.safeRelease(msg)`，引用计数降至 0，ByteBuf 归还对象池。TUN EventLoop 执行 `WriteTask` 时操作的是已回收的内存，`IpPacketCodec.encode()` 复制 0 字节或乱码，出站为空帧。
+- **修复**：`doWrite()` 中先 `ReferenceCountUtil.retain(msg)`（引用计数 1→2），再 `parentCtx.write(msg)`，再 `buf.remove()`（2→1）；TUN EventLoop 执行时 `encode()` 复制有效字节并 release（1→0）。
+
+#### Bug 4 — `TcpHandshakeHandler`：`ctx.fireChannelRead(pkt)` 跳过 `TcpEstablishedHandler`
+
+- **现象**：连接建立后，收到携带数据的最终 ACK（RFC 9293 §3.4 允许在最终 ACK 中捎带数据），服务端不回 ACK。
+- **根因**：`pipeline.replace(this, "established", new TcpEstablishedHandler(conn))` 后，旧 `ctx`（`TcpHandshakeHandler` 的 context）的 `next` 指针仍指向替换前的下一个 handler（`SimpleChannelInboundHandler`），而非新插入的 `TcpEstablishedHandler`。调用 `ctx.fireChannelRead(pkt)` 直接跳到 `SimpleChannelInboundHandler`，`TcpEstablishedHandler.channelRead()` 从未执行，`rcvNxt` 不更新，延迟 ACK 定时器不启动。
+- **修复**：改为 `ctx.pipeline().fireChannelRead(pkt)`，从 `HeadContext` 重新遍历当前 pipeline，正确到达 `TcpEstablishedHandler`。对纯 ACK（无数据）同样安全：`TcpAckProcessor.acknowledgeUpTo()` 幂等（`sndUna == ackSeq` 时返回 0），不产生副作用。
+
+#### Bug 5 — `TcpSegmenter` / `TcpRetransmitter` / `TcpPacketBuilder`：原始 IP 包被 `TcpEstablishedHandler.write()` 拦截，永远不写入 TUN
+
+- **现象**：`TcpSegmenter.sendAck()` 可被 Debug 断点命中，但 ACK 从未出现在 TUN 抓包中；所有控制包（ACK / FIN / RST / 数据重传）均如此。
+- **根因**：三个类均通过 `conn.channel().writeAndFlush(rawIpBuf)` 发出原始 IP 包。该调用从 `TcpConnectionChannel` pipeline 的 **出站方向**（TailContext → … → HeadContext）传播，途经 `TcpEstablishedHandler.write()`。该方法对所有 `ByteBuf` 消息执行：`conn.sendBuffer().enqueue(data); promise.setSuccess();`——**不调用 `ctx.write(msg, promise)`**，原始 IP 包被当作应用层 TCP payload 入队，promise 立即标记成功，消息就此终止传播，`HeadContext` 及 `doWrite()` 均不执行，TUN 侧收不到任何数据。
+- **修复**：`TcpConnectionChannel` 新增 `writeRaw(ByteBuf)` 方法，直接调用 `parentCtx.writeAndFlush(buf)` 写入 TUN channel pipeline，完全绕过 `TcpConnectionChannel` 自身的出站 pipeline。`TcpSegmenter`、`TcpRetransmitter`、`TcpPacketBuilder` 的所有 `conn.channel().writeAndFlush(buf)` 统一改为 `((TcpConnectionChannel) conn.channel()).writeRaw(buf)`。
+
+> **架构说明**：`TcpConnectionChannel` 的出站 pipeline 设计用于拦截**应用层写操作**（`ctx.write(ByteBuf app_data)` → `TcpEstablishedHandler.write()` → 入队 → `TcpSegmenter.sendPending()` 分段发送）；协议栈内部生成的原始 IP 控制包必须经 `writeRaw()` 旁路写入，两条路径不可混用。
+
 ### v4.0 — 2026-04-10
 
 **RFC 9293 TCP 协议栈实现完成**（`tun.net.v2.tcp` 包，共 38 个生产类 + 5 个测试类，54 个单元测试全部通过）
@@ -284,8 +320,14 @@ TcpHandshakeHandler.channelRead(ctx, pkt)
     │
     └─ pkt.isAck() && handshaker != null
           └─ conn = handshaker.finishHandshake(ctx.channel(), pkt)
-               └─ ctx.pipeline().replace("handshake", "established",
-                      new TcpEstablishedHandler(conn, ...))
+               ├─ ctx.pipeline().replace(this, "established",
+               │      new TcpEstablishedHandler(conn))
+               └─ ctx.pipeline().fireChannelRead(pkt)
+                    # RFC 9293 §3.4：final ACK 可携带数据，必须投递到新装入的 handler。
+                    # ⚠️ 禁止用 ctx.fireChannelRead(pkt)：replace() 后旧 ctx.next 仍指向
+                    #    replace 之前的下一 handler（例如 TailContext），会绕过刚装入的
+                    #    TcpEstablishedHandler。pipeline().fireChannelRead() 从 HeadContext
+                    #    重新遍历，确保命中正确位置。
 ```
 
 **传输阶段**
@@ -569,7 +611,12 @@ public class TcpConnectionChannel extends AbstractChannel {
     private final EventLoop            assignedWorker;      // 由 TcpMultiplexHandler 按四元组哈希分配
     private final Runnable             deregisterCallback;  // TUN EventLoop 上执行 registry.remove()
     private       ChannelHandlerContext parentCtx;          // 用于 doWrite() 写入父 pipeline
-    private volatile boolean           active;
+    // ⚠️ closed 和 active 必须分开：AbstractUnsafe.register() 在 doRegister() 之前调用
+    // ensureOpen() → isOpen()，此时 active 尚未置 true，若 isOpen() 复用 active 则注册
+    // 直接失败（StacklessClosedChannelException）。closed 初始 false 保证 isOpen() 始终
+    // 在注册完成前返回 true；active 在 doRegister() 后才置 true，用于 isActive()。
+    private volatile boolean           closed = false;      // isOpen() = !closed
+    private volatile boolean           active = false;      // isActive() = active
 
     public TcpConnectionChannel(Channel tunChannel, FourTuple fourTuple,
                                 EventLoop assignedWorker, Runnable deregisterCallback) {
@@ -603,7 +650,7 @@ public class TcpConnectionChannel extends AbstractChannel {
         // 让 TcpHandshakeHandler 可在 channelActive() 中做初始化。
         // ⚠️ 禁止在此处主动调用 pipeline().fireChannelRegistered() / fireChannelActive()，
         //    否则 AbstractChannel 会再触发一次，造成重复调用。
-        active = true;
+        active = true;   // channel 已注册且活跃
     }
 
     @Override
@@ -619,10 +666,11 @@ public class TcpConnectionChannel extends AbstractChannel {
 
     @Override
     protected void doClose() {
-        if (!active) return;
+        if (closed) return;
+        closed = true;
         active = false;
         // 调用顺序（由 AbstractUnsafe 驱动）：
-        //   1. doClose()（本方法）：将 active 置 false，提交 registry 注销任务
+        //   1. doClose()（本方法）：closed=true, active=false，提交 registry 注销任务
         //   2. AbstractUnsafe 检测到 wasActive && !isActive → pipeline.fireChannelInactive()
         //      → 各 handler.channelInactive()：业务 handler 在此调用 conn.close()
         //        （取消定时器、释放扩展 per-conn 状态）
@@ -651,20 +699,43 @@ public class TcpConnectionChannel extends AbstractChannel {
         // 线程安全说明：本方法运行在 Worker EventLoop（见 §6.4），
         // parentCtx.write() 检测到跨线程后自动将写操作提交到 TUN EventLoop 任务队列，
         // 因此 doWrite() 无需额外跨线程包装。
+        //
+        // ⚠️ 引用计数陷阱：parentCtx.write(msg) 将 WriteTask 异步提交给 TUN EventLoop，
+        // 提交时【不】retain msg。紧接着 buf.remove() 调用 safeRelease(msg)，若 refcount
+        // 原为 1，ByteBuf 在 TUN EventLoop 处理 WriteTask 之前已被回收 → use-after-free。
+        // 修复：每条消息在跨线程写之前先 retain()，buf.remove() 释放出站缓冲区的引用，
+        // WriteTask（最终由 IpPacketCodec.encode）持有并释放 retain() 增加的引用。
         for (;;) {
             Object msg = buf.current();
             if (msg == null) break;
+            ReferenceCountUtil.retain(msg);  // 跨线程 WriteTask 持有期间保活
             parentCtx.write(msg);
-            buf.remove();
+            buf.remove();                    // 释放出站缓冲区自身的引用
         }
         parentCtx.flush();
+    }
+
+    /**
+     * 将预构建的原始 IP 包直接写入父 TUN pipeline，绕过本 Channel 的出站 pipeline。
+     *
+     * <p><b>为何不能用 channel().writeAndFlush()?</b>
+     * {@code TcpConnectionChannel} pipeline 含 {@code TcpEstablishedHandler}，其 {@code write()}
+     * 拦截所有 {@link ByteBuf} 写操作，将其视为应用层 TCP 数据（进入发送缓冲区排队）。
+     * 协议控制包（ACK、FIN、RST、重传）由 {@code TcpSegmenter} / {@code TcpRetransmitter} 构建，
+     * 必须绕过该 handler 直达 TUN 接口。
+     *
+     * <p>本方法在 Worker EventLoop 调用；{@code parentCtx.writeAndFlush()} 自动跨线程提交到
+     * TUN EventLoop 任务队列。{@code buf} 所有权转交 TUN pipeline，调用方不得在此后释放。
+     */
+    public void writeRaw(ByteBuf buf) {
+        parentCtx.writeAndFlush(buf);
     }
 
     private static final ChannelMetadata METADATA = new ChannelMetadata(false);
 
     @Override protected SocketAddress localAddress0()  { return fourTuple.local(); }
     @Override protected SocketAddress remoteAddress0() { return fourTuple.remote(); }
-    @Override public boolean isOpen()   { return active; }
+    @Override public boolean isOpen()   { return !closed; }
     @Override public boolean isActive() { return active; }
     @Override public ChannelMetadata metadata() { return METADATA; }
 
@@ -697,7 +768,8 @@ public class TcpConnectionChannel extends AbstractChannel {
     private class TcpConnectionUnsafe extends AbstractUnsafe {
         @Override
         public void connect(SocketAddress remote, SocketAddress local, ChannelPromise p) {
-            p.setFailure(new UnsupportedOperationException("passive only"));
+            // TcpConnectionChannel 仅作为被动接受方，不支持主动连接。
+            p.setFailure(new UnsupportedOperationException("TcpConnectionChannel is passive-only"));
         }
     }
 }
@@ -716,16 +788,121 @@ public class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPacketBu
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
         if (pkt.isSyn()) {
-            if (handshaker == null)
+            if (handshaker == null) {
+                // 首个 SYN：创建 handshaker，通过 connect() 建立上游连接
+                // connect() 事件沿 pipeline 传播，由 UpstreamConnector 拦截处理；
+                // 若无 UpstreamConnector，落到 TcpConnectionUnsafe.connect() 立即成功。
                 handshaker = factory.newHandshaker(config, pkt);
-            handshaker.handshake(ctx.channel(), pkt);
+                pkt.retain();  // async listener 中需要访问 pkt，防止提前释放
+                ctx.pipeline().connect(pkt.resolvedDstAddress()).addListener(f -> {
+                    try {
+                        if (f.isSuccess()) handshaker.onConnected(ctx.channel());
+                        else               sendRst(ctx.channel(), pkt);
+                    } finally {
+                        pkt.release();
+                    }
+                });
+            } else {
+                // 重传 SYN：交由 handshaker 处理，内部判断是否发 SYN-ACK
+                // - connect() 仍 in-flight（synAckSent=false）：no-op
+                // - SYN-ACK 已发出（synAckSent=true）：重发 SYN-ACK
+                handshaker.handshake(ctx.channel(), pkt);
+            }
         } else if (pkt.isAck() && handshaker != null) {
             TcpConnection conn = handshaker.finishHandshake(ctx.channel(), pkt);
-            if (conn != null)
+            if (conn != null) {
+                Channel upstream = ctx.channel().attr(UPSTREAM_CHANNEL_KEY).get();
                 // 真实 Netty pipeline.replace()，与 WebSocket 升级完全一致
                 ctx.pipeline().replace(this, "established",
-                    new TcpEstablishedHandler(conn, ...));
+                    new TcpEstablishedHandler(conn, upstream));
+                // RFC 9293 §3.4：final ACK 可携带数据，投递到新装入的 handler。
+                // ⚠️ 必须用 pipeline().fireChannelRead()，不能用 ctx.fireChannelRead()：
+                //    replace() 后旧 ctx 的 next 指针仍指向 replace 之前的下一 handler，
+                //    会绕过刚装入的 TcpEstablishedHandler。
+                ctx.pipeline().fireChannelRead(pkt);
+            }
         }
+    }
+}
+```
+
+**TcpHandshaker 关键变更（配合异步 connect）**
+
+```java
+// 新增：上游连接成功后由 TcpHandshakeHandler 调用，发出首个 SYN-ACK
+public void onConnected(Channel connChannel) {
+    sendSynAck(connChannel);   // 内部 synAckSent = true
+}
+
+// 修改：重传 SYN 入口，内部封装 in-flight 判断，调用方无需感知状态
+public void handshake(Channel connChannel, TcpPacketBuf pkt) {
+    if (synAckSent) {
+        sendSynAck(connChannel);   // 重传 SYN-ACK
+    }
+    // else: connect() in-flight，no-op
+}
+```
+
+**UpstreamConnector（上游连接建立，可插拔）**
+
+```java
+/**
+ * 拦截 connect() 事件，负责建立到目标的上游连接（proxy / direct 均通过此处扩展）。
+ * 完全短路：不调 ctx.connect()，unsafe.connect() 不会执行。
+ *
+ * <p>三种场景：
+ * <ul>
+ *   <li>Proxy 模式：通过 socketChannelFactory 经代理连接目标</li>
+ *   <li>Direct 模式：socketChannelFactory 直连目标 IP</li>
+ *   <li>无 UpstreamConnector：connect() 落到 unsafe.connect()，立即 promise.setSuccess()</li>
+ * </ul>
+ */
+public class UpstreamConnector extends ChannelOutboundHandlerAdapter {
+
+    private final SocketChannelFactory socketChannelFactory;
+
+    @Override
+    public void connect(ChannelHandlerContext ctx,
+                        SocketAddress remoteAddress,
+                        SocketAddress localAddress,
+                        ChannelPromise promise) {
+        ChannelFuture f = socketChannelFactory.connect((InetSocketAddress) remoteAddress);
+        f.addListener(fut -> {
+            if (fut.isSuccess()) {
+                Channel upstream = ((ChannelFuture) fut).channel();
+                upstream.pipeline().addLast(new UpstreamDataRelay(ctx.channel()));
+                ctx.channel().attr(UPSTREAM_CHANNEL_KEY).set(upstream);
+                promise.setSuccess();
+            } else {
+                promise.setFailure(fut.cause());
+            }
+        });
+        // 不调 ctx.connect()：完全拦截，unsafe.connect() 不执行
+    }
+}
+```
+
+**UpstreamDataRelay（上游数据回写）**
+
+```java
+/**
+ * 挂在上游 Channel pipeline 末端，将目标服务器返回的数据注入 TcpConnectionChannel，
+ * 由 TCP 状态机封包后经 TUN 发回客户端。
+ */
+public class UpstreamDataRelay extends ChannelInboundHandlerAdapter {
+
+    private final Channel tcpConnChannel;
+
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+        // 目标服务器数据 → TcpConnectionChannel pipeline → TCP 封包 → TUN → 客户端
+        tcpConnChannel.pipeline().fireChannelRead(msg);
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) {
+        // 上游断开 → 触发连接关闭
+        tcpConnChannel.close();
     }
 }
 ```
@@ -814,17 +991,29 @@ public class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
 使用侧：
 
 ```java
-// TUN Channel pipeline 配置，对标 Http2MultiplexHandler 的写法
-EventLoopGroup workerGroup = new NioEventLoopGroup();  // 线程数 = CPU 核数
-tunPipeline.addLast(new TcpMultiplexHandler(config,
-    new ChannelInitializer<TcpConnectionChannel>() {
-        protected void initChannel(TcpConnectionChannel ch) {
-            ch.pipeline().addLast("handshake",
-                new TcpHandshakeHandler(handshakerFactory, config));
+// TUN EventLoop（单线程，负责 TunChannel 及包路由）
+EventLoopGroup tunGroup    = new DefaultEventLoopGroup(1);
+// Worker EventLoops（多线程，负责 TCP 状态机处理，一连接绑定一线程）
+EventLoopGroup workerGroup = new DefaultEventLoopGroup(4);
+
+// 每条连接的子 pipeline 初始化器（对标 Http2MultiplexHandler(childHandler) 写法）
+ChannelHandler childHandler = new ChannelInitializer<Channel>() {
+    protected void initChannel(Channel ch) {
+        ch.pipeline().addLast(new TcpHandshakeHandler(new TcpHandshakerFactory(config)));
+        // 可在此追加业务 handler，例如代理转发或 HTTP 响应
+    }
+};
+
+// TUN Channel pipeline 配置
+Bootstrap b = new Bootstrap()
+    .group(tunGroup)
+    .channel(TunChannel.class)
+    .handler(new ChannelInitializer<Channel>() {
+        protected void initChannel(Channel ch) {
+            ch.pipeline().addLast(new IpPacketCodec());
+            ch.pipeline().addLast(new TcpMultiplexHandler(config, childHandler, workerGroup));
         }
-    },
-    workerGroup
-));
+    });
 ```
 
 **方案 B 评估**
@@ -833,11 +1022,14 @@ tunPipeline.addLast(new TcpMultiplexHandler(config,
 |------|------|
 | 实现规模 | `TcpConnectionChannel` ~230 行，`TcpMultiplexHandler` ~80 行 |
 | EventLoop 集成 | `isCompatible()` 绑定 `assignedWorker`；TUN EventLoop 仅路由，TCP 处理分散到 workerGroup（见 §6.4） |
-| 出站写路径 | `doWrite()` → `parentCtx.write()` 写入父 pipeline，批量 flush，不逐包 flush |
-| 生命周期事件 | `doRegister()` 触发 `channelActive()`；`doDeregister()` 触发 `channelInactive()` |
+| 出站写路径（应用数据）| `channel().write(ByteBuf)` → `TcpEstablishedHandler.write()` → 进入发送缓冲区 → `TcpSegmenter.sendPending()` → `writeRaw()` |
+| 出站写路径（协议控制包）| `writeRaw(buf)` → `parentCtx.writeAndFlush()` → `IpPacketCodec.encode()` → `TunChannel.doWrite()` → TUN fd |
+| `doWrite()` 引用计数 | 跨线程 `parentCtx.write(msg)` 不 retain；须在 `buf.remove()` 前 `retain(msg)`，由 TUN pipeline 侧释放 |
+| 生命周期字段 | `closed`（`isOpen() = !closed`）与 `active`（`isActive()`）分开：注册前 `isOpen()` 须返回 true |
+| 生命周期事件 | `doRegister()` → `active=true` → `channelActive()` 自动触发；`doClose()` → `closed=true, active=false` → `channelInactive()` 自动触发 |
 | pipeline 配置 | `childHandler`（`ChannelInitializer`）注入构造函数，对标 `Http2MultiplexHandler(childHandler)` |
 | handler 复用 | 直接使用 `SimpleChannelInboundHandler` / `ChannelDuplexHandler` |
-| `pipeline.replace()` | 真实 Netty API，与 WebSocket 升级代码完全同构 |
+| `pipeline.replace()` 后转发 | 必须用 `ctx.pipeline().fireChannelRead(pkt)`，不能用 `ctx.fireChannelRead(pkt)`（旧 ctx.next 仍指向 replace 前的 handler） |
 | 流控扩展点 | `doBeginRead()` 可与 `RCV.WND` 联动（当前 no-op） |
 | 参考先例 | `AbstractHttp2StreamChannel`（写合并、生命周期）；`Http2MultiplexHandler`（childHandler 模式） |
 

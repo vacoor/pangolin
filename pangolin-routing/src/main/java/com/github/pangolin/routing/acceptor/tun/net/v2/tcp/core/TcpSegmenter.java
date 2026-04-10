@@ -75,7 +75,7 @@ public final class TcpSegmenter {
 
         conn.sndNxt(conn.sndNxt() + 1);   // FIN consumes one sequence number
 
-        conn.channel().writeAndFlush(buf);
+        ((TcpConnectionChannel) conn.channel()).writeRaw(buf);
     }
 
     /**
@@ -89,7 +89,7 @@ public final class TcpSegmenter {
                 conn.sndNxt(), conn.rcvNxt(),
                 0x10 /* ACK */,
                 scaledWindow(conn), null, null, 0);
-        conn.channel().writeAndFlush(buf);
+        ((TcpConnectionChannel) conn.channel()).writeRaw(buf);
     }
 
     /**
@@ -103,7 +103,7 @@ public final class TcpSegmenter {
                 conn.sndNxt(), conn.rcvNxt(),
                 0x14 /* RST+ACK */,
                 0, null, null, 0);
-        conn.channel().writeAndFlush(buf);
+        ((TcpConnectionChannel) conn.channel()).writeRaw(buf);
     }
 
     // ── Private helpers ──────────────────────────────────────────────────
@@ -130,7 +130,7 @@ public final class TcpSegmenter {
         conn.sendBuffer().enqueueRtx(entry);
         conn.sndNxt(conn.sndNxt() + payLen + (fin ? 1 : 0));
 
-        conn.channel().writeAndFlush(buf);
+        ((TcpConnectionChannel) conn.channel()).writeRaw(buf);
     }
 
     private static int scaledWindow(TcpConnection conn) {

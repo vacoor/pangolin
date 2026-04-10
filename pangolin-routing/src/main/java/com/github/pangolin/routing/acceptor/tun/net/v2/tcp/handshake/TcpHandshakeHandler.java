@@ -53,7 +53,14 @@ public final class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPa
                 ctx.pipeline().replace(this, "established", new TcpEstablishedHandler(conn));
                 // Fire the ACK into the newly installed handler: TCP allows data to be piggybacked
                 // on the final ACK (RFC 9293 §3.4). Without this, that data would be silently dropped.
-                ctx.fireChannelRead(pkt);
+                //
+                // MUST use pipeline().fireChannelRead(), NOT ctx.fireChannelRead().
+                // After replace(), `ctx` is the removed handler's context; its `next` pointer
+                // still points to the handler that was after TcpHandshakeHandler BEFORE the
+                // replace (i.e., SimpleChannelInboundHandler), skipping TcpEstablishedHandler.
+                // pipeline().fireChannelRead() starts from HeadContext and correctly reaches
+                // TcpEstablishedHandler at its new position.
+                ctx.pipeline().fireChannelRead(pkt);
             }
         }
         // All other packets during handshake are silently dropped.

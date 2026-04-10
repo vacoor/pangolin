@@ -48,7 +48,7 @@ public final class TcpRetransmitter {
                 flags, wnd,
                 null, oldest.payload(), payLen);
 
-        conn.channel().writeAndFlush(buf);
+        ((TcpConnectionChannel) conn.channel()).writeRaw(buf);
     }
 
     /**

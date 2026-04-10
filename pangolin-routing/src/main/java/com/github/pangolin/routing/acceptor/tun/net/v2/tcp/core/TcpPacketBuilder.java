@@ -70,7 +70,8 @@ public final class TcpPacketBuilder {
         ByteBuf buf = buildRaw(srcIp, srcPort, dstIp, dstPort,
                                seq, ack, tcpFlags, window,
                                buildDataOptions(conn), payload, payloadLen);
-        return conn.channel().writeAndFlush(buf);
+        ((TcpConnectionChannel) conn.channel()).writeRaw(buf);
+        return conn.channel().newSucceededFuture();
     }
 
     /** Build a raw IPv4+TCP packet (no payload copy — uses {@code payload.slice()}). */
