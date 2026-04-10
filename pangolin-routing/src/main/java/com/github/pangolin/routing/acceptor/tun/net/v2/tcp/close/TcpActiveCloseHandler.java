@@ -94,10 +94,13 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
             TcpSegmenter.INSTANCE.sendAck(conn);
             log.debug("[TCP] [ACTIVE-CLOSE] FIN in FIN_WAIT_1 → CLOSING");
         } else if (pkt.isAck()) {
-            // Our FIN was ACK'd — move to FIN_WAIT_2
-            conn.state(TcpConnectionState.FIN_WAIT_2);
-            scheduleFin2Timeout(ctx);
-            log.debug("[TCP] [ACTIVE-CLOSE] ACK in FIN_WAIT_1 → FIN_WAIT_2");
+            // Move to FIN_WAIT_2 only when our FIN is fully acknowledged (SND.UNA == SND.NXT).
+            // A plain data ACK that hasn't yet covered the FIN must keep us in FIN_WAIT_1.
+            if (conn.sndUna() == conn.sndNxt()) {
+                conn.state(TcpConnectionState.FIN_WAIT_2);
+                scheduleFin2Timeout(ctx);
+                log.debug("[TCP] [ACTIVE-CLOSE] ACK in FIN_WAIT_1 → FIN_WAIT_2");
+            }
         }
     }
 
@@ -116,7 +119,8 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
     // ── CLOSING ──────────────────────────────────────────────────────────
 
     private void handleClosing(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
-        if (pkt.isAck()) {
+        // Enter TIME_WAIT only when the ACK covers our FIN (SND.UNA == SND.NXT).
+        if (pkt.isAck() && conn.sndUna() == conn.sndNxt()) {
             conn.state(TcpConnectionState.TIME_WAIT);
             schedule2Msl(ctx);
             log.debug("[TCP] [ACTIVE-CLOSE] ACK in CLOSING → TIME_WAIT");
