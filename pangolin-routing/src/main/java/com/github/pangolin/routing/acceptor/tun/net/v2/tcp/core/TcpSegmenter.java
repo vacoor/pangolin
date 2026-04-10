@@ -27,10 +27,11 @@ public final class TcpSegmenter {
      * @param conn the connection whose send buffer to drain
      */
     public void sendPending(TcpConnection conn) {
-        int cwnd   = conn.congestionControl().cwnd(conn);
+        int cwnd     = conn.congestionControl().cwnd(conn);
+        int sndWnd   = conn.sndWnd();      // peer's receive window (bytes)
         int inFlight = conn.sendBuffer().rtxQueueSize();
 
-        while (conn.sendBuffer().hasDataToSend() && inFlight < cwnd) {
+        while (conn.sendBuffer().hasDataToSend() && inFlight < cwnd && sndWnd > 0) {
             ByteBuf data = conn.sendBuffer().pollWrite();
             if (data == null) break;
 
@@ -38,10 +39,11 @@ public final class TcpSegmenter {
             int total = data.readableBytes();
             int offset = 0;
 
-            while (offset < total && inFlight < cwnd) {
-                int segLen = Math.min(mss, total - offset);
+            while (offset < total && inFlight < cwnd && sndWnd > 0) {
+                int segLen = Math.min(mss, Math.min(total - offset, sndWnd));
                 ByteBuf payload = data.slice(offset, segLen).retain();
                 offset += segLen;
+                sndWnd -= segLen;          // track remaining peer window locally
                 sendSegment(conn, payload, false);
                 // Release the local retain: sendSegment enqueues a retainedSlice into the RTX
                 // queue (which holds its own +1), so payload's +1 from .retain() is no longer
@@ -50,7 +52,7 @@ public final class TcpSegmenter {
                 inFlight++;
             }
 
-            // If we couldn't send all data (cwnd exceeded), put remaining back
+            // If we couldn't send all data (cwnd or sndWnd exhausted), put remaining back
             if (offset < total) {
                 conn.sendBuffer().enqueue(data.slice(offset, total - offset).retain());
             }

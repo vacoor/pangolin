@@ -35,15 +35,8 @@ public final class TcpSegmentValidator {
             }
         }
 
-        // RST processing (RFC 9293 §3.5.2)
-        if (pkt.isRst()) {
-            int seq = pkt.tcpSeq();
-            if (seq == conn.rcvNxt() || isInWindow(conn, seq)) {
-                return false;   // valid RST: caller will close the connection
-            }
-            // Out-of-window RST: ignore
-            return false;
-        }
+        // NOTE: RST is handled by callers before validate() is called.
+        // validate() is never reached with an RST segment.
 
         // Sequence number acceptability (RFC 9293 §3.4)
         if (!isAcceptable(conn, pkt)) {
@@ -54,6 +47,26 @@ public final class TcpSegmentValidator {
         }
 
         return true;
+    }
+
+    /**
+     * RFC 9293 §3.5.2 — RST acceptability test.
+     *
+     * <p>A RST is valid only when its sequence number falls in the receive window:
+     * <ul>
+     *   <li>RCV.WND == 0: SEG.SEQ must equal RCV.NXT (exact match)</li>
+     *   <li>RCV.WND  > 0: RCV.NXT &le; SEG.SEQ &lt; RCV.NXT + RCV.WND</li>
+     * </ul>
+     */
+    public static boolean isRstAcceptable(TcpConnection conn, TcpPacketBuf pkt) {
+        int seq    = pkt.tcpSeq();
+        int rcvNxt = conn.rcvNxt();
+        int rcvWnd = conn.rcvWnd();
+        if (rcvWnd == 0) {
+            return seq == rcvNxt;
+        }
+        // RCV.NXT <= SEG.SEQ < RCV.NXT + RCV.WND  (exclude the upper bound)
+        return TcpSequence.between(rcvNxt, seq, rcvNxt + rcvWnd - 1);
     }
 
     /**

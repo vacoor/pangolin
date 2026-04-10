@@ -4,6 +4,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established.TcpSegmentValidator;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import io.netty.channel.ChannelDuplexHandler;
@@ -51,12 +52,15 @@ public final class TcpPassiveCloseHandler extends ChannelDuplexHandler {
         }
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
 
+        // RST: validate sequence before closing (RFC 9293 §3.5.2)
         if (pkt.isRst()) {
-            log.debug("[TCP] [PASSIVE-CLOSE] RST received — closing");
-            if (closePromise != null) {
-                ctx.channel().close(closePromise);
-            } else {
-                ctx.channel().close();
+            if (TcpSegmentValidator.isRstAcceptable(conn, pkt)) {
+                log.debug("[TCP] [PASSIVE-CLOSE] RST received — closing");
+                if (closePromise != null) {
+                    ctx.channel().close(closePromise);
+                } else {
+                    ctx.channel().close();
+                }
             }
             return;
         }

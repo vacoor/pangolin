@@ -53,10 +53,12 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
         }
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
 
-        // RST: unconditionally close
+        // RST: validate sequence before closing (RFC 9293 §3.5.2)
         if (pkt.isRst()) {
-            log.debug("[TCP] [ESTABLISHED] RST received — closing");
-            ctx.channel().close();
+            if (TcpSegmentValidator.isRstAcceptable(conn, pkt)) {
+                log.debug("[TCP] [ESTABLISHED] RST received — closing");
+                ctx.channel().close();
+            }
             return;
         }
 
@@ -70,8 +72,14 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
 
         // Data
         if (pkt.tcpPayloadLength() > 0 && conn.state().canReceive()) {
+            int sndNxtBefore = conn.sndNxt();
             TcpDataHandler.INSTANCE.onData(ctx, conn, pkt);
-            scheduleDelayedAck(ctx);
+            // onData() may have triggered a synchronous write (via fireChannelRead → app handler
+            // → write() → sendPending() → sendSegment()), which sends a PSH+ACK that already
+            // contains the acknowledgment. Only schedule delayed ACK if no data was sent.
+            if (conn.sndNxt() == sndNxtBefore) {
+                scheduleDelayedAck(ctx);
+            }
         }
 
         // FIN from peer → passive close
@@ -96,7 +104,14 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
         if (msg instanceof ByteBuf) {
             ByteBuf data = (ByteBuf) msg;
             conn.sendBuffer().enqueue(data);
+            int sndNxtBefore = conn.sndNxt();
             TcpSegmenter.INSTANCE.sendPending(conn);
+            // If a data segment was sent (PSH+ACK), it already carries the ACK field.
+            // Cancel any pending delayed ACK to avoid sending a redundant pure ACK.
+            if (conn.sndNxt() != sndNxtBefore && delAckPending) {
+                TcpTimerScheduler.INSTANCE.cancelDelayedAck(conn);
+                delAckPending = false;
+            }
             promise.setSuccess();
         } else {
             ctx.write(msg, promise);

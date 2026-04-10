@@ -3,7 +3,9 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpAckProcessor;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established.TcpSegmentValidator;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TimerType;
@@ -43,10 +45,18 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
+        // RST: validate sequence before closing (RFC 9293 §3.5.2)
         if (pkt.isRst()) {
-            log.debug("[TCP] [ACTIVE-CLOSE] RST received — closing");
-            ctx.channel().close(closePromise);
+            if (TcpSegmentValidator.isRstAcceptable(conn, pkt)) {
+                log.debug("[TCP] [ACTIVE-CLOSE] RST received — closing");
+                ctx.channel().close(closePromise);
+            }
             return;
+        }
+
+        // Process ACK in all active-close states: advances SND.UNA, samples RTT, updates CC
+        if (pkt.isAck()) {
+            TcpAckProcessor.INSTANCE.onAck(conn, pkt);
         }
 
         TcpConnectionState state = conn.state();
