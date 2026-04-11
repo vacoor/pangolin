@@ -1,12 +1,44 @@
 # TCP 协议栈 Java 重构方案
 
-> 版本：v4.0 | 更新日期：2026-04-10
+> 版本：v4.2 | 更新日期：2026-04-10
 > 分析基准：branch `feature/v1.2.3-ai-lb`
 > 目标：OOP 化、关注点分离、RFC9293 之外的扩展可插拔
 
 ---
 
 ## 更新日志
+
+### v4.2 — 2026-04-10
+
+**代码审查发现并修复 4 个 RFC9293 符合性 Bug**
+
+#### Bug A — RST 未做序列号合法性校验（RFC 9293 §3.5.2）
+
+- **影响范围**：`TcpEstablishedHandler`、`TcpActiveCloseHandler`、`TcpPassiveCloseHandler` 三个 handler 均受影响。
+- **根因**：三处均对收到的任意 RST 无条件关闭连接（`ctx.channel().close()`），未校验 `SEG.SEQ` 是否在接收窗口内。攻击者（或路由错乱）可发送任意序列号的 RST 强制断开合法连接（TCP RST 注入攻击）。
+- **RFC 9293 §3.5.2 要求**：
+  - `RCV.WND == 0`：`SEG.SEQ == RCV.NXT` 才接受；
+  - `RCV.WND > 0`：`RCV.NXT <= SEG.SEQ < RCV.NXT + RCV.WND`。
+- **修复**：`TcpSegmentValidator` 新增静态方法 `isRstAcceptable(conn, pkt)`，封装上述两条规则。三个 handler 的 RST 分支改为先调用该方法，校验通过才关闭。
+- **顺带 Bug D（同次修复）**：`TcpSegmentValidator.validate()` 内存在一段永不可达的 RST 处理代码（两条分支均 `return false`，且调用方在进入 `validate()` 前已提前拦截 RST）；修复时以注释替换，消除误导性死代码。
+
+#### Bug B — 主动关闭阶段 ACK 未触发 `TcpAckProcessor`（RTX 队列不清零、RTT 不采样、CC 不更新）
+
+- **影响范围**：`TcpActiveCloseHandler` 的 `handleFinWait1()`、`handleFinWait2()`、`handleClosing()` 三条路径。
+- **根因**：上述三个方法仅更新状态机（`conn.state(...)`）和发送控制包，未调用 `TcpAckProcessor.INSTANCE.onAck()`。结果：
+  1. RTX 队列不推进，FIN 的 RTX entry 永不移除，重传定时器可能永远触发；
+  2. Karn RTT 采样缺失，RTO 在主动关闭期间无法收敛；
+  3. CC 的 cwnd 与 SND.UNA 不更新。
+- **修复**：在 `channelRead0()` 的公共入口处，RST 检测之后统一调用 `TcpAckProcessor.INSTANCE.onAck(conn, pkt)`（仅当 `pkt.isAck()` 成立），作用于所有主动关闭状态。`onAck()` 内部对重复 ACK 和越界 ACK 均做幂等处理，无副作用风险。
+
+#### Bug C — `TcpSegmenter.sendPending()` 忽略对端接收窗口（`SND.WND`）
+
+- **影响范围**：`TcpSegmenter.sendPending()`。
+- **根因**：发送循环仅检查 `cwnd`（拥塞窗口），完全忽略 `conn.sndWnd()`（对端通告的接收窗口）。当对端窗口较小时，可发送超过对端缓冲区容量的数据，造成对端丢包、不必要重传，违反 RFC 9293 §3.7。
+- **修复**：
+  1. 外层循环条件加 `sndWnd > 0`（Zero Window 时停发）；
+  2. 内层循环用 `sndWnd` 本地副本同步递减；
+  3. `segLen = min(mss, min(remaining, sndWnd))`，单段大小不超过剩余对端窗口。
 
 ### v4.1 — 2026-04-10
 
