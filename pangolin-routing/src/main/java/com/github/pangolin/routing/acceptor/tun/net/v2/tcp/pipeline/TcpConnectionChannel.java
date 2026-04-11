@@ -122,11 +122,6 @@ public final class TcpConnectionChannel extends AbstractChannel {
 
     /**
      * Write all pending outbound messages to the parent TUN pipeline.
-     * Runs on Worker EventLoop; {@code parentCtx.write()} detects the cross-thread call and
-     * submits to the TUN EventLoop task queue automatically — no explicit wrapping needed.
-     */
-    /**
-     * Write all pending outbound messages to the parent TUN pipeline.
      *
      * <p><b>Refcount contract:</b> {@code buf.current()} returns the msg still owned by the
      * outbound-buffer entry (refcount = N). {@code parent().write(msg)} posts a cross-thread
@@ -209,7 +204,6 @@ public final class TcpConnectionChannel extends AbstractChannel {
      * The caller must not release {@code buf} after this call.
      */
     public void writeRaw(ByteBuf buf) {
-        // FIXME
         parent().writeAndFlush(buf);
     }
 

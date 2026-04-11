@@ -24,7 +24,7 @@ public final class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPa
     private       TcpHandshaker        handshaker;
 
     public TcpHandshakeHandler(TcpHandshakerFactory factory) {
-        super(false);   // autoRelease=false: TcpPacketBuf lifetime is managed by caller
+        super(true);   // autoRelease=true: release pkt after channelRead0 returns
         this.factory = factory;
     }
 
@@ -55,6 +55,11 @@ public final class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPa
             // replace (i.e., SimpleChannelInboundHandler), skipping TcpEstablishedHandler.
             // pipeline().fireChannelRead() starts from HeadContext and correctly reaches
             // TcpEstablishedHandler at its new position.
+            //
+            // autoRelease=true will release pkt once after channelRead0 returns.
+            // TcpEstablishedHandler.channelRead() also releases pkt once.
+            // Retain here so the net refcount change is zero when both releases fire.
+            pkt.retain();
             ctx.pipeline().fireChannelRead(pkt);
         }
     }

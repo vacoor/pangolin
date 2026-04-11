@@ -28,15 +28,16 @@ public final class TcpDataHandler {
             return;
         }
 
-        // Retain a copy for the receive buffer (slice shares refcount with pkt)
-        ByteBuf copy = payload.copy();
-        int newRcvNxt = conn.receiveBuffer().offer(pkt.tcpSeq(), conn.rcvNxt(), copy);
+        // retainedSlice shares the underlying buffer with pkt and adds a +1 refcount,
+        // so the receive buffer owns one reference independently of pkt's lifetime.
+        // Avoids the full data copy that copy() would perform.
+        ByteBuf segment = payload.retainedSlice();
+        int newRcvNxt = conn.receiveBuffer().offer(pkt.tcpSeq(), conn.rcvNxt(), segment);
         conn.rcvNxt(newRcvNxt);
 
         // Forward all available in-order data to upstream / application
         if (conn.receiveBuffer().isReadable()) {
-            ByteBuf data = conn.receiveBuffer().readAll();
-            ctx.fireChannelRead(data);
+            ctx.fireChannelRead(conn.receiveBuffer().readAll());
         }
     }
 }

@@ -4,9 +4,8 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established.TcpAckHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established.TcpSegmentValidator;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
@@ -51,28 +50,41 @@ public final class TcpPassiveCloseHandler extends ChannelDuplexHandler {
             return;
         }
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
-
-        // RST: validate sequence before closing (RFC 9293 §3.5.2)
-        if (pkt.isRst()) {
-            if (TcpSegmentValidator.isRstAcceptable(conn, pkt)) {
-                log.debug("[TCP] [PASSIVE-CLOSE] RST received — closing");
-                if (closePromise != null) {
-                    ctx.channel().close(closePromise);
-                } else {
-                    ctx.channel().close();
+        try {
+            // RST: validate sequence before closing (RFC 9293 §3.5.2)
+            if (pkt.isRst()) {
+                if (TcpSegmentValidator.isRstAcceptable(conn, pkt)) {
+                    log.debug("[TCP] [PASSIVE-CLOSE] RST received — closing");
+                    if (closePromise != null) {
+                        ctx.channel().close(closePromise);
+                    } else {
+                        ctx.channel().close();
+                    }
                 }
+                return;
             }
-            return;
-        }
 
-        // LAST_ACK: wait for the peer's ACK of our FIN
-        if (conn.state() == TcpConnectionState.LAST_ACK && pkt.isAck()) {
-            log.debug("[TCP] [PASSIVE-CLOSE] ACK received in LAST_ACK — closing channel");
-            // Trigger real Netty close: doClose() → deregisterCallback → registry.remove()
-            ChannelPromise p = closePromise != null ? closePromise : ctx.newPromise();
-            ctx.close(p);
+            // ACK processing: advances SND.UNA, samples RTT, and manages RFC 6298 retransmit
+            // timer (§5.2 cancel / §5.3 restart) for any data sent in CLOSE_WAIT before close().
+            if (pkt.isAck()) {
+                TcpAckHandler.INSTANCE.onAck(conn, pkt);
+            }
+
+            // LAST_ACK: close only when the ACK covers our FIN (SND.UNA == SND.NXT).
+            // A stale ACK that hasn't yet reached the FIN sequence must be ignored.
+            if (conn.state() == TcpConnectionState.LAST_ACK
+                    && pkt.isAck()
+                    && conn.sndUna() == conn.sndNxt()) {
+                log.debug("[TCP] [PASSIVE-CLOSE] FIN ACK'd in LAST_ACK — closing channel");
+                // Trigger real Netty close: doClose() → deregisterCallback → registry.remove()
+                ChannelPromise p = closePromise != null ? closePromise : ctx.newPromise();
+                ctx.close(p);
+            }
+            // CLOSE_WAIT: application drives close via close(); nothing further to do here.
+        } finally {
+            // pkt is consumed here (not forwarded to TailContext), so we must release it.
+            pkt.release();
         }
-        // CLOSE_WAIT: data or window-update ACKs — ignore (application drives close via close())
     }
 
     // ── Outbound ──────────────────────────────────────────────────────────

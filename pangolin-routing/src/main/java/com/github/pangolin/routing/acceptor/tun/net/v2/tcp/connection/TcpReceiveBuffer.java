@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection;
 
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
@@ -35,31 +36,46 @@ public final class TcpReceiveBuffer {
     public int offer(int seq, int rcvNxt, ByteBuf data) {
         int endSeq = seq + data.readableBytes();
         if (seq == rcvNxt) {
-            // In-order: deliver immediately
+            // In-order: deliver immediately, then drain any now-contiguous OFO segments
             readBuffer.addComponent(true, data);
-            rcvNxt = endSeq;
-            // Drain any buffered OFO segments that are now contiguous
-            while (!ofoQueue.isEmpty()) {
-                Integer nextSeq = ofoQueue.firstKey();
-                if (nextSeq == rcvNxt) {
-                    ByteBuf ofo = ofoQueue.pollFirstEntry().getValue();
-                    rcvNxt += ofo.readableBytes();
-                    readBuffer.addComponent(true, ofo);
-                } else {
-                    break;
-                }
-            }
-        } else if (Integer.compareUnsigned(seq, rcvNxt) > 0) {
-            // Out-of-order: buffer it (discard duplicates)
-            ByteBuf existing = ofoQueue.get(seq);
-            if (existing != null) {
-                data.release();
-            } else {
+            rcvNxt = drainOfo(endSeq);
+        } else if (TcpSequence.after(seq, rcvNxt)) {
+            // Out-of-order: buffer it (discard exact-sequence duplicates)
+            if (!ofoQueue.containsKey(seq)) {
                 ofoQueue.put(seq, data);
+            } else {
+                data.release();
             }
+        } else if (TcpSequence.after(endSeq, rcvNxt)) {
+            // Partial overlap: leading bytes already received, deliver only the new tail
+            int skip = rcvNxt - seq;
+            ByteBuf tail = data.retainedSlice(data.readerIndex() + skip, data.readableBytes() - skip);
+            data.release();
+            readBuffer.addComponent(true, tail);
+            rcvNxt = drainOfo(rcvNxt + tail.readableBytes());
         } else {
             // Fully duplicate: discard
             data.release();
+        }
+        return rcvNxt;
+    }
+
+    /**
+     * Drain contiguous out-of-order segments into {@code readBuffer} starting from {@code rcvNxt}.
+     *
+     * @param rcvNxt the sequence number expected next
+     * @return the updated RCV.NXT after absorbing all contiguous OFO segments
+     */
+    private int drainOfo(int rcvNxt) {
+        while (!ofoQueue.isEmpty()) {
+            Integer nextSeq = ofoQueue.firstKey();
+            if (nextSeq == rcvNxt) {
+                ByteBuf ofo = ofoQueue.pollFirstEntry().getValue();
+                rcvNxt += ofo.readableBytes();
+                readBuffer.addComponent(true, ofo);
+            } else {
+                break;
+            }
         }
         return rcvNxt;
     }
@@ -77,9 +93,12 @@ public final class TcpReceiveBuffer {
         if (!readBuffer.isReadable()) {
             return Unpooled.EMPTY_BUFFER;
         }
-        ByteBuf copy = readBuffer.copy();
+        // readRetainedSlice advances readerIndex, so discardReadComponents() can actually
+        // free the consumed backing components. copy() does NOT advance readerIndex —
+        // using it would leave all components in the buffer (memory leak).
+        ByteBuf result = readBuffer.readRetainedSlice(readBuffer.readableBytes());
         readBuffer.discardReadComponents();
-        return copy;
+        return result;
     }
 
     /** Release all buffers (called on connection close). */

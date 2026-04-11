@@ -60,47 +60,52 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
             return;
         }
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
-
-        // RST: validate sequence before closing (RFC 9293 §3.5.2)
-        if (pkt.isRst()) {
-            if (TcpSegmentValidator.isRstAcceptable(conn, pkt)) {
-                log.debug("[TCP] [ESTABLISHED] RST received — closing");
-                ctx.channel().close();
+        try {
+            // RST: validate sequence before closing (RFC 9293 §3.5.2)
+            if (pkt.isRst()) {
+                if (TcpSegmentValidator.isRstAcceptable(conn, pkt)) {
+                    log.debug("[TCP] [ESTABLISHED] RST received — closing");
+                    ctx.channel().close();
+                }
+                return;
             }
-            return;
+
+            // Segment validation (sequence number + PAWS)
+            if (!TcpSegmentValidator.INSTANCE.validate(conn, pkt)) {
+                return;
+            }
+
+            // ACK processing
+            TcpAckHandler.INSTANCE.onAck(conn, pkt);
+
+            // Data
+            if (pkt.tcpPayloadLength() > 0 && conn.state().canReceive()) {
+                ackPending |= ACK_SCHED;   // we owe the peer an ACK for this data
+                TcpDataHandler.INSTANCE.onData(ctx, conn, pkt);
+                // write() called synchronously inside onData() (app handler piggybacked a response)
+                // will have cleared ACK_SCHED; the ackSndCheck() below handles that cleanly.
+            }
+
+            // FIN from peer → passive close
+            if (pkt.isFin() && conn.state().canReceive()) {
+                conn.rcvNxt(conn.rcvNxt() + 1);   // FIN consumes one sequence number
+                conn.state(TcpConnectionState.CLOSE_WAIT);
+                log.debug("[TCP] [ESTABLISHED] FIN received — entering CLOSE_WAIT");
+                // FIN must be ACK'd immediately without delay (RFC 9293 §3.10.7.4).
+                // ACK_NOW implies ACK_SCHED: setting both ensures ackSndCheck() doesn't
+                // skip the send when no data was received in the same segment.
+                ackPending |= ACK_SCHED | ACK_NOW;
+                // Replace handler with passive close handler
+                ctx.pipeline().replace(this, "close", new TcpPassiveCloseHandler(conn));
+            }
+
+            // Single ACK decision point — mirrors Linux tcp_ack_snd_check().
+            ackSndCheck(ctx);
+        } finally {
+            // pkt is consumed here (not forwarded to TailContext), so we must release it.
+            // This is the terminal consumer for all inbound TcpPacketBuf in ESTABLISHED state.
+            pkt.release();
         }
-
-        // Segment validation (sequence number + PAWS)
-        if (!TcpSegmentValidator.INSTANCE.validate(conn, pkt)) {
-            return;
-        }
-
-        // ACK processing
-        TcpAckHandler.INSTANCE.onAck(conn, pkt);
-
-        // Data
-        if (pkt.tcpPayloadLength() > 0 && conn.state().canReceive()) {
-            ackPending |= ACK_SCHED;   // we owe the peer an ACK for this data
-            TcpDataHandler.INSTANCE.onData(ctx, conn, pkt);
-            // write() called synchronously inside onData() (app handler piggybacked a response)
-            // will have cleared ACK_SCHED; the ackSndCheck() below handles that cleanly.
-        }
-
-        // FIN from peer → passive close
-        if (pkt.isFin() && conn.state().canReceive()) {
-            conn.rcvNxt(conn.rcvNxt() + 1);   // FIN consumes one sequence number
-            conn.state(TcpConnectionState.CLOSE_WAIT);
-            log.debug("[TCP] [ESTABLISHED] FIN received — entering CLOSE_WAIT");
-            // FIN must be ACK'd immediately without delay (RFC 9293 §3.10.7.4).
-            // ACK_NOW implies ACK_SCHED: setting both ensures ackSndCheck() doesn't
-            // skip the send when no data was received in the same segment.
-            ackPending |= ACK_SCHED | ACK_NOW;
-            // Replace handler with passive close handler
-            ctx.pipeline().replace(this, "close", new TcpPassiveCloseHandler(conn));
-        }
-
-        // Single ACK decision point — mirrors Linux tcp_ack_snd_check().
-        ackSndCheck(ctx);
     }
 
     // ── Outbound ───────────────────────────────────────────────────────────

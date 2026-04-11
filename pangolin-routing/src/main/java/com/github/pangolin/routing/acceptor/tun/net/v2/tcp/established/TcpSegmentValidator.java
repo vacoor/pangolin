@@ -1,9 +1,11 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
+import io.netty.buffer.ByteBuf;
 
 /**
  * RFC 9293 §3.4 segment validation: sequence number check + RST processing + PAWS (RFC 7323).
@@ -25,9 +27,8 @@ public final class TcpSegmentValidator {
         // PAWS check (RFC 7323 §5) — must run before sequence check
         if (conn.timestampExt().isEnabled(conn)) {
             // Parse TSval from the incoming segment's options
-            io.netty.buffer.ByteBuf opts = pkt.tcpOptionsSlice();
-            long[] ts = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util
-                             .TcpOptionCodec.parseTimestamp(opts);
+            ByteBuf opts = pkt.tcpOptionsSlice();
+            long[] ts = TcpOptionCodec.parseTimestamp(opts);
             if (ts != null && conn.timestampExt().isPawsRejected(conn, (int) ts[0])) {
                 // PAWS: send ACK and drop the segment (RFC 7323 §5.1)
                 TcpSegmenter.INSTANCE.sendAck(conn);
@@ -76,12 +77,10 @@ public final class TcpSegmentValidator {
     private boolean isAcceptable(TcpConnection conn, TcpPacketBuf pkt) {
         int seq    = pkt.tcpSeq();
         int segLen = pkt.tcpPayloadLength() + (pkt.isSyn() ? 1 : 0) + (pkt.isFin() ? 1 : 0);
-        int rcvNxt = conn.rcvNxt();
-        int rcvEnd = rcvNxt + conn.rcvWnd();
 
         if (segLen == 0) {
             if (conn.rcvWnd() == 0) {
-                return seq == rcvNxt;
+                return seq == conn.rcvNxt();
             }
             return isInWindow(conn, seq);
         } else {
@@ -94,8 +93,9 @@ public final class TcpSegmentValidator {
     }
 
     private boolean isInWindow(TcpConnection conn, int seq) {
+        // RFC 9293 §3.4: window is [RCV.NXT, RCV.NXT+RCV.WND) — exclusive upper bound.
+        // TcpSequence.between() is inclusive on both ends, so subtract 1 to convert.
         int rcvNxt = conn.rcvNxt();
-        int rcvEnd = rcvNxt + conn.rcvWnd();
-        return TcpSequence.between(rcvNxt, seq, rcvEnd);
+        return TcpSequence.between(rcvNxt, seq, rcvNxt + conn.rcvWnd() - 1);
     }
 }
