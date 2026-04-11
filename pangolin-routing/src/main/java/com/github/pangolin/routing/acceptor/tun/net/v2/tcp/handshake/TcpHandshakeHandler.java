@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established.TcpEstablishedHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -36,7 +37,7 @@ public final class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPa
     protected void channelRead0(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
         if (handshaker == null) {
             /*-
-             * TCP_LISTEN state.
+             * TCP_LISTEN - <SYN> -> TCP_NEW_SYN_RECV (req sock).
              */
             // ── First packet: must be SYN (TcpMultiplexHandler already filters non-SYN) ──
             // Defensive guard in case a stray packet arrives before the SYN is processed.
@@ -47,17 +48,18 @@ public final class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPa
         }
 
         /*-
-         * TCP_NEW_SYN_RECV state.
+         * TCP_NEW_SYN_RECV - <ACK> -> TCP_SYN_RECV.
          */
         // ── All subsequent packets — delegate to handshaker (≈ tcp_check_req) ──
         // finishHandshake() handles RST, SYN retransmit, and the final ACK in one place.
         TcpConnection conn = handshaker.finishHandshake(ctx.channel(), pkt);
         if (conn != null) {
             /*-
-             * TCP_NEW_SYN_RECV --(--> TCP_SYN_RECV --)--> TCP_ESTABLISHED.
+             * TCP_SYN_RECV -> TCP_ESTABLISHED.
              */
             log.debug("[TCP] [HANDSHAKE] 3WH complete — switching to established handler");
             handshaker = null;
+            conn.state(TcpConnectionState.ESTABLISHED);
             ctx.pipeline().replace(this, "established", new TcpEstablishedHandler(conn));
             // Fire the ACK into the newly installed handler: TCP allows data to be piggybacked
             // on the final ACK (RFC 9293 §3.4). Without this, that data would be silently dropped.

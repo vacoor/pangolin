@@ -4,6 +4,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpPacketBuilder;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
@@ -201,7 +202,7 @@ public final class TcpHandshaker {
         cancelRetransmitTimer();  // handshake done — stop retransmitting SYN-ACK
         log.debug("[TCP] [HANDSHAKE] 3WH complete: mss={}, peerWscale={}", negotiatedMss, clientWscale);
 
-        return TcpConnection.builder()
+        TcpConnection conn = TcpConnection.builder()
                 .channel(connChannel)
                 .sndUna(sndIsn + 1)
                 .sndNxt(sndIsn + 1)
@@ -212,6 +213,8 @@ public final class TcpHandshaker {
                 .sndWscale(clientWscale >= 0 ? clientWscale : 0)
                 .rcvWscale(clientWscale >= 0 ? config.windowScale() : 0)
                 .build();
+        conn.state(TcpConnectionState.SYN_RECEIVED);
+        return conn;
     }
 
     // ── Private helpers ────────────────────────────────────────────────────
