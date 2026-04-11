@@ -12,6 +12,7 @@ import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
@@ -76,7 +77,14 @@ public class LinuxTunAdapter extends TunAdapter {
      * {@inheritDoc}
      */
     @Override
-    protected void write0(final ByteBuffer packet) {
+    protected void write0(final ByteBuffer[] packet) throws IOException {
+        // FIXME Gather I/O
+        for (final ByteBuffer buf : packet) {
+            write0(buf);
+        }
+    }
+
+    private void write0(final ByteBuffer packet) {
         final byte[] bytes = new byte[packet.remaining()];
         packet.get(bytes).clear();
         LIBC.write(fd, bytes, bytes.length);

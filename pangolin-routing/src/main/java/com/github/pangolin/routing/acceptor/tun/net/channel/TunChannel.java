@@ -135,7 +135,7 @@ public class TunChannel extends AbstractChannel {
             }
 
             try {
-                device.write(((ByteBuf) msg).nioBuffer());
+                device.write(((ByteBuf) msg).nioBuffers());
             } finally {
                 in.remove();
             }

@@ -100,7 +100,27 @@ public class WindowsTunAdapter extends TunAdapter {
      * {@inheritDoc}
      */
     @Override
-    protected void write0(final ByteBuffer packet) {
+    protected void write0(final ByteBuffer[] packet) throws IOException {
+        // FIXME Gather I/O
+        int len = 0;
+        for (final ByteBuffer buf : packet) {
+            len += buf.remaining();
+            write0(buf);
+        }
+
+        /*
+        final WinDef.DWORD size = new WinDef.DWORD(len);
+        final Pointer packetPointer = WintunAllocateSendPacket(session, size);
+        for (int i = 0, written = 0; i < packet.length; i++) {
+            for (; packet[i].hasRemaining(); written++) {
+                packetPointer.setByte(written, packet[i].get());
+            }
+        }
+        WintunSendPacket(session, packetPointer);
+        */
+    }
+
+    private void write0(final ByteBuffer packet) {
         final WinDef.DWORD size = new WinDef.DWORD(packet.remaining());
         final Pointer packetPointer = WintunAllocateSendPacket(session, size);
 
@@ -190,7 +210,7 @@ public class WindowsTunAdapter extends TunAdapter {
                  * route add 198.18.0.0 mask 255.255.255.0 198.18.0.1 metric 261 IF 12
                  * route add 198.18.0.1 mask 255.255.255.255 198.18.0.1 metric 261 IF 12
                  */
-                 final int ifIndex = WindowsNetworkInterface.interfaceLuidToIndex(luid);
+                final int ifIndex = WindowsNetworkInterface.interfaceLuidToIndex(luid);
                 for (final InterfaceAddressEx binding : bindings) {
                     /*
                     final InetAddress address = binding.getAddress();

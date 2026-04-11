@@ -104,7 +104,14 @@ public class DarwinTunAdapter extends TunAdapter {
      * {@inheritDoc}
      */
     @Override
-    protected void write0(final ByteBuffer packet) throws IOException {
+    protected void write0(final ByteBuffer[] packet) throws IOException {
+        // FIXME Gather I/O
+        for (final ByteBuffer buf : packet) {
+            write0(buf);
+        }
+    }
+
+    private void write0(final ByteBuffer packet) throws IOException {
         final int ipVersion = packet.get(packet.position()) >> 4;
         int addressFamily = Socket.AF_UNSPEC;
         if (4 == ipVersion) {

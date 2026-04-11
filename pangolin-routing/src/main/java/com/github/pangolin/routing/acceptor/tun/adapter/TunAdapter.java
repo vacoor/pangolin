@@ -13,7 +13,7 @@ public abstract class TunAdapter {
         return read0();
     }
 
-    public void write(final ByteBuffer packet) throws IOException {
+    public void write(final ByteBuffer[] packet) throws IOException {
         checkOpen();
         write0(packet);
     }
@@ -33,7 +33,7 @@ public abstract class TunAdapter {
 
     protected abstract ByteBuffer read0() throws IOException;
 
-    protected abstract void write0(final ByteBuffer buffer) throws IOException;
+    protected abstract void write0(final ByteBuffer[] packet) throws IOException;
 
     protected abstract void destroy0() throws IOException;
 
