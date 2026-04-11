@@ -101,14 +101,14 @@ public class WindowsTunAdapter extends TunAdapter {
      */
     @Override
     protected void write0(final ByteBuffer[] packet) throws IOException {
-        // FIXME Gather I/O
+        /*-
+         * XXX: Gather I/O is not supported in Wintun.
+         */
         int len = 0;
         for (final ByteBuffer buf : packet) {
             len += buf.remaining();
-            write0(buf);
         }
 
-        /*
         final WinDef.DWORD size = new WinDef.DWORD(len);
         final Pointer packetPointer = WintunAllocateSendPacket(session, size);
         for (int i = 0, written = 0; i < packet.length; i++) {
@@ -117,9 +117,9 @@ public class WindowsTunAdapter extends TunAdapter {
             }
         }
         WintunSendPacket(session, packetPointer);
-        */
     }
 
+    @Deprecated
     private void write0(final ByteBuffer packet) {
         final WinDef.DWORD size = new WinDef.DWORD(packet.remaining());
         final Pointer packetPointer = WintunAllocateSendPacket(session, size);
