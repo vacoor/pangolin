@@ -9,6 +9,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.ACK_NOW;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.ACK_SCHED;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.ACK_TIMER;
@@ -62,6 +63,11 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
 
     // ── Inbound ────────────────────────────────────────────────────────────
 
+    /**
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#tcp_v4_do_rcv">tcp_v4_do_rcv</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_rcv_state_process">tcp_rcv_state_process</a>
+     */
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
         if (!(msg instanceof TcpPacketBuf)) {
@@ -76,6 +82,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
              * PSH, bare FIN without ACK, flags=0).  Drop silently without sending ACK —
              * mirrors Linux tcp_rcv_state_process(!ACK && !RST && !SYN → discard). */
             if (!pkt.isAck() && !pkt.isRst() && !pkt.isSyn()) {
+                log.warn(logFormat("[TCP] [RCV]", pkt, "Connection reset: Invalid TCP flag(!ACK, !RST, !SYN)"));
                 return;
             }
 

@@ -65,6 +65,11 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#tcp_v4_rcv">tcp_v4_rcv</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#tcp_v4_do_rcv">tcp_v4_do_rcv</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_rcv_state_process">tcp_rcv_state_process</a>
+     */
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
         if (!(msg instanceof TcpPacketBuf)) {
@@ -88,7 +93,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
              *   SYN -> conn_request
              *   * -> DISCARD
              *
-             * @see https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_rcv_state_process
+             * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_rcv_state_process">tcp_rcv_state_process</a>
              */
             if (pkt.isAck()) {
                 log.info(logFormat("[TCP] [RCV]", pkt, "Connection reset: SKB_DROP_REASON_TCP_FLAGS Invalid TCP flag(LISTEN <- ACK)"));
@@ -96,24 +101,30 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                 pkt.release();
                 return;
             }
-
             if (pkt.isRst()) {
                 log.info(logFormat("[TCP] [RCV]", pkt, "Packet discard: Connection reset not required"));
                 pkt.release();
                 return;
             }
-
             if (!pkt.isSyn() || pkt.isFin()) {
                 log.info(logFormat("[TCP] [RCV]", pkt, "Packet discard: TCP_FLAGS"));
                 pkt.release();
                 return;
             }
 
+            /*-
+             * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_conn_request">tcp_conn_request</a>
+             */
+            log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 1/3: SYN"));
+
+            /*-
+             * FIXME check accept queue is full
+             */
+
             // First SYN: select Worker via consistent hash (bit-AND clears sign bit safely).
             // ⚠ Math.abs(Integer.MIN_VALUE) == Integer.MIN_VALUE (still negative in Java);
             //   use (hash & Integer.MAX_VALUE) to guarantee non-negative result.
             EventLoop worker = workers[(fourTuple.hashCode() & Integer.MAX_VALUE) % workers.length];
-
             connCh = new TcpConnectionChannel(
                     ctx.channel(), fourTuple, worker,
                     () -> registry.remove(fourTuple)   // deregisterCallback — runs on TUN EventLoop
@@ -133,6 +144,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                     ctx.channel().eventLoop().execute(() -> registry.remove(fourTuple));
                 }
             });
+
             registry.put(fourTuple, connCh);
         }
 

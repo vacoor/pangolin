@@ -28,9 +28,16 @@ public final class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPa
         this.factory = factory;
     }
 
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_conn_request">tcp_conn_request</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#tcp_v4_rcv">tcp_v4_rcv</a>
+     */
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
         if (handshaker == null) {
+            /*-
+             * TCP_LISTEN state.
+             */
             // ── First packet: must be SYN (TcpMultiplexHandler already filters non-SYN) ──
             // Defensive guard in case a stray packet arrives before the SYN is processed.
             if (!pkt.isSyn() || pkt.isFin()) return;
@@ -39,10 +46,16 @@ public final class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPa
             return;
         }
 
+        /*-
+         * TCP_NEW_SYN_RECV state.
+         */
         // ── All subsequent packets — delegate to handshaker (≈ tcp_check_req) ──
         // finishHandshake() handles RST, SYN retransmit, and the final ACK in one place.
         TcpConnection conn = handshaker.finishHandshake(ctx.channel(), pkt);
         if (conn != null) {
+            /*-
+             * TCP_NEW_SYN_RECV --(--> TCP_SYN_RECV --)--> TCP_ESTABLISHED.
+             */
             log.debug("[TCP] [HANDSHAKE] 3WH complete — switching to established handler");
             handshaker = null;
             ctx.pipeline().replace(this, "established", new TcpEstablishedHandler(conn));
