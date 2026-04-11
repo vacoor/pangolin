@@ -20,16 +20,25 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * TCP data-transfer pipeline stage.
+ * ESTABLISHED-state segment processing — RFC 9293 §3.10.7.4.
  *
- * <p>Processes all segments while the connection is ESTABLISHED:
- * <ul>
- *   <li>Validates sequence numbers (RFC 9293 §3.4)</li>
- *   <li>Processes ACKs (RFC 9293 / RFC 5681 / RFC 6298)</li>
- *   <li>Queues and delivers received data (RFC 9293 §3.7)</li>
- *   <li>Handles incoming FIN → transitions to passive close</li>
- *   <li>Schedules delayed ACK (RFC 9293 §3.8.6.2.2)</li>
- * </ul>
+ * <p>Inbound path ({@link #channelRead}) follows the eight-step procedure from the RFC:
+ * <ol>
+ *   <li>Sequence number acceptability check (§3.4) + PAWS (RFC 7323 §5)</li>
+ *   <li>RST bit — pre-screened with the acceptability test (§3.5.3)</li>
+ *   <li>Security — not applicable</li>
+ *   <li>SYN bit — rejected by step 1 sequence check; challenge-ACK omitted</li>
+ *   <li>ACK field — advance SND.UNA, update window, RFC 5681 CC, RFC 6298 timer</li>
+ *   <li>URG bit — not implemented</li>
+ *   <li>Segment text — deliver in-order; OFO queue for out-of-order</li>
+ *   <li>FIN bit — enter CLOSE_WAIT, ACK immediately</li>
+ * </ol>
+ *
+ * <p>Between steps 5 and 7, {@code tcp_data_snd_check} flushes any queued send data
+ * whose window was re-opened by this ACK.
+ *
+ * <p>After step 8, {@code tcp_ack_snd_check} decides whether to send an ACK immediately
+ * or arm the delayed-ACK timer.
  *
  * <p>Outbound writes ({@code ctx.write(ByteBuf)}) are enqueued in {@code TcpSendBuffer}
  * and transmitted by {@link TcpSegmenter}.
@@ -61,27 +70,56 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
         }
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
         try {
-            // RST: validate sequence before closing (RFC 9293 §3.5.2)
+            /* ── Flag pre-filter (before RFC steps) ──────────────────────────────────
+             * In all post-handshake states every valid segment must carry at least one
+             * of {ACK, RST, SYN}.  A segment with none of these is malformed (e.g. bare
+             * PSH, bare FIN without ACK, flags=0).  Drop silently without sending ACK —
+             * mirrors Linux tcp_rcv_state_process(!ACK && !RST && !SYN → discard). */
+            if (!pkt.isAck() && !pkt.isRst() && !pkt.isSyn()) {
+                return;
+            }
+
+            /* ── Step 2: check the RST bit (RFC 9293 §3.10.7.4 + RFC 5961 §3.2) ──────
+             * RST has its own acceptability test (§3.5.2) — three outcomes:
+             *   DROP          : SEG.SEQ outside window — silently discard.
+             *   RESET         : SEG.SEQ == RCV.NXT    — close connection.
+             *   CHALLENGE_ACK : SEG.SEQ in window but != RCV.NXT — send challenge ACK
+             *                   to let peer correct itself (blind-RST attack mitigation).
+             * Screened before step 1 because RST is exempt from PAWS (RFC 7323 §5). */
             if (pkt.isRst()) {
-                if (TcpSegmentValidator.isRstAcceptable(conn, pkt)) {
-                    log.debug("[TCP] [ESTABLISHED] RST received — closing");
-                    ctx.channel().close();
+                switch (TcpSegmentValidator.checkRst(conn, pkt)) {
+                    case RESET:
+                        log.debug("[TCP] [ESTABLISHED] RST accepted (seq==RCV.NXT) — closing");
+                        ctx.channel().close();
+                        break;
+                    case CHALLENGE_ACK:
+                        log.debug("[TCP] [ESTABLISHED] RST in window but seq!=RCV.NXT — challenge ACK");
+                        TcpSegmenter.INSTANCE.sendAck(conn);
+                        break;
+                    default: // DROP
+                        break;
                 }
                 return;
             }
 
-            // Segment validation (sequence number + PAWS)
+            /* ── Step 1: check sequence number + PAWS (RFC 9293 §3.4 + RFC 7323 §5) ─
+             * Unacceptable segment: send ACK (unless RST) and drop.
+             * PAWS check runs first (§3.4 note): TSval regression → send ACK and drop. */
             if (!TcpSegmentValidator.INSTANCE.validate(conn, pkt)) {
                 return;
             }
 
-            // ACK processing
+            /* ── Step 5: check the ACK field (RFC 9293 §3.10.7.4 fifth) ─────────────
+             * Advance SND.UNA, update SND.WND, sample RTT (Karn's alg.), notify CC
+             * (RFC 5681), and manage the RFC 6298 retransmit timer (§5.2 / §5.3). */
             TcpAckHandler.INSTANCE.onAck(conn, pkt);
 
-            // tcp_data_snd_check: flush pending send data after ACK — peer's receive window
-            // may have re-opened (e.g. zero-window → non-zero after this ACK).
-            // If a PSH+ACK is sent here it carries the current rcvNxt, piggybacking any
-            // delayed ACK still pending from a previous segment — cancel that timer.
+            /* ── tcp_data_snd_check (after step 5) ──────────────────────────────────
+             * The ACK may have re-opened a zero peer window.  Flush any queued send
+             * data immediately so the peer's credit is consumed without waiting for
+             * the application to write again.
+             * If a PSH+ACK is emitted here it carries rcvNxt as the acknowledgement,
+             * piggybacking any delayed ACK still pending from the previous segment. */
             {
                 int sndNxtPrior = conn.sndNxt();
                 TcpSegmenter.INSTANCE.sendPending(conn);
@@ -91,28 +129,30 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
                 }
             }
 
-            // Data
+            /* ── Step 7: process the segment text (RFC 9293 §3.10.7.4 seventh) ──────
+             * Deliver in-order payload to the application; buffer out-of-order data. */
             if (pkt.tcpPayloadLength() > 0 && conn.state().canReceive()) {
-                ackPending |= ACK_SCHED;   // we owe the peer an ACK for this data
+                ackPending |= ACK_SCHED;   // received data — we owe peer an ACK
                 TcpDataHandler.INSTANCE.onData(ctx, conn, pkt);
-                // write() called synchronously inside onData() (app handler piggybacked a response)
-                // will have cleared ACK_SCHED; the ackSndCheck() below handles that cleanly.
+                // write() may be called synchronously from the app handler during onData()
+                // (piggybacked response); it clears ACK_SCHED when it sends a PSH+ACK.
             }
 
-            // FIN from peer → passive close
+            /* ── Step 8: check the FIN bit (RFC 9293 §3.10.7.4 eighth) ─────────────
+             * FIN received: advance RCV.NXT, enter CLOSE_WAIT, ACK immediately.
+             * RFC 9293 §3.10.7.4 requires the FIN to be acknowledged without delay;
+             * ACK_NOW + ACK_SCHED ensure ackSndCheck() sends even if no data arrived. */
             if (pkt.isFin() && conn.state().canReceive()) {
                 conn.rcvNxt(conn.rcvNxt() + 1);   // FIN consumes one sequence number
                 conn.state(TcpConnectionState.CLOSE_WAIT);
                 log.debug("[TCP] [ESTABLISHED] FIN received — entering CLOSE_WAIT");
-                // FIN must be ACK'd immediately without delay (RFC 9293 §3.10.7.4).
-                // ACK_NOW implies ACK_SCHED: setting both ensures ackSndCheck() doesn't
-                // skip the send when no data was received in the same segment.
                 ackPending |= ACK_SCHED | ACK_NOW;
-                // Replace handler with passive close handler
                 ctx.pipeline().replace(this, "close", new TcpPassiveCloseHandler(conn));
             }
 
-            // Single ACK decision point — mirrors Linux tcp_ack_snd_check().
+            /* ── tcp_ack_snd_check (after step 8) ───────────────────────────────────
+             * Single ACK decision point (mirrors Linux tcp_ack_snd_check / §5827):
+             * send immediately if ACK_NOW, otherwise arm the delayed-ACK timer. */
             ackSndCheck(ctx);
         } finally {
             // pkt is consumed here (not forwarded to TailContext), so we must release it.

@@ -51,15 +51,23 @@ public final class TcpPassiveCloseHandler extends ChannelDuplexHandler {
         }
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
         try {
-            // RST: validate sequence before closing (RFC 9293 §3.5.2)
+            // RST: three-way check (RFC 9293 §3.5.2 + RFC 5961 §3.2)
             if (pkt.isRst()) {
-                if (TcpSegmentValidator.isRstAcceptable(conn, pkt)) {
-                    log.debug("[TCP] [PASSIVE-CLOSE] RST received — closing");
-                    if (closePromise != null) {
-                        ctx.channel().close(closePromise);
-                    } else {
-                        ctx.channel().close();
-                    }
+                switch (TcpSegmentValidator.checkRst(conn, pkt)) {
+                    case RESET:
+                        log.debug("[TCP] [PASSIVE-CLOSE] RST accepted (seq==RCV.NXT) — closing");
+                        if (closePromise != null) {
+                            ctx.channel().close(closePromise);
+                        } else {
+                            ctx.channel().close();
+                        }
+                        break;
+                    case CHALLENGE_ACK:
+                        log.debug("[TCP] [PASSIVE-CLOSE] RST in window but seq!=RCV.NXT — challenge ACK");
+                        TcpSegmenter.INSTANCE.sendAck(conn);
+                        break;
+                    default: // DROP
+                        break;
                 }
                 return;
             }

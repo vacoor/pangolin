@@ -44,11 +44,19 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
-        // RST: validate sequence before closing (RFC 9293 §3.5.2)
+        // RST: three-way check (RFC 9293 §3.5.2 + RFC 5961 §3.2)
         if (pkt.isRst()) {
-            if (TcpSegmentValidator.isRstAcceptable(conn, pkt)) {
-                log.debug("[TCP] [ACTIVE-CLOSE] RST received — closing");
-                ctx.channel().close(closePromise);
+            switch (TcpSegmentValidator.checkRst(conn, pkt)) {
+                case RESET:
+                    log.debug("[TCP] [ACTIVE-CLOSE] RST accepted (seq==RCV.NXT) — closing");
+                    ctx.channel().close(closePromise);
+                    break;
+                case CHALLENGE_ACK:
+                    log.debug("[TCP] [ACTIVE-CLOSE] RST in window but seq!=RCV.NXT — challenge ACK");
+                    TcpSegmenter.INSTANCE.sendAck(conn);
+                    break;
+                default: // DROP
+                    break;
             }
             return;
         }
