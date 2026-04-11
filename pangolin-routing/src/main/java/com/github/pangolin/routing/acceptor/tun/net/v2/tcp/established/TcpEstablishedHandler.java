@@ -78,6 +78,19 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
             // ACK processing
             TcpAckHandler.INSTANCE.onAck(conn, pkt);
 
+            // tcp_data_snd_check: flush pending send data after ACK — peer's receive window
+            // may have re-opened (e.g. zero-window → non-zero after this ACK).
+            // If a PSH+ACK is sent here it carries the current rcvNxt, piggybacking any
+            // delayed ACK still pending from a previous segment — cancel that timer.
+            {
+                int sndNxtPrior = conn.sndNxt();
+                TcpSegmenter.INSTANCE.sendPending(conn);
+                if (conn.sndNxt() != sndNxtPrior && (ackPending & ACK_TIMER) != 0) {
+                    TcpTimerScheduler.INSTANCE.cancelDelayedAck(conn);
+                    ackPending &= ~ACK_TIMER;
+                }
+            }
+
             // Data
             if (pkt.tcpPayloadLength() > 0 && conn.state().canReceive()) {
                 ackPending |= ACK_SCHED;   // we owe the peer an ACK for this data
@@ -143,6 +156,10 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
     public void close(ChannelHandlerContext ctx, ChannelPromise promise) {
         log.debug("[TCP] [ESTABLISHED] close() called — initiating active close");
         conn.state(TcpConnectionState.FIN_WAIT_1);
+        // Flush any buffered send data before FIN: if the peer's window was
+        // temporarily closed, data may be queued in sendBuffer.writeQueue.
+        // Sending it here ensures FIN is sequenced after all application data.
+        TcpSegmenter.INSTANCE.sendPending(conn);
         TcpSegmenter.INSTANCE.sendFin(conn);
         ctx.pipeline().replace(this, "close", new TcpActiveCloseHandler(conn, promise));
     }

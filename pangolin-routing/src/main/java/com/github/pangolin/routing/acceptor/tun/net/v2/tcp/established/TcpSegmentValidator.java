@@ -85,7 +85,10 @@ public final class TcpSegmentValidator {
             return isInWindow(conn, seq);
         } else {
             if (conn.rcvWnd() == 0) {
-                return false;
+                // RFC 793 / Linux special case: a bare FIN at RCV.NXT is acceptable
+                // even at zero window — peer is signalling end-of-data without payload.
+                // (mirrors tcp_data_queue: "Some stacks send bare FIN even if we send RWIN 0")
+                return pkt.tcpPayloadLength() == 0 && pkt.isFin() && seq == conn.rcvNxt();
             }
             // At least one byte must be in window
             return isInWindow(conn, seq) || isInWindow(conn, seq + segLen - 1);

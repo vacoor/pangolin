@@ -63,19 +63,44 @@ public final class TcpReceiveBuffer {
     /**
      * Drain contiguous out-of-order segments into {@code readBuffer} starting from {@code rcvNxt}.
      *
+     * <p>Three cases per OFO entry (mirrors Linux {@code tcp_ofo_queue}):
+     * <ol>
+     *   <li>Still out-of-order ({@code nextSeq > rcvNxt}): stop.</li>
+     *   <li>Fully duplicate ({@code endSeq <= rcvNxt}): discard and continue.</li>
+     *   <li>Partial or exact overlap: deliver only the new bytes (trim the already-received
+     *       prefix when {@code nextSeq < rcvNxt}).</li>
+     * </ol>
+     *
      * @param rcvNxt the sequence number expected next
      * @return the updated RCV.NXT after absorbing all contiguous OFO segments
      */
     private int drainOfo(int rcvNxt) {
         while (!ofoQueue.isEmpty()) {
             Integer nextSeq = ofoQueue.firstKey();
-            if (nextSeq == rcvNxt) {
-                ByteBuf ofo = ofoQueue.pollFirstEntry().getValue();
-                rcvNxt += ofo.readableBytes();
-                readBuffer.addComponent(true, ofo);
-            } else {
+
+            // Still out-of-order: no more work to do
+            if (TcpSequence.after(nextSeq, rcvNxt)) {
                 break;
             }
+
+            ByteBuf ofo = ofoQueue.pollFirstEntry().getValue();
+            int ofoEnd = nextSeq + ofo.readableBytes();
+
+            // Fully duplicate: entirely before rcvNxt — discard
+            if (!TcpSequence.after(ofoEnd, rcvNxt)) {
+                ofo.release();
+                continue;
+            }
+
+            // Partial or exact overlap: trim already-received prefix (skip = 0 when exact match)
+            int skip = rcvNxt - nextSeq;   // safe: signed-int wrapping handles seq wraparound
+            if (skip > 0) {
+                ByteBuf tail = ofo.retainedSlice(ofo.readerIndex() + skip, ofo.readableBytes() - skip);
+                ofo.release();
+                ofo = tail;
+            }
+            rcvNxt += ofo.readableBytes();
+            readBuffer.addComponent(true, ofo);
         }
         return rcvNxt;
     }

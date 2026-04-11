@@ -68,6 +68,8 @@ public final class TcpPassiveCloseHandler extends ChannelDuplexHandler {
             // timer (§5.2 cancel / §5.3 restart) for any data sent in CLOSE_WAIT before close().
             if (pkt.isAck()) {
                 TcpAckHandler.INSTANCE.onAck(conn, pkt);
+                // tcp_data_snd_check: flush any queued data whose window just re-opened.
+                TcpSegmenter.INSTANCE.sendPending(conn);
             }
 
             // LAST_ACK: close only when the ACK covers our FIN (SND.UNA == SND.NXT).
@@ -99,6 +101,8 @@ public final class TcpPassiveCloseHandler extends ChannelDuplexHandler {
             log.debug("[TCP] [PASSIVE-CLOSE] close() called — sending FIN, entering LAST_ACK");
             this.closePromise = promise;
             conn.state(TcpConnectionState.LAST_ACK);
+            // Flush any remaining send data before FIN (window may have been closed).
+            TcpSegmenter.INSTANCE.sendPending(conn);
             TcpSegmenter.INSTANCE.sendFin(conn);
             // Do NOT call super.close(): we wait for LAST_ACK's ACK in channelRead
         } else {

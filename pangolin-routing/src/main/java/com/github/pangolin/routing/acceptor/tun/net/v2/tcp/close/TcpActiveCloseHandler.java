@@ -57,6 +57,8 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
         // and manages RFC 6298 retransmit timer (§5.2 cancel / §5.3 restart).
         if (pkt.isAck()) {
             TcpAckHandler.INSTANCE.onAck(conn, pkt);
+            // tcp_data_snd_check: flush any queued data whose window just re-opened.
+            TcpSegmenter.INSTANCE.sendPending(conn);
         }
 
         TcpConnectionState state = conn.state();
