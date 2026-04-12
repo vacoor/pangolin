@@ -8,6 +8,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnect
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpPacketBuilder;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpConnectionChannel;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
@@ -182,8 +183,8 @@ public final class TcpHandshaker {
             log.warn("[TCP] [HANDSHAKE] ACK number mismatch: expected {}, got {}",
                     Integer.toUnsignedString(sndIsn + 1),
                     Integer.toUnsignedString(pkt.tcpAckNum()));
-            // FIXME connChannel? not close connection ?
-            sendRst(connChannel, pkt);
+            // Send RST and close the channel after write completes
+            sendRst(connChannel, pkt).addListener((ChannelFutureListener) f -> connChannel.close());
             return null;
         }
 
@@ -291,7 +292,7 @@ public final class TcpHandshaker {
         }
     }
 
-    private void sendRst(Channel connChannel, TcpPacketBuf pkt) {
+    private ChannelFuture sendRst(Channel connChannel, TcpPacketBuf pkt) {
         int seq = pkt.tcpAckNum();
         ByteBuf buf = TcpPacketBuilder.buildRaw(
                 dstAddrBytes, dstPort,
@@ -300,6 +301,8 @@ public final class TcpHandshaker {
                 0x04,  // RST
                 0, null, null, 0
         );
-        connChannel.writeAndFlush(buf);
+        // Use writeRaw() to bypass this channel's pipeline handlers (e.g., TcpEstablishedHandler)
+        // which would intercept write() and treat ByteBuf as application data.
+        return ((TcpConnectionChannel) connChannel).writeRaw(buf);
     }
 }

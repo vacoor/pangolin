@@ -202,9 +202,12 @@ public final class TcpConnectionChannel extends AbstractChannel {
      *
      * <p>Ownership of {@code buf}: transferred to the TUN pipeline.
      * The caller must not release {@code buf} after this call.
+     *
+     * @return the {@link ChannelFuture} for the write operation, allowing the caller
+     *         to add listeners for post-write actions (e.g., close channel after RST)
      */
-    public void writeRaw(ByteBuf buf) {
-        parent().writeAndFlush(buf);
+    public ChannelFuture writeRaw(ByteBuf buf) {
+        return parent().writeAndFlush(buf);
     }
 
     // ── Unsafe ──────────────────────────────────────────────────────────────
