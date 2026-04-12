@@ -182,6 +182,7 @@ public final class TcpHandshaker {
             log.warn("[TCP] [HANDSHAKE] ACK number mismatch: expected {}, got {}",
                     Integer.toUnsignedString(sndIsn + 1),
                     Integer.toUnsignedString(pkt.tcpAckNum()));
+            // FIXME connChannel? not close connection ?
             sendRst(connChannel, pkt);
             return null;
         }

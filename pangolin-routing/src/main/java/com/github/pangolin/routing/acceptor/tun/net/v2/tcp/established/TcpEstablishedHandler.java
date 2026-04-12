@@ -96,6 +96,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
             if (pkt.isRst()) {
                 switch (TcpSegmentValidator.checkRst(conn, pkt)) {
                     case RESET:
+                        // FIXME skip send FIN.
                         log.debug("[TCP] [ESTABLISHED] RST accepted (seq==RCV.NXT) — closing");
                         ctx.channel().close();
                         break;
@@ -221,6 +222,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        // FIXME RST
         log.warn("[TCP] [ESTABLISHED] Exception — closing", cause);
         ctx.channel().close();
     }
