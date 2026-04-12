@@ -8,16 +8,19 @@ import com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Socket;
 import com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.SysDomain;
 import com.github.pangolin.routing.acceptor.tun.adapter.unix.jna.LibC;
 import com.github.pangolin.routing.acceptor.tun.adapter.util.NetUtils2;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.sun.jna.Native;
-import com.sun.jna.Structure;
+import com.sun.jna.*;
 import com.sun.jna.ptr.IntByReference;
+import jdk.jshell.spi.ExecutionControl;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.util.Set;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
@@ -105,14 +108,59 @@ public class DarwinTunAdapter extends TunAdapter {
      */
     @Override
     protected void write0(final ByteBuffer[] packet) throws IOException {
-        // FIXME Gather I/O
-        for (final ByteBuffer buf : packet) {
-            write0(buf);
+        final int ipVersion = packet[0].get(packet[0].position()) >> 4;
+        final int addressFamily = addressFamily(ipVersion);
+        final ByteBuffer addressFamilyBuf = ByteBuffer.allocateDirect(AF_BYTES);
+        addressFamilyBuf.put(new byte[]{
+                (byte) (addressFamily >> 24),
+                (byte) (addressFamily >> 16),
+                (byte) (addressFamily >> 8),
+                (byte) addressFamily
+        });
+        addressFamilyBuf.flip();
+
+        final List<Memory> manualMemories = Lists.newArrayList();
+        final LibC.Iovec[] iov = (LibC.Iovec[]) new LibC.Iovec().toArray(1 + packet.length);
+        try {
+            write(iov, 0, addressFamilyBuf, manualMemories);
+            for (int i = 0; i < packet.length; i++) {
+                write(iov, i + 1, packet[i], manualMemories);
+            }
+
+            final NativeLong written = LIBC.writev(fd, iov, iov.length);
+            Preconditions.checkState(written.longValue() >= 0, "Failed to write packet: %s", written);
+        } finally {
+            closeMemories(manualMemories);
         }
     }
 
-    private void write0(final ByteBuffer packet) throws IOException {
-        final int ipVersion = packet.get(packet.position()) >> 4;
+    private void closeMemories(final List<Memory> memories) {
+        for (final Memory memory : memories) {
+            if (memory != null) {
+                memory.close();
+            }
+        }
+    }
+
+    private LibC.Iovec write(final LibC.Iovec[] iov, final int offset, final ByteBuffer buf, final List<Memory> memories) {
+        Pointer ptr;
+        if (buf.isDirect()) {
+            ptr = Native.getDirectBufferPointer(buf).share(buf.position());
+        } else {
+            log.warn("Non-direct -> Direct memory.");
+            final Memory memory = new Memory(buf.remaining());
+            memories.add(memory);
+            for (int i = 0; buf.hasRemaining(); i++) {
+                memory.setByte(i, buf.get());
+            }
+            ptr = memory;
+        }
+        iov[offset].iov_base = ptr;
+        iov[offset].iov_len = new NativeLong(buf.remaining());
+        return iov[offset];
+    }
+
+    private int addressFamily(final int ipVersion) throws IOException {
         int addressFamily = Socket.AF_UNSPEC;
         if (4 == ipVersion) {
             addressFamily = Socket.AF_INET;
@@ -121,6 +169,12 @@ public class DarwinTunAdapter extends TunAdapter {
         } else {
             throw new IOException("Unknown address family: " + addressFamily);
         }
+        return addressFamily;
+    }
+
+    private void write0(final ByteBuffer packet) throws IOException {
+        final int ipVersion = packet.get(packet.position()) >> 4;
+        final int addressFamily = addressFamily(ipVersion);
 
         final ByteBuffer buf = ByteBuffer.allocateDirect(
                 AF_BYTES + packet.remaining()

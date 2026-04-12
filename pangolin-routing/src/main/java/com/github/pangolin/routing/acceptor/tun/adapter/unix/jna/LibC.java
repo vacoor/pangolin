@@ -9,6 +9,8 @@ import com.sun.jna.platform.unix.LibCAPI;
 import com.sun.jna.ptr.IntByReference;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * <I>libc</I> API.
@@ -156,6 +158,21 @@ public interface LibC extends LibCAPI, Library {
      * @return the number of characters actually written
      */
     int write(final int fd, final Pointer buf, final int nbytes);
+
+    public class Iovec extends Structure {
+        public Pointer iov_base;  // 必须赋值！
+        public NativeLong iov_len;
+
+        public Iovec() {}
+        public Iovec(Pointer p) { super(p); }
+
+        @Override
+        protected List<String> getFieldOrder() {
+            return Arrays.asList("iov_base", "iov_len");
+        }
+    }
+
+    NativeLong writev(final int fd, final Iovec[] iov, final int iovcnt);
 
     /**
      * Creates an endpoint for communication and returns a descriptor.

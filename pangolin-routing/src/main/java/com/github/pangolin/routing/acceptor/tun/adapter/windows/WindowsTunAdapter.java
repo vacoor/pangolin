@@ -101,25 +101,28 @@ public class WindowsTunAdapter extends TunAdapter {
      */
     @Override
     protected void write0(final ByteBuffer[] packet) throws IOException {
-        /*-
-         * XXX: Gather I/O is not supported in Wintun.
-         */
-        int len = 0;
-        for (final ByteBuffer buf : packet) {
-            len += buf.remaining();
-        }
-
-        final WinDef.DWORD size = new WinDef.DWORD(len);
-        final Pointer packetPointer = WintunAllocateSendPacket(session, size);
-        for (int i = 0, written = 0; i < packet.length; i++) {
-            for (; packet[i].hasRemaining(); written++) {
-                packetPointer.setByte(written, packet[i].get());
+        if (1 == packet.length) {
+            write0(packet[0]);
+        }  else {
+            /*-
+             * XXX: Gather I/O is not supported in Wintun.
+             */
+            int len = 0;
+            for (final ByteBuffer buf : packet) {
+                len += buf.remaining();
             }
+
+            final WinDef.DWORD size = new WinDef.DWORD(len);
+            final Pointer packetPointer = WintunAllocateSendPacket(session, size);
+            for (int i = 0, written = 0; i < packet.length; i++) {
+                for (; packet[i].hasRemaining(); written++) {
+                    packetPointer.setByte(written, packet[i].get());
+                }
+            }
+            WintunSendPacket(session, packetPointer);
         }
-        WintunSendPacket(session, packetPointer);
     }
 
-    @Deprecated
     private void write0(final ByteBuffer packet) {
         final WinDef.DWORD size = new WinDef.DWORD(packet.remaining());
         final Pointer packetPointer = WintunAllocateSendPacket(session, size);

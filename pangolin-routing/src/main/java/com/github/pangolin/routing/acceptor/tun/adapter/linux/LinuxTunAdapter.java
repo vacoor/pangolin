@@ -8,14 +8,16 @@ import com.github.pangolin.routing.acceptor.tun.adapter.linux.jna.Socket;
 import com.github.pangolin.routing.acceptor.tun.adapter.linux.jna.Sockios;
 import com.github.pangolin.routing.acceptor.tun.adapter.unix.jna.LibC;
 import com.github.pangolin.routing.acceptor.tun.adapter.TunAdapter;
-import com.sun.jna.LastErrorException;
-import com.sun.jna.Native;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Lists;
+import com.sun.jna.*;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import static com.github.pangolin.routing.acceptor.tun.adapter.linux.LinuxUtils.throwLastErrorException;
@@ -78,16 +80,48 @@ public class LinuxTunAdapter extends TunAdapter {
      */
     @Override
     protected void write0(final ByteBuffer[] packet) throws IOException {
-        // FIXME Gather I/O
-        for (final ByteBuffer buf : packet) {
-            write0(buf);
+        if (1 == packet.length) {
+            LIBC.write(fd, packet[0], packet[0].remaining());
+        } else {
+            final List<Memory> manualMemories = Lists.newArrayList();
+            final LibC.Iovec[] iov = (LibC.Iovec[]) new LibC.Iovec().toArray(packet.length);
+            try {
+                for (int i = 0; i < packet.length; i++) {
+                    write(iov, i, packet[i], manualMemories);
+                }
+
+                final NativeLong written = LIBC.writev(fd, iov, iov.length);
+                Preconditions.checkState(written.longValue() >= 0, "Failed to write packet: %s", written);
+            } finally {
+                closeMemories(manualMemories);
+            }
         }
     }
 
-    private void write0(final ByteBuffer packet) {
-        final byte[] bytes = new byte[packet.remaining()];
-        packet.get(bytes).clear();
-        LIBC.write(fd, bytes, bytes.length);
+    private void closeMemories(final List<Memory> memories) {
+        for (final Memory memory : memories) {
+            if (memory != null) {
+                memory.close();
+            }
+        }
+    }
+
+    private LibC.Iovec write(final LibC.Iovec[] iov, final int offset, final ByteBuffer buf, final List<Memory> memories) {
+        Pointer ptr;
+        if (buf.isDirect()) {
+            ptr = Native.getDirectBufferPointer(buf).share(buf.position());
+        } else {
+            log.warn("Non-direct -> Direct memory.");
+            final Memory memory = new Memory(buf.remaining());
+            memories.add(memory);
+            for (int i = 0; buf.hasRemaining(); i++) {
+                memory.setByte(i, buf.get());
+            }
+            ptr = memory;
+        }
+        iov[offset].iov_base = ptr;
+        iov[offset].iov_len = new NativeLong(buf.remaining());
+        return iov[offset];
     }
 
     /**

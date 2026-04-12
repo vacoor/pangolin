@@ -15,7 +15,9 @@ public abstract class TunAdapter {
 
     public void write(final ByteBuffer[] packet) throws IOException {
         checkOpen();
-        write0(packet);
+        if (0 < packet.length) {
+            write0(packet);
+        }
     }
 
     private void checkOpen() {
