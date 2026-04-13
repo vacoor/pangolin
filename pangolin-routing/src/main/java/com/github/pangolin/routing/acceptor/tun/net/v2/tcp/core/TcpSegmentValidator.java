@@ -1,7 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close.TcpCloseMachine;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.ConnectionKey;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
@@ -9,12 +11,17 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnect
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import org.slf4j.Logger;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpConstants.HZ;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.jiffies;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
 
@@ -78,9 +85,6 @@ public final class TcpSegmentValidator extends ChannelInboundHandlerAdapter {
 
     // ── Internal validation result ─────────────────────────────────────────
 
-    /** Outcome of {@link #validateIncoming}. */
-    private enum ValidateResult { PASS, DROP, CHALLENGE_ACK, RESET }
-
     /** Outcome of {@link #checkRst}. */
     private enum RstResult { DROP, RESET, CHALLENGE_ACK }
 
@@ -128,16 +132,8 @@ public final class TcpSegmentValidator extends ChannelInboundHandlerAdapter {
         }
 
         // ── tcp_validate_incoming: PAWS + sequence + RST + SYN (steps 1–4) ──
-        ValidateResult vr = validateIncoming(conn, pkt);
-        if (vr == ValidateResult.RESET) {
-            log.debug("[TCP] [{}] RST accepted (seq==RCV.NXT) — abortive close",
-                    conn.state().name());
-            TcpCloseMachine.abortiveClose(ctx, conn, closePromise);
-            pkt.release();
-            return;
-        }
-        if (vr != ValidateResult.PASS) {
-            // DROP or CHALLENGE_ACK: side-effects (OOW ACK, challenge ACK) already sent.
+        if (!tcp_validate_incoming(ctx, conn, pkt)) {
+            // DROP, CHALLENGE_ACK, or RESET: side-effects already applied inside.
             pkt.release();
             return;
         }
@@ -182,9 +178,17 @@ public final class TcpSegmentValidator extends ChannelInboundHandlerAdapter {
      * {@code tcp_validate_incoming} ordering:
      * PAWS → sequence check → RST check → SYN challenge.
      *
-     * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/tcp_input.c#L5870">tcp_validate_incoming</a>
+     * <p>Mirrors the Linux boolean return convention: {@code true} means the segment
+     * passed all checks and processing should continue; {@code false} means the segment
+     * was discarded (side-effects such as OOW ACK, challenge ACK, or abortive close have
+     * already been applied inside this method, just like Linux {@code tcp_reset()} is
+     * called from within {@code tcp_validate_incoming}).
+     *
+     * @return {@code true} if the segment is acceptable; {@code false} to drop it.
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5870">tcp_validate_incoming</a>
      */
-    private ValidateResult validateIncoming(TcpConnection conn, TcpPacketBuf pkt) {
+    private boolean tcp_validate_incoming(ChannelHandlerContext ctx,
+                                          TcpConnection conn, TcpPacketBuf pkt) {
         // PAWS check (RFC 7323 §5) — RST is exempt.
         if (conn.timestampExt().isEnabled(conn)) {
             ByteBuf opts = pkt.tcpOptionsSlice();
@@ -192,14 +196,15 @@ public final class TcpSegmentValidator extends ChannelInboundHandlerAdapter {
             if (ts != null && conn.timestampExt().isPawsRejected(conn, (int) ts[0])) {
                 if (!pkt.isRst()) {
                     TcpSegmenter.INSTANCE.sendAck(conn);
-                    return ValidateResult.DROP;
+                    return false;
                 }
                 // RST is accepted even if it did not pass PAWS — fall through to step 1.
             }
         }
 
         // Step 1: sequence number acceptability (RFC 9293 §3.4).
-        if (!tcpSequence(conn, pkt)) {
+        final int reason = tcp_sequence(conn, pkt);
+        if (reason != SKB_NOT_DROPPED_YET) {
             /*
              * RFC 793 p.37: "In all states except SYN-SENT, all reset (RST) segments are
              * validated by checking their SEQ-fields."
@@ -212,76 +217,208 @@ public final class TcpSegmentValidator extends ChannelInboundHandlerAdapter {
             if (!pkt.isRst()) {
                 if (pkt.isSyn()) {
                     // Linux syn_challenge: challenge ACK on invalid-sequence SYN (RFC 5961 §4).
-                    TcpSegmenter.INSTANCE.sendAck(conn);
-                    return ValidateResult.CHALLENGE_ACK;
+                    tcp_send_challenge_ack(conn);
+                    return discard(conn, pkt, SKB_DROP_REASON_TCP_INVALID_SYN);
                 }
                 // Rate-limited dupack for out-of-window non-RST/non-SYN segments.
-                if (shouldSendOowAck(conn)) {
+                if (tcp_oow_rate_limited(conn, pkt, conn.lastOowAckTimeMs())) {
+                    // FIXME tcp_send_dupack
                     TcpSegmenter.INSTANCE.sendAck(conn);
                 }
-            } else if (tcpResetCheck(conn, pkt)) {
+            } else if (tcp_reset_check(conn, pkt)) {
                 // Linux tcp_reset_check: accept bare RST at RCV.NXT - 1 in half-close states.
-                return ValidateResult.RESET;
+                tcp_reset(ctx, conn);
             }
-            return ValidateResult.DROP;
+            return discard(conn, pkt, reason);
         }
 
         // Step 2: RST handling (RFC 9293 §3.5.2 + RFC 5961 §3.2).
         if (pkt.isRst()) {
-            RstResult rr = checkRst(conn, pkt);
-            if (rr == RstResult.RESET || tcpResetCheck(conn, pkt)) {
-                return ValidateResult.RESET;
+
+            /*-
+             * RFC 5961 3.2 (extend to match against (RCV.NXT - 1) after a  FIN and SACK too if available):
+             * If seq num matches RCV.NXT or (RCV.NXT - 1) after a FIN, or the right-most SACK block,
+             * then
+             *     RESET the connection
+             * else
+             *     Send a challenge ACK
+             */
+            if (pkt.tcpSeq() == conn.rcvNxt() || tcp_reset_check(conn, pkt)) {
+                tcp_reset(ctx, conn);
+                return false;
             }
-            if (rr == RstResult.CHALLENGE_ACK) {
-                TcpSegmenter.INSTANCE.sendAck(conn);
-                return ValidateResult.CHALLENGE_ACK;
-            }
-            return ValidateResult.DROP;
+
+            // TODO SACK
+
+            tcp_send_challenge_ack(conn);
+            return discard(conn, pkt, SKB_DROP_REASON_TCP_RESET);
         }
 
         // Step 4: SYN challenge in established/closing states (RFC 5961 §4).
         if (pkt.isSyn()) {
-            TcpSegmenter.INSTANCE.sendAck(conn);
-            return ValidateResult.CHALLENGE_ACK;
+            int seq = pkt.tcpSeq();
+            int endSeq = determineEndSeq(pkt);
+            if (conn.state() == TcpConnectionState.TCP_SYN_RECV
+                    // && sk->sk_socket
+                    && pkt.isAck()
+                    && seq + 1 == endSeq
+                    && seq + 1 == conn.rcvNxt()
+                    && pkt.tcpAckNum() == conn.sndNxt()) {
+                return true;
+            }
+
+            tcp_send_challenge_ack(conn);
+            return discard(conn, pkt, SKB_DROP_REASON_TCP_INVALID_SYN);
         }
-        return ValidateResult.PASS;
+
+        return true;
     }
+
+    private boolean discard(TcpConnection tp, TcpPacketBuf pkt, int reason) {
+        // TODO log reason
+        return false;
+    }
+
+    private int tcp_disordered_ack_check(final TcpConnection tp, final TcpPacketBuf pkt) {
+        int reason = SKB_DROP_REASON_TCP_RFC7323_PAWS;
+        int seq = pkt.tcpSeq();
+        int ack = pkt.tcpAckNum();
+
+        /* 1. Is this not a pure ACK ? */
+        if (!pkt.isAck() || seq != determineEndSeq(pkt)) {
+            return reason;
+        }
+
+        /* 2. Is its sequence not the expected one ? */
+        if (seq != tp.rcvNxt()) {
+            return TcpUtils.before(seq, tp.rcvNxt()) ? SKB_DROP_REASON_TCP_RFC7323_PAWS_ACK : reason;
+        }
+
+        /* 3. Is this not a duplicate ACK ? */
+        if (ack != tp.sndUna()) {
+            return reason;
+        }
+
+        /* 4. Is this updating the window ? */
+//        if (tcp_may_update_window(tp, ack, seq, th.getWindowAsInt() << tp.rx_opt.snd_wscale)) {
+//            return reason;
+//        }
+        /* 5. Is this not in the replay window ? */
+//        if ((s32)(tp->rx_opt.ts_recent - tp->rx_opt.rcv_tsval) > tcp_tsval_replay(sk)) {
+//            return reason;
+//        }
+        return SKB_NOT_DROPPED_YET;
+    }
+
+
+    // ── errno constants used by tcp_reset ────────────────────────────────
+    /** Linux {@code ECONNRESET} (104) — connection reset by peer. */
+    private static final int ECONNRESET   = 104;
+    /** Linux {@code ECONNREFUSED} (111) — connection refused; set when RST arrives in SYN_SENT. */
+    private static final int ECONNREFUSED = 111;
+    /** Linux {@code EPIPE} (32) — broken pipe; set when RST arrives in CLOSE_WAIT. */
+    private static final int EPIPE        = 32;
+
+    /**
+     * Mirrors Linux {@code tcp_reset()}: resolve the socket error code, report it,
+     * then trigger abortive close (analogous to {@code tcp_done()}).
+     *
+     * <ul>
+     *   <li>{@code TCP_SYN_SENT}  → {@code ECONNREFUSED} (peer rejected active open)</li>
+     *   <li>{@code CLOSE_WAIT}    → {@code EPIPE} (app still writing after remote FIN + RST)</li>
+     *   <li>{@code TCP_CLOSED}    → skip (already closed, nothing to do)</li>
+     *   <li>default               → {@code ECONNRESET}</li>
+     * </ul>
+     *
+     * <p>Called from within {@link #tcp_validate_incoming} so the caller only inspects
+     * the boolean return value — mirroring how Linux calls {@code tcp_reset()} internally
+     * before returning {@code false}.
+     *
+     * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/tcp_input.c">tcp_reset</a>
+     */
+    private void tcp_reset(ChannelHandlerContext ctx, TcpConnection conn) {
+        final int err;
+        switch (conn.state()) {
+            case TCP_SYN_SENT: err = ECONNREFUSED; break;
+            case CLOSE_WAIT:   err = EPIPE;        break;
+            case TCP_CLOSED:   return;             // already closed — skip
+            default:           err = ECONNRESET;   break;
+        }
+        log.debug("[TCP] [{}] RST — err={}", conn.state().name(), errName(err));
+        TcpCloseMachine.abortiveClose(ctx, conn, closePromise);
+    }
+
+    private static String errName(int err) {
+        switch (err) {
+            case ECONNREFUSED: return "ECONNREFUSED";
+            case EPIPE:        return "EPIPE";
+            default:           return "ECONNRESET";
+        }
+    }
+
+    // ── skb_drop_reason constants used by tcpSequence ─────────────────────
+    // Mirrors the Linux kernel's enum skb_drop_reason (include/net/dropreason-core.h).
+    // Only the values relevant to tcp_sequence() are listed here.
+
+    /** Segment is within the receive window — do not drop. */
+    private static final int SKB_NOT_DROPPED_YET = 0;
+    /**
+     * {@code end_seq} is before {@code rcv_wup}: the segment carries only data
+     * the receiver has already acknowledged and advanced past.
+     */
+    private static final int SKB_DROP_REASON_TCP_OLD_SEQUENCE = 65;
+    /**
+     * {@code seq} (or {@code end_seq}) is beyond {@code rcv_nxt + rcv_wnd}:
+     * the segment starts (or ends) outside the current receive window.
+     */
+    private static final int SKB_DROP_REASON_TCP_INVALID_SEQUENCE = 67;
+
+    private static final int SKB_DROP_REASON_TCP_INVALID_SYN = 0;
+
+    private static final int SKB_DROP_REASON_TCP_RFC7323_PAWS = 0;
+
+    private static final int SKB_DROP_REASON_TCP_RFC7323_PAWS_ACK = 0;
+    private static final int SKB_DROP_REASON_TCP_RESET = 0;
+
+
 
     /**
      * RFC 9293 §3.4 — segment acceptability test.
      * Written in the same shape as Linux {@code tcp_sequence()} for easier side-by-side
      * comparison:
      * <pre>
-     *   if before(end_seq, rcv_wup)           → old sequence
+     *   if before(end_seq, rcv_wup)           → SKB_DROP_REASON_TCP_OLD_SEQUENCE
      *   if after(end_seq, rcv_nxt + rcv_wnd)  → invalid end sequence
-     *      and after(seq, rcv_nxt + rcv_wnd)  → invalid sequence
+     *      and after(seq, rcv_nxt + rcv_wnd)  → SKB_DROP_REASON_TCP_INVALID_SEQUENCE
      * </pre>
      *
+     * @return {@link #SKB_NOT_DROPPED_YET} (0) if the segment is acceptable;
+     *         a non-zero {@code skb_drop_reason} constant otherwise.
      * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/tcp_input.c#L4394">tcp_sequence</a>
      */
-    private static boolean tcpSequence(TcpConnection conn, TcpPacketBuf pkt) {
+    private static int tcp_sequence(TcpConnection conn, TcpPacketBuf pkt) {
         int seq    = pkt.tcpSeq();
         int segLen = pkt.tcpPayloadLength()
                    + (pkt.isSyn() ? 1 : 0)
                    + (pkt.isFin() ? 1 : 0);
-        int endSeq    = seq + segLen;
+        int endSeq = seq + segLen;
         int rcvWup    = conn.rcvWup();
         int rcvNxt    = conn.rcvNxt();
-        int rcvWndEnd = rcvNxt + conn.rcvWnd();
+        int rcvWndEnd = rcvNxt + conn.tcp_receive_window();
 
         if (before(endSeq, rcvWup)) {
-            return false;
+            return SKB_DROP_REASON_TCP_OLD_SEQUENCE;
         }
         if (after(endSeq, rcvWndEnd)) {
             // Allow FIN to extend one byte beyond the window.
             if (!after(endSeq - (pkt.isFin() ? 1 : 0), rcvWndEnd)) {
-                return true;
+                return SKB_NOT_DROPPED_YET;
             }
             if (after(seq, rcvWndEnd)) {
-                return false;
+                return SKB_DROP_REASON_TCP_INVALID_SEQUENCE;
             }
         }
-        return true;
+        return SKB_NOT_DROPPED_YET;
     }
 
     /**
@@ -311,9 +448,9 @@ public final class TcpSegmentValidator extends ChannelInboundHandlerAdapter {
      * Linux {@code tcp_reset_check}: accept a bare RST whose sequence equals
      * {@code RCV.NXT - 1} while the local side has already sent its FIN.
      *
-     * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/tcp_input.c#L1749">tcp_reset_check</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6329">tcp_reset_check</a>
      */
-    private static boolean tcpResetCheck(TcpConnection conn, TcpPacketBuf pkt) {
+    private static boolean tcp_reset_check(TcpConnection conn, TcpPacketBuf pkt) {
         if (pkt.tcpSeq() != conn.rcvNxt() - 1) {
             return false;
         }
@@ -324,13 +461,62 @@ public final class TcpSegmentValidator extends ChannelInboundHandlerAdapter {
     }
 
     /** Rate-limit out-of-window ACKs to avoid ACK storms. */
-    private static boolean shouldSendOowAck(TcpConnection conn) {
-        long now  = System.currentTimeMillis();
-        long last = conn.lastOowAckTimeMs();
-        if (last == 0L || now - last >= TcpConstants.INVALID_ACK_RATELIMIT_MS) {
-            conn.lastOowAckTimeMs(now);
-            return true;
+    private static boolean tcp_oow_rate_limited(TcpConnection conn, final TcpPacketBuf pkt, final long last_oow_ack_time) {
+        /* Data packets without SYNs are not likely part of an ACK loop. */
+        if (pkt.tcpSeq() != determineEndSeq(pkt) && !pkt.isSyn()) {
+            return false;
         }
-        return false;
+        return __tcp_oow_rate_limited(conn, last_oow_ack_time);
     }
+
+    private static boolean __tcp_oow_rate_limited(TcpConnection conn, long last_oow_ack_time) {
+        if (0 != last_oow_ack_time) {
+            final long elapsed = tcp_jiffies32() - last_oow_ack_time;
+            if (0 <= elapsed && elapsed < TcpConstants.INVALID_ACK_RATELIMIT_MS) {
+                return true;/* rate-limited: don't send yet! */
+            }
+        }
+
+        conn.lastOowAckTimeMs(tcp_jiffies32());
+
+        return false;    /* not rate-limited: go ahead, send dupack now! */
+    }
+
+    /**
+     * RFC 5961 7 [ACK Throttling]
+     *
+     * @param tp
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3649">tcp_send_challenge_ack</a>
+     */
+    private void tcp_send_challenge_ack(final TcpConnection tp) {
+        /* First check our per-socket dupack rate limit. */
+        if (__tcp_oow_rate_limited(tp, tp.lastOowAckTimeMs())) {
+            return;
+        }
+
+        TcpSegmenter.INSTANCE.sendAck(conn);
+        /*
+        int ack_limit = tp.ipv4_sysctl_tcp_challenge_ack_limit;
+        if (ack_limit == Integer.MAX_VALUE) {
+            output.tcp_send_ack(net, tp);
+            return;
+        }
+         */
+
+        /* Then check host-wide RFC 5961 rate limit. */
+        /*
+        final long now = jiffies() / HZ;
+        if (now != tp.ipv4_tcp_challenge_timestamp) {
+            int half = (ack_limit + 1) >> 1;
+            tp.ipv4_tcp_challenge_timestamp = now;
+            tp.ipv4_tcp_challenge_count = get_random_u32_inclusive(half, ack_limit + half - 1);
+        }
+        int count = tp.ipv4_tcp_challenge_count;
+        if (count > 0) {
+            tp.ipv4_tcp_challenge_count -= 1;
+            output.tcp_send_ack(net, tp);
+        }
+        */
+    }
+
 }

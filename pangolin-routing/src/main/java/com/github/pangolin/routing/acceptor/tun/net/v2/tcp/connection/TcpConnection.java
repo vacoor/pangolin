@@ -109,6 +109,20 @@ public final class TcpConnection {
     public int skShutdown()            { return skShutdown; }
     public long lastOowAckTimeMs()     { return lastOowAckTimeMs; }
 
+    /**
+     * Available receive window size, mirroring Linux {@code tcp_receive_window()}:
+     * <pre>
+     *   max(0, rcv_wup + rcv_wnd - rcv_nxt)
+     * </pre>
+     * {@code rcv_wup} is the sequence number at which the window was last advertised;
+     * subtracting {@code rcv_nxt} gives the bytes still available since that advertisement.
+     *
+     * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/tcp_output.c">tcp_receive_window</a>
+     */
+    public int tcp_receive_window() {
+        return Math.max(0, rcvWup + rcvWnd - rcvNxt);
+    }
+
     // ── State mutators ───────────────────────────────────────────────────────
 
     public void state(TcpConnectionState s)  { this.state = s; }

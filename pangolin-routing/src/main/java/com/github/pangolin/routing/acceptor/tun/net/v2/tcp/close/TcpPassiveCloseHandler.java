@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory;
  *   <li>Saves the {@code closePromise}.</li>
  *   <li>Does NOT call {@code super.close()} yet.</li>
  * </ol>
- * When the peer's ACK arrives (step {@link #channelRead0}):
+ * When the peer's ACK arrives (step {@link #channelRead}):
  * <ol>
  *   <li>Calls {@code ctx.close(closePromise)} — this triggers the real Netty lifecycle
  *       ({@code doClose()} → {@code deregisterCallback} → registry removal).</li>
