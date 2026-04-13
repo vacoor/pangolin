@@ -141,27 +141,19 @@ public final class TcpSegmentValidator extends ChannelInboundHandlerAdapter {
         // ── tcp_ack: step 5 ACK field processing ──────────────────────────
         AckResult ackResult = AckResult.NONE;
         if (pkt.isAck()) {
-            int ack = pkt.tcpAckNum();
-            // Future ACK: send challenge ACK and drop (mirrors Linux tcp_ack returning -1).
-            if (TcpSequence.after(ack, conn.sndNxt())) {
-                TcpSegmenter.INSTANCE.sendAck(conn);
+            int prevUna = conn.sndUna();
+            int r = tcp_ack(conn, pkt);
+            if (r < 0) {
+                if (r == -SKB_DROP_REASON_TCP_ACK_UNSENT_DATA) {
+                    // Future ACK: mirrors Linux tcp_rcv_state_process sending challenge ACK
+                    // for SKB_DROP_REASON_TCP_ACK_UNSENT_DATA before discarding.
+                    TcpSegmenter.INSTANCE.sendAck(conn);
+                }
+                // All other negative reasons (too-old ACK, etc.): challenge ACK already
+                // sent inside tcp_ack when applicable.
                 pkt.release();
                 return;
             }
-
-            int prevUna = conn.sndUna();
-            // Core ACK processing: SND.UNA advance, window update, RTT, CC, loss.
-            TcpAckProcessor.INSTANCE.onAck(conn, pkt);
-
-            // RFC 6298 retransmit timer management (mirrors Linux tcp_rearm_rto):
-            if (!conn.sendBuffer().hasRtxPending()) {
-                // §5.2: all in-flight data acknowledged — cancel retransmit timer.
-                TcpRetransmitter.INSTANCE.cancelRetransmit(conn);
-            } else if (TcpSequence.after(conn.sndUna(), prevUna)) {
-                // §5.3: new data acknowledged but RTX queue still has entries — restart RTO.
-                TcpRetransmitter.INSTANCE.scheduleRetransmit(conn);
-            }
-
             ackResult = TcpSequence.after(conn.sndUna(), prevUna)
                     ? AckResult.NEW_DATA_ACKED : AckResult.OLD_OR_DUP;
         }
@@ -169,6 +161,60 @@ public final class TcpSegmentValidator extends ChannelInboundHandlerAdapter {
         // Expose the result to the downstream state handler for this EventLoop turn.
         conn.setAttr(ACK_RESULT_KEY, ackResult);
         ctx.fireChannelRead(msg);   // downstream handler owns the release
+    }
+
+    // ── tcp_ack ────────────────────────────────────────────────────────────
+
+    /**
+     * Step-5 ACK field processing, mirroring Linux {@code tcp_ack()}.
+     *
+     * <p>Return value convention (mirrors Linux integer return):
+     * <ul>
+     *   <li>{@code 1}  — ACK is valid; caller derives {@link AckResult} from SND.UNA advancement.</li>
+     *   <li>{@code 0}  — old/duplicate ACK ({@code ack < SND.UNA}, not a blind injection);
+     *       segment may still carry data — caller continues with {@link AckResult#OLD_OR_DUP}.</li>
+     *   <li>{@code -}{@link #SKB_DROP_REASON_TCP_TOO_OLD_ACK}  — blind-injection ACK
+     *       (RFC 5961 §5.2); challenge ACK already sent inside this method.</li>
+     *   <li>{@code -}{@link #SKB_DROP_REASON_TCP_ACK_UNSENT_DATA}  — future ACK
+     *       ({@code ack > SND.NXT}); caller must send challenge ACK and discard.</li>
+     * </ul>
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4246">tcp_ack</a>
+     */
+    private int tcp_ack(TcpConnection conn, TcpPacketBuf pkt) {
+        final int priorSndUna = conn.sndUna();
+        final int ack         = pkt.tcpAckNum();
+
+        // Old ACK: ack before SND.UNA — mirrors Linux "if (before(ack, prior_snd_una))" block.
+        if (TcpSequence.before(ack, priorSndUna)) {
+            // RFC 5961 §5.2: blind data-injection mitigation — ack is so old it falls outside
+            // any plausible window (prior_snd_una - max_window).  Send challenge ACK + drop.
+            if (TcpSequence.before(ack, priorSndUna - conn.sndWnd())) {
+                TcpSegmenter.INSTANCE.sendAck(conn);
+                return -SKB_DROP_REASON_TCP_TOO_OLD_ACK;
+            }
+            // goto old_ack: ordinary duplicate/retransmitted ACK — let segment through.
+            return 0;
+        }
+
+        // Future ACK: ack beyond SND.NXT — discard per RFC 793 §3.9.
+        if (TcpSequence.after(ack, conn.sndNxt())) {
+            return -SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
+        }
+
+        // Core: advance SND.UNA, update send window, RTT sample, CC, loss detection.
+        TcpAckProcessor.INSTANCE.onAck(conn, pkt);
+
+        // RFC 6298 retransmit timer management — mirrors Linux tcp_rearm_rto():
+        if (!conn.sendBuffer().hasRtxPending()) {
+            // §5.2: all outstanding data acknowledged — cancel retransmit timer.
+            TcpRetransmitter.INSTANCE.cancelRetransmit(conn);
+        } else if (TcpSequence.after(conn.sndUna(), priorSndUna)) {
+            // §5.3: partial ACK — new data acknowledged but queue still has entries → restart RTO.
+            TcpRetransmitter.INSTANCE.scheduleRetransmit(conn);
+        }
+
+        return 1;
     }
 
     // ── tcp_validate_incoming ──────────────────────────────────────────────
@@ -356,29 +402,30 @@ public final class TcpSegmentValidator extends ChannelInboundHandlerAdapter {
         }
     }
 
-    // ── skb_drop_reason constants used by tcpSequence ─────────────────────
-    // Mirrors the Linux kernel's enum skb_drop_reason (include/net/dropreason-core.h).
-    // Only the values relevant to tcp_sequence() are listed here.
+    // ── skb_drop_reason constants ──────────────────────────────────────────
+    // Mirrors Linux enum skb_drop_reason (include/net/dropreason-core.h).
+    // Values sourced from TcpDropReason (handler/tcp/internal).
 
-    /** Segment is within the receive window — do not drop. */
-    private static final int SKB_NOT_DROPPED_YET = 0;
-    /**
-     * {@code end_seq} is before {@code rcv_wup}: the segment carries only data
-     * the receiver has already acknowledged and advanced past.
-     */
-    private static final int SKB_DROP_REASON_TCP_OLD_SEQUENCE = 65;
-    /**
-     * {@code seq} (or {@code end_seq}) is beyond {@code rcv_nxt + rcv_wnd}:
-     * the segment starts (or ends) outside the current receive window.
-     */
-    private static final int SKB_DROP_REASON_TCP_INVALID_SEQUENCE = 67;
-
-    private static final int SKB_DROP_REASON_TCP_INVALID_SYN = 0;
-
-    private static final int SKB_DROP_REASON_TCP_RFC7323_PAWS = 0;
-
-    private static final int SKB_DROP_REASON_TCP_RFC7323_PAWS_ACK = 0;
-    private static final int SKB_DROP_REASON_TCP_RESET = 0;
+    /** Packet accepted — do not drop. */
+    private static final int SKB_NOT_DROPPED_YET                    =  0;
+    /** ACK field acknowledges data we never sent. */
+    private static final int SKB_DROP_REASON_TCP_ACK_UNSENT_DATA    =  9;
+    /** ACK is old but within plausible window (old_ack path). */
+    private static final int SKB_DROP_REASON_TCP_OLD_ACK            = 10;
+    /** ACK is too old — outside any plausible window (blind injection). */
+    private static final int SKB_DROP_REASON_TCP_TOO_OLD_ACK        = 11;
+    /** PAWS check failed on a non-ACK segment (RFC 7323 §5). */
+    private static final int SKB_DROP_REASON_TCP_RFC7323_PAWS       = 36;
+    /** PAWS check failed on a pure ACK (disordered-ACK exemption path). */
+    private static final int SKB_DROP_REASON_TCP_RFC7323_PAWS_ACK   = 37;
+    /** SEQ is before RCV.WUP — segment is fully in the past. */
+    private static final int SKB_DROP_REASON_TCP_OLD_SEQUENCE       = 41;
+    /** SEQ/end_seq is beyond the current receive window. */
+    private static final int SKB_DROP_REASON_TCP_INVALID_SEQUENCE   = 42;
+    /** SYN received in an established/closing state — challenge-ACK issued. */
+    private static final int SKB_DROP_REASON_TCP_INVALID_SYN        = 46;
+    /** Valid RST received — connection aborted. */
+    private static final int SKB_DROP_REASON_TCP_RESET               =  2;
 
 
 
