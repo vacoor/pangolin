@@ -1,15 +1,16 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close.TcpPassiveCloseHandler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close.TcpCloseMachine;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close.TcpActiveCloseHandler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close.TcpPassiveCloseHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpStateProcessor;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.ACK_NOW;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.ACK_SCHED;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.ACK_TIMER;
@@ -19,6 +20,8 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.nio.channels.ClosedChannelException;
 
 /**
  * ESTABLISHED-state segment processing — RFC 9293 §3.10.7.4.
@@ -76,51 +79,28 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
         }
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
         try {
-            /* ── Flag pre-filter (before RFC steps) ──────────────────────────────────
-             * In all post-handshake states every valid segment must carry at least one
-             * of {ACK, RST, SYN}.  A segment with none of these is malformed (e.g. bare
-             * PSH, bare FIN without ACK, flags=0).  Drop silently without sending ACK —
-             * mirrors Linux tcp_rcv_state_process(!ACK && !RST && !SYN → discard). */
-            if (!pkt.isAck() && !pkt.isRst() && !pkt.isSyn()) {
-                log.warn(logFormat("[TCP] [RCV]", pkt, "Connection reset: Invalid TCP flag(!ACK, !RST, !SYN)"));
+            if (TcpStateProcessor.INSTANCE.preProcess(ctx, conn, pkt, null, log, "ESTABLISHED")) {
                 return;
             }
 
-            /* ── Step 2: check the RST bit (RFC 9293 §3.10.7.4 + RFC 5961 §3.2) ──────
-             * RST has its own acceptability test (§3.5.2) — three outcomes:
-             *   DROP          : SEG.SEQ outside window — silently discard.
-             *   RESET         : SEG.SEQ == RCV.NXT    — close connection.
-             *   CHALLENGE_ACK : SEG.SEQ in window but != RCV.NXT — send challenge ACK
-             *                   to let peer correct itself (blind-RST attack mitigation).
-             * Screened before step 1 because RST is exempt from PAWS (RFC 7323 §5). */
-            if (pkt.isRst()) {
-                switch (TcpSegmentValidator.checkRst(conn, pkt)) {
-                    case RESET:
-                        // FIXME skip send FIN.
-                        log.debug("[TCP] [ESTABLISHED] RST accepted (seq==RCV.NXT) — closing");
-                        ctx.channel().close();
-                        break;
-                    case CHALLENGE_ACK:
-                        log.debug("[TCP] [ESTABLISHED] RST in window but seq!=RCV.NXT — challenge ACK");
-                        TcpSegmenter.INSTANCE.sendAck(conn);
-                        break;
-                    default: // DROP
-                        break;
-                }
+            if (TcpStateProcessor.INSTANCE.processAck(conn, pkt)
+                    == TcpStateProcessor.AckResult.INVALID_FUTURE_ACK) {
                 return;
             }
 
-            /* ── Step 1: check sequence number + PAWS (RFC 9293 §3.4 + RFC 7323 §5) ─
-             * Unacceptable segment: send ACK (unless RST) and drop.
-             * PAWS check runs first (§3.4 note): TSval regression → send ACK and drop. */
-            if (!TcpSegmentValidator.INSTANCE.validate(conn, pkt)) {
-                return;
+            /* ── TCP_SYN_RECV → TCP_ESTABLISHED transition ───────────────────────────
+             * Mirrors the TCP_SYN_RECV case in Linux tcp_rcv_state_process(): after the
+             * final ACK is accepted and processed, promote the connection to ESTABLISHED
+             * before handling any piggybacked data or FIN (RFC 9293 §3.10.7.3).
+             *
+             * The TcpConnection is created by TcpHandshaker.finishHandshake() in
+             * SYN_RECEIVED state (analogous to tcp_create_openreq_child()), and the
+             * final ACK packet is replayed into this handler by TcpHandshakeHandler
+             * (analogous to tcp_child_process → tcp_rcv_state_process). */
+            if (conn.state() == TcpConnectionState.TCP_SYN_RECV) {
+                conn.state(TcpConnectionState.TCP_ESTABLISHED);
+                log.debug("[TCP] [SYN_RECV] Final ACK accepted — entering ESTABLISHED");
             }
-
-            /* ── Step 5: check the ACK field (RFC 9293 §3.10.7.4 fifth) ─────────────
-             * Advance SND.UNA, update SND.WND, sample RTT (Karn's alg.), notify CC
-             * (RFC 5681), and manage the RFC 6298 retransmit timer (§5.2 / §5.3). */
-            TcpAckHandler.INSTANCE.onAck(conn, pkt);
 
             /* ── tcp_data_snd_check (after step 5) ──────────────────────────────────
              * The ACK may have re-opened a zero peer window.  Flush any queued send
@@ -152,6 +132,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
              * ACK_NOW + ACK_SCHED ensure ackSndCheck() sends even if no data arrived. */
             if (pkt.isFin() && conn.state().canReceive()) {
                 conn.rcvNxt(conn.rcvNxt() + 1);   // FIN consumes one sequence number
+                conn.addShutdown(TcpConstants.RCV_SHUTDOWN);
                 conn.state(TcpConnectionState.CLOSE_WAIT);
                 log.debug("[TCP] [ESTABLISHED] FIN received — entering CLOSE_WAIT");
                 ackPending |= ACK_SCHED | ACK_NOW;
@@ -177,6 +158,11 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) {
         if (msg instanceof ByteBuf) {
+            if (conn.hasShutdown(TcpConstants.SEND_SHUTDOWN)) {
+                ((ByteBuf) msg).release();
+                promise.setFailure(new ClosedChannelException());
+                return;
+            }
             ByteBuf data = (ByteBuf) msg;
             conn.sendBuffer().enqueue(data);
             int sndNxtBefore = conn.sndNxt();
@@ -202,11 +188,14 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
      */
     @Override
     public void close(ChannelHandlerContext ctx, ChannelPromise promise) {
+        if (conn.hasShutdown(TcpConstants.SHUTDOWN_MASK)) {
+            ctx.close(promise);
+            return;
+        }
         log.debug("[TCP] [ESTABLISHED] close() called — initiating active close");
+        conn.addShutdown(TcpConstants.SEND_SHUTDOWN);
         conn.state(TcpConnectionState.FIN_WAIT_1);
-        // Flush any buffered send data before FIN: if the peer's window was
-        // temporarily closed, data may be queued in sendBuffer.writeQueue.
-        // Sending it here ensures FIN is sequenced after all application data.
+        // Ensure FIN is sequenced after all queued app data.
         TcpSegmenter.INSTANCE.sendPending(conn);
         TcpSegmenter.INSTANCE.sendFin(conn);
         ctx.pipeline().replace(this, "close", new TcpActiveCloseHandler(conn, promise));
@@ -222,9 +211,8 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        // FIXME RST
         log.warn("[TCP] [ESTABLISHED] Exception — closing", cause);
-        ctx.channel().close();
+        TcpCloseMachine.abortiveClose(ctx, conn, null);
     }
 
     // ── ACK scheduling — mirrors Linux tcp_ack_snd_check / __tcp_ack_snd_check ──────────────

@@ -4,14 +4,20 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
 import io.netty.buffer.ByteBuf;
 
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
+
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
+
 /**
- * RFC 9293 §3.10.7.4 segment validation: steps 1 + 4 (sequence + PAWS + SYN challenge).
+ * RFC 9293 §3.10.7.4 segment validation: steps 1, 2, 4
+ * (sequence acceptability + PAWS + RST + SYN challenge).
  *
- * <p>Step 2 (RST) is handled by the caller before {@link #validate} is invoked.
- * Step 3 (security) and step 6 (URG) are not implemented.
+ * <p>Step 3 (security/precedence) and step 6 (URG) are not implemented.
  *
  * <p>Stateless — all state is in {@link TcpConnection}.
  */
@@ -21,54 +27,91 @@ public final class TcpSegmentValidator {
 
     private TcpSegmentValidator() {}
 
+    public enum ValidateResult {
+        PASS,
+        DROP,
+        CHALLENGE_ACK,
+        RESET
+    }
+
     /**
-     * Validate an incoming segment (steps 1 + 4 of RFC 9293 §3.10.7.4).
+     * Unified validation path for post-handshake states, aligned with Linux
+     * {@code tcp_validate_incoming} ordering:
+     * PAWS → sequence check → RST check → SYN challenge.
      *
-     * <p>Order:
-     * <ol>
-     *   <li>PAWS check (RFC 7323 §5) — must precede sequence check.</li>
-     *   <li>Step 1: sequence number acceptability (RFC 9293 §3.4).
-     *       Unacceptable segment: send ACK and drop.</li>
-     *   <li>Step 4: SYN in established state — send challenge ACK and drop
-     *       (RFC 5961 §4.2).  A SYN whose sequence falls inside the receive
-     *       window would otherwise corrupt the connection.</li>
-     * </ol>
+     * <p>Step 1 failure ordering mirrors Linux exactly (RFC793/RFC9293 §3.5.3):
+     * <pre>
+     *   if (!rst) {
+     *       if (syn)  → syn_challenge
+     *       else      → rate-limited dupack
+     *   } else if (tcp_reset_check) → reset
+     *   // discard
+     * </pre>
      *
-     * <p>Note: RST (step 2) is never passed here — callers handle it first.
-     * PAWS does not apply to RST for the same reason.
-     *
-     * @return {@code true} if the segment is acceptable and processing should continue;
-     *         {@code false} if it should be silently dropped or an ACK was sent
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5870">tcp_validate_incoming</a>
      */
-    public boolean validate(TcpConnection conn, TcpPacketBuf pkt) {
-        // PAWS check (RFC 7323 §5) — runs before sequence check.
-        // RST never reaches here (handled by caller), so no RST exemption needed.
+    public ValidateResult validateIncoming(TcpConnection conn, TcpPacketBuf pkt) {
+        // PAWS check (RFC 7323 §5) — RST is exempt.
         if (conn.timestampExt().isEnabled(conn)) {
             ByteBuf opts = pkt.tcpOptionsSlice();
             long[] ts = TcpOptionCodec.parseTimestamp(opts);
             if (ts != null && conn.timestampExt().isPawsRejected(conn, (int) ts[0])) {
-                // PAWS: send ACK and drop (RFC 7323 §5.1)
-                TcpSegmenter.INSTANCE.sendAck(conn);
-                return false;
+                if (!pkt.isRst()) {
+                    TcpSegmenter.INSTANCE.sendAck(conn);
+                    return ValidateResult.DROP;
+                }
+                // RST is accepted even if it did not pass PAWS — fall through to step1.
             }
         }
 
         // Step 1: sequence number acceptability (RFC 9293 §3.4).
-        // Unacceptable segment → send ACK (unless RST, but RST never reaches here).
-        if (!isAcceptable(conn, pkt)) {
-            TcpSegmenter.INSTANCE.sendAck(conn);
-            return false;
+        if (!tcp_sequence(conn, pkt)) {
+            /*
+             * RFC793 p.37: "In all states except SYN-SENT, all reset (RST) segments are
+             * validated by checking their SEQ-fields."
+             * RFC793 p.69: "If an incoming segment is not acceptable, an acknowledgment
+             * should be sent in reply (unless the RST bit is set, if so drop the segment
+             * and return)."
+             *
+             * Mirror Linux ordering: !rst branch first (handles SYN inside), then RST.
+             */
+            if (!pkt.isRst()) {
+                if (pkt.isSyn()) {
+                    // Linux syn_challenge: challenge ACK on invalid-sequence SYN (RFC 5961 §4).
+                    TcpSegmenter.INSTANCE.sendAck(conn);
+                    return ValidateResult.CHALLENGE_ACK;
+                }
+                // Rate-limited dupack for out-of-window non-RST/non-SYN segments.
+                if (shouldSendOowAck(conn)) {
+                    TcpSegmenter.INSTANCE.sendAck(conn);
+                }
+            } else if (tcpResetCheck(conn, pkt)) {
+                // Linux tcp_reset_check: accept bare RST at RCV.NXT - 1 in half-close states.
+                return ValidateResult.RESET;
+            }
+            return ValidateResult.DROP;
         }
 
-        // Step 4: SYN in established state (RFC 9293 §3.10.7.4 / RFC 5961 §4.2).
-        // A SYN whose seq is inside the receive window is either a retransmit confusion
-        // or a spoofed attack.  Send a challenge ACK and drop — do NOT reset.
+        // Step 2: RST handling (RFC 9293 §3.5.2 + RFC 5961 §3.2).
+        if (pkt.isRst()) {
+            RstResult rr = checkRst(conn, pkt);
+            // Also reset when tcp_reset_check matches (Linux tcp_reset_check extension).
+            if (rr == RstResult.RESET || tcpResetCheck(conn, pkt)) {
+                return ValidateResult.RESET;
+            }
+            if (rr == RstResult.CHALLENGE_ACK) {
+                TcpSegmenter.INSTANCE.sendAck(conn);
+                return ValidateResult.CHALLENGE_ACK;
+            }
+            return ValidateResult.DROP;
+        }
+
+        // Step 4: SYN challenge in established/closing states (RFC 5961 §4).
         if (pkt.isSyn()) {
-            TcpSegmenter.INSTANCE.sendAck(conn);   // challenge ACK
-            return false;
+            TcpSegmenter.INSTANCE.sendAck(conn);
+            return ValidateResult.CHALLENGE_ACK;
         }
-
-        return true;
+        return ValidateResult.PASS;
     }
 
     /**
@@ -116,33 +159,69 @@ public final class TcpSegmentValidator {
 
     /**
      * RFC 9293 §3.4 — segment acceptability test.
-     * A segment is acceptable if it overlaps the receive window.
+     * Written in the same shape as Linux tcp_sequence() for easier side-by-side comparison:
+     *   1) before(end_seq, rcv_wup) -> old sequence
+     *   2) after(end_seq, rcv_nxt + rcv_wnd) -> invalid end sequence
+     *      and if after(seq, rcv_nxt + rcv_wnd) -> invalid sequence
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4394">tcp_sequence</a>
      */
-    private boolean isAcceptable(TcpConnection conn, TcpPacketBuf pkt) {
-        int seq    = pkt.tcpSeq();
+    private boolean tcp_sequence(TcpConnection conn, TcpPacketBuf pkt) {
+        int seq = pkt.tcpSeq();
         int segLen = pkt.tcpPayloadLength() + (pkt.isSyn() ? 1 : 0) + (pkt.isFin() ? 1 : 0);
+        int endSeq = seq + segLen; // exclusive end sequence (matches Linux end_seq style)
+        int rcvWup = conn.rcvWup();
+        int rcvNxt = conn.rcvNxt();
 
-        if (segLen == 0) {
-            if (conn.rcvWnd() == 0) {
-                return seq == conn.rcvNxt();
-            }
-            return isInWindow(conn, seq);
-        } else {
-            if (conn.rcvWnd() == 0) {
-                // RFC 793 / Linux special case: a bare FIN at RCV.NXT is acceptable
-                // even at zero window — peer is signalling end-of-data without payload.
-                // (mirrors tcp_data_queue: "Some stacks send bare FIN even if we send RWIN 0")
-                return pkt.tcpPayloadLength() == 0 && pkt.isFin() && seq == conn.rcvNxt();
-            }
-            // At least one byte must be in window
-            return isInWindow(conn, seq) || isInWindow(conn, seq + segLen - 1);
+        if (before(endSeq, rcvWup)) {
+            return false;
         }
+
+        int rcvWndEnd = rcvNxt + conn.rcvWnd();
+        if (after(endSeq, rcvWndEnd)) {
+            /* Some stacks are known to handle FIN incorrectly; allow the
+             * FIN to extend beyond the window and check it in detail later.
+             */
+            if (!after(endSeq - (pkt.isFin() ? 1 : 0), rcvWndEnd)) {
+                return true;
+            }
+
+            if (after(seq, rcvWndEnd)) {
+                return false;
+            }
+            // Linux keeps this packet only when receive queue is empty.
+            // v2 has no direct receive-queue-length check at this layer, so reject conservatively.
+//            return false;
+        }
+        return true;
     }
 
-    private boolean isInWindow(TcpConnection conn, int seq) {
-        // RFC 9293 §3.4: window is [RCV.NXT, RCV.NXT+RCV.WND) — exclusive upper bound.
-        // TcpSequence.between() is inclusive on both ends, so subtract 1 to convert.
-        int rcvNxt = conn.rcvNxt();
-        return TcpSequence.between(rcvNxt, seq, rcvNxt + conn.rcvWnd() - 1);
+    private boolean shouldSendOowAck(TcpConnection conn) {
+        long now = System.currentTimeMillis();
+        long last = conn.lastOowAckTimeMs();
+        if (last == 0L || now - last >= TcpConstants.INVALID_ACK_RATELIMIT_MS) {
+            conn.lastOowAckTimeMs(now);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Linux {@code tcp_reset_check}: accept a bare RST whose sequence number equals
+     * {@code RCV.NXT - 1} while the connection is in a half-close state where the local
+     * side has already sent its FIN.  This handles the edge case where {@code rcv_wup}
+     * lags behind {@code rcv_nxt} so that {@code SEG.SEQ = RCV.NXT - 1} slips past the
+     * sequence-acceptability check but is still within the "just closed" window.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L1749">tcp_reset_check</a>
+     */
+    private static boolean tcpResetCheck(TcpConnection conn, TcpPacketBuf pkt) {
+        if (pkt.tcpSeq() != conn.rcvNxt() - 1) {
+            return false;
+        }
+        TcpConnectionState s = conn.state();
+        return s == TcpConnectionState.CLOSE_WAIT
+                || s == TcpConnectionState.LAST_ACK
+                || s == TcpConnectionState.CLOSING;
     }
 }

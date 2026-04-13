@@ -22,7 +22,7 @@ public final class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPa
     private static final Logger log = LoggerFactory.getLogger(TcpHandshakeHandler.class);
 
     private final TcpHandshakerFactory factory;
-    private       TcpHandshaker        handshaker;
+    private TcpHandshaker handshaker;
 
     public TcpHandshakeHandler(TcpHandshakerFactory factory) {
         super(true);   // autoRelease=true: release pkt after channelRead0 returns
@@ -31,52 +31,61 @@ public final class TcpHandshakeHandler extends SimpleChannelInboundHandler<TcpPa
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_conn_request">tcp_conn_request</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#tcp_v4_rcv">tcp_v4_rcv</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L660">tcp_check_req</a>
      */
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
         if (handshaker == null) {
             /*-
              * TCP_LISTEN - <SYN> -> TCP_NEW_SYN_RECV (req sock).
+             *
+             * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_conn_request">tcp_conn_request</a>
              */
             // ── First packet: must be SYN (TcpMultiplexHandler already filters non-SYN) ──
             // Defensive guard in case a stray packet arrives before the SYN is processed.
             if (!pkt.isSyn() || pkt.isFin()) return;
+
+            // sk_acceptq_is_full -> drop
+
             handshaker = factory.newHandshaker(pkt);
             handshaker.handshake(ctx.channel(), pkt);
             return;
         }
 
         /*-
-         * TCP_NEW_SYN_RECV - <ACK> -> TCP_SYN_RECV.
+         * TCP_NEW_SYN_RECV - <ACK> -> TCP_SYN_RECV (≈ tcp_check_req).
+         *
+         * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L660">tcp_check_req</a>
          */
         // ── All subsequent packets — delegate to handshaker (≈ tcp_check_req) ──
         // finishHandshake() handles RST, SYN retransmit, and the final ACK in one place.
-        TcpConnection conn = handshaker.finishHandshake(ctx.channel(), pkt);
-        if (conn != null) {
-            /*-
-             * TCP_SYN_RECV -> TCP_ESTABLISHED.
-             */
-            log.debug("[TCP] [HANDSHAKE] 3WH complete — switching to established handler");
-            handshaker = null;
-            conn.state(TcpConnectionState.ESTABLISHED);
-            ctx.pipeline().replace(this, "established", new TcpEstablishedHandler(conn));
-            // Fire the ACK into the newly installed handler: TCP allows data to be piggybacked
-            // on the final ACK (RFC 9293 §3.4). Without this, that data would be silently dropped.
-            //
-            // MUST use pipeline().fireChannelRead(), NOT ctx.fireChannelRead().
-            // After replace(), `ctx` is the removed handler's context; its `next` pointer
-            // still points to the handler that was after TcpHandshakeHandler BEFORE the
-            // replace (i.e., SimpleChannelInboundHandler), skipping TcpEstablishedHandler.
-            // pipeline().fireChannelRead() starts from HeadContext and correctly reaches
-            // TcpEstablishedHandler at its new position.
-            //
-            // autoRelease=true will release pkt once after channelRead0 returns.
-            // TcpEstablishedHandler.channelRead() also releases pkt once.
-            // Retain here so the net refcount change is zero when both releases fire.
-            pkt.retain();
-            ctx.pipeline().fireChannelRead(pkt);
+        final TcpConnection nsk = handshaker.finishHandshake(ctx.channel(), pkt);
+        if (null == nsk) {
+            // RST or SYN retransmit handled inside tcp_check_req — drop packet
+            return;
         }
+
+        log.debug("[TCP] [HANDSHAKE] 3WH complete — switching to established handler");
+        handshaker = null;
+        ctx.pipeline().replace(this, "established", new TcpEstablishedHandler(nsk));
+        // Fire the ACK into the newly installed handler: TCP allows data to be piggybacked
+        // on the final ACK (RFC 9293 §3.4). Without this, that data would be silently dropped.
+        //
+        // MUST use pipeline().fireChannelRead(), NOT ctx.fireChannelRead().
+        // After replace(), `ctx` is the removed handler's context; its `next` pointer
+        // still points to the handler that was after TcpHandshakeHandler BEFORE the
+        // replace (i.e., SimpleChannelInboundHandler), skipping TcpEstablishedHandler.
+        // pipeline().fireChannelRead() starts from HeadContext and correctly reaches
+        // TcpEstablishedHandler at its new position.
+        //
+        // autoRelease=true will release pkt once after channelRead0 returns.
+        // TcpEstablishedHandler.channelRead() also releases pkt once.
+        // Retain here so the net refcount change is zero when both releases fire.
+        /*-
+         * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c#L992">tcp_child_process</a>
+         */
+        pkt.retain();
+        ctx.pipeline().fireChannelRead(pkt);
     }
 
     @Override

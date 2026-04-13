@@ -68,12 +68,13 @@ public final class TcpSegmenter {
         FourTuple ft = ((TcpConnectionChannel) conn.channel()).fourTuple();
         int seq = conn.sndNxt();
         int ack = conn.rcvNxt();
+        int wnd = selectAdvertisedWindow(conn);
 
         ByteBuf buf = TcpPacketBuilder.buildRaw(
                 ft.dstAddrBytes(), ft.dstPort(),
                 ft.srcAddrBytes(), ft.srcPort(),
                 seq, ack, 0x11 /* FIN+ACK */,
-                scaledWindow(conn), null, null, 0);
+                wnd, null, null, 0);
 
         conn.sndNxt(conn.sndNxt() + 1);   // FIN consumes one sequence number
 
@@ -85,12 +86,13 @@ public final class TcpSegmenter {
      */
     public void sendAck(TcpConnection conn) {
         FourTuple ft = ((TcpConnectionChannel) conn.channel()).fourTuple();
+        int wnd = selectAdvertisedWindow(conn);
         ByteBuf buf = TcpPacketBuilder.buildRaw(
                 ft.dstAddrBytes(), ft.dstPort(),
                 ft.srcAddrBytes(), ft.srcPort(),
                 conn.sndNxt(), conn.rcvNxt(),
                 0x10 /* ACK */,
-                scaledWindow(conn), null, null, 0);
+                wnd, null, null, 0);
         ((TcpConnectionChannel) conn.channel()).writeRaw(buf);
     }
 
@@ -123,19 +125,26 @@ public final class TcpSegmenter {
                 ft.dstAddrBytes(), ft.dstPort(),
                 ft.srcAddrBytes(), ft.srcPort(),
                 seq, conn.rcvNxt(),
-                flags, scaledWindow(conn),
+                flags, selectAdvertisedWindow(conn),
                 null, payload, payLen);
 
         // Track in RTX queue before sending
         TcpSegmentEntry entry = new TcpSegmentEntry(
                 payload.retainedSlice(), seq, payLen, fin, sentTime);
+        boolean startRto = !conn.sendBuffer().hasRtxPending();
         conn.sendBuffer().enqueueRtx(entry);
         conn.sndNxt(conn.sndNxt() + payLen + (fin ? 1 : 0));
 
         ((TcpConnectionChannel) conn.channel()).writeRaw(buf);
+        // RFC 6298 §5.1: when the first segment becomes outstanding, start the RTO timer.
+        if (startRto) {
+            TcpRetransmitter.INSTANCE.scheduleRetransmit(conn);
+        }
     }
 
-    private static int scaledWindow(TcpConnection conn) {
+    private static int selectAdvertisedWindow(TcpConnection conn) {
+        // Linux tcp_select_window updates rcv_wup when selecting the advertised window.
+        conn.rcvWup(conn.rcvNxt());
         int wnd = conn.rcvWnd() >> conn.rcvWscale();
         return Math.min(Math.max(wnd, 0), 65535);
     }

@@ -4,8 +4,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established.TcpAckHandler;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established.TcpSegmentValidator;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpStateProcessor;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
@@ -51,31 +50,16 @@ public final class TcpPassiveCloseHandler extends ChannelDuplexHandler {
         }
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
         try {
-            // RST: three-way check (RFC 9293 §3.5.2 + RFC 5961 §3.2)
-            if (pkt.isRst()) {
-                switch (TcpSegmentValidator.checkRst(conn, pkt)) {
-                    case RESET:
-                        log.debug("[TCP] [PASSIVE-CLOSE] RST accepted (seq==RCV.NXT) — closing");
-                        if (closePromise != null) {
-                            ctx.channel().close(closePromise);
-                        } else {
-                            ctx.channel().close();
-                        }
-                        break;
-                    case CHALLENGE_ACK:
-                        log.debug("[TCP] [PASSIVE-CLOSE] RST in window but seq!=RCV.NXT — challenge ACK");
-                        TcpSegmenter.INSTANCE.sendAck(conn);
-                        break;
-                    default: // DROP
-                        break;
-                }
+            if (TcpStateProcessor.INSTANCE.preProcess(
+                    ctx, conn, pkt, closePromise, log, "PASSIVE-CLOSE")) {
                 return;
             }
 
-            // ACK processing: advances SND.UNA, samples RTT, and manages RFC 6298 retransmit
-            // timer (§5.2 cancel / §5.3 restart) for any data sent in CLOSE_WAIT before close().
-            if (pkt.isAck()) {
-                TcpAckHandler.INSTANCE.onAck(conn, pkt);
+            TcpStateProcessor.AckResult ackResult = TcpStateProcessor.INSTANCE.processAck(conn, pkt);
+            if (ackResult == TcpStateProcessor.AckResult.INVALID_FUTURE_ACK) {
+                return;
+            }
+            if (ackResult != TcpStateProcessor.AckResult.NONE) {
                 // tcp_data_snd_check: flush any queued data whose window just re-opened.
                 TcpSegmenter.INSTANCE.sendPending(conn);
             }
@@ -108,10 +92,7 @@ public final class TcpPassiveCloseHandler extends ChannelDuplexHandler {
         if (conn.state() == TcpConnectionState.CLOSE_WAIT) {
             log.debug("[TCP] [PASSIVE-CLOSE] close() called — sending FIN, entering LAST_ACK");
             this.closePromise = promise;
-            conn.state(TcpConnectionState.LAST_ACK);
-            // Flush any remaining send data before FIN (window may have been closed).
-            TcpSegmenter.INSTANCE.sendPending(conn);
-            TcpSegmenter.INSTANCE.sendFin(conn);
+            TcpCloseMachine.beginLastAckClose(conn);
             // Do NOT call super.close(): we wait for LAST_ACK's ACK in channelRead
         } else {
             // Already in LAST_ACK or later: pass through
@@ -130,6 +111,6 @@ public final class TcpPassiveCloseHandler extends ChannelDuplexHandler {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         log.warn("[TCP] [PASSIVE-CLOSE] Exception — closing", cause);
-        ctx.channel().close();
+        TcpCloseMachine.abortiveClose(ctx, conn, closePromise);
     }
 }

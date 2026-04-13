@@ -7,21 +7,24 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection;
  *
  * <p>States not held by {@link TcpConnection}:
  * <ul>
- *   <li>{@link #LISTEN} — held by the listener socket, not by an individual connection</li>
- *   <li>{@link #SYN_SENT} — active-open only; TUN stack is passive-open, never used</li>
- *   <li>{@link #SYN_RECEIVED} — held by {@code TcpHandshaker} internally</li>
+ *   <li>{@link #TCP_LISTEN} — held by the listener socket, not by an individual connection</li>
+ *   <li>{@link #TCP_SYN_SENT} — active-open only; TUN stack is passive-open, never used</li>
  * </ul>
- * A {@link TcpConnection} is created only after {@code TcpHandshaker.finishHandshake()}
- * completes; its initial state is always {@link #ESTABLISHED}.
+ *
+ * <p>{@link TcpConnection} is created by {@code TcpHandshaker.finishHandshake()} after the
+ * final ACK passes sequence validation, analogous to Linux {@code tcp_create_openreq_child()}.
+ * The connection starts in {@link #TCP_SYN_RECV} and transitions to {@link #TCP_ESTABLISHED}
+ * inside {@code TcpEstablishedHandler} once the ACK is processed — mirroring the
+ * {@code TCP_SYN_RECV} case in Linux {@code tcp_rcv_state_process()}.
  */
 public enum TcpConnectionState {
 
     // RFC 9293 §3.3.2 — 11 standard states
-    CLOSED        (false, false),
-    LISTEN        (false, false),   // not held by TcpConnection
-    SYN_SENT      (false, false),   // not used in passive TUN; kept for RFC9293 completeness
-    SYN_RECEIVED  (false, false),   // held by TcpHandshaker, not TcpConnection
-    ESTABLISHED   (true,  true),
+    TCP_CLOSED(false, false),
+    TCP_LISTEN(false, false),   // not held by TcpConnection
+    TCP_SYN_SENT(false, false),   // not used in passive TUN; kept for RFC9293 completeness
+    TCP_SYN_RECV(false, false),   // child socket created by finishHandshake(); transitions to ESTABLISHED on final ACK
+    TCP_ESTABLISHED(true,  true),
     FIN_WAIT_1    (false, true),    // local FIN sent; waiting for ACK or simultaneous FIN
     FIN_WAIT_2    (false, true),    // local FIN ACK'd; waiting for remote FIN
     CLOSE_WAIT    (true,  false),   // remote FIN received; waiting for local close()

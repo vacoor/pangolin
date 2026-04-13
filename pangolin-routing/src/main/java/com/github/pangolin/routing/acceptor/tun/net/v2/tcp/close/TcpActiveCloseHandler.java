@@ -4,8 +4,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established.TcpAckHandler;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established.TcpSegmentValidator;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpStateProcessor;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import io.netty.channel.ChannelHandlerContext;
@@ -44,27 +43,16 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
-        // RST: three-way check (RFC 9293 §3.5.2 + RFC 5961 §3.2)
-        if (pkt.isRst()) {
-            switch (TcpSegmentValidator.checkRst(conn, pkt)) {
-                case RESET:
-                    log.debug("[TCP] [ACTIVE-CLOSE] RST accepted (seq==RCV.NXT) — closing");
-                    ctx.channel().close(closePromise);
-                    break;
-                case CHALLENGE_ACK:
-                    log.debug("[TCP] [ACTIVE-CLOSE] RST in window but seq!=RCV.NXT — challenge ACK");
-                    TcpSegmenter.INSTANCE.sendAck(conn);
-                    break;
-                default: // DROP
-                    break;
-            }
+        if (TcpStateProcessor.INSTANCE.preProcess(
+                ctx, conn, pkt, closePromise, log, "ACTIVE-CLOSE")) {
             return;
         }
 
-        // Process ACK in all active-close states: advances SND.UNA, samples RTT, updates CC,
-        // and manages RFC 6298 retransmit timer (§5.2 cancel / §5.3 restart).
-        if (pkt.isAck()) {
-            TcpAckHandler.INSTANCE.onAck(conn, pkt);
+        TcpStateProcessor.AckResult ackResult = TcpStateProcessor.INSTANCE.processAck(conn, pkt);
+        if (ackResult == TcpStateProcessor.AckResult.INVALID_FUTURE_ACK) {
+            return;
+        }
+        if (ackResult != TcpStateProcessor.AckResult.NONE) {
             // tcp_data_snd_check: flush any queued data whose window just re-opened.
             TcpSegmenter.INSTANCE.sendPending(conn);
         }
@@ -87,6 +75,12 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
         ctx.fireChannelInactive();
     }
 
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        log.warn("[TCP] [ACTIVE-CLOSE] Exception — abortive close", cause);
+        TcpCloseMachine.abortiveClose(ctx, conn, closePromise);
+    }
+
     // ── FIN_WAIT_1 ───────────────────────────────────────────────────────
 
     private void handleFinWait1(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
@@ -94,6 +88,7 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
             // Peer's FIN: advance RCV.NXT and ACK it.
             // TcpAckProcessor.onAck() has already run, so sndUna reflects the latest ACK.
             conn.rcvNxt(conn.rcvNxt() + 1);
+            conn.addShutdown(TcpConstants.RCV_SHUTDOWN);
             TcpSegmenter.INSTANCE.sendAck(conn);
             // RFC 9293 §3.10.7.3: if our FIN is also acknowledged → TIME_WAIT; else → CLOSING.
             if (conn.sndUna() == conn.sndNxt()) {
@@ -121,6 +116,7 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
     private void handleFinWait2(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
         if (pkt.isFin()) {
             conn.rcvNxt(conn.rcvNxt() + 1);
+            conn.addShutdown(TcpConstants.RCV_SHUTDOWN);
             conn.state(TcpConnectionState.TIME_WAIT);
             TcpSegmenter.INSTANCE.sendAck(conn);
             schedule2Msl(ctx);

@@ -35,9 +35,14 @@ public final class TcpConnection {
     private int rcvNxt;    // RCV.NXT — next sequence number expected from peer
     private int sndWnd;    // SND.WND — peer's receive window
     private int rcvWnd;    // RCV.WND — our advertised receive window
+    private int rcvWup;    // RCV.WUP — receive-window update point (Linux-style)
     private int mss;       // Maximum Segment Size (negotiated)
     private int sndWscale; // peer's receive window scale factor
     private int rcvWscale; // our receive window scale factor
+    /** Linux-style shutdown mask: RCV_SHUTDOWN / SEND_SHUTDOWN */
+    private int skShutdown;
+    /** Last time we sent an out-of-window challenge/dupack (ms). */
+    private long lastOowAckTimeMs;
 
     // ── Netty integration ───────────────────────────────────────────────────
     private final Channel channel;
@@ -60,15 +65,18 @@ public final class TcpConnection {
 
     private TcpConnection(Builder b) {
         this.channel           = b.channel;
-        this.state             = TcpConnectionState.ESTABLISHED;
+        this.state             = TcpConnectionState.TCP_ESTABLISHED;
         this.sndUna            = b.sndUna;
         this.sndNxt            = b.sndNxt;
         this.rcvNxt            = b.rcvNxt;
         this.sndWnd            = b.sndWnd;
         this.rcvWnd            = b.rcvWnd;
+        this.rcvWup            = b.rcvWup;
         this.mss               = b.mss;
         this.sndWscale         = b.sndWscale;
         this.rcvWscale         = b.rcvWscale;
+        this.skShutdown        = 0;
+        this.lastOowAckTimeMs  = 0L;
         this.rttEstimator      = b.rttEstimator;
         this.congestionControl = b.congestionControl;
         this.lossDetector      = b.lossDetector;
@@ -88,9 +96,12 @@ public final class TcpConnection {
     public int rcvNxt()                { return rcvNxt; }
     public int sndWnd()                { return sndWnd; }
     public int rcvWnd()                { return rcvWnd; }
+    public int rcvWup()                { return rcvWup; }
     public int mss()                   { return mss; }
     public int sndWscale()             { return sndWscale; }
     public int rcvWscale()             { return rcvWscale; }
+    public int skShutdown()            { return skShutdown; }
+    public long lastOowAckTimeMs()     { return lastOowAckTimeMs; }
 
     // ── State mutators ───────────────────────────────────────────────────────
 
@@ -99,6 +110,11 @@ public final class TcpConnection {
     public void rcvNxt(int v)               { this.rcvNxt = v; }
     public void sndWnd(int v)               { this.sndWnd = v; }
     public void rcvWnd(int v)               { this.rcvWnd = v; }
+    public void rcvWup(int v)               { this.rcvWup = v; }
+    public void skShutdown(int mask)        { this.skShutdown = mask; }
+    public void addShutdown(int how)        { this.skShutdown |= how; }
+    public boolean hasShutdown(int how)     { return (this.skShutdown & how) != 0; }
+    public void lastOowAckTimeMs(long v)    { this.lastOowAckTimeMs = v; }
 
     /**
      * Advance SND.UNA to {@code ackSeq} and acknowledge RTX-queue entries.
@@ -162,6 +178,8 @@ public final class TcpConnection {
         private int                    rcvNxt;
         private int                    sndWnd;
         private int                    rcvWnd           = 65535;
+        private int                    rcvWup;
+        private boolean                rcvWupSet;
         private int                    mss              = 1460;
         private int                    sndWscale;
         private int                    rcvWscale;
@@ -177,6 +195,7 @@ public final class TcpConnection {
         public Builder rcvNxt(int v)                           { this.rcvNxt = v; return this; }
         public Builder sndWnd(int v)                           { this.sndWnd = v; return this; }
         public Builder rcvWnd(int v)                           { this.rcvWnd = v; return this; }
+        public Builder rcvWup(int v)                           { this.rcvWup = v; this.rcvWupSet = true; return this; }
         public Builder mss(int v)                              { this.mss = v; return this; }
         public Builder sndWscale(int v)                        { this.sndWscale = v; return this; }
         public Builder rcvWscale(int v)                        { this.rcvWscale = v; return this; }
@@ -198,6 +217,9 @@ public final class TcpConnection {
 
         public TcpConnection build() {
             if (channel == null) throw new IllegalStateException("channel must be set");
+            if (!rcvWupSet) {
+                rcvWup = rcvNxt;
+            }
             TcpConnection conn = new TcpConnection(this);
             rttEstimator.init(conn);
             congestionControl.init(conn, retransmitCallback);
