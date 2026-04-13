@@ -272,7 +272,7 @@ public final class TcpHandshaker {
 
         TcpConnection conn = TcpConnection.builder()
                 .channel(connChannel)
-                .sndUna(sndIsn + 1)
+                .sndUna(sndIsn)        // SYN occupies sndIsn; final ACK advances SND.UNA to sndIsn+1
                 .sndNxt(sndIsn + 1)
                 .rcvNxt(rcvNxt)
                 .rcvWup(rcvNxt)

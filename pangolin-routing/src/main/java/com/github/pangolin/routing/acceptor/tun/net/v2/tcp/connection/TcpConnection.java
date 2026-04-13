@@ -34,8 +34,10 @@ public final class TcpConnection {
     private int sndNxt;    // SND.NXT — next sequence number to send
     private int rcvNxt;    // RCV.NXT — next sequence number expected from peer
     private int sndWnd;    // SND.WND — peer's receive window
+    private int sndWl1;    // SND.WL1 (linux: tp->snd_wl1) — SEQ of last window-update segment
     private int rcvWnd;    // RCV.WND — our advertised receive window
     private int rcvWup;    // RCV.WUP — receive-window update point (Linux-style)
+    private int rcvMss;    // RCV.MSS (linux: icsk_ack.rcv_mss) — effective receive MSS for delayed-ACK
     private int mss;       // Maximum Segment Size (negotiated)
     private int sndWscale; // peer's receive window scale factor
     private int rcvWscale; // our receive window scale factor
@@ -70,8 +72,10 @@ public final class TcpConnection {
         this.sndNxt            = b.sndNxt;
         this.rcvNxt            = b.rcvNxt;
         this.sndWnd            = b.sndWnd;
+        this.sndWl1            = b.sndWl1;
         this.rcvWnd            = b.rcvWnd;
         this.rcvWup            = b.rcvWup;
+        this.rcvMss            = b.mss;    // tcp_initialize_rcv_mss will refine this in ESTABLISHED transition
         this.mss               = b.mss;
         this.sndWscale         = b.sndWscale;
         this.rcvWscale         = b.rcvWscale;
@@ -95,8 +99,10 @@ public final class TcpConnection {
     public int sndNxt()                { return sndNxt; }
     public int rcvNxt()                { return rcvNxt; }
     public int sndWnd()                { return sndWnd; }
+    public int sndWl1()                { return sndWl1; }
     public int rcvWnd()                { return rcvWnd; }
     public int rcvWup()                { return rcvWup; }
+    public int rcvMss()                { return rcvMss; }
     public int mss()                   { return mss; }
     public int sndWscale()             { return sndWscale; }
     public int rcvWscale()             { return rcvWscale; }
@@ -109,8 +115,10 @@ public final class TcpConnection {
     public void sndNxt(int v)               { this.sndNxt = v; }
     public void rcvNxt(int v)               { this.rcvNxt = v; }
     public void sndWnd(int v)               { this.sndWnd = v; }
+    public void sndWl1(int v)               { this.sndWl1 = v; }
     public void rcvWnd(int v)               { this.rcvWnd = v; }
     public void rcvWup(int v)               { this.rcvWup = v; }
+    public void rcvMss(int v)               { this.rcvMss = v; }
     public void skShutdown(int mask)        { this.skShutdown = mask; }
     public void addShutdown(int how)        { this.skShutdown |= how; }
     public boolean hasShutdown(int how)     { return (this.skShutdown & how) != 0; }
@@ -177,6 +185,7 @@ public final class TcpConnection {
         private int                    sndNxt;
         private int                    rcvNxt;
         private int                    sndWnd;
+        private int                    sndWl1;
         private int                    rcvWnd           = 65535;
         private int                    rcvWup;
         private boolean                rcvWupSet;
@@ -194,6 +203,7 @@ public final class TcpConnection {
         public Builder sndNxt(int v)                           { this.sndNxt = v; return this; }
         public Builder rcvNxt(int v)                           { this.rcvNxt = v; return this; }
         public Builder sndWnd(int v)                           { this.sndWnd = v; return this; }
+        public Builder sndWl1(int v)                           { this.sndWl1 = v; return this; }
         public Builder rcvWnd(int v)                           { this.rcvWnd = v; return this; }
         public Builder rcvWup(int v)                           { this.rcvWup = v; this.rcvWupSet = true; return this; }
         public Builder mss(int v)                              { this.mss = v; return this; }
