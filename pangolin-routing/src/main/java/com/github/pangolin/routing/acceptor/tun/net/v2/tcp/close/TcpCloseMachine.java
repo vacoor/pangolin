@@ -4,6 +4,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnect
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 
@@ -33,12 +34,12 @@ public final class TcpCloseMachine {
     /**
      * Abortive close: do not send FIN, close channel immediately.
      */
-    public static void abortiveClose(ChannelHandlerContext ctx, TcpConnection conn, ChannelPromise promise) {
+    public static ChannelFuture abortiveClose(ChannelHandlerContext ctx, TcpConnection conn, ChannelPromise promise) {
         conn.skShutdown(TcpConstants.SHUTDOWN_MASK);
         if (promise != null) {
-            ctx.close(promise);
+            return ctx.close(promise);
         } else {
-            ctx.close();
+            return ctx.close();
         }
     }
 

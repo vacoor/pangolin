@@ -33,7 +33,7 @@ public final class TcpAckProcessor {
         int ackSeq   = pkt.tcpAckNum();
         int prevUna  = conn.sndUna();
 
-        // Precondition: caller (TcpSegmentValidator) has already verified ack <= SND.NXT.
+        // Precondition: caller (TcpIncomingAckHandler) has already verified ack <= SND.NXT.
         int ackedBytes = conn.acknowledgeUpTo(ackSeq);
         boolean advanced = TcpSequence.after(conn.sndUna(), prevUna);
 

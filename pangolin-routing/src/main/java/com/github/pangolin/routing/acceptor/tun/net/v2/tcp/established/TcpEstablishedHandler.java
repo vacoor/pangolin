@@ -6,7 +6,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close.TcpActiveCloseH
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close.TcpPassiveCloseHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmentValidator;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
@@ -68,7 +68,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
     // ── Lifecycle / inbound ───────────────────────────────────────────────
 
     /**
-     * Insert {@link TcpSegmentValidator} immediately before this handler when it is
+     * Insert {@link TcpIncomingAckHandler} immediately before this handler when it is
      * added to the pipeline.  The validator performs the common pre-checks
      * (sequence acceptability + ACK processing) for all inbound segments, analogous to
      * how {@link io.netty.handler.codec.http.websocketx.Utf8FrameValidator} sits before
@@ -80,7 +80,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) {
         ctx.pipeline().addBefore(ctx.name(), "tcp-segment-validator",
-                new TcpSegmentValidator(conn, log));
+                new TcpIncomingAckHandler(conn, log));
     }
 
     /**
@@ -96,9 +96,9 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
         }
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
         try {
-            // Validation (preProcess + processAck) is handled upstream by TcpSegmentValidator.
+            // Validation (preProcess + processAck) is handled upstream by TcpIncomingAckHandler.
             // Arriving here means the segment passed sequence checks, SND.UNA/WND are up-to-date,
-            // and the AckResult is stored in conn attr TcpSegmentValidator.ACK_RESULT_KEY.
+            // and the AckResult is stored in conn attr TcpIncomingAckHandler.ACK_RESULT_KEY.
 
             /* ── tcp_ack 之后的 switch(state)：TCP_SYN_RECV → TCP_ESTABLISHED 状态迁移 ────
              * 对应 Linux tcp_rcv_state_process 中 tcp_ack() 之后的 switch case TCP_SYN_RECV：

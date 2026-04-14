@@ -3,7 +3,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmentValidator;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
@@ -42,20 +42,20 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
     }
 
     /**
-     * Notify {@link TcpSegmentValidator} of our close promise so that an RST arriving in
+     * Notify {@link TcpIncomingAckHandler} of our close promise so that an RST arriving in
      * any active-close state can trigger an abortive close on the correct promise.
      */
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) {
-        TcpSegmentValidator v = ctx.pipeline().get(TcpSegmentValidator.class);
+        TcpIncomingAckHandler v = ctx.pipeline().get(TcpIncomingAckHandler.class);
         if (v != null) v.closePromise(closePromise);
     }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
-        // Validation (preProcess + processAck) was handled by TcpSegmentValidator.
-        TcpSegmentValidator.AckResult ackResult = conn.getAttr(TcpSegmentValidator.ACK_RESULT_KEY);
-        if (ackResult != TcpSegmentValidator.AckResult.NONE) {
+        // Validation (preProcess + processAck) was handled by TcpIncomingAckHandler.
+        TcpIncomingAckHandler.AckResult ackResult = conn.getAttr(TcpIncomingAckHandler.ACK_RESULT_KEY);
+        if (ackResult != TcpIncomingAckHandler.AckResult.NONE) {
             // tcp_data_snd_check: flush any queued data whose window just re-opened.
             TcpSegmenter.INSTANCE.sendPending(conn);
         }

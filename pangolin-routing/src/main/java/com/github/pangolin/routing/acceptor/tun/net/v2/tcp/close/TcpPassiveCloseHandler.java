@@ -3,7 +3,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmentValidator;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -50,9 +50,9 @@ public final class TcpPassiveCloseHandler extends ChannelDuplexHandler {
         }
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
         try {
-            // Validation (preProcess + processAck) was handled by TcpSegmentValidator.
-            TcpSegmentValidator.AckResult ackResult = conn.getAttr(TcpSegmentValidator.ACK_RESULT_KEY);
-            if (ackResult != TcpSegmentValidator.AckResult.NONE) {
+            // Validation (preProcess + processAck) was handled by TcpIncomingAckHandler.
+            TcpIncomingAckHandler.AckResult ackResult = conn.getAttr(TcpIncomingAckHandler.ACK_RESULT_KEY);
+            if (ackResult != TcpIncomingAckHandler.AckResult.NONE) {
                 // tcp_data_snd_check: flush any queued data whose window just re-opened.
                 TcpSegmenter.INSTANCE.sendPending(conn);
             }
@@ -86,7 +86,7 @@ public final class TcpPassiveCloseHandler extends ChannelDuplexHandler {
             log.debug("[TCP] [PASSIVE-CLOSE] close() called — sending FIN, entering LAST_ACK");
             this.closePromise = promise;
             // Notify validator so an RST arriving in LAST_ACK can abort on the correct promise.
-            TcpSegmentValidator v = ctx.pipeline().get(TcpSegmentValidator.class);
+            TcpIncomingAckHandler v = ctx.pipeline().get(TcpIncomingAckHandler.class);
             if (v != null) v.closePromise(promise);
             TcpCloseMachine.beginLastAckClose(conn);
             // Do NOT call super.close(): we wait for LAST_ACK's ACK in channelRead
