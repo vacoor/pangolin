@@ -133,7 +133,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
                 return;
             }
             ByteBuf data = (ByteBuf) msg;
-            conn.sendBuffer().enqueue(data);
+            conn.queueWrite(data);
             // ACK_SCHED | ACK_TIMER clearing is now handled inside TcpSegmenter.tcp_transmit_skb,
             // mirroring Linux __tcp_transmit_skb → tcp_event_ack_sent → inet_csk_clear_xmit_timer.
             TcpSegmenter.INSTANCE.tcp_write_xmit(conn, conn.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
@@ -238,7 +238,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h#L2102">tcp_push_pending_frames</a>
      */
     private void tcp_push_pending_frames() {
-        if (!conn.sendBuffer().hasDataToSend()) {
+        if (conn.tcpSendHead() == null) {
             return;
         }
         __tcp_push_pending_frames();

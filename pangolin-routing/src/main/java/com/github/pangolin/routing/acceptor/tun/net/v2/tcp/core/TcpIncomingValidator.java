@@ -15,8 +15,8 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpU
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants.*;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutSupport.*;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpInputSupport.*;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.*;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpInputOps.*;
 
 @Slf4j
 public class TcpIncomingValidator extends ChannelInboundHandlerAdapter {

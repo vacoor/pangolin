@@ -3,12 +3,11 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close.TcpCloseMachine;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class TcpInputSupport {
+public class TcpInputOps {
     // ── errno constants used by tcp_reset ────────────────────────────────
     /** Linux {@code ECONNRESET} (104) — connection reset by peer. */
     private static final int ECONNRESET   = 104;

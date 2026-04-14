@@ -13,6 +13,12 @@ import io.netty.buffer.ByteBuf;
  * TCP segment transmitter: segments application data and sends it within the congestion
  * and receive windows.
  *
+ * <p>Follows Linux's model exactly: the write queue stores {@link TcpSegmentEntry} objects
+ * with sequence numbers already assigned at enqueue time (via {@link TcpConnection#queueWrite}).
+ * {@link #tcp_transmit_skb} reads the seq directly from the entry (mirroring Linux reading
+ * {@code TCP_SKB_CB(skb)->seq}).  {@link #tcp_event_new_data_sent} moves the same entry
+ * object from the write queue to the RTX queue — no new allocation at transmission time.
+ *
  * <p>Stateless — all state lives in {@link TcpConnection}.
  */
 public final class TcpSegmenter {
@@ -35,9 +41,9 @@ public final class TcpSegmenter {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2791">tcp_write_xmit</a>
      */
     public boolean tcp_write_xmit(TcpConnection conn, int mss_now, int nonagle, int push_one) {
-        int     sent_pkts       = 0;
-        boolean is_cwnd_limited  = false;
-        boolean is_rwnd_limited  = false;
+        int     sent_pkts      = 0;
+        boolean is_cwnd_limited = false;
+        boolean is_rwnd_limited = false;
 
         tcp_mstamp_refresh(conn);
 
@@ -52,8 +58,8 @@ public final class TcpSegmenter {
         }
 
         final int max_segs = tcp_tso_segs(conn, mss_now);
-        ByteBuf skb;
-        while ((skb = conn.sendBuffer().peekWrite()) != null) {
+        TcpSegmentEntry skb;
+        while ((skb = conn.tcpSendHead()) != null) {
             if (tcp_pacing_check(conn)) {
                 break;
             }
@@ -88,34 +94,49 @@ public final class TcpSegmenter {
                 }
             }
 
+            /*
+             * Argh, we hit an empty skb(), presumably a thread is sleeping in
+             * sendmsg()/sk_stream_wait_memory(). We do not want to send a pure-ack
+             * packet and have a strange looking rtx queue with empty packet(s).
+             * Mirrors Linux: if (TCP_SKB_CB(skb)->seq == TCP_SKB_CB(skb)->end_seq)
+             */
+            if (skb.dataLen() == 0 && !skb.isFin()) {
+                break;
+            }
+
             int limit = mss_now;
             if (tso_segs > 1 && !tcp_urg_mode(conn)) {
                 limit = tcp_mss_split_point(conn, skb, mss_now, cwnd_quota, nonagle);
             }
 
-            if (skb.readableBytes() > limit && tso_fragment(conn, skb, limit, mss_now)) {
-                break;
+            if (skb.dataLen() > limit) {
+                if (tcp_fragment(conn, skb, limit, mss_now)) {
+                    break;
+                }
+                /* tcp_fragment replaced the head entry — re-peek the new (smaller) head. */
+                skb = conn.tcpSendHead();
+                if (skb == null) {
+                    break;
+                }
             }
+
             if (tcp_small_queue_check(conn, skb, push_one)) {
                 break;
             }
 
-            ByteBuf payload = nextSegment(conn, limit);
-            if (payload == null) break;
-
-            if (tcp_transmit_skb(conn, payload) != 0) {
-                payload.release();
+            // FIXME
+            if (0 != tcp_transmit_skb(conn, skb)) {
                 break;
             }
 
             /*
              * Advance the send_head.  This one is sent out.
              * This call will increment packets_out.
+             * Mirrors Linux: tcp_event_new_data_sent moves skb from sk_write_queue to tcp_rtx_queue.
              */
-            tcp_event_new_data_sent(conn, payload);
-            tcp_minshall_update(conn, mss_now, payload);
-            sent_pkts += tcp_skb_pcount(payload);
-            payload.release();  // release our slice; RTX entry holds its own retainedSlice
+            tcp_event_new_data_sent(conn, skb);
+            tcp_minshall_update(conn, mss_now, skb);
+            sent_pkts += tcp_skb_pcount(skb);
 
             if (push_one != 0) {
                 break;
@@ -136,7 +157,7 @@ public final class TcpSegmenter {
             }
             return false;
         }
-        return conn.packetsOut() == 0 && conn.sendBuffer().hasDataToSend();
+        return conn.packetsOut() == 0 && conn.tcpSendHead() != null;
     }
 
     // ── tcp_write_xmit sub-functions ─────────────────────────────────────
@@ -203,7 +224,7 @@ public final class TcpSegmenter {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1614">tcp_set_skb_tso_segs</a>
      */
-    private int tcp_set_skb_tso_segs(ByteBuf skb, int mss_now) {
+    private int tcp_set_skb_tso_segs(TcpSegmentEntry skb, int mss_now) {
         return 1;
     }
 
@@ -213,9 +234,9 @@ public final class TcpSegmenter {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1985">tcp_snd_wnd_test</a>
      */
-    private boolean tcp_snd_wnd_test(TcpConnection conn, ByteBuf skb, int mss_now) {
-        // end_seq of what would be sent: sndNxt + min(skb data, mss_now)
-        int end_seq = conn.sndNxt() + Math.min(skb.readableBytes(), mss_now);
+    private boolean tcp_snd_wnd_test(TcpConnection conn, TcpSegmentEntry skb, int mss_now) {
+        // end_seq of what would be sent: skb.startSeq + min(skb data, mss_now)
+        int end_seq = skb.startSeq() + Math.min(skb.dataLen(), mss_now);
         // tcp_wnd_end(tp) = snd_una + snd_wnd
         int wnd_end = conn.sndUna() + conn.sndWnd();
         return !TcpSequence.after(end_seq, wnd_end);
@@ -223,13 +244,11 @@ public final class TcpSegmenter {
 
     /**
      * Returns {@code true} if {@code skb} is the last segment in the write queue.
-     * Simplified — always returns {@code false} (FIXME: check last skb in queue).
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1780">tcp_skb_is_last</a>
      */
-    private boolean tcp_skb_is_last(TcpConnection conn, ByteBuf skb) {
-        // FIXME: return conn.sendBuffer().writeQueueSize() == 1
-        return false;
+    private boolean tcp_skb_is_last(TcpConnection conn, TcpSegmentEntry skb) {
+        return conn.sendBuffer().writeQueueSize() == 1;
     }
 
     /**
@@ -238,12 +257,12 @@ public final class TcpSegmenter {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1785">tcp_nagle_test</a>
      */
-    private boolean tcp_nagle_test(TcpConnection conn, ByteBuf skb, int mss_now, int nonagle) {
+    private boolean tcp_nagle_test(TcpConnection conn, TcpSegmentEntry skb, int mss_now, int nonagle) {
         if ((nonagle & (TcpConstants.TCP_NAGLE_OFF | TcpConstants.TCP_NAGLE_PUSH)) != 0) {
             return true;
         }
         // Standard Nagle: allow only if segment fills MSS or nothing is in flight
-        return skb.readableBytes() >= mss_now || conn.packetsOut() == 0;
+        return skb.dataLen() >= mss_now || conn.packetsOut() == 0;
     }
 
     /**
@@ -251,7 +270,7 @@ public final class TcpSegmenter {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2065">tcp_tso_should_defer</a>
      */
-    private boolean tcp_tso_should_defer(TcpConnection conn, ByteBuf skb,
+    private boolean tcp_tso_should_defer(TcpConnection conn, TcpSegmentEntry skb,
                                           boolean is_cwnd_limited, boolean is_rwnd_limited,
                                           int max_segs) {
         // FIXME: not implemented
@@ -274,18 +293,42 @@ public final class TcpSegmenter {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1741">tcp_mss_split_point</a>
      */
-    private int tcp_mss_split_point(TcpConnection conn, ByteBuf skb, int mss_now,
+    private int tcp_mss_split_point(TcpConnection conn, TcpSegmentEntry skb, int mss_now,
                                      int cwnd_quota, int nonagle) {
         return mss_now;
     }
 
     /**
-     * Fragment {@code skb} at {@code limit} bytes for TSO — not implemented;
-     * always returns {@code false} (no fragment, keep going).
+     * Fragment {@code skb} at {@code limit} bytes: split the head write-queue entry into
+     * two entries of {@code limit} and {@code skb.dataLen() - limit} bytes respectively,
+     * each with the correct start sequence number.
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1559">tso_fragment</a>
+     * <p>Mirrors Linux {@code tcp_fragment} (tcp_output.c): the original SKB is split into
+     * two; the first fragment keeps its original {@code TCP_SKB_CB->seq}, and the second
+     * gets {@code seq + limit}.  Both are re-inserted into the write queue in order.
+     *
+     * @return {@code false} always — caller should re-peek the write queue and continue
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1559">tcp_fragment</a>
      */
-    private boolean tso_fragment(TcpConnection conn, ByteBuf skb, int limit, int mss_now) {
+    private boolean tcp_fragment(TcpConnection conn, TcpSegmentEntry skb, int limit, int mss_now) {
+        ByteBuf origPayload = skb.payload();
+        int     origReader  = origPayload.readerIndex();
+
+        ByteBuf headBuf = origPayload.retainedSlice(origReader, limit);
+        int     tailLen = skb.dataLen() - limit;
+        ByteBuf tailBuf = origPayload.retainedSlice(origReader + limit, tailLen);
+
+        TcpSegmentEntry headEntry = new TcpSegmentEntry(headBuf, skb.startSeq(),         limit,   false,        0L);
+        TcpSegmentEntry tailEntry = new TcpSegmentEntry(tailBuf, skb.startSeq() + limit, tailLen, skb.isFin(), 0L);
+
+        /* Remove original entry and release its payload; the two slices above hold their own refs. */
+        conn.sendBuffer().pollWrite().release();
+
+        /* Re-insert in order: enqueueWriteFirst(tail) then enqueueWriteFirst(head)
+         * so that head is at the front and tail follows immediately. */
+        conn.sendBuffer().enqueueWriteFirst(tailEntry);
+        conn.sendBuffer().enqueueWriteFirst(headEntry);
+
         return false;
     }
 
@@ -295,96 +338,157 @@ public final class TcpSegmenter {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2374">tcp_small_queue_check</a>
      */
-    private boolean tcp_small_queue_check(TcpConnection conn, ByteBuf skb, int push_one) {
+    private boolean tcp_small_queue_check(TcpConnection conn, TcpSegmentEntry skb, int push_one) {
         return false;
-    }
-
-    /**
-     * Dequeues one segment of at most {@code limit} bytes from the write buffer,
-     * also bounded by the remaining send window.
-     * Returns {@code null} if the window is exhausted.
-     * Mirrors the per-skb slice logic inside the Linux {@code tcp_write_xmit} loop.
-     */
-    private ByteBuf nextSegment(TcpConnection conn, int limit) {
-        ByteBuf head = conn.sendBuffer().peekWrite();
-        if (head == null) return null;
-        int window = conn.sndUna() + conn.sndWnd() - conn.sndNxt();
-        int segLen = Math.min(head.readableBytes(), Math.min(limit, window));
-        if (segLen <= 0) return null;
-        ByteBuf segment = head.readRetainedSlice(segLen);  // advances readerIndex in-place
-        if (!head.isReadable()) {
-            conn.sendBuffer().pollWrite().release();        // fully consumed — remove + release
-        }
-        return segment;
     }
 
     /**
      * Build and transmit one data segment on the wire.
      *
-     * <p>Only responsible for header construction and I/O — no TCP state is updated here.
-     * The caller must invoke {@link #tcp_event_new_data_sent} immediately after a successful
-     * return to advance SND.NXT, enqueue in the RTX queue, and arm the RTO timer.
+     * <p>Mirrors Linux {@code __tcp_transmit_skb()}: builds the TCP/IP packet, writes it to
+     * the TUN device, and performs per-segment accounting (ACK piggybacking, stats).
+     * {@code rcv_nxt} is taken as an explicit parameter so the retransmitter can pass a
+     * snapshot of RCV.NXT rather than the live value — exactly as Linux splits
+     * {@code __tcp_transmit_skb} from {@code tcp_transmit_skb}.
      *
      * @return 0 on success, non-zero on send failure
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1399">tcp_transmit_skb</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1290">__tcp_transmit_skb</a>
      */
-    private int tcp_transmit_skb(TcpConnection conn, ByteBuf payload) {
-        FourTuple ft = ((TcpConnectionChannel) conn.channel()).fourTuple();
-        int payLen   = payload.readableBytes();
+    private int __tcp_transmit_skb(TcpConnection conn, TcpSegmentEntry skb, int rcv_nxt) {
+        if (skb == null) {
+            return -1;
+        }
+
+        // TODO: pacing timestamp update
+        // tp.tcp_wstamp_ns = Math.max(tp.tcp_wstamp_ns, tp.tcp_clock_cache);
+        // tp.skb_set_delivery_time(skb, tp.tcp_wstamp_ns, SKB_CLOCK_MONOTONIC);
+
+        /* Build TCP options for the established path (no SYN here). */
+        final byte[] rawOptions = tcp_established_options(conn, skb);
+
+        /*
+         * Fill addressing fields.  Note the swap: from the TUN device's perspective the
+         * packet travels dst→src (the "local" host is the destination of the original flow).
+         * Mirrors Linux: skb->srcAddr = tp.ir_loc_addr, skb->dstAddr = tp.ir_rmt_addr.
+         */
+        final FourTuple ft = ((TcpConnectionChannel) conn.channel()).fourTuple();
+
+        /* Determine TCP flags.
+         * Always set ACK; add PSH when carrying data; add FIN when the entry is a FIN. */
+        int tcpFlags = 0x10; /* ACK */
+        if (skb.dataLen() > 0) {
+            tcpFlags |= 0x08; /* PSH */
+        }
+        if (skb.isFin()) {
+            tcpFlags |= 0x01; /* FIN */
+        }
 
         ByteBuf buf = TcpPacketBuilder.buildRaw(
                 ft.dstAddrBytes(), ft.dstPort(),
                 ft.srcAddrBytes(), ft.srcPort(),
-                conn.sndNxt(), conn.rcvNxt(),
-                0x18 /* PSH+ACK */, selectAdvertisedWindow(conn),
-                null, payload, payLen);
+                skb.startSeq(), rcv_nxt,
+                tcpFlags, selectAdvertisedWindow(conn),
+                rawOptions, skb.payload(), skb.dataLen());
 
         ((TcpConnectionChannel) conn.channel()).writeRaw(buf);
 
-        // Mirrors Linux tcp_event_ack_sent(): every data segment carries the ACK flag,
-        // so the piggybacked ACK covers any pending acknowledgement.
-        // Clear ACK_SCHED | ACK_TIMER and cancel the delayed-ACK timer.
-        // Linux does exactly this inside __tcp_transmit_skb → tcp_event_ack_sent →
-        //   inet_csk_clear_xmit_timer(ICSK_TIME_DACK).
+        /* Every data segment carries the ACK flag, so the piggybacked ACK covers any
+         * pending delayed acknowledgement.  Mirrors Linux:
+         *   __tcp_transmit_skb → tcp_event_ack_sent → inet_csk_clear_xmit_timer(ICSK_TIME_DACK). */
+        tcp_event_ack_sent(conn, rcv_nxt);
+
+        if (skb.dataLen() > 0) {
+            tcp_event_data_sent(conn);
+            // TODO: tp.data_segs_out += tcp_skb_pcount(skb); tp.bytes_sent += skb.dataLen();
+        }
+
+        // TODO: tp.segs_out += tcp_skb_pcount(skb);
+
+        return 0;
+    }
+
+    /**
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1486">tcp_transmit_skb</a>
+     */
+    private int tcp_transmit_skb(TcpConnection conn, TcpSegmentEntry skb) {
+        return __tcp_transmit_skb(conn, skb, conn.rcvNxt());
+    }
+
+    /**
+     * Account for an ACK we sent.
+     *
+     * <p>If the piggybacked ACK number equals RCV.NXT the acknowledgement is current:
+     * clear {@code ACK_SCHED | ACK_TIMER} and cancel the delayed-ACK timer.
+     * Mirrors Linux {@code tcp_event_ack_sent()} →
+     * {@code inet_csk_clear_xmit_timer(ICSK_TIME_DACK)}.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L182">tcp_event_ack_sent</a>
+     */
+    private void tcp_event_ack_sent(TcpConnection conn, int rcv_nxt) {
+        if (rcv_nxt != conn.rcvNxt()) {
+            return;
+        }
+        // TODO: tcp_dec_quickack_mode(conn);
         if (conn.hasAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER)) {
             if (conn.hasAckPending(TcpConstants.ACK_TIMER)) {
                 TcpTimerScheduler.INSTANCE.cancelDelayedAck(conn);
             }
             conn.clearAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER);
         }
+    }
 
-        return 0;
+    /**
+     * Congestion-state accounting after a data segment has been sent.
+     * Updates {@code lsndtime} and the ping-pong counter.
+     * Not yet implemented.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L163">tcp_event_data_sent</a>
+     */
+    private void tcp_event_data_sent(TcpConnection conn) {
+        // TODO: tp.lsndtime = tcp_jiffies32();
+        // TODO: if (now - tp.icsk_ack.lrcvtime < tp.icsk_ack.ato) tp.inet_csk_inc_pingpong_cnt();
+    }
+
+    /**
+     * Build TCP options for an established connection.
+     * Currently returns {@code null} (no options); timestamps will be added here
+     * once {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.timestamp.TcpTimestampExtension}
+     * is wired in.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L633">tcp_established_options</a>
+     */
+    private byte[] tcp_established_options(TcpConnection conn, TcpSegmentEntry skb) {
+        // TODO: include TCP timestamps (TcpTimestampExtension), SACK blocks, etc.
+        return null;
     }
 
     /**
      * Update send-path state after a segment has been handed to the NIC.
      *
-     * <p>Mirrors Linux {@code tcp_event_new_data_sent()}:
+     * <p>Mirrors Linux {@code tcp_event_new_data_sent()} exactly:
      * <ol>
-     *   <li>Advance {@code SND.NXT} by the payload length.</li>
-     *   <li>Enqueue a retained copy in the RTX (retransmit) queue.</li>
+     *   <li>Advance {@code SND.NXT} to {@code skb.endSeq()} — mirrors
+     *       {@code tp->snd_nxt = TCP_SKB_CB(skb)->end_seq}.</li>
+     *   <li>Move the entry from the write queue to the RTX queue — mirrors
+     *       {@code __skb_unlink(skb, &sk->sk_write_queue)} +
+     *       {@code tcp_rbtree_insert(&sk->tcp_rtx_queue, skb)}.
+     *       No new allocation: the same entry object is promoted.</li>
+     *   <li>Stamp {@code sentTimeUs} on the entry (was 0 while in write queue).</li>
      *   <li>Increment {@code packets_out}.</li>
      *   <li>Arm the RTO timer if this is the first segment in flight (RFC 6298 §5.1).</li>
      * </ol>
      *
-     * <p>Must be called immediately after {@link #tcp_transmit_skb} returns 0, while
-     * {@code SND.NXT} still points to the start of {@code payload}.
-     *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2595">tcp_event_new_data_sent</a>
      */
-    private void tcp_event_new_data_sent(TcpConnection conn, ByteBuf payload) {
-        final int  seq       = conn.sndNxt();
-        final int  payLen    = payload.readableBytes();
-        final long sentTime  = System.nanoTime() / 1_000L;
-
+    private void tcp_event_new_data_sent(TcpConnection conn, TcpSegmentEntry skb) {
         // tp->snd_nxt = TCP_SKB_CB(skb)->end_seq
-        conn.sndNxt(seq + payLen);
+        conn.sndNxt(skb.endSeq());
 
-        // tcp_rbtree_insert: move skb from write queue to RTX queue
-        TcpSegmentEntry entry = new TcpSegmentEntry(
-                payload.retainedSlice(), seq, payLen, false, sentTime);
+        // __skb_unlink(skb, &sk->sk_write_queue) + tcp_rbtree_insert(&sk->tcp_rtx_queue, skb)
+        conn.sendBuffer().pollWrite();   // remove from write queue — skb reference still held here
         final boolean startRto = !conn.sendBuffer().hasRtxPending();
-        conn.sendBuffer().enqueueRtx(entry);
+        skb.updateSentTime(System.nanoTime() / 1_000L);
+        conn.sendBuffer().enqueueRtx(skb);
 
         // tp->packets_out += tcp_skb_pcount(skb)
         conn.incrementPacketsOut();
@@ -403,8 +507,8 @@ public final class TcpSegmenter {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L566">tcp_minshall_update</a>
      */
-    private void tcp_minshall_update(TcpConnection conn, int mss_now, ByteBuf skb) {
-        // TODO: if (skb.readableBytes() < tcp_skb_pcount(skb) * mss_now) conn.sndSml(snd_nxt)
+    private void tcp_minshall_update(TcpConnection conn, int mss_now, TcpSegmentEntry skb) {
+        // TODO: if (skb.dataLen() < tcp_skb_pcount(skb) * mss_now) conn.sndSml(snd_nxt)
     }
 
     /**
@@ -413,7 +517,7 @@ public final class TcpSegmenter {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1610">tcp_skb_pcount</a>
      */
-    private int tcp_skb_pcount(ByteBuf skb) {
+    private int tcp_skb_pcount(TcpSegmentEntry skb) {
         return 1;
     }
 

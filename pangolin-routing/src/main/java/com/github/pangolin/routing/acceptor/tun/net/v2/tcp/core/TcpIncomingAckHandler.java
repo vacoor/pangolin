@@ -12,7 +12,7 @@ import org.slf4j.Logger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants.*;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutSupport.*;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.*;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
 
@@ -286,7 +286,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3546">tcp_ack_probe</a>
      */
     private static void tcpAckProbe(TcpConnection conn) {
-        if (!conn.sendBuffer().hasDataToSend()) {
+        if (conn.tcpSendHead() == null) {
             return;     // nothing to send — no probe timer active
         }
         if (conn.sndWnd() > 0) {

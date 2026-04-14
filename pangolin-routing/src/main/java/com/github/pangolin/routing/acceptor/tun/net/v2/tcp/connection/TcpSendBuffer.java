@@ -9,27 +9,49 @@ import java.util.Deque;
  * TCP send buffer: holds application data waiting to be segmented and sent,
  * plus a retransmit queue of in-flight segments.
  *
+ * <p>Following Linux's model, the write queue stores {@link TcpSegmentEntry} objects
+ * with sequence numbers assigned at enqueue time (mirroring {@code sk_write_queue} where
+ * each {@code sk_buff} carries {@code TCP_SKB_CB(skb)->seq} when added via
+ * {@code tcp_queue_skb}).  The same entry object is promoted from the write queue to
+ * the retransmit queue by {@code tcp_event_new_data_sent} — no new allocation occurs
+ * at transmission time.
+ *
  * <p>All operations must be called from the connection's assigned Worker EventLoop.
  */
 public final class TcpSendBuffer {
 
-    /** Pending application data not yet segmented/sent. */
-    private final Deque<ByteBuf> writeQueue = new ArrayDeque<>();
+    /**
+     * Unsent application data: entries with sequence numbers already assigned.
+     * Mirrors Linux {@code sk->sk_write_queue}.
+     */
+    private final Deque<TcpSegmentEntry> writeQueue = new ArrayDeque<>();
 
-    /** In-flight segments awaiting ACK (retransmit queue). Each entry is a full TCP payload. */
+    /** In-flight segments awaiting ACK (retransmit queue). Mirrors Linux {@code sk->tcp_rtx_queue}. */
     private final Deque<TcpSegmentEntry> rtxQueue = new ArrayDeque<>();
 
     // ---- Write queue ----
 
-    public void enqueue(ByteBuf data) {
-        writeQueue.addLast(data);
+    /**
+     * Append an entry to the tail of the write queue.
+     * Mirrors Linux {@code tcp_queue_skb}: called after seq and end_seq have been set on the entry.
+     */
+    public void enqueue(TcpSegmentEntry entry) {
+        writeQueue.addLast(entry);
     }
 
-    public ByteBuf peekWrite() {
+    /**
+     * Insert an entry at the head of the write queue.
+     * Used by {@code tcp_fragment} to re-enqueue the split head fragment.
+     */
+    public void enqueueWriteFirst(TcpSegmentEntry entry) {
+        writeQueue.addFirst(entry);
+    }
+
+    public TcpSegmentEntry peekWrite() {
         return writeQueue.peekFirst();
     }
 
-    public ByteBuf pollWrite() {
+    public TcpSegmentEntry pollWrite() {
         return writeQueue.pollFirst();
     }
 
@@ -80,8 +102,8 @@ public final class TcpSendBuffer {
 
     /** Release all buffers (called on connection close). */
     public void releaseAll() {
-        for (ByteBuf buf : writeQueue) {
-            buf.release();
+        for (TcpSegmentEntry entry : writeQueue) {
+            entry.release();
         }
         writeQueue.clear();
         for (TcpSegmentEntry entry : rtxQueue) {
@@ -92,23 +114,35 @@ public final class TcpSendBuffer {
 
     // ---- Inner type ----
 
-    /** An in-flight TCP segment stored in the retransmit queue. */
+    /**
+     * A TCP segment stored in either the write queue or the retransmit queue.
+     *
+     * <p>Lifecycle mirrors Linux {@code sk_buff} with {@code TCP_SKB_CB}:
+     * <ol>
+     *   <li>Created with {@code startSeq} assigned in {@link TcpConnection#queueWrite} —
+     *       placed in the write queue.</li>
+     *   <li>Transmitted by {@code TcpSegmenter.tcp_transmit_skb} — seq read from this entry.</li>
+     *   <li>{@code sentTimeUs} stamped and entry promoted to RTX queue by
+     *       {@code TcpSegmenter.tcp_event_new_data_sent} — no new allocation.</li>
+     *   <li>Released when ACKed ({@link #acknowledgeUpTo}) or on connection close.</li>
+     * </ol>
+     */
     public static final class TcpSegmentEntry {
         private final ByteBuf payload;
         private final int     startSeq;
         private final int     dataLen;
         private final boolean fin;
         private       boolean retransmitted;
-        private       long    sentTimeUs;   // send timestamp in µs (for RTT sampling)
+        private       long    sentTimeUs;   // stamped at transmission time (0 while in write queue)
 
         public TcpSegmentEntry(ByteBuf payload, int startSeq, int dataLen,
                                boolean fin, long sentTimeUs) {
-            this.payload      = payload;
-            this.startSeq     = startSeq;
-            this.dataLen      = dataLen;
-            this.fin          = fin;
+            this.payload       = payload;
+            this.startSeq      = startSeq;
+            this.dataLen       = dataLen;
+            this.fin           = fin;
             this.retransmitted = false;
-            this.sentTimeUs   = sentTimeUs;
+            this.sentTimeUs    = sentTimeUs;
         }
 
         /** Exclusive end sequence number of this segment. */
@@ -123,8 +157,8 @@ public final class TcpSendBuffer {
         public long    sentTimeUs()      { return sentTimeUs; }
         public boolean isRetransmitted() { return retransmitted; }
 
-        public void markRetransmitted()  { retransmitted = true; }
-        public void updateSentTime(long us) { this.sentTimeUs = us; }
+        public void markRetransmitted()          { retransmitted = true; }
+        public void updateSentTime(long us)      { this.sentTimeUs = us; }
 
         public void release() {
             if (payload != null) payload.release();

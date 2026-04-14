@@ -7,7 +7,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
 
-public class TcpOutSupport {
+public class TcpOutOps {
 
     /**
      * RFC 5961 7 [ACK Throttling]

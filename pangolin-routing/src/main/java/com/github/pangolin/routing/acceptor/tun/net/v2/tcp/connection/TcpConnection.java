@@ -8,8 +8,10 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.rtt.NoopRttEstima
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.rtt.RttEstimator;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.timestamp.NoopTimestampExtension;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.timestamp.TcpTimestampExtension;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpConnectionTimers;
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
 
@@ -31,7 +33,8 @@ public final class TcpConnection {
     // ── RFC 9293 core state ──────────────────────────────────────────────────
     private TcpConnectionState state;
     private int sndUna;    // SND.UNA — oldest unacknowledged sequence number
-    private int sndNxt;    // SND.NXT — next sequence number to send
+    private int sndNxt;    // SND.NXT — next sequence number to send (advanced on transmit)
+    private int writeSeq;  // write_seq — next sequence number to be queued (advanced on enqueue, mirrors Linux tp->write_seq)
     private int rcvNxt;    // RCV.NXT — next sequence number expected from peer
     private int sndWnd;    // SND.WND — peer's receive window
     private int maxWindow; // maximum SND.WND ever seen from peer (Linux: tp->max_window)
@@ -79,6 +82,7 @@ public final class TcpConnection {
         this.state             = TcpConnectionState.TCP_ESTABLISHED;
         this.sndUna            = b.sndUna;
         this.sndNxt            = b.sndNxt;
+        this.writeSeq          = b.sndNxt;  // initially equal to sndNxt — no data queued yet
         this.rcvNxt            = b.rcvNxt;
         this.sndWnd            = b.sndWnd;
         this.maxWindow         = b.sndWnd;  // initialise to the first advertised window
@@ -107,6 +111,7 @@ public final class TcpConnection {
     public TcpConnectionState state()  { return state; }
     public int sndUna()                { return sndUna; }
     public int sndNxt()                { return sndNxt; }
+    public int writeSeq()              { return writeSeq; }
     public int rcvNxt()                { return rcvNxt; }
     public int sndWnd()                { return sndWnd; }
     public int maxWindow()             { return maxWindow; }
@@ -141,6 +146,7 @@ public final class TcpConnection {
 
     public void state(TcpConnectionState s)  { this.state = s; }
     public void sndNxt(int v)               { this.sndNxt = v; }
+    public void writeSeq(int v)             { this.writeSeq = v; }
     public void rcvNxt(int v)               { this.rcvNxt = v; }
     public void sndWnd(int v)               { this.sndWnd = v; if (Integer.compareUnsigned(v, maxWindow) > 0) this.maxWindow = v; }
     public void sndWl1(int v)               { this.sndWl1 = v; }
@@ -196,6 +202,36 @@ public final class TcpConnection {
      */
     public void incrementPacketsOut() {
         packetsOut++;
+    }
+
+    /**
+     * Returns the first unsent entry in the write queue, or {@code null} if the queue is empty.
+     * Mirrors Linux {@code tcp_send_head(sk)} (include/net/tcp.h).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h">tcp_send_head</a>
+     */
+    public TcpSegmentEntry tcpSendHead() {
+        return sendBuffer.peekWrite();
+    }
+
+    /**
+     * Enqueue application data into the write queue with the next write sequence number assigned.
+     *
+     * <p>Mirrors Linux {@code tcp_queue_skb} (tcp_output.c): sets
+     * {@code TCP_SKB_CB(skb)->end_seq = tp->write_seq + len} then advances
+     * {@code tp->write_seq}.  The resulting {@link TcpSegmentEntry} carries its seq
+     * before entering the write queue, so {@code tcp_transmit_skb} and
+     * {@code tcp_event_new_data_sent} both read seq from the entry — never from
+     * {@code sndNxt} directly.
+     *
+     * @param data application payload; ownership transferred to the new entry
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498">tcp_queue_skb</a>
+     */
+    public void queueWrite(ByteBuf data) {
+        int seq = writeSeq;
+        int len = data.readableBytes();
+        sendBuffer.enqueue(new TcpSegmentEntry(data, seq, len, false, 0L));
+        writeSeq = seq + len;
     }
 
     /**
