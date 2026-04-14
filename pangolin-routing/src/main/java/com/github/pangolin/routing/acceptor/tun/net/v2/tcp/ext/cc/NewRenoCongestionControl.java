@@ -23,7 +23,7 @@ import java.util.function.Consumer;
  *       {@code snd_cwnd_cnt}; cwnd increments by 1 per RTT, not per ACK.</li>
  *   <li><b>LOSS exit</b>: when first new ACK arrives after RTO, transition LOSS→OPEN
  *       so cwnd resumes slow-start growth (not stuck at 1 forever).</li>
- *   <li><b>ackedSegs ≥ 1 guard</b>: handled by caller (TcpAckProcessor).</li>
+ *   <li><b>ackedSegs ≥ 1 guard</b>: handled by caller ({@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler}).</li>
  * </ul>
  */
 public final class NewRenoCongestionControl implements CongestionControl {

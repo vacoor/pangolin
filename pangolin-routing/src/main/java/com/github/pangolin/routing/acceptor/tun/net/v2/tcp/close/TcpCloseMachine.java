@@ -27,7 +27,7 @@ public final class TcpCloseMachine {
     public static void beginLastAckClose(TcpConnection conn) {
         conn.addShutdown(TcpConstants.SEND_SHUTDOWN);
         conn.state(TcpConnectionState.LAST_ACK);
-        TcpSegmenter.INSTANCE.sendPending(conn);
+        TcpSegmenter.INSTANCE.tcp_write_xmit(conn, conn.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
         TcpSegmenter.INSTANCE.sendFin(conn);
     }
 

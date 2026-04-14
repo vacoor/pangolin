@@ -1,20 +1,20 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.ConnectionKey;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import org.slf4j.Logger;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants.*;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutSupport.*;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
 
 /**
  * Inbound TCP segment validator — analogous to
@@ -74,11 +74,6 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
     public static final ConnectionKey<AckResult> ACK_RESULT_KEY =
             ConnectionKey.of("tcp.segment-validator.ack-result");
 
-    // ── Internal validation result ─────────────────────────────────────────
-
-    /** Outcome of {@link #checkRst}. */
-    private enum RstResult { DROP, RESET, CHALLENGE_ACK }
-
     // ── State ──────────────────────────────────────────────────────────────
 
     private final TcpConnection conn;
@@ -128,6 +123,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
 
         // ── tcp_ack: step 5 ACK field processing ──────────────────────────
+        final int priorSndUna = conn.sndUna();
         int reason = tcp_ack(conn, pkt, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT | FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {
             if (TcpConnectionState.TCP_SYN_RECV.equals(conn.state())) {
@@ -144,6 +140,12 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
             }
         }
 
+        // RFC 6298 §5.2/§5.3: rearm or cancel RTO when SND.UNA advances.
+        // Mirrors Linux tcp_rearm_rto(), called here rather than inside tcp_ack().
+        if (after(conn.sndUna(), priorSndUna)) {
+            TcpRetransmitter.INSTANCE.rearmRto(conn);
+        }
+
         ctx.fireChannelRead(msg);   // downstream handler owns the release
     }
 
@@ -151,24 +153,25 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         // TODO log it.
     }
 
-    // ── tcp_ack ────────────────────────────────────────────────────────────
-    /**
-     * Do not skip RFC checks for window update.
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L97">FLAG_SLOWPATH</a>
-     */
-    static final int FLAG_SLOWPATH = 0x100;
+    // ── tcp_ack flags (mirrors Linux net/ipv4/tcp_input.c flag bitmask) ───
+    /** Incoming frame contained data.
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L97">FLAG_DATA</a> */
+    private static final int FLAG_DATA            = 0x01;
 
-    /**
-     * Snd_una was changed (!= FLAG_DATA_ACKED).
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L97">FLAG_SND_UNA_ADVANCED</a>
-     */
+    /** Incoming ACK was a window update.
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L97">FLAG_WIN_UPDATE</a> */
+    private static final int FLAG_WIN_UPDATE      = 0x02;
+
+    /** Do not skip RFC checks for window update.
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L97">FLAG_SLOWPATH</a> */
+    static final int FLAG_SLOWPATH                = 0x100;
+
+    /** SND.UNA was changed (!= FLAG_DATA_ACKED).
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L97">FLAG_SND_UNA_ADVANCED</a> */
     private static final int FLAG_SND_UNA_ADVANCED = 0x400;
 
-    static final int FLAG_UPDATE_TS_RECENT = 0x4000;
-
-    static final int FLAG_NO_CHALLENGE_ACK = 0x8000;
+    static final int FLAG_UPDATE_TS_RECENT        = 0x4000;
+    static final int FLAG_NO_CHALLENGE_ACK        = 0x8000;
 
     /**
      * Step-5 ACK field processing, mirroring Linux {@code tcp_ack()}.
@@ -187,15 +190,22 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4246">tcp_ack</a>
      */
     private int tcp_ack(TcpConnection conn, TcpPacketBuf pkt, int flags) {
-        final int priorSndUna = conn.sndUna();
-        final int ack         = pkt.tcpAckNum();
+        final int priorSndUna  = conn.sndUna();
+        final int priorPktsOut = conn.packetsOut();                 // ≈ prior_packets_out
+        final int ackSeq       = pkt.tcpSeq();                      // ≈ ack_seq
+        final int ack          = pkt.tcpAckNum();
 
-        // Old ACK: ack before SND.UNA — mirrors Linux "if (before(ack, prior_snd_una))" block.
-        if (TcpSequence.before(ack, priorSndUna)) {
+        // Old ACK: mirrors Linux "if (before(ack, prior_snd_una))" block.
+        if (before(ack, priorSndUna)) {
             // RFC 5961 §5.2: blind data-injection mitigation — ack is so old it falls outside
             // any plausible window (prior_snd_una - max_window).  Send challenge ACK + drop.
-            if (TcpSequence.before(ack, priorSndUna - conn.sndWnd())) {
-                TcpSegmenter.INSTANCE.sendAck(conn);
+            // Use min(max_window, bytes_acked) to match Linux: bytes_acked caps the bound
+            // at the start of the connection before max_window stabilises.
+            final int maxWindow = (int) Math.min(conn.maxWindow(), conn.bytesAcked());
+            if (before(ack, priorSndUna - maxWindow)) {
+                if (0 == (flags & FLAG_NO_CHALLENGE_ACK)) {
+                    tcp_send_challenge_ack(conn, false);
+                }
                 return -SKB_DROP_REASON_TCP_TOO_OLD_ACK;
             }
             // goto old_ack: ordinary duplicate/retransmitted ACK — let segment through.
@@ -203,88 +213,122 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         }
 
         // Future ACK: ack beyond SND.NXT — discard per RFC 793 §3.9.
-        if (TcpSequence.after(ack, conn.sndNxt())) {
+        if (after(ack, conn.sndNxt())) {
             return -SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
         }
 
-        // Core: advance SND.UNA, update send window, RTT sample, CC, loss detection.
-        TcpAckProcessor.INSTANCE.onAck(conn, pkt);
+        // Mirrors Linux FLAG_SND_UNA_ADVANCED: set before any state mutation so the
+        // fast/slow path selector and CC below see a consistent value.
+        if (after(ack, priorSndUna)) {
+            flags |= FLAG_SND_UNA_ADVANCED;
+        }
 
-        // RFC 6298 retransmit timer management — mirrors Linux tcp_rearm_rto():
-        if (!conn.sendBuffer().hasRtxPending()) {
-            // §5.2: all outstanding data acknowledged — cancel retransmit timer.
-            TcpRetransmitter.INSTANCE.cancelRetransmit(conn);
-        } else if (TcpSequence.after(conn.sndUna(), priorSndUna)) {
-            // §5.3: partial ACK — new data acknowledged but queue still has entries → restart RTO.
-            TcpRetransmitter.INSTANCE.scheduleRetransmit(conn);
+        // ts_recent update (RFC 7323 §5.3) — after confirming segment is in-window.
+        if (0 != (flags & FLAG_UPDATE_TS_RECENT)) {
+            conn.timestampExt().updateRecent(conn, ackSeq);    // ≈ tcp_replace_ts_recent
+        }
+
+        // Window update + SND.WL1 maintenance: fast path vs slow path.
+        // Condition mirrors Linux: (flag & (FLAG_SLOWPATH|FLAG_SND_UNA_ADVANCED)) == FLAG_SND_UNA_ADVANCED
+        if ((flags & (FLAG_SLOWPATH | FLAG_SND_UNA_ADVANCED)) == FLAG_SND_UNA_ADVANCED) {
+            // Fast path: pure forward advance — window constant, no may_update_window check.
+            conn.sndWl1(ackSeq);                                // ≈ tcp_update_wl
+            flags |= FLAG_WIN_UPDATE;
+        } else {
+            // Slow path: full RFC 9293 window acceptability check.
+            if (ackSeq != determineEndSeq(pkt)) {
+                flags |= FLAG_DATA;                             // segment carries data
+            }
+            flags |= tcpAckUpdateWindow(conn, pkt, 0 != (flags & FLAG_SND_UNA_ADVANCED));  // ≈ tcp_ack_update_window
+        }
+
+        // Advance SND.UNA only — does NOT drain the RTX queue.
+        // Mirrors Linux tcp_snd_una_update(); RTX cleanup follows separately below.
+        conn.sndUnaUpdate(ack);
+
+        // no_queue: no segments were in flight before this ACK — skip RTT/CC/loss work.
+        // Mirrors Linux "if (prior_packets_out == 0) goto no_queue".
+        if (priorPktsOut == 0) {
+            tcpAckProbe(conn);                                  // ≈ tcp_ack_probe
+            return 1;
+        }
+
+        // RTT sample — must happen BEFORE the RTX queue is drained so peekRtx() still
+        // sees the just-ACKed segment (mirrors tcp_ack_update_rtt inside tcp_clean_rtx_queue).
+        long rttUs = rttSample(conn, pkt);
+        conn.rttEstimator().addSample(conn, rttUs);
+
+        // Drain acknowledged entries from RTX queue + decrement packets_out
+        // (≈ tcp_clean_rtx_queue drain loop + tp->packets_out -= acked_pcount).
+        conn.cleanRtxQueue(ack);
+
+        // RFC 5681 §3.2: loss detection — dupack / fast retransmit / RACK
+        // (mirrors tcp_fastretrans_alert).
+        conn.lossDetector().onAck(conn, ack, flags);
+
+        // RFC 5681 §3.1: cwnd advancement — only when new data was acknowledged
+        // (mirrors tcp_cong_avoid with newly_acked = prior_packets_out - tp->packets_out).
+        if (0 != (flags & FLAG_SND_UNA_ADVANCED)) {
+            int newlyAcked = Math.max(1, priorPktsOut - conn.packetsOut());
+            conn.congestionControl().onAck(conn, newlyAcked, true);
+            conn.rttEstimator().resetBackoff(conn);
         }
 
         return 1;
     }
 
-    // ── tcp_validate_incoming ──────────────────────────────────────────────
-
-
-    private int tcp_disordered_ack_check(final TcpConnection tp, final TcpPacketBuf pkt) {
-        int reason = SKB_DROP_REASON_TCP_RFC7323_PAWS;
-        int seq = pkt.tcpSeq();
-        int ack = pkt.tcpAckNum();
-
-        /* 1. Is this not a pure ACK ? */
-        if (!pkt.isAck() || seq != determineEndSeq(pkt)) {
-            return reason;
+    /**
+     * Zero-window probe timer management — mirrors Linux {@code tcp_ack_probe}.
+     * Called on the no_queue path (no in-flight segments before this ACK).
+     * If the peer's window has opened and we have data queued, cancel the probe timer
+     * so the send path can proceed normally.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3546">tcp_ack_probe</a>
+     */
+    private static void tcpAckProbe(TcpConnection conn) {
+        if (!conn.sendBuffer().hasDataToSend()) {
+            return;     // nothing to send — no probe timer active
         }
-
-        /* 2. Is its sequence not the expected one ? */
-        if (seq != tp.rcvNxt()) {
-            return TcpUtils.before(seq, tp.rcvNxt()) ? SKB_DROP_REASON_TCP_RFC7323_PAWS_ACK : reason;
+        if (conn.sndWnd() > 0) {
+            // Window has opened — cancel probe timer; the send path will handle it.
+            TcpRetransmitter.INSTANCE.cancelRetransmit(conn);
         }
-
-        /* 3. Is this not a duplicate ACK ? */
-        if (ack != tp.sndUna()) {
-            return reason;
-        }
-
-        /* 4. Is this updating the window ? */
-//        if (tcp_may_update_window(tp, ack, seq, th.getWindowAsInt() << tp.rx_opt.snd_wscale)) {
-//            return reason;
-//        }
-        /* 5. Is this not in the replay window ? */
-//        if ((s32)(tp->rx_opt.ts_recent - tp->rx_opt.rcv_tsval) > tcp_tsval_replay(sk)) {
-//            return reason;
-//        }
-        return SKB_NOT_DROPPED_YET;
     }
-
-
-
-
-
 
     /**
-     * RFC 9293 §3.5.2 + RFC 5961 §3.2 — RST acceptability test (three-way result).
+     * Guarded SND.WND update — mirrors Linux {@code tcp_ack_update_window}.
      *
-     * <ul>
-     *   <li>{@link RstResult#DROP}          — SEG.SEQ outside receive window.</li>
-     *   <li>{@link RstResult#RESET}         — SEG.SEQ == RCV.NXT; valid reset.</li>
-     *   <li>{@link RstResult#CHALLENGE_ACK} — SEG.SEQ in window but != RCV.NXT;
-     *       blind-RST attack mitigation (RFC 5961 §3.2).</li>
-     * </ul>
+     * @param newDataAcked {@code true} iff {@code SND.UNA} was advanced by this ACK
+     * @return {@link #FLAG_WIN_UPDATE} if the window was updated, {@code 0} otherwise
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3688">tcp_ack_update_window</a>
      */
-    private static RstResult checkRst(TcpConnection conn, TcpPacketBuf pkt) {
-        int seq    = pkt.tcpSeq();
-        int rcvNxt = conn.rcvNxt();
-        int rcvWnd = conn.rcvWnd();
-        if (rcvWnd == 0) {
-            return seq == rcvNxt ? RstResult.RESET : RstResult.DROP;
+    private static int tcpAckUpdateWindow(TcpConnection conn, TcpPacketBuf pkt,
+                                          boolean newDataAcked) {
+        int seg  = pkt.tcpSeq();
+        int nwin = pkt.tcpWindow() << conn.sndWscale();
+        if (newDataAcked
+                || after(seg, conn.sndWl1())
+                || (seg == conn.sndWl1() && (before(conn.sndWnd(), nwin) || nwin == 0))) {
+            conn.sndWl1(seg);
+            conn.sndWnd(nwin);
+            return FLAG_WIN_UPDATE;
         }
-        if (!TcpSequence.between(rcvNxt, seq, rcvNxt + rcvWnd - 1)) {
-            return RstResult.DROP;
-        }
-        return seq == rcvNxt ? RstResult.RESET : RstResult.CHALLENGE_ACK;
+        return 0;
     }
 
-
+    /**
+     * Estimate RTT from the ACK, applying Karn's algorithm.
+     *
+     * @return RTT in microseconds, or {@code -1} to signal "skip" (retransmitted segment)
+     */
+    private static long rttSample(TcpConnection conn, TcpPacketBuf pkt) {
+        TcpSegmentEntry head = conn.sendBuffer().peekRtx();
+        if (head == null) return -1;
+        if (head.isRetransmitted()) return -1;  // Karn: don't sample retransmits
+        if (!after(pkt.tcpAckNum(), head.startSeq())) return -1;
+        long nowUs = System.nanoTime() / 1_000L;
+        return nowUs - head.sentTimeUs();
+    }
 
 
 }

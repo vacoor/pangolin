@@ -15,7 +15,7 @@ public interface RttEstimator {
     /**
      * Incorporate a new RTT sample (microseconds).
      *
-     * <p><b>Karn's Algorithm (RFC 6298 §4)</b>: the caller ({@code TcpAckProcessor}) must
+     * <p><b>Karn's Algorithm (RFC 6298 §4)</b>: the caller ({@code TcpIncomingAckHandler}) must
      * supply {@code rttUs = -1} for retransmitted segments. This method must silently skip
      * sampling when {@code rttUs < 0}. Violating this invariant pollutes SRTT/RTTVAR and
      * produces inaccurate RTO estimates.

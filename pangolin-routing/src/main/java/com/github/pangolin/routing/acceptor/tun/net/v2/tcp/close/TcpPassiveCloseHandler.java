@@ -5,6 +5,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnect
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
@@ -54,7 +55,7 @@ public final class TcpPassiveCloseHandler extends ChannelDuplexHandler {
             TcpIncomingAckHandler.AckResult ackResult = conn.getAttr(TcpIncomingAckHandler.ACK_RESULT_KEY);
             if (ackResult != TcpIncomingAckHandler.AckResult.NONE) {
                 // tcp_data_snd_check: flush any queued data whose window just re-opened.
-                TcpSegmenter.INSTANCE.sendPending(conn);
+                TcpSegmenter.INSTANCE.tcp_write_xmit(conn, conn.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
             }
 
             // LAST_ACK: close only when the ACK covers our FIN (SND.UNA == SND.NXT).

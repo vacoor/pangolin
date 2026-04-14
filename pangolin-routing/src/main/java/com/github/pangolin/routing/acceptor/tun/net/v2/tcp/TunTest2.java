@@ -43,7 +43,7 @@ public class TunTest2 {
                     ch.pipeline().addLast(new SimpleChannelInboundHandler<ByteBuf>() {
                         @Override
                         protected void channelRead0(ChannelHandlerContext ctx, ByteBuf msg) {
-                            System.out.println(msg.toString(StandardCharsets.UTF_8));
+                            // System.out.println(msg.toString(StandardCharsets.UTF_8));
                             ctx.writeAndFlush(Unpooled.wrappedBuffer(Bytes.toBytes("HTTP/1.1 200 OK\r\n\r\nOK")));
                         }
                     });

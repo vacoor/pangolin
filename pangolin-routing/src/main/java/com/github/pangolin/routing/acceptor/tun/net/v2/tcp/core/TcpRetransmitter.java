@@ -78,4 +78,23 @@ public final class TcpRetransmitter {
     public void cancelRetransmit(TcpConnection conn) {
         TcpTimerScheduler.INSTANCE.cancelWriteTimer(conn);
     }
+
+    /**
+     * RFC 6298 §5.2/§5.3: rearm or cancel the retransmit timer after SND.UNA advances.
+     * Mirrors Linux {@code tcp_rearm_rto()}.
+     *
+     * <ul>
+     *   <li>§5.2: {@code packets_out == 0} — all outstanding data acknowledged → cancel timer.</li>
+     *   <li>§5.3: {@code packets_out > 0} — partial ACK, data still in flight → restart timer.</li>
+     * </ul>
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_rearm_rto</a>
+     */
+    public void rearmRto(TcpConnection conn) {
+        if (conn.packetsOut() == 0) {
+            cancelRetransmit(conn);
+        } else {
+            scheduleRetransmit(conn);
+        }
+    }
 }

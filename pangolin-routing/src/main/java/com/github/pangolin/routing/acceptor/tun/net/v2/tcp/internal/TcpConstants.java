@@ -45,6 +45,14 @@ public final class TcpConstants {
     /** Out-of-window invalid segment ACK rate-limit interval (~Linux HZ/2). */
     public static final long INVALID_ACK_RATELIMIT_MS = 500L;
 
+    // ---- Nagle algorithm flags (≈ Linux TCP_NAGLE_* in include/net/tcp.h) ----
+    /** Nagle algorithm disabled (TCP_NODELAY). */
+    public static final int TCP_NAGLE_OFF   = 2;
+    /** Force-push pending frames regardless of Nagle. */
+    public static final int TCP_NAGLE_PUSH  = 4;
+    /** TCP_CORK: hold data until cork is released. */
+    public static final int TCP_NAGLE_CORK  = 8;
+
     // ---- ACK-pending bitmask flags (≈ Linux ICSK_ACK_* in inet_connection_sock.h) ----
     /** ACK is owed to the peer — set when data is received, cleared when ACK is sent. */
     public static final int ACK_SCHED = 0x01;   // ≈ ICSK_ACK_SCHED

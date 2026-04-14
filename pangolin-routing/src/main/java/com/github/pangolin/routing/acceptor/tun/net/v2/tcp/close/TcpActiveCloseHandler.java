@@ -57,7 +57,7 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
         TcpIncomingAckHandler.AckResult ackResult = conn.getAttr(TcpIncomingAckHandler.ACK_RESULT_KEY);
         if (ackResult != TcpIncomingAckHandler.AckResult.NONE) {
             // tcp_data_snd_check: flush any queued data whose window just re-opened.
-            TcpSegmenter.INSTANCE.sendPending(conn);
+            TcpSegmenter.INSTANCE.tcp_write_xmit(conn, conn.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
         }
 
         TcpConnectionState state = conn.state();
@@ -89,7 +89,7 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
     private void handleFinWait1(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
         if (pkt.isFin()) {
             // Peer's FIN: advance RCV.NXT and ACK it.
-            // TcpAckProcessor.onAck() has already run, so sndUna reflects the latest ACK.
+            // TcpIncomingAckHandler.tcp_ack() has already run, so sndUna reflects the latest ACK.
             conn.rcvNxt(conn.rcvNxt() + 1);
             conn.addShutdown(TcpConstants.RCV_SHUTDOWN);
             TcpSegmenter.INSTANCE.sendAck(conn);

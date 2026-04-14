@@ -34,6 +34,7 @@ public final class TcpConnection {
     private int sndNxt;    // SND.NXT — next sequence number to send
     private int rcvNxt;    // RCV.NXT — next sequence number expected from peer
     private int sndWnd;    // SND.WND — peer's receive window
+    private int maxWindow; // maximum SND.WND ever seen from peer (Linux: tp->max_window)
     private int sndWl1;    // SND.WL1 (linux: tp->snd_wl1) — SEQ of last window-update segment
     private int rcvWnd;    // RCV.WND — our advertised receive window
     private int rcvWup;    // RCV.WUP — receive-window update point (Linux-style)
@@ -41,8 +42,16 @@ public final class TcpConnection {
     private int mss;       // Maximum Segment Size (negotiated)
     private int sndWscale; // peer's receive window scale factor
     private int rcvWscale; // our receive window scale factor
+    private long bytesAcked;  // cumulative bytes acknowledged (Linux: tp->bytes_acked)
+    private int  packetsOut;  // segments in flight awaiting ACK (Linux: tp->packets_out)
     /** Linux-style shutdown mask: RCV_SHUTDOWN / SEND_SHUTDOWN */
     private int skShutdown;
+    /**
+     * ACK-pending bitmask — mirrors Linux {@code icsk_ack.pending}.
+     * Bits: {@code ACK_SCHED} | {@code ACK_TIMER} | {@code ACK_NOW}
+     * (see {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants}).
+     */
+    private int ackPending;
     /** Last time we sent an out-of-window challenge/dupack (ms). */
     private long lastOowAckTimeMs;
 
@@ -72,6 +81,7 @@ public final class TcpConnection {
         this.sndNxt            = b.sndNxt;
         this.rcvNxt            = b.rcvNxt;
         this.sndWnd            = b.sndWnd;
+        this.maxWindow         = b.sndWnd;  // initialise to the first advertised window
         this.sndWl1            = b.sndWl1;
         this.rcvWnd            = b.rcvWnd;
         this.rcvWup            = b.rcvWup;
@@ -99,6 +109,9 @@ public final class TcpConnection {
     public int sndNxt()                { return sndNxt; }
     public int rcvNxt()                { return rcvNxt; }
     public int sndWnd()                { return sndWnd; }
+    public int maxWindow()             { return maxWindow; }
+    public long bytesAcked()           { return bytesAcked; }
+    public int  packetsOut()           { return packetsOut; }
     public int sndWl1()                { return sndWl1; }
     public int rcvWnd()                { return rcvWnd; }
     public int rcvWup()                { return rcvWup; }
@@ -106,7 +119,8 @@ public final class TcpConnection {
     public int mss()                   { return mss; }
     public int sndWscale()             { return sndWscale; }
     public int rcvWscale()             { return rcvWscale; }
-    public int skShutdown()            { return skShutdown; }
+    public int  skShutdown()           { return skShutdown; }
+    public int  ackPending()           { return ackPending; }
     public long lastOowAckTimeMs()     { return lastOowAckTimeMs; }
 
     /**
@@ -128,30 +142,72 @@ public final class TcpConnection {
     public void state(TcpConnectionState s)  { this.state = s; }
     public void sndNxt(int v)               { this.sndNxt = v; }
     public void rcvNxt(int v)               { this.rcvNxt = v; }
-    public void sndWnd(int v)               { this.sndWnd = v; }
+    public void sndWnd(int v)               { this.sndWnd = v; if (Integer.compareUnsigned(v, maxWindow) > 0) this.maxWindow = v; }
     public void sndWl1(int v)               { this.sndWl1 = v; }
     public void rcvWnd(int v)               { this.rcvWnd = v; }
     public void rcvWup(int v)               { this.rcvWup = v; }
     public void rcvMss(int v)               { this.rcvMss = v; }
-    public void skShutdown(int mask)        { this.skShutdown = mask; }
-    public void addShutdown(int how)        { this.skShutdown |= how; }
-    public boolean hasShutdown(int how)     { return (this.skShutdown & how) != 0; }
-    public void lastOowAckTimeMs(long v)    { this.lastOowAckTimeMs = v; }
+    public void    skShutdown(int mask)        { this.skShutdown = mask; }
+    public void    addShutdown(int how)        { this.skShutdown |= how; }
+    public boolean hasShutdown(int how)        { return (this.skShutdown & how) != 0; }
+    /** Set one or more {@code ACK_*} bits. */
+    public void    addAckPending(int bits)     { this.ackPending |= bits; }
+    /** Clear one or more {@code ACK_*} bits. */
+    public void    clearAckPending(int bits)   { this.ackPending &= ~bits; }
+    /** Test whether any of the given {@code ACK_*} bits are set. */
+    public boolean hasAckPending(int bits)     { return (this.ackPending & bits) != 0; }
+    public void    lastOowAckTimeMs(long v)    { this.lastOowAckTimeMs = v; }
+
+    /**
+     * Advance SND.UNA to {@code ackSeq} — does <b>not</b> drain the RTX queue.
+     * Mirrors Linux {@code tcp_snd_una_update}: updates only {@code snd_una} and
+     * {@code bytes_acked}.  RTX-queue cleanup must follow separately via
+     * {@link TcpSendBuffer#acknowledgeUpTo(int)}.
+     *
+     * @return number of bytes newly acknowledged (0 if ackSeq ≤ SND.UNA)
+     */
+    public int sndUnaUpdate(int ackSeq) {
+        if (!TcpSequence.after(ackSeq, sndUna)) {
+            return 0;
+        }
+        int delta = ackSeq - sndUna;
+        sndUna    = ackSeq;
+        bytesAcked += delta;
+        return delta;
+    }
 
     /**
      * Advance SND.UNA to {@code ackSeq} and acknowledge RTX-queue entries.
-     * Calls {@link TcpSendBuffer#acknowledgeUpTo(int)} to free confirmed segments.
+     * Combines {@link #sndUnaUpdate(int)} with {@link #cleanRtxQueue(int)}.
      *
      * @return number of bytes newly acknowledged
      */
     public int acknowledgeUpTo(int ackSeq) {
-        if (!TcpSequence.after(ackSeq, sndUna)) {
-            return 0;
+        int delta = sndUnaUpdate(ackSeq);
+        if (delta > 0) {
+            cleanRtxQueue(ackSeq);
         }
-        int delta = ackSeq - sndUna;   // safe: unsigned delta via serial-number diff
-        sndUna = ackSeq;
-        sendBuffer.acknowledgeUpTo(ackSeq);
         return delta;
+    }
+
+    /**
+     * Increment {@code packets_out} — called each time a segment is placed on the RTX queue
+     * (mirrors Linux {@code tp->packets_out++} in the send path).
+     */
+    public void incrementPacketsOut() {
+        packetsOut++;
+    }
+
+    /**
+     * Drain acknowledged entries from the RTX queue and decrement {@code packets_out}
+     * accordingly — mirrors Linux {@code tcp_clean_rtx_queue}'s drain loop and its
+     * {@code tp->packets_out -= acked_pcount} bookkeeping.
+     *
+     * <p>Must be called <em>after</em> RTT sampling so that {@link TcpSendBuffer#peekRtx()}
+     * still sees the just-ACKed segment head.
+     */
+    public void cleanRtxQueue(int ackSeq) {
+        packetsOut -= sendBuffer.acknowledgeUpTo(ackSeq);
     }
 
     // ── Extension attributes ─────────────────────────────────────────────────

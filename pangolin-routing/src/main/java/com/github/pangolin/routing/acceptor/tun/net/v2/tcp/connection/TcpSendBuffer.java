@@ -51,16 +51,23 @@ public final class TcpSendBuffer {
         return rtxQueue.peekFirst();
     }
 
-    /** Remove all RTX entries with {@code endSeq <= ackSeq} (acknowledged segments). */
-    public void acknowledgeUpTo(int ackSeq) {
+    /**
+     * Remove all RTX entries with {@code endSeq <= ackSeq} (acknowledged segments).
+     *
+     * @return number of entries removed
+     */
+    public int acknowledgeUpTo(int ackSeq) {
+        int removed = 0;
         while (!rtxQueue.isEmpty()) {
             TcpSegmentEntry head = rtxQueue.peekFirst();
             if (head.endSeq() - ackSeq <= 0) {
                 rtxQueue.pollFirst().release();
+                removed++;
             } else {
                 break;
             }
         }
+        return removed;
     }
 
     public boolean hasRtxPending() {

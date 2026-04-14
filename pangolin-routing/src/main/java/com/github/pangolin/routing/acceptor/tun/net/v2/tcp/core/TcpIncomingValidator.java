@@ -207,12 +207,51 @@ public class TcpIncomingValidator extends ChannelInboundHandlerAdapter {
     }
 
     /**
+     * Disordered-ACK check used by the PAWS path to distinguish an acceptable
+     * out-of-order ACK from one that must be dropped.
+     *
+     * @return {@link SkbDropReasonConstants#SKB_NOT_DROPPED_YET} if the ACK is acceptable;
+     *         a non-zero {@code skb_drop_reason} constant otherwise.
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3585">tcp_disordered_ack</a>
+     */
+    private int tcp_disordered_ack_check(final TcpConnection tp, final TcpPacketBuf pkt) {
+        int reason = SKB_DROP_REASON_TCP_RFC7323_PAWS;
+        int seq = pkt.tcpSeq();
+        int ack = pkt.tcpAckNum();
+
+        /* 1. Is this not a pure ACK ? */
+        if (!pkt.isAck() || seq != determineEndSeq(pkt)) {
+            return reason;
+        }
+
+        /* 2. Is its sequence not the expected one ? */
+        if (seq != tp.rcvNxt()) {
+            return before(seq, tp.rcvNxt()) ? SKB_DROP_REASON_TCP_RFC7323_PAWS_ACK : reason;
+        }
+
+        /* 3. Is this not a duplicate ACK ? */
+        if (ack != tp.sndUna()) {
+            return reason;
+        }
+
+        /* 4. Is this updating the window ? */
+//        if (tcp_may_update_window(tp, ack, seq, th.getWindowAsInt() << tp.rx_opt.snd_wscale)) {
+//            return reason;
+//        }
+        /* 5. Is this not in the replay window ? */
+//        if ((s32)(tp->rx_opt.ts_recent - tp->rx_opt.rcv_tsval) > tcp_tsval_replay(sk)) {
+//            return reason;
+//        }
+        return SKB_NOT_DROPPED_YET;
+    }
+
+    /**
      * RFC 9293 §3.5.2 + RFC 5961 §3.2 — RST acceptability test (three-way result).
      *
      * <ul>
-     *   <li>{@link TcpIncomingAckHandler.RstResult#DROP}          — SEG.SEQ outside receive window.</li>
-     *   <li>{@link TcpIncomingAckHandler.RstResult#RESET}         — SEG.SEQ == RCV.NXT; valid reset.</li>
-     *   <li>{@link TcpIncomingAckHandler.RstResult#CHALLENGE_ACK} — SEG.SEQ in window but != RCV.NXT;
+     *   <li>DROP          — SEG.SEQ outside receive window.</li>
+     *   <li>RESET         — SEG.SEQ == RCV.NXT; valid reset.</li>
+     *   <li>CHALLENGE_ACK — SEG.SEQ in window but != RCV.NXT;
      *       blind-RST attack mitigation (RFC 5961 §3.2).</li>
      * </ul>
      *
