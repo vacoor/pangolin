@@ -5,7 +5,6 @@ import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
-import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import lombok.extern.slf4j.Slf4j;
@@ -46,7 +45,7 @@ public class TunTest2 {
                         @Override
                         protected void initChannel(Channel ch) {
                             ch.pipeline().addLast(new IpPacketCodec());
-                            ch.pipeline().addLast(new TcpMultiplexHandler(dnsEngine, new StandardSocketChannelFactory(null)));
+                            ch.pipeline().addLast(new TcpMultiplexHandler(dnsEngine));
                         }
                     });
 

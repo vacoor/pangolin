@@ -6,7 +6,6 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuf
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
@@ -644,11 +643,11 @@ public final class TcpOutput {
     }
 
     private static FourTuple fourTuple(TcpConnection conn) {
-        return ((TcpSockChannel) conn.channel()).fourTuple();
+        return conn.fourTuple();
     }
 
     /** Single write-path: all established-state sends go through here. */
     private static void writeRaw(TcpConnection conn, ByteBuf buf) {
-        ((TcpSockChannel) conn.channel()).writeRaw(buf);
+        conn.channel().writeAndFlush(buf);
     }
 }

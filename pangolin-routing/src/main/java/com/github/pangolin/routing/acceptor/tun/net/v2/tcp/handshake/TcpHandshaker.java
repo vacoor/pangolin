@@ -6,6 +6,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import io.netty.buffer.ByteBuf;
@@ -119,7 +120,7 @@ public final class TcpHandshaker {
      * Process the initial SYN: sends SYN-ACK and arms the retransmit timer.
      * Called exactly once — SYN retransmits are handled by {@link #finishHandshake}.
      *
-     * @param connChannel the {@code TcpSockChannel} for this connection
+     * @param connChannel connection channel used to send handshake responses
      * @param pkt         the SYN packet (not retained after return)
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_conn_request">tcp_conn_request</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a>
@@ -271,6 +272,7 @@ public final class TcpHandshaker {
 
         TcpConnection conn = TcpConnection.builder()
                 .channel(connChannel)
+                .fourTuple(FourTuple.of(dstAddrBytes, dstPort, srcAddrBytes, srcPort))
                 .sndUna(sndIsn)        // SYN occupies sndIsn; final ACK advances SND.UNA to sndIsn+1
                 .sndNxt(sndIsn + 1)
                 .rcvNxt(rcvNxt)

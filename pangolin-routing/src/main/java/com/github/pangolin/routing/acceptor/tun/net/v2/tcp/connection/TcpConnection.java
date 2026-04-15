@@ -9,6 +9,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.rtt.NoopRttEstima
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.rtt.RttEstimator;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.timestamp.NoopTimestampExtension;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.timestamp.TcpTimestampExtension;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpConnectionTimers;
@@ -70,6 +71,7 @@ public final class TcpConnection {
 
     // ── Netty integration ───────────────────────────────────────────────────
     private final Channel channel;
+    private final FourTuple fourTuple;
 
     // ── RFC extension per-conn state storage ────────────────────────────────
     private final Map<ConnectionKey<?>, Object> attributes = new HashMap<>();
@@ -89,6 +91,7 @@ public final class TcpConnection {
 
     private TcpConnection(Builder b) {
         this.channel = b.channel;
+        this.fourTuple = b.fourTuple;
         this.state = TcpConnectionState.TCP_ESTABLISHED;
         this.sndUna = b.sndUna;
         this.sndNxt = b.sndNxt;
@@ -121,6 +124,10 @@ public final class TcpConnection {
 
     public EventLoop eventLoop() {
         return channel.eventLoop();
+    }
+
+    public FourTuple fourTuple() {
+        return fourTuple;
     }
 
     public TcpConnectionState state() {
@@ -454,6 +461,7 @@ public final class TcpConnection {
 
     public static final class Builder {
         private Channel channel;
+        private FourTuple fourTuple;
         private int sndUna;
         private int sndNxt;
         private int rcvNxt;
@@ -474,6 +482,11 @@ public final class TcpConnection {
 
         public Builder channel(Channel ch) {
             this.channel = ch;
+            return this;
+        }
+
+        public Builder fourTuple(FourTuple ft) {
+            this.fourTuple = ft;
             return this;
         }
 
@@ -556,6 +569,7 @@ public final class TcpConnection {
 
         public TcpConnection build() {
             if (channel == null) throw new IllegalStateException("channel must be set");
+            if (fourTuple == null) throw new IllegalStateException("fourTuple must be set");
             if (!rcvWupSet) {
                 rcvWup = rcvNxt;
             }

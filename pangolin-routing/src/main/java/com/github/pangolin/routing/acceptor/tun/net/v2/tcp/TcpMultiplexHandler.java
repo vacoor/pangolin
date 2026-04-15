@@ -3,17 +3,12 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketHandler;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.Tcp4Multiplexer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpMultiplexer;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
-import com.github.pangolin.routing.support.SocketChannelFactory;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.UnknownHostException;
-import java.util.Map;
 
 /**
  * v2 TCP ingress now follows v1 architecture:
@@ -27,21 +22,21 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
     private final DnsEngine dnsEngine;
     private final TcpMultiplexer multiplexer;
 
-    public TcpMultiplexHandler(final DnsEngine dnsEngine,
-                               final SocketChannelFactory socketChannelFactory) {
+    public TcpMultiplexHandler(final DnsEngine dnsEngine) {
         super(PROTO_TCP);
         this.dnsEngine = dnsEngine;
-        this.multiplexer = create(dnsEngine, socketChannelFactory);
+        this.multiplexer = create();
     }
 
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final TcpPacketBuf rawPkt) {
         try {
             final TcpPacketBuf pkt = prepare(rawPkt);
-            multiplexer.tcp_rcv(ctx.channel(), pkt);
+            multiplexer.tcp_rcv(ctx, pkt);
         } catch (final Exception ex) {
             log.error("Failed to process TCP packet", ex);
-            multiplexer.send_reset(ctx.channel(), rawPkt, -77);
+            // fallback reset in ingress layer
+            com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput.INSTANCE.tcp_v4_send_reset(ctx, rawPkt);
         }
     }
 
@@ -50,12 +45,8 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
         return pkt;
     }
 
-    protected TcpMultiplexer create(final DnsEngine dnsEngine,
-                                    final SocketChannelFactory socketChannelFactory) {
-        final Map<String, tcp_request_sock> synRegistry = new java.util.concurrent.ConcurrentHashMap<>();
-        final Map<String, TcpSock> establishedRegistry = new java.util.concurrent.ConcurrentHashMap<>();
-        final EventLoopGroup childGroup = new io.netty.channel.nio.NioEventLoopGroup();
-        return new Tcp4Multiplexer(synRegistry, establishedRegistry, childGroup, dnsEngine, socketChannelFactory);
+    protected TcpMultiplexer create() {
+        return new TcpMultiplexer(TcpConfig.builder().build());
     }
 
     protected java.net.InetAddress resolveDstAddress(final byte[] addr) throws UnknownHostException {
