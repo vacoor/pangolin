@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshakeCompletedEvent;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel;
@@ -11,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.RejectedExecutionException;
 
@@ -39,9 +41,11 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(TcpMultiplexHandler.class);
 
+    @SuppressWarnings("unused")
     private final TcpConfig config;
     private final ChannelHandler childHandler;
-    private final TcpConnectionRegistry registry = new TcpConnectionRegistry();
+    private final HashMap<FourTuple, TcpSockChannel> synRegistry = new HashMap<>();
+    private final HashMap<FourTuple, TcpSockChannel> establishedRegistry = new HashMap<>();
     private final EventLoop[] workers;
 
     /**
@@ -82,7 +86,10 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
          * XXX: CHECK listen sock in here, but this is an unnecessary operation for proxy scenario.
          */
 
-        TcpSockChannel connCh = registry.get(fourTuple);
+        TcpSockChannel connCh = establishedRegistry.get(fourTuple);
+        if (connCh == null) {
+            connCh = synRegistry.get(fourTuple);
+        }
         if (connCh == null) {
             /*-
              * listen sock in TCP_LISTEN state.
@@ -124,10 +131,37 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
             // ⚠ Math.abs(Integer.MIN_VALUE) == Integer.MIN_VALUE (still negative in Java);
             //   use (hash & Integer.MAX_VALUE) to guarantee non-negative result.
             EventLoop worker = workers[(fourTuple.hashCode() & Integer.MAX_VALUE) % workers.length];
+            EventLoop tunEventLoop = ctx.channel().eventLoop();
             connCh = new TcpSockChannel(
                     ctx.channel(), fourTuple, worker,
-                    () -> registry.remove(fourTuple)   // deregisterCallback — runs on TUN EventLoop
+                    () -> tunEventLoop.execute(() -> {
+                        synRegistry.remove(fourTuple);
+                        establishedRegistry.remove(fourTuple);
+                    })
             );
+            connCh.pipeline().addLast("lifecycle", new ChannelInboundHandlerAdapter() {
+                @Override
+                public void userEventTriggered(ChannelHandlerContext c, Object evt) {
+                    if (evt == TcpHandshakeCompletedEvent.INSTANCE) {
+                        tunEventLoop.execute(() -> {
+                            TcpSockChannel ch = synRegistry.remove(fourTuple);
+                            if (ch != null) {
+                                establishedRegistry.put(fourTuple, ch);
+                            }
+                        });
+                    }
+                    c.fireUserEventTriggered(evt);
+                }
+
+                @Override
+                public void channelInactive(ChannelHandlerContext c) throws Exception {
+                    tunEventLoop.execute(() -> {
+                        synRegistry.remove(fourTuple);
+                        establishedRegistry.remove(fourTuple);
+                    });
+                    super.channelInactive(c);
+                }
+            });
             connCh.pipeline().addLast(childHandler);
 
             // register() sets eventLoop on the channel (volatile write), then posts register0 to Worker.
@@ -140,11 +174,11 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                     // fires asynchronously, pkt's refcount is already at 0 (TUN has released its ref).
                     log.warn("[{}] TcpSockChannel registration failed, removing from registry: {}",
                             fourTuple, f.cause() != null ? f.cause().getMessage() : "unknown");
-                    ctx.channel().eventLoop().execute(() -> registry.remove(fourTuple));
+                    tunEventLoop.execute(() -> synRegistry.remove(fourTuple));
                 }
             });
 
-            registry.put(fourTuple, connCh);
+            synRegistry.put(fourTuple, connCh);
         }
 
         // Cross-thread dispatch to Worker EventLoop.
