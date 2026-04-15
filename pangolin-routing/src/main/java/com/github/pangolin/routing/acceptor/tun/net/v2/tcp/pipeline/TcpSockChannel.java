@@ -24,7 +24,7 @@ import java.net.SocketAddress;
  *
  * <p><b>No {@code @ChannelHandler.Sharable}</b> — each instance is per-connection.
  */
-public final class TcpConnectionChannel extends AbstractChannel {
+public final class TcpSockChannel extends AbstractChannel {
 
     private static final ChannelMetadata METADATA = new ChannelMetadata(false);
 
@@ -41,7 +41,7 @@ public final class TcpConnectionChannel extends AbstractChannel {
      * @param assignedWorker    Worker EventLoop bound to this connection (consistent hash)
      * @param deregisterCallback run on TUN EventLoop when the channel closes
      */
-    public TcpConnectionChannel(Channel parent,
+    public TcpSockChannel(Channel parent,
                                  FourTuple fourTuple,
                                  EventLoop assignedWorker,
                                  Runnable deregisterCallback) {
@@ -191,7 +191,7 @@ public final class TcpConnectionChannel extends AbstractChannel {
      * bypassing this channel's own outbound pipeline.
      *
      * <p><b>Why not {@code channel().writeAndFlush()}?</b>
-     * The {@code TcpConnectionChannel}'s pipeline contains {@code TcpEstablishedHandler},
+     * The {@code TcpSockChannel}'s pipeline contains {@code TcpEstablishedHandler},
      * which overrides {@code write()} to intercept <em>all</em> {@link ByteBuf} writes and
      * treat them as application TCP data (enqueueing into the send buffer). Raw IP control
      * packets (ACK, FIN, RST, retransmits) built by {@code TcpOutput} must bypass that handler
@@ -215,7 +215,7 @@ public final class TcpConnectionChannel extends AbstractChannel {
     private final class TcpConnectionUnsafe extends AbstractUnsafe {
         @Override
         public void connect(SocketAddress remote, SocketAddress local, ChannelPromise promise) {
-            promise.setFailure(new UnsupportedOperationException("TcpConnectionChannel is passive-only"));
+            promise.setFailure(new UnsupportedOperationException("TcpSockChannel is passive-only"));
         }
     }
 }

@@ -4,7 +4,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpConnectionChannel;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel;
 import io.netty.channel.*;
 import io.netty.util.concurrent.EventExecutor;
 import org.slf4j.Logger;
@@ -21,7 +21,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpL
  *
  * <p>Responsibilities:
  * <ul>
- *   <li>Look up the per-connection {@link TcpConnectionChannel} by 4-tuple.</li>
+ *   <li>Look up the per-connection {@link TcpSockChannel} by 4-tuple.</li>
  *   <li>On first SYN: create a channel, register it on a Worker EventLoop (consistent hash),
  *       attach the {@code childHandler} initialiser.</li>
  *   <li>On subsequent packets: cross-thread dispatch to the connection's Worker EventLoop.</li>
@@ -82,7 +82,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
          * XXX: CHECK listen sock in here, but this is an unnecessary operation for proxy scenario.
          */
 
-        TcpConnectionChannel connCh = registry.get(fourTuple);
+        TcpSockChannel connCh = registry.get(fourTuple);
         if (connCh == null) {
             /*-
              * listen sock in TCP_LISTEN state.
@@ -124,7 +124,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
             // ⚠ Math.abs(Integer.MIN_VALUE) == Integer.MIN_VALUE (still negative in Java);
             //   use (hash & Integer.MAX_VALUE) to guarantee non-negative result.
             EventLoop worker = workers[(fourTuple.hashCode() & Integer.MAX_VALUE) % workers.length];
-            connCh = new TcpConnectionChannel(
+            connCh = new TcpSockChannel(
                     ctx.channel(), fourTuple, worker,
                     () -> registry.remove(fourTuple)   // deregisterCallback — runs on TUN EventLoop
             );
@@ -138,7 +138,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                     // Worker shut down or register0 failed — remove from registry on TUN EventLoop
                     // (single-writer constraint). Do NOT access pkt here: by the time this listener
                     // fires asynchronously, pkt's refcount is already at 0 (TUN has released its ref).
-                    log.warn("[{}] TcpConnectionChannel registration failed, removing from registry: {}",
+                    log.warn("[{}] TcpSockChannel registration failed, removing from registry: {}",
                             fourTuple, f.cause() != null ? f.cause().getMessage() : "unknown");
                     ctx.channel().eventLoop().execute(() -> registry.remove(fourTuple));
                 }
@@ -160,7 +160,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
         // Why no `finally { pkt.release() }` in the lambda:
         //   Pipeline handlers (SimpleChannelInboundHandler auto-release, or TailContext)
         //   release exactly once. A redundant release in the lambda would cause refcount < 0.
-        final TcpConnectionChannel ch = connCh;
+        final TcpSockChannel ch = connCh;
         pkt.retain();
         try {
             ch.eventLoop().execute(() -> ch.fireChildRead(pkt));

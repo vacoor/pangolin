@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpConnectionChannel;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel;
 
 import java.util.HashMap;
 
@@ -15,20 +15,20 @@ import java.util.HashMap;
  * <p>Lifecycle:
  * <ul>
  *   <li>Register on first SYN (TUN EventLoop, {@code TcpMultiplexHandler.channelRead})</li>
- *   <li>Remove via {@code deregisterCallback} posted from {@code TcpConnectionChannel.doClose()}</li>
+ *   <li>Remove via {@code deregisterCallback} posted from {@code TcpSockChannel.doClose()}</li>
  * </ul>
  */
 public final class TcpConnectionRegistry {
 
-    private final HashMap<FourTuple, TcpConnectionChannel> map = new HashMap<>();
+    private final HashMap<FourTuple, TcpSockChannel> map = new HashMap<>();
 
     /** @return the channel for this 4-tuple, or {@code null} if not found. */
-    public TcpConnectionChannel get(FourTuple key) {
+    public TcpSockChannel get(FourTuple key) {
         return map.get(key);
     }
 
     /** Register a new connection. Must be called on the TUN EventLoop. */
-    public void put(FourTuple key, TcpConnectionChannel channel) {
+    public void put(FourTuple key, TcpSockChannel channel) {
         map.put(key, channel);
     }
 

@@ -424,7 +424,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
      *   <li>{@code tcp_init_congestion_control()} — {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection.Builder#build()}:
      *       {@code congestionControl.init(conn, retransmitCallback)}</li>
      *   <li>{@code tcp_init_buffer_space()} — not applicable; we use a fixed {@code rcvWnd}.</li>
-     *   <li>{@code sk_wake_async(POLL_OUT)} — {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpConnectionChannel#doRegister()}:
+     *   <li>{@code sk_wake_async(POLL_OUT)} — {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel#doRegister()}:
      *       sets {@code active = true}; {@code AbstractChannel} fires {@code channelActive()} immediately after.</li>
      *   <li>{@code tp->rcv_wup = tp->rcv_nxt} — {@code Builder.rcvWup(rcvNxt)} in
      *       {@code TcpHandshaker.finishHandshake()} (mirroring {@code tcp_finish_connect}).</li>

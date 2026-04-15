@@ -6,7 +6,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuf
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpConnectionChannel;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelFuture;
@@ -326,7 +326,7 @@ public final class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L944">tcp_v4_send_synack</a>
      */
-    public ChannelFuture tcp_send_synack(TcpConnectionChannel ch,
+    public ChannelFuture tcp_send_synack(TcpSockChannel ch,
             byte[] localIp, int localPort, byte[] remoteIp, int remotePort,
             int seq, int ack, int window, byte[] options) {
         ByteBuf buf = TcpPacketBuilder.buildRaw(
@@ -340,7 +340,7 @@ public final class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3649">tcp_send_challenge_ack</a>
      */
-    public void tcp_send_challenge_ack_handshake(TcpConnectionChannel ch,
+    public void tcp_send_challenge_ack_handshake(TcpSockChannel ch,
             byte[] localIp, int localPort, byte[] remoteIp, int remotePort,
             int seq, int ack, int window) {
         ByteBuf buf = TcpPacketBuilder.buildRaw(
@@ -356,7 +356,7 @@ public final class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3615">tcp_send_reset</a>
      */
-    public ChannelFuture tcp_send_reset_handshake(TcpConnectionChannel ch,
+    public ChannelFuture tcp_send_reset_handshake(TcpSockChannel ch,
             byte[] localIp, int localPort, byte[] remoteIp, int remotePort,
             int seq) {
         ByteBuf buf = TcpPacketBuilder.buildRaw(
@@ -643,11 +643,11 @@ public final class TcpOutput {
     }
 
     private static FourTuple fourTuple(TcpConnection conn) {
-        return ((TcpConnectionChannel) conn.channel()).fourTuple();
+        return ((TcpSockChannel) conn.channel()).fourTuple();
     }
 
     /** Single write-path: all established-state sends go through here. */
     private static void writeRaw(TcpConnection conn, ByteBuf buf) {
-        ((TcpConnectionChannel) conn.channel()).writeRaw(buf);
+        ((TcpSockChannel) conn.channel()).writeRaw(buf);
     }
 }

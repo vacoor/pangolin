@@ -34,7 +34,7 @@ public class TunTest2 {
                     .windowScalingEnabled(true)
                     .build();
 
-            // childHandler: installed into each TcpConnectionChannel's pipeline
+            // childHandler: installed into each TcpSockChannel's pipeline
             ChannelHandler childHandler = new ChannelInitializer<Channel>() {
                 @Override
                 protected void initChannel(Channel ch) {

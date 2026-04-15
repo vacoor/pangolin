@@ -8,7 +8,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnect
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpConnectionChannel;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
@@ -120,7 +120,7 @@ public final class TcpHandshaker {
      * Process the initial SYN: sends SYN-ACK and arms the retransmit timer.
      * Called exactly once — SYN retransmits are handled by {@link #finishHandshake}.
      *
-     * @param connChannel the {@code TcpConnectionChannel} for this connection
+     * @param connChannel the {@code TcpSockChannel} for this connection
      * @param pkt         the SYN packet (not retained after return)
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_conn_request">tcp_conn_request</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L2179">tcp_v4_rcv</a>
@@ -308,7 +308,7 @@ public final class TcpHandshaker {
         // (epoch mismatch) skips scheduleRetransmit() and avoids leaking a second timer.
         final int epoch = ++synAckSendEpoch;
         TcpOutput.INSTANCE.tcp_send_synack(
-                (TcpConnectionChannel) connChannel,
+                (TcpSockChannel) connChannel,
                 dstAddrBytes, dstPort, srcAddrBytes, srcPort,
                 sndIsn, rcvNxt, window, opts
         ).addListener((ChannelFutureListener) f -> {
@@ -393,7 +393,7 @@ public final class TcpHandshaker {
         int window = config.initialRcvWnd() >> (clientWscale >= 0 ? config.windowScale() : 0);
         if (window > TcpConstants.TCP_MAX_WINDOW) window = TcpConstants.TCP_MAX_WINDOW;
         TcpOutput.INSTANCE.tcp_send_challenge_ack_handshake(
-                (TcpConnectionChannel) connChannel,
+                (TcpSockChannel) connChannel,
                 dstAddrBytes, dstPort, srcAddrBytes, srcPort,
                 sndIsn + 1, rcvNxt, window);
     }
@@ -402,7 +402,7 @@ public final class TcpHandshaker {
         // Use tcp_send_reset_handshake() which calls writeRaw() — bypasses pipeline handlers
         // (e.g., TcpEstablishedHandler) that would intercept write() as application data.
         return TcpOutput.INSTANCE.tcp_send_reset_handshake(
-                (TcpConnectionChannel) connChannel,
+                (TcpSockChannel) connChannel,
                 dstAddrBytes, dstPort, srcAddrBytes, srcPort,
                 pkt.tcpAckNum());
     }
