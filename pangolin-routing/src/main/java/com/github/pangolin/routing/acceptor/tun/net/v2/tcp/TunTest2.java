@@ -1,21 +1,14 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
+import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshakeHandler;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshakerFactory;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
-import freework.util.Bytes;
+import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
-
-import java.nio.charset.StandardCharsets;
 
 /**
  *
@@ -28,25 +21,21 @@ public class TunTest2 {
 
         // TUN EventLoop (single thread — owns the TunChannel and packet demux)
         EventLoopGroup tunGroup    = new DefaultEventLoopGroup(1);
-        // Worker EventLoops — one connection is pinned to one worker (consistent hash)
-        EventLoopGroup workerGroup = new NioEventLoopGroup(4);
         try {
-            TcpConfig config = TcpConfig.builder()
-                    .windowScalingEnabled(true)
-                    .build();
-
-            // childHandler: installed into each TcpSockChannel's pipeline
-            ChannelHandler childHandler = new ChannelInitializer<Channel>() {
+            final DnsEngine dnsEngine = new DnsEngine() {
                 @Override
-                protected void initChannel(Channel ch) {
-                    ch.pipeline().addLast(new TcpHandshakeHandler(new TcpHandshakerFactory(config)));
-                    ch.pipeline().addLast(new SimpleChannelInboundHandler<ByteBuf>() {
-                        @Override
-                        protected void channelRead0(ChannelHandlerContext ctx, ByteBuf msg) {
-                            // System.out.println(msg.toString(StandardCharsets.UTF_8));
-                            ctx.writeAndFlush(Unpooled.wrappedBuffer(Bytes.toBytes("HTTP/1.1 200 OK\r\n\r\nOK")));
-                        }
-                    });
+                public boolean isFakeAddress(byte[] address) {
+                    return false;
+                }
+
+                @Override
+                public String getHostByAddress(byte[] address) {
+                    return null;
+                }
+
+                @Override
+                public io.netty.handler.codec.dns.DatagramDnsResponse lookup(io.netty.handler.codec.dns.DatagramDnsQuery query) {
+                    return null;
                 }
             };
 
@@ -57,7 +46,7 @@ public class TunTest2 {
                         @Override
                         protected void initChannel(Channel ch) {
                             ch.pipeline().addLast(new IpPacketCodec());
-                            ch.pipeline().addLast(new TcpMultiplexHandler(config, childHandler, workerGroup));
+                            ch.pipeline().addLast(new TcpMultiplexHandler(dnsEngine, new StandardSocketChannelFactory(null)));
                         }
                     });
 
@@ -66,7 +55,6 @@ public class TunTest2 {
             ch.closeFuture().sync();
         } finally {
             tunGroup.shutdownGracefully();
-            workerGroup.shutdownGracefully();
         }
     }
 

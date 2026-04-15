@@ -1,244 +1,70 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 
+import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
+import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketHandler;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.Tcp4Multiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshakeEstablishedEvent;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.sock.V2TcpSock;
-import io.netty.channel.*;
-import io.netty.util.concurrent.EventExecutor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.github.pangolin.routing.support.SocketChannelFactory;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.EventLoopGroup;
+import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.concurrent.RejectedExecutionException;
-
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_ESTABLISHED;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_LISTEN;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_NEW_SYN_RECV;
+import java.net.UnknownHostException;
+import java.util.Map;
 
 /**
- * TUN-EventLoop–side TCP packet dispatcher (analogous to {@code Http2MultiplexHandler}).
- *
- * <p>Responsibilities:
- * <ul>
- *   <li>Look up the per-connection {@link TcpSockChannel} by 4-tuple.</li>
- *   <li>On first SYN: create a channel, register it on a Worker EventLoop (consistent hash),
- *       attach the {@code childHandler} initialiser.</li>
- *   <li>On subsequent packets: cross-thread dispatch to the connection's Worker EventLoop.</li>
- * </ul>
- *
- * <p><b>Not {@code @ChannelHandler.Sharable}</b>: holds per-instance registry and worker array.
- *
- * <p><b>Thread model</b>:
- * <ul>
- *   <li>TUN EventLoop: registry reads/writes, channel creation, {@code pkt.retain()}/{@code pkt.release()}</li>
- *   <li>Worker EventLoop: {@code fireChildRead()}, TCP state machine</li>
- * </ul>
+ * v2 TCP ingress now follows v1 architecture:
+ * TCP logic is handled by {@link TcpMultiplexer}, not Netty pipeline handlers.
  */
-public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
+@Slf4j
+public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
 
-    private static final Logger log = LoggerFactory.getLogger(TcpMultiplexHandler.class);
-    private static final int DEFAULT_MAX_SYN_BACKLOG = 1024;
+    private static final byte PROTO_TCP = 6;
 
-    @SuppressWarnings("unused")
-    private final TcpConfig config;
-    private final ChannelHandler childHandler;
-    private final V2TcpSock listenSock;
-    private final HashMap<FourTuple, tcp_request_sock> synRegistry = new HashMap<>();
-    private final HashMap<FourTuple, TcpSockChannel> synChannelRegistry = new HashMap<>();
-    private final HashMap<FourTuple, V2TcpSock> establishedRegistry = new HashMap<>();
-    private final EventLoop[] workers;
+    private final DnsEngine dnsEngine;
+    private final TcpMultiplexer multiplexer;
 
-    /**
-     * @param config       shared TCP configuration
-     * @param childHandler {@link ChannelInitializer} applied to each new connection channel
-     * @param workerGroup  worker threads; each TCP connection is pinned to one worker
-     */
-    public TcpMultiplexHandler(TcpConfig config,
-                               ChannelHandler childHandler,
-                               EventLoopGroup workerGroup) {
-        this.config = config;
-        this.childHandler = childHandler;
-        this.listenSock = new V2TcpSock(null);
-        this.listenSock.state(TCP_LISTEN);
-        List<EventLoop> list = new ArrayList<>();
-        for (EventExecutor e : workerGroup) {
-            list.add((EventLoop) e);
-        }
-        this.workers = list.toArray(new EventLoop[0]);
-        if (workers.length == 0) {
-            throw new IllegalArgumentException("workerGroup must have at least one EventLoop");
-        }
+    public TcpMultiplexHandler(final DnsEngine dnsEngine,
+                               final SocketChannelFactory socketChannelFactory) {
+        super(PROTO_TCP);
+        this.dnsEngine = dnsEngine;
+        this.multiplexer = create(dnsEngine, socketChannelFactory);
     }
 
-    /**
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#tcp_v4_rcv">tcp_v4_rcv</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#tcp_v4_do_rcv">tcp_v4_do_rcv</a>
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_rcv_state_process">tcp_rcv_state_process</a>
-     */
     @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) {
-        if (!(msg instanceof TcpPacketBuf)) {
-            ctx.fireChannelRead(msg);
-            return;
-        }
-        TcpPacketBuf pkt = (TcpPacketBuf) msg;
-        FourTuple fourTuple = FourTuple.of(pkt);
-
-        /*-
-         * XXX: CHECK listen sock in here, but this is an unnecessary operation for proxy scenario.
-         */
-
-        V2TcpSock establishedSock = establishedRegistry.get(fourTuple);
-        TcpSockChannel connCh = establishedSock != null ? establishedSock.sockChannel() : synChannelRegistry.get(fourTuple);
-        if (connCh == null) {
-            /*-
-             * listen sock in TCP_LISTEN state.
-             *   ACK -> CONNECT REST
-             *   RST -> DISCARD
-             *   SYN-FIN -> DISCARD
-             *   SYN -> conn_request
-             *   * -> DISCARD
-             *
-             * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_rcv_state_process">tcp_rcv_state_process</a>
-             */
-            if (pkt.isAck()) {
-                log.info(logFormat("[TCP] [RCV]", pkt, "Connection reset: SKB_DROP_REASON_TCP_FLAGS Invalid TCP flag(LISTEN <- ACK)"));
-                TcpOutput.INSTANCE.tcp_v4_send_reset(ctx, pkt);
-                pkt.release();
-                return;
-            }
-            if (pkt.isRst()) {
-                log.info(logFormat("[TCP] [RCV]", pkt, "Packet discard: Connection reset not required"));
-                pkt.release();
-                return;
-            }
-            if (!pkt.isSyn() || pkt.isFin()) {
-                log.info(logFormat("[TCP] [RCV]", pkt, "Packet discard: TCP_FLAGS"));
-                pkt.release();
-                return;
-            }
-
-            /*-
-             * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#tcp_conn_request">tcp_conn_request</a>
-             */
-            log.debug(logFormat("[TCP] [HANDSHAKE]", pkt, "Connection handshake 1/3: SYN"));
-
-            /*-
-             * FIXME check accept queue is full
-             */
-            if (synRegistry.size() >= DEFAULT_MAX_SYN_BACKLOG) {
-                log.warn(logFormat("[TCP] [RCV]", pkt, "Packet discard: SYN backlog full"));
-                pkt.release();
-                return;
-            }
-
-            // First SYN: select Worker via consistent hash (bit-AND clears sign bit safely).
-            // ⚠ Math.abs(Integer.MIN_VALUE) == Integer.MIN_VALUE (still negative in Java);
-            //   use (hash & Integer.MAX_VALUE) to guarantee non-negative result.
-            EventLoop worker = workers[(fourTuple.hashCode() & Integer.MAX_VALUE) % workers.length];
-            EventLoop tunEventLoop = ctx.channel().eventLoop();
-            connCh = new TcpSockChannel(
-                    ctx.channel(), fourTuple, worker,
-                    () -> tunEventLoop.execute(() -> {
-                        synRegistry.remove(fourTuple);
-                        synChannelRegistry.remove(fourTuple);
-                        establishedRegistry.remove(fourTuple);
-                    })
-            );
-            connCh.pipeline().addLast("lifecycle", new ChannelInboundHandlerAdapter() {
-                @Override
-                public void userEventTriggered(ChannelHandlerContext c, Object evt) {
-                    if (evt instanceof TcpHandshakeEstablishedEvent) {
-                        TcpHandshakeEstablishedEvent e = (TcpHandshakeEstablishedEvent) evt;
-                        V2TcpSock sock = new V2TcpSock(c.alloc());
-                        sock.state(TCP_ESTABLISHED);
-                        sock.netChannel(ctx.channel());
-                        sock.workerEventLoop(c.channel().eventLoop());
-                        sock.fourTuple(fourTuple);
-                        sock.tcpConnection(e.connection());
-                        sock.sockChannel((TcpSockChannel) c.channel());
-                        tunEventLoop.execute(() -> {
-                            synRegistry.remove(fourTuple);
-                            synChannelRegistry.remove(fourTuple);
-                            establishedRegistry.put(fourTuple, sock);
-                        });
-                    }
-                    c.fireUserEventTriggered(evt);
-                }
-
-                @Override
-                public void channelInactive(ChannelHandlerContext c) throws Exception {
-                    tunEventLoop.execute(() -> {
-                        synRegistry.remove(fourTuple);
-                        synChannelRegistry.remove(fourTuple);
-                        establishedRegistry.remove(fourTuple);
-                    });
-                    super.channelInactive(c);
-                }
-            });
-            connCh.pipeline().addLast(childHandler);
-
-            // register() sets eventLoop on the channel (volatile write), then posts register0 to Worker.
-            // After this line, connCh.eventLoop() is immediately usable even before register0 runs.
-            ChannelFuture regFuture = worker.register(connCh);
-            regFuture.addListener((ChannelFutureListener) f -> {
-                if (!f.isSuccess()) {
-                    // Worker shut down or register0 failed — remove from registry on TUN EventLoop
-                    // (single-writer constraint). Do NOT access pkt here: by the time this listener
-                    // fires asynchronously, pkt's refcount is already at 0 (TUN has released its ref).
-                    log.warn("[{}] TcpSockChannel registration failed, removing from registry: {}",
-                            fourTuple, f.cause() != null ? f.cause().getMessage() : "unknown");
-                    tunEventLoop.execute(() -> {
-                        synRegistry.remove(fourTuple);
-                        synChannelRegistry.remove(fourTuple);
-                    });
-                }
-            });
-
-            tcp_request_sock req = new tcp_request_sock();
-            req.state(TCP_NEW_SYN_RECV);
-            req.skc_listener = listenSock;
-            req.ir_loc_addr = pkt.dstAddr();
-            req.ir_rmt_addr = pkt.srcAddr();
-            req.ir_num = pkt.tcpDstPort();
-            req.ir_rmt_port = pkt.tcpSrcPort();
-            req.rcv_isn = pkt.tcpSeq();
-            req.rcv_nxt = pkt.tcpSeq() + 1;
-            synRegistry.put(fourTuple, req);
-            synChannelRegistry.put(fourTuple, connCh);
-        }
-
-        // Cross-thread dispatch to Worker EventLoop.
-        //
-        // Reference-count contract:
-        //   pkt enters this method with refcount = N (typically 1, from the upstream codec).
-        //   retain() gives the Worker lambda one extra reference.
-        //   TUN releases its own reference at the bottom (regardless of Worker outcome).
-        //   fireChildRead() owns the lambda's reference: it either transfers it to the pipeline
-        //   (active path — pipeline handler / TailContext releases) or releases directly
-        //   (inactive path). The Worker lambda therefore has NO explicit release.
-        //
-        // Why no `finally { pkt.release() }` in the lambda:
-        //   Pipeline handlers (SimpleChannelInboundHandler auto-release, or TailContext)
-        //   release exactly once. A redundant release in the lambda would cause refcount < 0.
-        final TcpSockChannel ch = connCh;
-        pkt.retain();
+    protected void channelRead0(final ChannelHandlerContext ctx, final TcpPacketBuf rawPkt) {
         try {
-            ch.eventLoop().execute(() -> ch.fireChildRead(pkt));
-        } catch (RejectedExecutionException e) {
-            // Worker already shut down: lambda never runs, release the retain() we added.
-            log.warn("[{}] Worker rejected packet dispatch (EventLoop shut down?)", fourTuple);
-            pkt.release();
+            final TcpPacketBuf pkt = prepare(rawPkt);
+            multiplexer.tcp_rcv(ctx.channel(), pkt);
+        } catch (final Exception ex) {
+            log.error("Failed to process TCP packet", ex);
+            multiplexer.send_reset(ctx.channel(), rawPkt, -77);
         }
-        pkt.release();   // TUN thread releases its own reference
     }
 
+    protected TcpPacketBuf prepare(final TcpPacketBuf pkt) throws UnknownHostException {
+        pkt.resolvedDstAddr(resolveDstAddress(pkt.dstAddrBytes()));
+        return pkt;
+    }
+
+    protected TcpMultiplexer create(final DnsEngine dnsEngine,
+                                    final SocketChannelFactory socketChannelFactory) {
+        final Map<String, tcp_request_sock> synRegistry = new java.util.concurrent.ConcurrentHashMap<>();
+        final Map<String, TcpSock> establishedRegistry = new java.util.concurrent.ConcurrentHashMap<>();
+        final EventLoopGroup childGroup = new io.netty.channel.nio.NioEventLoopGroup();
+        return new Tcp4Multiplexer(synRegistry, establishedRegistry, childGroup, dnsEngine, socketChannelFactory);
+    }
+
+    protected java.net.InetAddress resolveDstAddress(final byte[] addr) throws UnknownHostException {
+        if (dnsEngine.isFakeAddress(addr)) {
+            final String hostname = dnsEngine.getHostByAddress(addr);
+            if (hostname != null && !hostname.isEmpty()) {
+                return java.net.InetAddress.getByAddress(hostname, addr);
+            }
+        }
+        return java.net.InetAddress.getByAddress(io.netty.util.NetUtil.bytesToIpAddress(addr), addr);
+    }
 }
