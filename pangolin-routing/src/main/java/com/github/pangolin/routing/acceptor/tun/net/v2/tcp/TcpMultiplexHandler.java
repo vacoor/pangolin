@@ -3,8 +3,11 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketHandler;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.DataConsumer;
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import lombok.extern.slf4j.Slf4j;
 
@@ -20,11 +23,17 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
     private static final byte PROTO_TCP = 6;
 
     private final DnsEngine dnsEngine;
+    private final DataConsumer dataConsumer;
     private final TcpMultiplexer multiplexer;
 
     public TcpMultiplexHandler(final DnsEngine dnsEngine) {
+        this(dnsEngine, null);
+    }
+
+    public TcpMultiplexHandler(final DnsEngine dnsEngine, final DataConsumer dataConsumer) {
         super(PROTO_TCP);
         this.dnsEngine = dnsEngine;
+        this.dataConsumer = dataConsumer;
         this.multiplexer = create();
     }
 
@@ -32,7 +41,7 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
     protected void channelRead0(final ChannelHandlerContext ctx, final TcpPacketBuf rawPkt) {
         try {
             final TcpPacketBuf pkt = prepare(rawPkt);
-            multiplexer.tcp_rcv(ctx, pkt);
+            multiplexer.consume(ctx, pkt);
         } catch (final Exception ex) {
             log.error("Failed to process TCP packet", ex);
             // fallback reset in ingress layer
@@ -46,7 +55,15 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
     }
 
     protected TcpMultiplexer create() {
-        return new TcpMultiplexer(TcpConfig.builder().build());
+        return new TcpMultiplexer(TcpConfig.builder().build(), dataConsumer);
+    }
+
+    public boolean write(final FourTuple key, final ByteBuf data) {
+        return multiplexer.write(key, data);
+    }
+
+    public TcpMultiplexer multiplexer() {
+        return multiplexer;
     }
 
     protected java.net.InetAddress resolveDstAddress(final byte[] addr) throws UnknownHostException {

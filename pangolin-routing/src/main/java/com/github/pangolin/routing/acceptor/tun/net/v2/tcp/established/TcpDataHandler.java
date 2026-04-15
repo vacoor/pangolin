@@ -23,9 +23,16 @@ public final class TcpDataHandler {
      * @param pkt  the incoming segment
      */
     public void onData(ChannelHandlerContext ctx, TcpConnection conn, TcpPacketBuf pkt) {
+        ByteBuf data = onData(conn, pkt);
+        if (data != null) {
+            ctx.fireChannelRead(data);
+        }
+    }
+
+    public ByteBuf onData(TcpConnection conn, TcpPacketBuf pkt) {
         ByteBuf payload = pkt.tcpPayloadSlice();
         if (!payload.isReadable()) {
-            return;
+            return null;
         }
 
         // retainedSlice shares the underlying buffer with pkt and adds a +1 refcount,
@@ -35,9 +42,9 @@ public final class TcpDataHandler {
         int newRcvNxt = conn.receiveBuffer().offer(pkt.tcpSeq(), conn.rcvNxt(), segment);
         conn.rcvNxt(newRcvNxt);
 
-        // Forward all available in-order data to upstream / application
         if (conn.receiveBuffer().isReadable()) {
-            ctx.fireChannelRead(conn.receiveBuffer().readAll());
+            return conn.receiveBuffer().readAll();
         }
+        return null;
     }
 }

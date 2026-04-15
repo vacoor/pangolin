@@ -11,8 +11,8 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshak
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshakerFactory;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
-import io.netty.channel.ChannelHandlerContext;
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
 
 import java.util.HashMap;
 
@@ -24,13 +24,25 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSe
  * TUN ingress calls this class directly.
  */
 public final class TcpMultiplexer {
+    @FunctionalInterface
+    public interface DataConsumer {
+        void onData(FourTuple key, ByteBuf data);
+    }
+
+    private static final DataConsumer DROP_DATA = (key, data) -> data.release();
 
     private final TcpHandshakerFactory handshakerFactory;
     private final HashMap<FourTuple, TcpHandshaker> synRegistry = new HashMap<>();
     private final HashMap<FourTuple, TcpConnection> establishedRegistry = new HashMap<>();
+    private final DataConsumer dataConsumer;
 
     public TcpMultiplexer(TcpConfig config) {
+        this(config, DROP_DATA);
+    }
+
+    public TcpMultiplexer(TcpConfig config, DataConsumer dataConsumer) {
         this.handshakerFactory = new TcpHandshakerFactory(config);
+        this.dataConsumer = dataConsumer == null ? DROP_DATA : dataConsumer;
     }
 
     public void tcp_rcv(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
@@ -129,7 +141,10 @@ public final class TcpMultiplexer {
         }
 
         if (pkt.tcpPayloadLength() > 0 && conn.state().canReceive()) {
-            TcpDataHandler.INSTANCE.onData(ctx, conn, pkt);
+            ByteBuf data = TcpDataHandler.INSTANCE.onData(conn, pkt);
+            if (data != null) {
+                dataConsumer.onData(key, data);
+            }
             TcpOutput.INSTANCE.tcp_send_ack(conn);
         }
 
