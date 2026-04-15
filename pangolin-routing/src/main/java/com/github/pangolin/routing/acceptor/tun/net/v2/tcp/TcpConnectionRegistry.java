@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.demux;
+package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpConnectionChannel;

@@ -6,8 +6,10 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close.TcpActiveCloseH
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close.TcpPassiveCloseHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpInput;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
@@ -46,7 +48,7 @@ import java.nio.channels.ClosedChannelException;
  * an ACK immediately or arm the delayed-ACK timer.
  *
  * <p>Outbound writes ({@code ctx.write(ByteBuf)}) are enqueued in {@code TcpSendBuffer}
- * and transmitted by {@link TcpSegmenter}.
+ * and transmitted by {@link TcpOutput}.
  *
  * <p>Runs entirely on the connection's assigned Worker EventLoop.
  */
@@ -64,12 +66,13 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
 
     /**
      * Insert {@link TcpIncomingAckHandler} immediately before this handler when it is
-     * added to the pipeline.  The validator performs the common pre-checks
-     * (sequence acceptability + ACK processing) for all inbound segments, analogous to
-     * how {@link io.netty.handler.codec.http.websocketx.Utf8FrameValidator} sits before
+     * added to the pipeline.  The handler internally calls {@code TcpIncomingPreValidator}
+     * (non-Netty) for flag gate + {@code tcp_validate_incoming} checks, then performs
+     * ACK field processing (step 5).  Analogous to how
+     * {@link io.netty.handler.codec.http.websocketx.Utf8FrameValidator} sits before
      * the actual WebSocket handler.
      *
-     * <p>The validator is never replaced — only the downstream state handler changes on
+     * <p>The handler is never replaced — only the downstream state handler changes on
      * state transitions (ESTABLISHED → active/passive close).
      */
     @Override
@@ -133,10 +136,12 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
                 return;
             }
             ByteBuf data = (ByteBuf) msg;
-            conn.queueWrite(data);
-            // ACK_SCHED | ACK_TIMER clearing is now handled inside TcpSegmenter.tcp_transmit_skb,
+            // tcp_init_nondata_skb / sk_stream_alloc_skb: build skb with seq pre-assigned
+            conn.tcp_queue_skb(new TcpSegmentEntry(data, conn.writeSeq(),
+                    data.readableBytes(), (byte) TcpConstants.TCPHDR_ACK, 0L));
+            // ACK_SCHED | ACK_TIMER clearing is now handled inside TcpOutput.__tcp_transmit_skb,
             // mirroring Linux __tcp_transmit_skb → tcp_event_ack_sent → inet_csk_clear_xmit_timer.
-            TcpSegmenter.INSTANCE.tcp_write_xmit(conn, conn.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
+            TcpOutput.INSTANCE.tcp_write_xmit(conn, conn.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
             promise.setSuccess();
         } else {
             ctx.write(msg, promise);
@@ -155,9 +160,8 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
         log.debug("[TCP] [ESTABLISHED] close() called — initiating active close");
         conn.addShutdown(TcpConstants.SEND_SHUTDOWN);
         conn.state(TcpConnectionState.FIN_WAIT_1);
-        // Ensure FIN is sequenced after all queued app data.
-        TcpSegmenter.INSTANCE.tcp_write_xmit(conn, conn.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
-        TcpSegmenter.INSTANCE.sendFin(conn);
+        // Queue FIN at the tail of the write queue and push; mirrors Linux tcp_send_fin().
+        TcpOutput.INSTANCE.tcp_send_fin(conn);
         ctx.pipeline().replace(this, "close", new TcpActiveCloseHandler(conn, promise));
     }
 
@@ -170,7 +174,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         log.warn("[TCP] [ESTABLISHED] Exception — closing", cause);
-        TcpCloseMachine.abortiveClose(ctx, conn, null);
+        TcpInput.tcp_done(ctx, conn, null);
     }
 
     // ── Data receive / send / ACK — mirrors Linux tcp_data_queue / tcp_data_snd_check / tcp_ack_snd_check ──
@@ -183,7 +187,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
      * FIN processing ({@code tcp_fin}) is separated into {@link #tcpFin} to keep RFC 9293
      * step structure explicit.
      *
-     * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/tcp_input.c#L4939">tcp_data_queue</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4939">tcp_data_queue</a>
      */
     private void tcp_data_queue(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
         if (pkt.tcpPayloadLength() <= 0 || !conn.state().canReceive()) return;
@@ -204,7 +208,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
      * <p>Advances RCV.NXT by 1 (FIN occupies one sequence number), sets RCV_SHUTDOWN,
      * transitions to CLOSE_WAIT, and schedules an immediate ACK.
      *
-     * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/tcp_input.c#L4239">tcp_fin</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4239">tcp_fin</a>
      */
     private void tcpFin(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
         if (!pkt.isFin() || !conn.state().canReceive()) return;
@@ -247,9 +251,9 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
     /**
      * Mirrors Linux {@code __tcp_push_pending_frames} (tcp_output.c).
      *
-     * <p>Calls {@link TcpSegmenter#tcp_write_xmit}.
+     * <p>Calls {@link TcpOutput#tcp_write_xmit}.
      * ACK_SCHED | ACK_TIMER clearing and delayed-ACK timer cancellation are performed inside
-     * {@link TcpSegmenter#tcp_transmit_skb} (mirroring Linux {@code __tcp_transmit_skb →
+     * {@link TcpOutput} (mirroring Linux {@code __tcp_transmit_skb →
      * tcp_event_ack_sent → inet_csk_clear_xmit_timer}), so this method requires no ACK
      * bookkeeping of its own — exactly matching the Linux implementation.
      *
@@ -260,7 +264,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3005">__tcp_push_pending_frames</a>
      */
     private void __tcp_push_pending_frames() {
-        if (TcpSegmenter.INSTANCE.tcp_write_xmit(conn, conn.mss(), TcpConstants.TCP_NAGLE_OFF, 0)) {
+        if (TcpOutput.INSTANCE.tcp_write_xmit(conn, conn.mss(), TcpConstants.TCP_NAGLE_OFF, 0)) {
             // TODO tcp_check_probe_timer: sndWnd closed with nothing in flight → arm persist timer
         }
     }
@@ -281,42 +285,122 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
     // ── ACK scheduling — mirrors Linux tcp_ack_snd_check / __tcp_ack_snd_check ──────────────
 
     /**
-     * ACK send decision — mirrors Linux {@code tcp_ack_snd_check} / {@code __tcp_ack_snd_check}.
+     * Mirrors Linux {@code tcp_ack_snd_check} (tcp_input.c).
      *
-     * <p>If {@code ACK_SCHED} is clear (a piggybacked PSH+ACK from {@link #write} already
-     * acknowledged the data), nothing to do.  Otherwise, priority order:
-     * <ol>
-     *   <li>{@link TcpConstants#ACK_NOW}: immediate ACK required (FIN received, etc.).</li>
-     *   <li>{@code rcv_nxt − rcv_wup > rcv_mss}: "ACK every other full segment" rule
-     *       (RFC 9293 §3.8.6.2.2).  If we have accumulated more than one {@code rcv_mss}
-     *       worth of unacknowledged data, send an immediate ACK so the sender's 2-ACK clock
-     *       keeps ticking and the congestion window can grow.</li>
-     *   <li>Default: arm the delayed-ACK timer (RFC 9293 §3.8.6.2, max 40 ms).</li>
-     * </ol>
+     * <p>Guard: if {@code ACK_SCHED} is clear the peer has already been acknowledged
+     * (piggybacked ACK sent by {@link #write}); nothing to do.
+     * Otherwise delegate to {@link #__tcp_ack_snd_check}.
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#__tcp_ack_snd_check">__tcp_ack_snd_check</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5659">tcp_ack_snd_check</a>
      */
     private void tcp_ack_snd_check(ChannelHandlerContext ctx) {
-        if (!conn.hasAckPending(ACK_SCHED)) return;   // ACK already sent (piggybacked)
-        conn.clearAckPending(ACK_SCHED);
-
-        if (conn.hasAckPending(ACK_NOW)) {
-            // Immediate ACK required (e.g. FIN received — RFC 9293 §3.10.7.4)
-            if (conn.hasAckPending(ACK_TIMER)) {
-                TcpTimerScheduler.INSTANCE.cancelDelayedAck(conn);
-            }
-            conn.clearAckPending(ACK_NOW | ACK_TIMER);
-            TcpSegmenter.INSTANCE.sendAck(conn);
-        } else if (TcpSequence.after(conn.rcvNxt(), conn.rcvWup() + conn.rcvMss())) {
-            // __tcp_ack_snd_check: rcv_nxt - rcv_wup > rcv_mss → ACK every other full segment
-            if (conn.hasAckPending(ACK_TIMER)) {
-                TcpTimerScheduler.INSTANCE.cancelDelayedAck(conn);
-                conn.clearAckPending(ACK_TIMER);
-            }
-            TcpSegmenter.INSTANCE.sendAck(conn);
-        } else {
-            scheduleDelayedAck(ctx);
+        if (!conn.hasAckPending(ACK_SCHED)) {
+            // inet_csk_ack_scheduled: not set — data segment already carried the ACK.
+            return;
         }
+        __tcp_ack_snd_check(ctx);
+    }
+
+    /**
+     * Mirrors Linux {@code __tcp_ack_snd_check} (tcp_input.c).
+     *
+     * <p>Evaluates three "send now" conditions in the same order as Linux:
+     * <ol>
+     *   <li><b>Full-segment rule</b> ({@code rcv_nxt − rcv_wup > rcv_mss}) — ACK every other
+     *       full segment so the sender's 2-ACK clock keeps ticking (RFC 9293 §3.8.6.2.2).
+     *       Linux also requires a window sub-condition:
+     *       {@code (rcv_nxt − copied_seq < rcvlowat) || (__tcp_select_window ≥ rcv_wnd)}.
+     *       In our model data is delivered immediately (no blocking {@code recvmsg}), so
+     *       {@code copied_seq ≈ rcv_nxt → rcv_nxt − copied_seq ≈ 0 < sk_rcvlowat (= 1)};
+     *       the sub-condition is always satisfied and is omitted.</li>
+     *   <li><b>Quickack mode</b> ({@code tcp_in_quickack_mode}) — not implemented, always
+     *       {@code false}; see {@link #tcp_in_quickack_mode}.</li>
+     *   <li><b>{@code ICSK_ACK_NOW}</b> — protocol state mandates a one-time immediate ACK
+     *       (e.g. FIN received in ESTABLISHED, or SYN-RECV final ACK).</li>
+     * </ol>
+     *
+     * <p>If any condition is met: {@code goto send_now} — cancel the delayed-ACK timer,
+     * clear all ACK-pending flags, send ACK immediately.
+     * Otherwise: {@code tcp_send_delayed_ack} — arm the delayed-ACK timer.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5611">__tcp_ack_snd_check</a>
+     */
+    private void __tcp_ack_snd_check(ChannelHandlerContext ctx) {
+        /*-
+         * send_now conditions (Linux ordering):
+         *   1. (rcv_nxt - rcv_wup > rcv_mss) && window_sub_condition
+         *   2. tcp_in_quickack_mode
+         *   3. icsk_ack.pending & ICSK_ACK_NOW
+         */
+        if (TcpSequence.after(conn.rcvNxt(), conn.rcvWup() + conn.rcvMss())
+                || tcp_in_quickack_mode()
+                || conn.hasAckPending(ACK_NOW)) {
+            // send_now: tcp_send_ack → tcp_event_ack_sent → clear ICSK_ACK_SCHED|TIMER + cancel timer
+            tcp_send_ack_now();
+            return;
+        }
+
+        // Neither condition met — schedule delayed ACK (≈ tcp_send_delayed_ack)
+        tcp_send_delayed_ack(ctx);
+    }
+
+    /**
+     * Send an immediate pure ACK.
+     *
+     * <p>Corresponds to the {@code send_now} label in Linux {@code __tcp_ack_snd_check}:
+     * simply calls {@code tcp_send_ack(sk)}.
+     * {@code ICSK_ACK_SCHED | ICSK_ACK_TIMER} are cleared — and the delayed-ACK timer is
+     * cancelled — inside {@link TcpOutput#tcp_send_ack} via {@code tcp_event_ack_sent},
+     * exactly as Linux {@code __tcp_transmit_skb} does.
+     * {@code ICSK_ACK_NOW} is cleared here, before the call, mirroring the Linux
+     * {@code __tcp_ack_snd_check} control-flow where the flag is consumed by the caller.
+     */
+    private void tcp_send_ack_now() {
+        conn.clearAckPending(ACK_NOW);   // consumed by the send_now decision; ACK_SCHED|ACK_TIMER cleared inside tcp_send_ack
+        TcpOutput.INSTANCE.tcp_send_ack(conn);
+    }
+
+    /**
+     * Arm the delayed-ACK timer if not already running.
+     *
+     * <p>Mirrors Linux {@code tcp_send_delayed_ack} (inet_connection_sock.c):
+     * compute the delay, arm {@code ICSK_TIME_DACK}. Here we use the fixed
+     * {@link TcpConstants#DELAYED_ACK_MS} (40 ms) — RTT-adaptive shortening is not
+     * implemented.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L945">tcp_send_delayed_ack</a>
+     */
+    private void tcp_send_delayed_ack(ChannelHandlerContext ctx) {
+        if (conn.hasAckPending(ACK_TIMER)) return;   // ICSK_ACK_TIMER already armed
+        conn.addAckPending(ACK_TIMER);
+        TcpTimerScheduler.INSTANCE.scheduleDelayedAck(conn, TcpConstants.DELAYED_ACK_MS, () -> {
+            if (ctx.channel().isActive()) {
+                // tcp_send_ack internally calls tcp_event_ack_sent which clears ACK_SCHED|ACK_TIMER
+                // and cancels the delayed-ACK timer — no explicit clear needed here.
+                TcpOutput.INSTANCE.tcp_send_ack(conn);
+            } else {
+                // Channel is already closing: ACK will never be sent, so clean up flags manually.
+                conn.clearAckPending(ACK_TIMER | ACK_SCHED);
+            }
+        });
+    }
+
+    /**
+     * Mirrors Linux {@code tcp_in_quickack_mode} (include/net/inet_connection_sock.h).
+     *
+     * <p>Not implemented: our stack does not track {@code icsk_ack.quick} (quickack
+     * segment counter) or pingpong mode ({@code ICSK_ACK_PINGPONG}).
+     * Always returns {@code false} — quickack is never active.
+     *
+     * <p>TODO: implement {@code icsk_ack.quick} counter: set to 2 × {@code snd_cwnd} on
+     * connection setup and after an idle period; decremented by {@code tcp_dec_quickack_mode}
+     * on each ACK sent; quickack mode is active while the counter is positive and
+     * pingpong is not set.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/inet_connection_sock.h">tcp_in_quickack_mode</a>
+     */
+    private static boolean tcp_in_quickack_mode() {
+        return false;
     }
 
     /**
@@ -326,7 +410,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
      * {@code TCP_SYN_RECV}, matching the order in Linux {@code tcp_rcv_state_process()}:
      * {@code tcp_init_wl} is the first call inside {@code case TCP_SYN_RECV} after {@code tcp_ack}.
      *
-     * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/tcp_input.c#L3562">tcp_init_wl</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3562">tcp_init_wl</a>
      */
     private static void tcpInitWl(TcpConnection conn, int seq) {
         conn.sndWl1(seq);
@@ -346,7 +430,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
      *       {@code TcpHandshaker.finishHandshake()} (mirroring {@code tcp_finish_connect}).</li>
      * </ul>
      *
-     * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/tcp_input.c#L5825">tcp_init_transfer</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5825">tcp_init_transfer</a>
      */
     private static void tcpInitTransfer(TcpConnection conn) {
         // All sub-operations are performed at construction time or during Netty channel
@@ -358,7 +442,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
      * Computes the initial receive MSS used by {@link #tcp_ack_snd_check} to decide whether
      * an immediate ACK is warranted.  Called once at the TCP_SYN_RECV→ESTABLISHED transition.
      *
-     * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/inet_connection_sock.c#L631">tcp_initialize_rcv_mss</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_connection_sock.c#L631">tcp_initialize_rcv_mss</a>
      */
     private static int tcpInitializeRcvMss(TcpConnection conn) {
         int mss  = conn.mss();
@@ -374,7 +458,7 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
      * Adaptively updates {@code rcv_mss} based on the incoming segment size.
      * Larger incoming segments → larger {@code rcv_mss} → immediate ACK fires less frequently.
      *
-     * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/tcp_input.c#L562">tcp_measure_rcv_mss</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L562">tcp_measure_rcv_mss</a>
      */
     private void tcpMeasureRcvMss(TcpPacketBuf pkt) {
         int len = pkt.tcpPayloadLength();
@@ -383,15 +467,4 @@ public final class TcpEstablishedHandler extends ChannelDuplexHandler {
         }
     }
 
-    /** Arm the delayed-ACK timer if not already running ({@code ACK_TIMER} not set). */
-    private void scheduleDelayedAck(ChannelHandlerContext ctx) {
-        if (conn.hasAckPending(ACK_TIMER)) return;   // timer already armed
-        conn.addAckPending(ACK_TIMER);
-        TcpTimerScheduler.INSTANCE.scheduleDelayedAck(conn, TcpConstants.DELAYED_ACK_MS, () -> {
-            conn.clearAckPending(ACK_TIMER);
-            if (ctx.channel().isActive()) {
-                TcpSegmenter.INSTANCE.sendAck(conn);
-            }
-        });
-    }
 }

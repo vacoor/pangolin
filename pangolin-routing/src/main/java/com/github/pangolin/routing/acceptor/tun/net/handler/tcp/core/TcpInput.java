@@ -2036,7 +2036,7 @@ public class TcpInput {
      * @throws IOException
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6910">tcp_rcv_state_process</a>
      */
-    protected int tcp_rcv_state_process(final Channel net, TcpSock sk, final TcpPacketBuf pkt) throws IOException {
+    public int tcp_rcv_state_process(final Channel net, TcpSock sk, final TcpPacketBuf pkt) throws IOException {
         switch (sk.state()) {
             case TCP_CLOSE:
                 log.info(logFormat("[TCP] [RCV]", pkt, "Packet discard: The Connection is CLOSED"));

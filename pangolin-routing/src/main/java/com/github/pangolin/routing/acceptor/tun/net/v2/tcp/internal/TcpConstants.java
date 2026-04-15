@@ -7,6 +7,24 @@ public final class TcpConstants {
 
     private TcpConstants() {}
 
+    // ---- TCP header flag bits (≈ Linux include/linux/tcp.h TCPHDR_*) ----
+    /** FIN — end of byte stream; consumes one sequence number. */
+    public static final int TCPHDR_FIN = 0x01;
+    /** SYN — synchronise sequence numbers; consumes one sequence number. */
+    public static final int TCPHDR_SYN = 0x02;
+    /** RST — reset the connection; sent immediately, does NOT consume a sequence number. */
+    public static final int TCPHDR_RST = 0x04;
+    /** PSH — push buffered data to the application immediately. */
+    public static final int TCPHDR_PSH = 0x08;
+    /** ACK — acknowledgement field is significant. */
+    public static final int TCPHDR_ACK = 0x10;
+    /** URG — urgent pointer field is significant (not implemented). */
+    public static final int TCPHDR_URG = 0x20;
+    /** ECE — ECN-Echo (RFC 3168). */
+    public static final int TCPHDR_ECE = 0x40;
+    /** CWR — congestion window reduced (RFC 3168). */
+    public static final int TCPHDR_CWR = 0x80;
+
     // ---- Header sizes ----
     public static final int TCP_MIN_HEADER_LEN = 20;
     public static final int IP4_HEADER_LEN     = 20;

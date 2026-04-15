@@ -4,7 +4,8 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSegmenter;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpInput;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import io.netty.channel.ChannelHandlerContext;
@@ -57,7 +58,7 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
         TcpIncomingAckHandler.AckResult ackResult = conn.getAttr(TcpIncomingAckHandler.ACK_RESULT_KEY);
         if (ackResult != TcpIncomingAckHandler.AckResult.NONE) {
             // tcp_data_snd_check: flush any queued data whose window just re-opened.
-            TcpSegmenter.INSTANCE.tcp_write_xmit(conn, conn.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
+            TcpOutput.INSTANCE.tcp_write_xmit(conn, conn.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
         }
 
         TcpConnectionState state = conn.state();
@@ -81,7 +82,7 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         log.warn("[TCP] [ACTIVE-CLOSE] Exception — abortive close", cause);
-        TcpCloseMachine.abortiveClose(ctx, conn, closePromise);
+        TcpInput.tcp_done(ctx, conn, closePromise);
     }
 
     // ── FIN_WAIT_1 ───────────────────────────────────────────────────────
@@ -92,7 +93,7 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
             // TcpIncomingAckHandler.tcp_ack() has already run, so sndUna reflects the latest ACK.
             conn.rcvNxt(conn.rcvNxt() + 1);
             conn.addShutdown(TcpConstants.RCV_SHUTDOWN);
-            TcpSegmenter.INSTANCE.sendAck(conn);
+            TcpOutput.INSTANCE.tcp_send_ack(conn);
             // RFC 9293 §3.10.7.3: if our FIN is also acknowledged → TIME_WAIT; else → CLOSING.
             if (conn.sndUna() == conn.sndNxt()) {
                 conn.state(TcpConnectionState.TIME_WAIT);
@@ -121,7 +122,7 @@ public final class TcpActiveCloseHandler extends SimpleChannelInboundHandler<Tcp
             conn.rcvNxt(conn.rcvNxt() + 1);
             conn.addShutdown(TcpConstants.RCV_SHUTDOWN);
             conn.state(TcpConnectionState.TIME_WAIT);
-            TcpSegmenter.INSTANCE.sendAck(conn);
+            TcpOutput.INSTANCE.tcp_send_ack(conn);
             schedule2Msl(ctx);
             log.debug("[TCP] [ACTIVE-CLOSE] FIN in FIN_WAIT_2 → TIME_WAIT");
         }

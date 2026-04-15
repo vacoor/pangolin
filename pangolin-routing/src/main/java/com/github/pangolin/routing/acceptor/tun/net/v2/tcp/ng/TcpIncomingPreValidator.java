@@ -1,12 +1,13 @@
-package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
+package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import lombok.extern.slf4j.Slf4j;
 
@@ -15,15 +16,27 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpU
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants.*;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.*;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpInputOps.*;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.tcp_oow_rate_limited;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpInput.*;
 
+/**
+ * 非 Netty handler 的入向报文合法性校验器，供其他处理器直接调用。
+ *
+ * <p>执行 Linux {@code tcp_rcv_state_process} 入口处的两道门卫：
+ * <ol>
+ *   <li>Flag gate — 丢弃既无 ACK、又无 RST、也无 SYN 的报文。</li>
+ *   <li>{@code tcp_validate_incoming} — PAWS + 序列号检查 + RST + SYN challenge（RFC 9293 步骤 1–4）。</li>
+ * </ol>
+ *
+ * <p><b>引用计数约定</b>：{@link #validate} 在校验失败时自行 release {@code pkt} 并返回 {@code false}；
+ * 调用方无需再次 release。校验通过时返回 {@code true}，{@code pkt} 的所有权仍归调用方。
+ */
 @Slf4j
-public class TcpIncomingValidator extends ChannelInboundHandlerAdapter {
+public class TcpIncomingPreValidator {
     private final TcpConnection conn;
     private ChannelPromise closePromise;
 
-    public TcpIncomingValidator(TcpConnection conn) {
+    public TcpIncomingPreValidator(TcpConnection conn) {
         this.conn = conn;
     }
 
@@ -32,32 +45,34 @@ public class TcpIncomingValidator extends ChannelInboundHandlerAdapter {
     }
 
     /**
+     * 校验入向报文。
+     *
+     * <p>对应 Linux {@code tcp_rcv_state_process} 中调用 {@code tcp_validate_incoming} 之前的
+     * Flag gate，以及 {@code tcp_validate_incoming} 本身（PAWS → 序列号 → RST → SYN）。
+     *
+     * @param ctx Netty handler context，用于触发 RST/challenge-ACK 等副作用
+     * @param pkt 待校验的 TCP 报文；校验失败时此方法负责 release
+     * @return {@code true} 表示报文通过校验，调用方应继续处理；
+     *         {@code false} 表示报文已被丢弃（副作用已在此方法内完成），调用方直接返回
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6910">tcp_rcv_state_process</a>
      */
-    @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (!(msg instanceof TcpPacketBuf)) {
-            ctx.fireChannelRead(msg);
-            return;
-        }
-        TcpPacketBuf pkt = (TcpPacketBuf) msg;
-
+    public boolean validate(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
         // ── Flag gate ────────────────────────────────────────────────────────
         // Mirrors Linux tcp_rcv_state_process: drop segments that are neither ACK, RST, nor SYN.
         if (!pkt.isAck() && !pkt.isRst() && !pkt.isSyn()) {
             log.warn(logFormat("[TCP] [RCV]", pkt, "Invalid TCP flag(!ACK, !RST, !SYN) — dropped"));
             pkt.release();
-            return;
+            return false;
         }
 
         // ── tcp_validate_incoming: PAWS + sequence + RST + SYN (steps 1–4) ──
         if (!tcp_validate_incoming(ctx, conn, pkt)) {
             // DROP, CHALLENGE_ACK, or RESET: side-effects already applied inside.
             pkt.release();
-            return;
+            return false;
         }
 
-        ctx.fireChannelRead(msg);
+        return true;
     }
 
     /**
@@ -72,7 +87,7 @@ public class TcpIncomingValidator extends ChannelInboundHandlerAdapter {
      * called from within {@code tcp_validate_incoming}).
      *
      * @return {@code true} if the segment is acceptable; {@code false} to drop it.
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L5870">tcp_validate_incoming</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6283">tcp_validate_incoming</a>
      */
     private boolean tcp_validate_incoming(ChannelHandlerContext ctx,
                                           TcpConnection conn, TcpPacketBuf pkt) {
@@ -83,7 +98,7 @@ public class TcpIncomingValidator extends ChannelInboundHandlerAdapter {
             long[] ts = TcpOptionCodec.parseTimestamp(opts);
             if (ts != null && conn.timestampExt().isPawsRejected(conn, (int) ts[0])) {
                 if (!pkt.isRst()) {
-                    TcpSegmenter.INSTANCE.sendAck(conn);
+                    TcpOutput.INSTANCE.tcp_send_ack(conn);
                     return false;
                 }
                 // RST is accepted even if it did not pass PAWS — fall through to step 1.
@@ -105,13 +120,13 @@ public class TcpIncomingValidator extends ChannelInboundHandlerAdapter {
             if (!pkt.isRst()) {
                 if (pkt.isSyn()) {
                     // Linux syn_challenge: challenge ACK on invalid-sequence SYN (RFC 5961 §4).
-                    tcp_send_challenge_ack(conn, accecn_reflector);
+                    TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, accecn_reflector);
                     return discard(conn, pkt, SKB_DROP_REASON_TCP_INVALID_SYN);
                 }
                 // Rate-limited dupack for out-of-window non-RST/non-SYN segments.
                 if (tcp_oow_rate_limited(conn, pkt, conn.lastOowAckTimeMs())) {
                     // FIXME tcp_send_dupack
-                    TcpSegmenter.INSTANCE.sendAck(conn);
+                    TcpOutput.INSTANCE.tcp_send_ack(conn);
                 }
             } else if (tcp_reset_check(conn, pkt)) {
                 // Linux tcp_reset_check: accept bare RST at RCV.NXT - 1 in half-close states.
@@ -138,7 +153,7 @@ public class TcpIncomingValidator extends ChannelInboundHandlerAdapter {
 
             // TODO SACK
 
-            tcp_send_challenge_ack(conn, false);
+            TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, false);
             return discard(conn, pkt, SKB_DROP_REASON_TCP_RESET);
         }
 
@@ -155,7 +170,7 @@ public class TcpIncomingValidator extends ChannelInboundHandlerAdapter {
                 return true;
             }
 
-            tcp_send_challenge_ack(conn, accecn_reflector);
+            TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, accecn_reflector);
             return discard(conn, pkt, SKB_DROP_REASON_TCP_INVALID_SYN);
         }
 
@@ -179,7 +194,7 @@ public class TcpIncomingValidator extends ChannelInboundHandlerAdapter {
      *
      * @return {@link SkbDropReasonConstants#SKB_NOT_DROPPED_YET} (0) if the segment is acceptable;
      *         a non-zero {@code skb_drop_reason} constant otherwise.
-     * @see <a href="https://elixir.bootlin.com/linux/latest/source/net/ipv4/tcp_input.c#L4394">tcp_sequence</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4394">tcp_sequence</a>
      */
     private static int tcp_sequence(TcpConnection conn, TcpPacketBuf pkt) {
         int seq    = pkt.tcpSeq();

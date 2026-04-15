@@ -194,8 +194,8 @@ public final class TcpConnectionChannel extends AbstractChannel {
      * The {@code TcpConnectionChannel}'s pipeline contains {@code TcpEstablishedHandler},
      * which overrides {@code write()} to intercept <em>all</em> {@link ByteBuf} writes and
      * treat them as application TCP data (enqueueing into the send buffer). Raw IP control
-     * packets (ACK, FIN, RST, retransmits) built by {@code TcpSegmenter} /
-     * {@code TcpRetransmitter} must bypass that handler and go directly to the TUN interface.
+     * packets (ACK, FIN, RST, retransmits) built by {@code TcpOutput} must bypass that handler
+     * and go directly to the TUN interface.
      *
      * <p>Called from the connection's Worker EventLoop; {@code parent().writeAndFlush()}
      * cross-posts write + flush tasks to the TUN EventLoop automatically.

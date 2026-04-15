@@ -1,11 +1,10 @@
-package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.demux;
+package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpConnectionChannel;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.util.concurrent.EventExecutor;
 import org.slf4j.Logger;
@@ -97,7 +96,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
              */
             if (pkt.isAck()) {
                 log.info(logFormat("[TCP] [RCV]", pkt, "Connection reset: SKB_DROP_REASON_TCP_FLAGS Invalid TCP flag(LISTEN <- ACK)"));
-                sendRst(ctx, pkt);
+                TcpOutput.INSTANCE.tcp_v4_send_reset(ctx, pkt);
                 pkt.release();
                 return;
             }
@@ -173,122 +172,4 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
         pkt.release();   // TUN thread releases its own reference
     }
 
-    // ── RST helper ───────────────────────────────────────────────────────────
-
-    /**
-     * Send a TCP RST in response to an unroutable packet.
-     * Builds a minimal IPv4+TCP RST packet; does not modify or release {@code pkt}.
-     */
-    private static void sendRst(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
-        if (pkt.isRst()) return;   // never RST a RST (RFC 9293 §3.5.2)
-
-        byte[] srcIp = pkt.dstAddrBytes();
-        byte[] dstIp = pkt.srcAddrBytes();
-        int srcPort = pkt.tcpDstPort();
-        int dstPort = pkt.tcpSrcPort();
-
-        int seq;
-        int ack;
-        int flags;
-        if (pkt.isAck()) {
-            seq = pkt.tcpAckNum();
-            ack = 0;
-            flags = 0x04;   // RST only
-        } else {
-            seq = 0;
-            ack = pkt.tcpSeq() + pkt.tcpPayloadLength() + (pkt.isSyn() ? 1 : 0);
-            flags = 0x14;   // RST + ACK
-        }
-
-        ByteBuf buf = buildIp4TcpPacket(srcIp, srcPort, dstIp, dstPort, seq, ack, flags, 0, null);
-        ctx.writeAndFlush(buf);
-    }
-
-    /**
-     * Assemble a raw IPv4+TCP packet with checksum computation.
-     * Re-implements the essential logic of {@code Tcp4Multiplexer.buildIp4Packet()}.
-     */
-    static ByteBuf buildIp4TcpPacket(byte[] srcIp, int srcPort,
-                                     byte[] dstIp, int dstPort,
-                                     int seq, int ack, int tcpFlags,
-                                     int window, byte[] options) {
-        int optLen = options != null ? options.length : 0;
-        int tcpHdrLen = 20 + optLen;
-        int ipTotalLen = 20 + tcpHdrLen;
-
-        ByteBuf buf = Unpooled.buffer(ipTotalLen);
-
-        // IPv4 header
-        int ipHdrStart = buf.writerIndex();
-        buf.writeByte(0x45);
-        buf.writeByte(0);
-        buf.writeShort(ipTotalLen);
-        buf.writeShort(0);
-        buf.writeShort(0x4000);   // DF flag
-        buf.writeByte(64);        // TTL
-        buf.writeByte(0x06);      // TCP
-        int ipCsumIdx = buf.writerIndex();
-        buf.writeShort(0);
-        buf.writeBytes(srcIp);
-        buf.writeBytes(dstIp);
-
-        // TCP header
-        int tcpHdrStart = buf.writerIndex();
-        buf.writeShort(srcPort);
-        buf.writeShort(dstPort);
-        buf.writeInt(seq);
-        buf.writeInt(ack);
-        buf.writeByte((tcpHdrLen / 4) << 4);
-        buf.writeByte(tcpFlags);
-        buf.writeShort(window);
-        int tcpCsumIdx = buf.writerIndex();
-        buf.writeShort(0);
-        buf.writeShort(0);  // urgent pointer
-
-        if (optLen > 0) {
-            buf.writeBytes(options);
-        }
-
-        // TCP checksum
-        int tcpCsum = computeTcpChecksum(buf, srcIp, dstIp, tcpHdrStart, tcpHdrLen);
-        buf.setShort(tcpCsumIdx, tcpCsum);
-
-        // IP checksum
-        int ipCsum = computeIpChecksum(buf, ipHdrStart, 20);
-        buf.setShort(ipCsumIdx, ipCsum);
-
-        return buf;
-    }
-
-    private static int computeTcpChecksum(ByteBuf buf, byte[] srcIp, byte[] dstIp,
-                                          int tcpStart, int tcpLen) {
-        long sum = 0;
-        // Pseudo-header
-        sum += ((srcIp[0] & 0xFF) << 8) | (srcIp[1] & 0xFF);
-        sum += ((srcIp[2] & 0xFF) << 8) | (srcIp[3] & 0xFF);
-        sum += ((dstIp[0] & 0xFF) << 8) | (dstIp[1] & 0xFF);
-        sum += ((dstIp[2] & 0xFF) << 8) | (dstIp[3] & 0xFF);
-        sum += 6;         // protocol = TCP
-        sum += tcpLen;
-        // TCP segment
-        int i = tcpStart;
-        while (i + 1 < tcpStart + tcpLen) {
-            sum += buf.getUnsignedShort(i);
-            i += 2;
-        }
-        if (i < tcpStart + tcpLen) {
-            sum += (buf.getUnsignedByte(i) << 8);
-        }
-        while (sum >> 16 != 0) sum = (sum & 0xFFFF) + (sum >> 16);
-        return (int) (~sum & 0xFFFF);
-    }
-
-    private static int computeIpChecksum(ByteBuf buf, int start, int len) {
-        long sum = 0;
-        for (int i = start; i < start + len; i += 2) {
-            sum += buf.getUnsignedShort(i);
-        }
-        while (sum >> 16 != 0) sum = (sum & 0xFFFF) + (sum >> 16);
-        return (int) (~sum & 0xFFFF);
-    }
 }

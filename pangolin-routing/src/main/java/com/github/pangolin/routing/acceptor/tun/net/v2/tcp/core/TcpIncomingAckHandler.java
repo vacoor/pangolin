@@ -5,6 +5,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.Connection
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpIncomingPreValidator;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
@@ -12,7 +13,7 @@ import org.slf4j.Logger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants.*;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.*;
+
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
 
@@ -78,7 +79,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
 
     private final TcpConnection conn;
     private final Logger        log;
-    private final TcpIncomingValidator incomingValidator;
+    private final TcpIncomingPreValidator incomingValidator;
 
     /**
      * Promise to notify if an RST triggers an abortive close.
@@ -90,7 +91,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
     public TcpIncomingAckHandler(TcpConnection conn, Logger log) {
         this.conn = conn;
         this.log  = log;
-        this.incomingValidator = new TcpIncomingValidator(conn);
+        this.incomingValidator = new TcpIncomingPreValidator(conn);
     }
 
     /**
@@ -105,12 +106,6 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
 
     // ── Pipeline handler ───────────────────────────────────────────────────
 
-
-    @Override
-    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
-        ctx.pipeline().addBefore(ctx.name(), "tcp-incoming-validator", incomingValidator);
-    }
-
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6910">tcp_rcv_state_process</a>
      */
@@ -121,6 +116,12 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
             return;
         }
         TcpPacketBuf pkt = (TcpPacketBuf) msg;
+
+        // ── tcp_validate_incoming: flag gate + PAWS + sequence + RST + SYN ──
+        // 校验失败时 incomingValidator 已 release pkt，直接返回即可。
+        if (!incomingValidator.validate(ctx, pkt)) {
+            return;
+        }
 
         // ── tcp_ack: step 5 ACK field processing ──────────────────────────
         final int priorSndUna = conn.sndUna();
@@ -133,7 +134,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
             }
             /* accept old ack during closing */
             if (reason < 0) {
-                tcp_send_challenge_ack(conn, false);
+                TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, false);
                 reason = -reason;
                 discard(conn, pkt, reason);
                 return;
@@ -204,7 +205,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
             final int maxWindow = (int) Math.min(conn.maxWindow(), conn.bytesAcked());
             if (before(ack, priorSndUna - maxWindow)) {
                 if (0 == (flags & FLAG_NO_CHALLENGE_ACK)) {
-                    tcp_send_challenge_ack(conn, false);
+                    TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, false);
                 }
                 return -SKB_DROP_REASON_TCP_TOO_OLD_ACK;
             }
@@ -239,7 +240,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
             if (ackSeq != determineEndSeq(pkt)) {
                 flags |= FLAG_DATA;                             // segment carries data
             }
-            flags |= tcpAckUpdateWindow(conn, pkt, 0 != (flags & FLAG_SND_UNA_ADVANCED));  // ≈ tcp_ack_update_window
+            flags |= tcp_ack_update_window(conn, pkt, 0 != (flags & FLAG_SND_UNA_ADVANCED));  // ≈ tcp_ack_update_window
         }
 
         // Advance SND.UNA only — does NOT drain the RTX queue.
@@ -302,8 +303,8 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
      * @return {@link #FLAG_WIN_UPDATE} if the window was updated, {@code 0} otherwise
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3688">tcp_ack_update_window</a>
      */
-    private static int tcpAckUpdateWindow(TcpConnection conn, TcpPacketBuf pkt,
-                                          boolean newDataAcked) {
+    private static int tcp_ack_update_window(TcpConnection conn, TcpPacketBuf pkt,
+                                             boolean newDataAcked) {
         int seg  = pkt.tcpSeq();
         int nwin = pkt.tcpWindow() << conn.sndWscale();
         if (newDataAcked

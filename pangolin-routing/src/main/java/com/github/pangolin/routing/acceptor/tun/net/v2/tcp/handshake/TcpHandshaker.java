@@ -5,7 +5,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCo
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpPacketBuilder;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpConnectionChannel;
@@ -293,19 +293,7 @@ public final class TcpHandshaker {
         int window = config.initialRcvWnd() >> (clientWscale >= 0 ? config.windowScale() : 0);
         if (window > TcpConstants.TCP_MAX_WINDOW) window = TcpConstants.TCP_MAX_WINDOW;
 
-        // flags: SYN(0x02) + ACK(0x10) = 0x12
-        ByteBuf buf = TcpPacketBuilder.buildRaw(
-                dstAddrBytes, dstPort,
-                srcAddrBytes, srcPort,
-                sndIsn, rcvNxt,
-                0x12,    // SYN+ACK
-                window,
-                opts, null, 0
-        );
-
         // Cancel any running retransmit timer before (re-)sending.
-        // A client SYN retransmit resets the backoff counter (synAckRetries already set to 0
-        // by the caller); cancelling here ensures a clean timer state for the new attempt.
         cancelRetransmitTimer();
 
         // Mark synAckSent synchronously before writeAndFlush(): both sendSynAck() and
@@ -319,7 +307,11 @@ public final class TcpHandshaker {
         // matching the latest epoch should arm the retransmit timer.  The stale callback
         // (epoch mismatch) skips scheduleRetransmit() and avoids leaking a second timer.
         final int epoch = ++synAckSendEpoch;
-        connChannel.writeAndFlush(buf).addListener((ChannelFutureListener) f -> {
+        TcpOutput.INSTANCE.tcp_send_synack(
+                (TcpConnectionChannel) connChannel,
+                dstAddrBytes, dstPort, srcAddrBytes, srcPort,
+                sndIsn, rcvNxt, window, opts
+        ).addListener((ChannelFutureListener) f -> {
             if (!f.isSuccess()) {
                 log.warn("[TCP] [HANDSHAKE] SYN-ACK send failed", f.cause());
                 return;
@@ -400,28 +392,18 @@ public final class TcpHandshaker {
     private void sendChallengeAck(Channel connChannel) {
         int window = config.initialRcvWnd() >> (clientWscale >= 0 ? config.windowScale() : 0);
         if (window > TcpConstants.TCP_MAX_WINDOW) window = TcpConstants.TCP_MAX_WINDOW;
-        ByteBuf buf = TcpPacketBuilder.buildRaw(
-                dstAddrBytes, dstPort,
-                srcAddrBytes, srcPort,
-                sndIsn + 1, rcvNxt,
-                0x10,   // ACK
-                window,
-                null, null, 0
-        );
-        ((TcpConnectionChannel) connChannel).writeRaw(buf);
+        TcpOutput.INSTANCE.tcp_send_challenge_ack_handshake(
+                (TcpConnectionChannel) connChannel,
+                dstAddrBytes, dstPort, srcAddrBytes, srcPort,
+                sndIsn + 1, rcvNxt, window);
     }
 
     private ChannelFuture sendRst(Channel connChannel, TcpPacketBuf pkt) {
-        int seq = pkt.tcpAckNum();
-        ByteBuf buf = TcpPacketBuilder.buildRaw(
-                dstAddrBytes, dstPort,
-                srcAddrBytes, srcPort,
-                seq, 0,
-                0x04,  // RST
-                0, null, null, 0
-        );
-        // Use writeRaw() to bypass this channel's pipeline handlers (e.g., TcpEstablishedHandler)
-        // which would intercept write() and treat ByteBuf as application data.
-        return ((TcpConnectionChannel) connChannel).writeRaw(buf);
+        // Use tcp_send_reset_handshake() which calls writeRaw() — bypasses pipeline handlers
+        // (e.g., TcpEstablishedHandler) that would intercept write() as application data.
+        return TcpOutput.INSTANCE.tcp_send_reset_handshake(
+                (TcpConnectionChannel) connChannel,
+                dstAddrBytes, dstPort, srcAddrBytes, srcPort,
+                pkt.tcpAckNum());
     }
 }
