@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshakeEstablishedEvent;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
@@ -20,6 +21,7 @@ import java.util.concurrent.RejectedExecutionException;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_ESTABLISHED;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_LISTEN;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_NEW_SYN_RECV;
 
 /**
  * TUN-EventLoop–side TCP packet dispatcher (analogous to {@code Http2MultiplexHandler}).
@@ -43,12 +45,14 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.
 public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(TcpMultiplexHandler.class);
+    private static final int DEFAULT_MAX_SYN_BACKLOG = 1024;
 
     @SuppressWarnings("unused")
     private final TcpConfig config;
     private final ChannelHandler childHandler;
     private final V2TcpSock listenSock;
-    private final HashMap<FourTuple, TcpSockChannel> synRegistry = new HashMap<>();
+    private final HashMap<FourTuple, tcp_request_sock> synRegistry = new HashMap<>();
+    private final HashMap<FourTuple, TcpSockChannel> synChannelRegistry = new HashMap<>();
     private final HashMap<FourTuple, V2TcpSock> establishedRegistry = new HashMap<>();
     private final EventLoop[] workers;
 
@@ -93,7 +97,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
          */
 
         V2TcpSock establishedSock = establishedRegistry.get(fourTuple);
-        TcpSockChannel connCh = establishedSock != null ? establishedSock.sockChannel() : synRegistry.get(fourTuple);
+        TcpSockChannel connCh = establishedSock != null ? establishedSock.sockChannel() : synChannelRegistry.get(fourTuple);
         if (connCh == null) {
             /*-
              * listen sock in TCP_LISTEN state.
@@ -130,6 +134,11 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
             /*-
              * FIXME check accept queue is full
              */
+            if (synRegistry.size() >= DEFAULT_MAX_SYN_BACKLOG) {
+                log.warn(logFormat("[TCP] [RCV]", pkt, "Packet discard: SYN backlog full"));
+                pkt.release();
+                return;
+            }
 
             // First SYN: select Worker via consistent hash (bit-AND clears sign bit safely).
             // ⚠ Math.abs(Integer.MIN_VALUE) == Integer.MIN_VALUE (still negative in Java);
@@ -140,6 +149,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                     ctx.channel(), fourTuple, worker,
                     () -> tunEventLoop.execute(() -> {
                         synRegistry.remove(fourTuple);
+                        synChannelRegistry.remove(fourTuple);
                         establishedRegistry.remove(fourTuple);
                     })
             );
@@ -157,6 +167,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                         sock.sockChannel((TcpSockChannel) c.channel());
                         tunEventLoop.execute(() -> {
                             synRegistry.remove(fourTuple);
+                            synChannelRegistry.remove(fourTuple);
                             establishedRegistry.put(fourTuple, sock);
                         });
                     }
@@ -167,6 +178,7 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                 public void channelInactive(ChannelHandlerContext c) throws Exception {
                     tunEventLoop.execute(() -> {
                         synRegistry.remove(fourTuple);
+                        synChannelRegistry.remove(fourTuple);
                         establishedRegistry.remove(fourTuple);
                     });
                     super.channelInactive(c);
@@ -184,11 +196,24 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                     // fires asynchronously, pkt's refcount is already at 0 (TUN has released its ref).
                     log.warn("[{}] TcpSockChannel registration failed, removing from registry: {}",
                             fourTuple, f.cause() != null ? f.cause().getMessage() : "unknown");
-                    tunEventLoop.execute(() -> synRegistry.remove(fourTuple));
+                    tunEventLoop.execute(() -> {
+                        synRegistry.remove(fourTuple);
+                        synChannelRegistry.remove(fourTuple);
+                    });
                 }
             });
 
-            synRegistry.put(fourTuple, connCh);
+            tcp_request_sock req = new tcp_request_sock();
+            req.state(TCP_NEW_SYN_RECV);
+            req.skc_listener = listenSock;
+            req.ir_loc_addr = pkt.dstAddr();
+            req.ir_rmt_addr = pkt.srcAddr();
+            req.ir_num = pkt.tcpDstPort();
+            req.ir_rmt_port = pkt.tcpSrcPort();
+            req.rcv_isn = pkt.tcpSeq();
+            req.rcv_nxt = pkt.tcpSeq() + 1;
+            synRegistry.put(fourTuple, req);
+            synChannelRegistry.put(fourTuple, connCh);
         }
 
         // Cross-thread dispatch to Worker EventLoop.
