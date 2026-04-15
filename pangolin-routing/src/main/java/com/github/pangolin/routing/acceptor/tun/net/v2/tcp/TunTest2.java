@@ -12,6 +12,7 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.charset.StandardCharsets;
@@ -28,7 +29,7 @@ public class TunTest2 {
         // TUN EventLoop (single thread — owns the TunChannel and packet demux)
         EventLoopGroup tunGroup    = new DefaultEventLoopGroup(1);
         // Worker EventLoops — one connection is pinned to one worker (consistent hash)
-        EventLoopGroup workerGroup = new DefaultEventLoopGroup(4);
+        EventLoopGroup workerGroup = new NioEventLoopGroup(4);
         try {
             TcpConfig config = TcpConfig.builder()
                     .windowScalingEnabled(true)
