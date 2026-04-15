@@ -4,7 +4,6 @@ import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.demux.TcpMultiplexHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshakeHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshakerFactory;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
