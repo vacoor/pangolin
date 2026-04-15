@@ -8,7 +8,6 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnect
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
@@ -308,7 +307,7 @@ public final class TcpHandshaker {
         // (epoch mismatch) skips scheduleRetransmit() and avoids leaking a second timer.
         final int epoch = ++synAckSendEpoch;
         TcpOutput.INSTANCE.tcp_send_synack(
-                (TcpSockChannel) connChannel,
+                connChannel,
                 dstAddrBytes, dstPort, srcAddrBytes, srcPort,
                 sndIsn, rcvNxt, window, opts
         ).addListener((ChannelFutureListener) f -> {
@@ -393,16 +392,15 @@ public final class TcpHandshaker {
         int window = config.initialRcvWnd() >> (clientWscale >= 0 ? config.windowScale() : 0);
         if (window > TcpConstants.TCP_MAX_WINDOW) window = TcpConstants.TCP_MAX_WINDOW;
         TcpOutput.INSTANCE.tcp_send_challenge_ack_handshake(
-                (TcpSockChannel) connChannel,
+                connChannel,
                 dstAddrBytes, dstPort, srcAddrBytes, srcPort,
                 sndIsn + 1, rcvNxt, window);
     }
 
     private ChannelFuture sendRst(Channel connChannel, TcpPacketBuf pkt) {
-        // Use tcp_send_reset_handshake() which calls writeRaw() — bypasses pipeline handlers
-        // (e.g., TcpEstablishedHandler) that would intercept write() as application data.
+        // Use handshake reset path directly on connection channel.
         return TcpOutput.INSTANCE.tcp_send_reset_handshake(
-                (TcpSockChannel) connChannel,
+                connChannel,
                 dstAddrBytes, dstPort, srcAddrBytes, srcPort,
                 pkt.tcpAckNum());
     }

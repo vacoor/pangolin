@@ -2,10 +2,11 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshakeCompletedEvent;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshakeEstablishedEvent;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.sock.V2TcpSock;
 import io.netty.channel.*;
 import io.netty.util.concurrent.EventExecutor;
 import org.slf4j.Logger;
@@ -17,6 +18,8 @@ import java.util.List;
 import java.util.concurrent.RejectedExecutionException;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_ESTABLISHED;
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.internal.TcpState.TCP_LISTEN;
 
 /**
  * TUN-EventLoop–side TCP packet dispatcher (analogous to {@code Http2MultiplexHandler}).
@@ -44,8 +47,9 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
     @SuppressWarnings("unused")
     private final TcpConfig config;
     private final ChannelHandler childHandler;
+    private final V2TcpSock listenSock;
     private final HashMap<FourTuple, TcpSockChannel> synRegistry = new HashMap<>();
-    private final HashMap<FourTuple, TcpSockChannel> establishedRegistry = new HashMap<>();
+    private final HashMap<FourTuple, V2TcpSock> establishedRegistry = new HashMap<>();
     private final EventLoop[] workers;
 
     /**
@@ -58,6 +62,8 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
                                EventLoopGroup workerGroup) {
         this.config = config;
         this.childHandler = childHandler;
+        this.listenSock = new V2TcpSock(null);
+        this.listenSock.state(TCP_LISTEN);
         List<EventLoop> list = new ArrayList<>();
         for (EventExecutor e : workerGroup) {
             list.add((EventLoop) e);
@@ -86,10 +92,8 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
          * XXX: CHECK listen sock in here, but this is an unnecessary operation for proxy scenario.
          */
 
-        TcpSockChannel connCh = establishedRegistry.get(fourTuple);
-        if (connCh == null) {
-            connCh = synRegistry.get(fourTuple);
-        }
+        V2TcpSock establishedSock = establishedRegistry.get(fourTuple);
+        TcpSockChannel connCh = establishedSock != null ? establishedSock.sockChannel() : synRegistry.get(fourTuple);
         if (connCh == null) {
             /*-
              * listen sock in TCP_LISTEN state.
@@ -142,12 +146,18 @@ public final class TcpMultiplexHandler extends ChannelInboundHandlerAdapter {
             connCh.pipeline().addLast("lifecycle", new ChannelInboundHandlerAdapter() {
                 @Override
                 public void userEventTriggered(ChannelHandlerContext c, Object evt) {
-                    if (evt == TcpHandshakeCompletedEvent.INSTANCE) {
+                    if (evt instanceof TcpHandshakeEstablishedEvent) {
+                        TcpHandshakeEstablishedEvent e = (TcpHandshakeEstablishedEvent) evt;
+                        V2TcpSock sock = new V2TcpSock(c.alloc());
+                        sock.state(TCP_ESTABLISHED);
+                        sock.netChannel(ctx.channel());
+                        sock.workerEventLoop(c.channel().eventLoop());
+                        sock.fourTuple(fourTuple);
+                        sock.tcpConnection(e.connection());
+                        sock.sockChannel((TcpSockChannel) c.channel());
                         tunEventLoop.execute(() -> {
-                            TcpSockChannel ch = synRegistry.remove(fourTuple);
-                            if (ch != null) {
-                                establishedRegistry.put(fourTuple, ch);
-                            }
+                            synRegistry.remove(fourTuple);
+                            establishedRegistry.put(fourTuple, sock);
                         });
                     }
                     c.fireUserEventTriggered(evt);

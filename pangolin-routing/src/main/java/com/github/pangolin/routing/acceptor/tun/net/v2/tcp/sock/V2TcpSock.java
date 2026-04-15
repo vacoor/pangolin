@@ -1,10 +1,13 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.sock;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpReceiveBuffer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel;
 import io.netty.buffer.ByteBufAllocator;
+import io.netty.buffer.UnpooledByteBufAllocator;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
 
@@ -20,17 +23,19 @@ public class V2TcpSock extends TcpSock {
     private Channel netChannel;
     private EventLoop workerEventLoop;
     private FourTuple fourTuple;
+    private TcpConnection tcpConnection;
+    private TcpSockChannel sockChannel;
 
     public V2TcpSock(ByteBufAllocator allocator) {
-        this.receiveBuffer = new TcpReceiveBuffer(allocator);
+        this.receiveBuffer = new TcpReceiveBuffer(allocator != null ? allocator : UnpooledByteBufAllocator.DEFAULT);
     }
 
     public TcpSendBuffer sendBuffer() {
-        return sendBuffer;
+        return tcpConnection != null ? tcpConnection.sendBuffer() : sendBuffer;
     }
 
     public TcpReceiveBuffer receiveBuffer() {
-        return receiveBuffer;
+        return tcpConnection != null ? tcpConnection.receiveBuffer() : receiveBuffer;
     }
 
     public Channel netChannel() {
@@ -55,5 +60,21 @@ public class V2TcpSock extends TcpSock {
 
     public void fourTuple(FourTuple fourTuple) {
         this.fourTuple = fourTuple;
+    }
+
+    public TcpConnection tcpConnection() {
+        return tcpConnection;
+    }
+
+    public void tcpConnection(TcpConnection tcpConnection) {
+        this.tcpConnection = tcpConnection;
+    }
+
+    public TcpSockChannel sockChannel() {
+        return sockChannel;
+    }
+
+    public void sockChannel(TcpSockChannel sockChannel) {
+        this.sockChannel = sockChannel;
     }
 }

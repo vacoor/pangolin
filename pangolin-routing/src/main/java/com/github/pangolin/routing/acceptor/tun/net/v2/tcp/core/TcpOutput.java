@@ -9,6 +9,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.pipeline.TcpSockChannel;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 
@@ -326,7 +327,7 @@ public final class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c#L944">tcp_v4_send_synack</a>
      */
-    public ChannelFuture tcp_send_synack(TcpSockChannel ch,
+    public ChannelFuture tcp_send_synack(Channel ch,
             byte[] localIp, int localPort, byte[] remoteIp, int remotePort,
             int seq, int ack, int window, byte[] options) {
         ByteBuf buf = TcpPacketBuilder.buildRaw(
@@ -340,13 +341,13 @@ public final class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3649">tcp_send_challenge_ack</a>
      */
-    public void tcp_send_challenge_ack_handshake(TcpSockChannel ch,
+    public void tcp_send_challenge_ack_handshake(Channel ch,
             byte[] localIp, int localPort, byte[] remoteIp, int remotePort,
             int seq, int ack, int window) {
         ByteBuf buf = TcpPacketBuilder.buildRaw(
                 localIp, localPort, remoteIp, remotePort,
                 seq, ack, TCPHDR_ACK, window, null, null, 0);
-        ch.writeRaw(buf);
+        ch.writeAndFlush(buf);
     }
 
     /**
@@ -356,13 +357,13 @@ public final class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3615">tcp_send_reset</a>
      */
-    public ChannelFuture tcp_send_reset_handshake(TcpSockChannel ch,
+    public ChannelFuture tcp_send_reset_handshake(Channel ch,
             byte[] localIp, int localPort, byte[] remoteIp, int remotePort,
             int seq) {
         ByteBuf buf = TcpPacketBuilder.buildRaw(
                 localIp, localPort, remoteIp, remotePort,
                 seq, 0, TCPHDR_RST, 0, null, null, 0);
-        return ch.writeRaw(buf);
+        return ch.writeAndFlush(buf);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
