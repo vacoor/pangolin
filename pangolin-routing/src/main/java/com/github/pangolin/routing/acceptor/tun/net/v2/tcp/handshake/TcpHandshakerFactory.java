@@ -18,7 +18,7 @@ public final class TcpHandshakerFactory {
 
     /**
      * Create a new {@link TcpHandshaker} for a new connection.
-     * Called by {@link TcpHandshakeHandler} on the first SYN.
+     * Called by the v2 {@code ng} multiplexer on the first SYN.
      *
      * @param synPkt the SYN packet; fields are extracted immediately, no retain needed
      */

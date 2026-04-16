@@ -1,20 +1,21 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.close.TcpCloseMachine;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.SocketException;
 
-@Slf4j
 public class TcpInput {
+    private static final Logger log = LoggerFactory.getLogger(TcpInput.class);
     // ── errno constants used by tcp_reset ────────────────────────────────
     /** Linux {@code ECONNRESET} (104) — connection reset by peer. */
     private static final int ECONNRESET   = 104;
@@ -71,6 +72,21 @@ public class TcpInput {
         tcp_done_with_error(ctx, conn, err, closePromise);
     }
 
+    public static void tcp_reset(ChannelHandlerContext ctx, TcpSock sock, ChannelPromise closePromise) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        log.debug("[TCP] [{}] RST received", sock.state().name());
+        final int err;
+        switch (sock.state()) {
+            case TCP_SYN_SENT: err = ECONNREFUSED; break;
+            case CLOSE_WAIT:   err = EPIPE;        break;
+            case TCP_CLOSED:   return;
+            default:           err = ECONNRESET;   break;
+        }
+        tcp_done_with_error(ctx, sock, err, closePromise);
+    }
+
     public static void tcp_done_with_error(ChannelHandlerContext ctx, TcpConnection conn, int err, ChannelPromise closePromise) {
         conn.skErr(err);
 
@@ -88,10 +104,32 @@ public class TcpInput {
         ctx.fireExceptionCaught(errException(err));
     }
 
+    public static void tcp_done_with_error(ChannelHandlerContext ctx, TcpSock sock, int err, ChannelPromise closePromise) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        sock.skErr(err);
+        tcp_done(ctx, sock, closePromise);
+        ctx.fireExceptionCaught(errException(err));
+    }
+
     public static ChannelFuture tcp_done(ChannelHandlerContext ctx, TcpConnection conn, ChannelPromise closePromise) {
         conn.state(TcpConnectionState.TCP_CLOSED);
         conn.skShutdown(TcpConstants.SHUTDOWN_MASK);
 
+        if (closePromise != null) {
+            return ctx.close(closePromise);
+        } else {
+            return ctx.close();
+        }
+    }
+
+    public static ChannelFuture tcp_done(ChannelHandlerContext ctx, TcpSock sock, ChannelPromise closePromise) {
+        if (sock == null || !sock.hasConnection()) {
+            return null;
+        }
+        sock.state(TcpConnectionState.TCP_CLOSED);
+        sock.skShutdown(TcpConstants.SHUTDOWN_MASK);
         if (closePromise != null) {
             return ctx.close(closePromise);
         } else {

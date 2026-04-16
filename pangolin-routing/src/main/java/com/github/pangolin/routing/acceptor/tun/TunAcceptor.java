@@ -14,7 +14,7 @@ import com.github.pangolin.routing.acceptor.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelOption;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
-import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.Tcp4MultiplexHandler;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.handler.Tcp4MultiplexHandler;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.route.predicate.Subnet4RoutePredicate;

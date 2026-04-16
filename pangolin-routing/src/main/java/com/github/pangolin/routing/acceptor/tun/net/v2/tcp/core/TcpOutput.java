@@ -6,6 +6,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuf
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
@@ -61,18 +62,20 @@ public final class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">__tcp_send_ack</a>
      */
-    public void tcp_send_ack(TcpConnection conn) {
-        final int rcv_nxt = conn.rcvNxt();   // snapshot before write (mirrors Linux rcv_nxt arg)
-        FourTuple ft  = fourTuple(conn);
-        int       wnd = selectAdvertisedWindow(conn);
-        ByteBuf   buf = TcpPacketBuilder.buildRaw(
+    public void tcp_send_ack(TcpSock sock) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        final int rcv_nxt = sock.rcvNxt();
+        FourTuple ft = sock.fourTuple();
+        int wnd = selectAdvertisedWindow(sock);
+        ByteBuf buf = TcpPacketBuilder.buildRaw(
                 ft.dstAddrBytes(), ft.dstPort(),
                 ft.srcAddrBytes(), ft.srcPort(),
-                conn.sndNxt(), rcv_nxt,
+                sock.sndNxt(), rcv_nxt,
                 TCPHDR_ACK, wnd, null, null, 0);
-        writeRaw(conn, buf);
-        /* Mirrors __tcp_transmit_skb → tcp_event_ack_sent → inet_csk_clear_xmit_timer(DACK). */
-        tcp_event_ack_sent(conn, rcv_nxt);
+        sock.channel().writeAndFlush(buf);
+        tcp_event_ack_sent(sock, rcv_nxt);
     }
 
     /**
@@ -92,24 +95,20 @@ public final class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_send_challenge_ack</a>
      */
-    public void tcp_send_challenge_ack(TcpConnection conn, boolean accecn_reflector) {
-        /* ── Step 1: per-socket rate limit — mirrors __tcp_oow_rate_limited ── */
-        long now     = tcp_jiffies32();
-        long lastOow = conn.lastOowAckTimeMs();
+    public void tcp_send_challenge_ack(TcpSock sock, boolean accecn_reflector) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        long now = tcp_jiffies32();
+        long lastOow = sock.lastOowAckTimeMs();
         if (lastOow != 0) {
             long elapsed = now - lastOow;
             if (elapsed >= 0 && elapsed < TcpConstants.INVALID_ACK_RATELIMIT_MS) {
-                return;  /* rate-limited: not yet */
+                return;
             }
         }
-        conn.lastOowAckTimeMs(now);
-
-        /* ── Step 2: host-wide rate limit ───────────────────────────────────
-         * TODO: implement sysctl tcp_challenge_ack_limit (global token bucket).
-         *       Linux: if (net->ipv4.tcp_challenge_count > 0) { count--; send; }
-         */
-
-        tcp_send_ack(conn);
+        sock.lastOowAckTimeMs(now);
+        tcp_send_ack(sock);
     }
 
     /**
@@ -126,15 +125,17 @@ public final class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_send_active_reset</a>
      */
-    public void tcp_send_reset(TcpConnection conn) {
-        tcp_mstamp_refresh(conn);   // mirrors tcp_send_active_reset → tcp_mstamp_refresh(tp)
-        FourTuple ft  = fourTuple(conn);
-        ByteBuf   buf = TcpPacketBuilder.buildRaw(
+    public void tcp_send_reset(TcpSock sock) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        FourTuple ft = sock.fourTuple();
+        ByteBuf buf = TcpPacketBuilder.buildRaw(
                 ft.dstAddrBytes(), ft.dstPort(),
                 ft.srcAddrBytes(), ft.srcPort(),
-                conn.sndNxt(), conn.rcvNxt(),
+                sock.sndNxt(), sock.rcvNxt(),
                 TCPHDR_RST | TCPHDR_ACK, 0, null, null, 0);
-        writeRaw(conn, buf);
+        sock.channel().writeAndFlush(buf);
     }
 
     /**
@@ -156,22 +157,23 @@ public final class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_retransmit_skb</a>
      */
-    public void tcp_retransmit_skb(TcpConnection conn) {
-        TcpSegmentEntry oldest = conn.sendBuffer().peekRtx();
-        if (oldest == null) return;
+    public void tcp_retransmit_skb(TcpSock sock) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        TcpSegmentEntry oldest = sock.sendBuffer().peekRtx();
+        if (oldest == null) {
+            return;
+        }
 
-        /* __tcp_retransmit_skb: if receiver has shrunk window, do not retransmit.
-         * Mirrors: if (!before(TCP_SKB_CB(skb)->seq, tcp_wnd_end(tp))) return -EAGAIN; */
-        int wnd_end = conn.sndUna() + conn.sndWnd();
+        int wnd_end = sock.sndUna() + sock.sndWnd();
         if (!TcpSequence.before(oldest.startSeq(), wnd_end)) {
             return;
         }
 
-        oldest.markRetransmitted();                          // TCP_SKB_CB(skb)->sacked |= TCPCB_RETRANS
-        oldest.updateSentTime(System.nanoTime() / 1_000L);  // skb_mstamp_ns update
-
-        /* Re-use __tcp_transmit_skb: handles options, window selection, and tcp_event_ack_sent. */
-        __tcp_transmit_skb(conn, oldest, conn.rcvNxt());
+        oldest.markRetransmitted();
+        oldest.updateSentTime(System.nanoTime() / 1_000L);
+        __tcp_transmit_skb(sock, oldest, sock.rcvNxt());
     }
 
     // ── tcp_write_xmit and tcp_send_fin ───────────────────────────────────
@@ -189,15 +191,18 @@ public final class TcpOutput {
      *         {@code false} otherwise
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2791">tcp_write_xmit</a>
      */
-    public boolean tcp_write_xmit(TcpConnection conn, int mss_now, int nonagle, int push_one) {
-        int     sent_pkts       = 0;
+    public boolean tcp_write_xmit(TcpSock sock, int mss_now, int nonagle, int push_one) {
+        if (sock == null || !sock.hasConnection()) {
+            return false;
+        }
+        int sent_pkts = 0;
         boolean is_cwnd_limited = false;
         boolean is_rwnd_limited = false;
 
-        tcp_mstamp_refresh(conn);
+        tcp_mstamp_refresh(sock);
 
         if (push_one == 0) {
-            int mtu = tcp_mtu_probe(conn);
+            int mtu = tcp_mtu_probe(sock);
             if (mtu == 0) {
                 return false;
             } else if (mtu > 0) {
@@ -205,14 +210,14 @@ public final class TcpOutput {
             }
         }
 
-        final int max_segs = tcp_tso_segs(conn, mss_now);
+        final int max_segs = tcp_tso_segs(sock, mss_now);
         TcpSegmentEntry skb;
-        while ((skb = conn.tcpSendHead()) != null) {
-            if (tcp_pacing_check(conn)) {
+        while ((skb = sock.tcpSendHead()) != null) {
+            if (tcp_pacing_check(sock)) {
                 break;
             }
 
-            int cwnd_quota = tcp_cwnd_test(conn);
+            int cwnd_quota = tcp_cwnd_test(sock);
             if (cwnd_quota == 0) {
                 if (push_one == 2) {
                     cwnd_quota = 1;
@@ -224,53 +229,52 @@ public final class TcpOutput {
             cwnd_quota = Math.min(cwnd_quota, max_segs);
 
             final int tso_segs = tcp_set_skb_tso_segs(skb, mss_now);
-            if (!tcp_snd_wnd_test(conn, skb, mss_now)) {
+            if (!tcp_snd_wnd_test(sock, skb, mss_now)) {
                 is_rwnd_limited = true;
                 break;
             }
 
             if (tso_segs == 1) {
-                if (!tcp_nagle_test(conn, skb, mss_now,
-                        tcp_skb_is_last(conn, skb) ? nonagle : TCP_NAGLE_PUSH)) {
+                if (!tcp_nagle_test(sock, skb, mss_now,
+                        tcp_skb_is_last(sock, skb) ? nonagle : TCP_NAGLE_PUSH)) {
                     break;
                 }
             } else {
                 if (push_one == 0
-                        && tcp_tso_should_defer(conn, skb, is_cwnd_limited, is_rwnd_limited, max_segs)) {
+                        && tcp_tso_should_defer(sock, skb, is_cwnd_limited, is_rwnd_limited, max_segs)) {
                     break;
                 }
             }
 
-            /* Skip empty non-FIN/SYN skbs (mirrors Linux TCP_SKB_CB(skb)->seq == end_seq check). */
             if (skb.dataLen() == 0 && !skb.isFin() && !skb.isSyn()) {
                 break;
             }
 
             int limit = mss_now;
-            if (tso_segs > 1 && !tcp_urg_mode(conn)) {
-                limit = tcp_mss_split_point(conn, skb, mss_now, cwnd_quota, nonagle);
+            if (tso_segs > 1 && !tcp_urg_mode(sock)) {
+                limit = tcp_mss_split_point(sock, skb, mss_now, cwnd_quota, nonagle);
             }
 
             if (skb.dataLen() > limit) {
-                if (tcp_fragment(conn, skb, limit, mss_now)) {
+                if (tcp_fragment(sock, skb, limit, mss_now)) {
                     break;
                 }
-                skb = conn.tcpSendHead();
+                skb = sock.tcpSendHead();
                 if (skb == null) {
                     break;
                 }
             }
 
-            if (tcp_small_queue_check(conn, skb, push_one)) {
+            if (tcp_small_queue_check(sock, skb, push_one)) {
                 break;
             }
 
-            if (0 != tcp_transmit_skb(conn, skb)) {
+            if (0 != tcp_transmit_skb(sock, skb)) {
                 break;
             }
 
-            tcp_event_new_data_sent(conn, skb);
-            tcp_minshall_update(conn, mss_now, skb);
+            tcp_event_new_data_sent(sock, skb);
+            tcp_minshall_update(sock, mss_now, skb);
             sent_pkts += tcp_skb_pcount(skb);
 
             if (push_one != 0) {
@@ -278,20 +282,18 @@ public final class TcpOutput {
             }
         }
 
-        is_cwnd_limited |= (conn.packetsOut() >= conn.congestionControl().cwnd(conn));
+        is_cwnd_limited |= (sock.packetsOut() >= sock.cwnd());
         if (sent_pkts != 0 || is_cwnd_limited) {
             tcp_cwnd_validate(is_cwnd_limited);
         }
         if (sent_pkts != 0) {
-            if (tcp_in_cwnd_reduction(conn)) {
-                // tp->prr_out += sent_pkts;
+            if (tcp_in_cwnd_reduction(sock)) {
             }
             if (push_one != 2) {
-                // tcp_schedule_loss_probe(conn, false);
             }
             return false;
         }
-        return conn.packetsOut() == 0 && conn.tcpSendHead() != null;
+        return sock.packetsOut() == 0 && sock.tcpSendHead() != null;
     }
 
     /**
@@ -303,11 +305,14 @@ public final class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3442">tcp_send_fin</a>
      */
-    public void tcp_send_fin(TcpConnection conn) {
-        ByteBuf empty = conn.channel().alloc().buffer(0, 0);
-        conn.tcp_queue_skb(new TcpSegmentEntry(
-                empty, conn.writeSeq(), 0, (byte) (TCPHDR_ACK | TCPHDR_FIN), 0L));
-        tcp_write_xmit(conn, conn.mss(), TCP_NAGLE_OFF, 0);
+    public void tcp_send_fin(TcpSock sock) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        ByteBuf empty = sock.channel().alloc().buffer(0, 0);
+        sock.tcp_queue_skb(new TcpSegmentEntry(
+                empty, sock.writeSeq(), 0, (byte) (TCPHDR_ACK | TCPHDR_FIN), 0L));
+        tcp_write_xmit(sock, sock.mss(), TCP_NAGLE_OFF, 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -415,12 +420,20 @@ public final class TcpOutput {
         // TODO: update tp->tcp_clock_cache / tp->tcp_mstamp
     }
 
+    private void tcp_mstamp_refresh(TcpSock sock) {
+        // TODO: update tp->tcp_clock_cache / tp->tcp_mstamp
+    }
+
     /**
      * MTU probing — not implemented.
      * @return -1 (skip probe); 0 = early-return false; >0 = probe sent
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2434">tcp_mtu_probe</a>
      */
     private int tcp_mtu_probe(TcpConnection conn) {
+        return -1;
+    }
+
+    private int tcp_mtu_probe(TcpSock sock) {
         return -1;
     }
 
@@ -432,6 +445,10 @@ public final class TcpOutput {
         return Integer.MAX_VALUE;
     }
 
+    private int tcp_tso_segs(TcpSock sock, int mss_now) {
+        return Integer.MAX_VALUE;
+    }
+
     /**
      * Pacing gate — pacing not implemented; always {@code false}.
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2769">tcp_pacing_check</a>
@@ -440,12 +457,16 @@ public final class TcpOutput {
         return false;
     }
 
+    private boolean tcp_pacing_check(TcpSock sock) {
+        return false;
+    }
+
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2303">tcp_cwnd_test</a>
      */
-    private int tcp_cwnd_test(TcpConnection conn) {
-        int cwnd      = conn.congestionControl().cwnd(conn);
-        int in_flight = conn.sendBuffer().rtxQueueSize();
+    private int tcp_cwnd_test(TcpSock sock) {
+        int cwnd = sock.cwnd();
+        int in_flight = sock.sendBuffer().rtxQueueSize();
         return Math.max(0, cwnd - in_flight);
     }
 
@@ -461,9 +482,19 @@ public final class TcpOutput {
         return !TcpSequence.after(end_seq, wnd_end);
     }
 
+    private boolean tcp_snd_wnd_test(TcpSock sock, TcpSegmentEntry skb, int mss_now) {
+        int end_seq = skb.startSeq() + Math.min(skb.dataLen(), mss_now);
+        int wnd_end = sock.sndUna() + sock.sndWnd();
+        return !TcpSequence.after(end_seq, wnd_end);
+    }
+
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1780">tcp_skb_is_last</a> */
     private boolean tcp_skb_is_last(TcpConnection conn, TcpSegmentEntry skb) {
         return conn.sendBuffer().writeQueueSize() == 1;
+    }
+
+    private boolean tcp_skb_is_last(TcpSock sock, TcpSegmentEntry skb) {
+        return sock.sendBuffer().writeQueueSize() == 1;
     }
 
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1785">tcp_nagle_test</a> */
@@ -474,8 +505,21 @@ public final class TcpOutput {
         return skb.dataLen() >= mss_now || conn.packetsOut() == 0;
     }
 
+    private boolean tcp_nagle_test(TcpSock sock, TcpSegmentEntry skb, int mss_now, int nonagle) {
+        if ((nonagle & (TCP_NAGLE_OFF | TCP_NAGLE_PUSH)) != 0) {
+            return true;
+        }
+        return skb.dataLen() >= mss_now || sock.packetsOut() == 0;
+    }
+
     /** TSO deferral — not implemented; always {@code false}. @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2065">tcp_tso_should_defer</a> */
     private boolean tcp_tso_should_defer(TcpConnection conn, TcpSegmentEntry skb,
+                                         boolean is_cwnd_limited, boolean is_rwnd_limited,
+                                         int max_segs) {
+        return false;
+    }
+
+    private boolean tcp_tso_should_defer(TcpSock sock, TcpSegmentEntry skb,
                                          boolean is_cwnd_limited, boolean is_rwnd_limited,
                                          int max_segs) {
         return false;
@@ -486,8 +530,17 @@ public final class TcpOutput {
         return false;
     }
 
+    private boolean tcp_urg_mode(TcpSock sock) {
+        return false;
+    }
+
     /** Simplified: always {@code mss_now}. @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1741">tcp_mss_split_point</a> */
     private int tcp_mss_split_point(TcpConnection conn, TcpSegmentEntry skb, int mss_now,
+                                    int cwnd_quota, int nonagle) {
+        return mss_now;
+    }
+
+    private int tcp_mss_split_point(TcpSock sock, TcpSegmentEntry skb, int mss_now,
                                     int cwnd_quota, int nonagle) {
         return mss_now;
     }
@@ -516,14 +569,42 @@ public final class TcpOutput {
         return false;
     }
 
+    private boolean tcp_fragment(TcpSock sock, TcpSegmentEntry skb, int limit, int mss_now) {
+        ByteBuf origPayload = skb.payload();
+        int origReader = origPayload.readerIndex();
+
+        ByteBuf headBuf = origPayload.retainedSlice(origReader, limit);
+        int tailLen = skb.dataLen() - limit;
+        ByteBuf tailBuf = origPayload.retainedSlice(origReader + limit, tailLen);
+
+        byte headFlags = (byte) (skb.tcpFlags() & ~(TCPHDR_FIN | TCPHDR_PSH));
+        byte tailFlags = skb.tcpFlags();
+
+        TcpSegmentEntry headEntry = new TcpSegmentEntry(headBuf, skb.startSeq(), limit, headFlags, 0L);
+        TcpSegmentEntry tailEntry = new TcpSegmentEntry(tailBuf, skb.startSeq() + limit, tailLen, tailFlags, 0L);
+
+        sock.sendBuffer().pollWrite().release();
+        sock.sendBuffer().enqueueWriteFirst(tailEntry);
+        sock.sendBuffer().enqueueWriteFirst(headEntry);
+        return false;
+    }
+
     /** Not implemented; always {@code false}. @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2374">tcp_small_queue_check</a> */
     private boolean tcp_small_queue_check(TcpConnection conn, TcpSegmentEntry skb, int push_one) {
+        return false;
+    }
+
+    private boolean tcp_small_queue_check(TcpSock sock, TcpSegmentEntry skb, int push_one) {
         return false;
     }
 
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1486">tcp_transmit_skb</a> */
     private int tcp_transmit_skb(TcpConnection conn, TcpSegmentEntry skb) {
         return __tcp_transmit_skb(conn, skb, conn.rcvNxt());
+    }
+
+    private int tcp_transmit_skb(TcpSock sock, TcpSegmentEntry skb) {
+        return __tcp_transmit_skb(sock, skb, sock.rcvNxt());
     }
 
     /**
@@ -559,6 +640,35 @@ public final class TcpOutput {
         return 0;
     }
 
+    private int __tcp_transmit_skb(TcpSock sock, TcpSegmentEntry skb, int rcv_nxt) {
+        if (skb == null) {
+            return -1;
+        }
+
+        final byte[] rawOptions = tcp_established_options(sock, skb);
+        final FourTuple ft = sock.fourTuple();
+
+        int tcpFlags = (skb.tcpFlags() & 0xFF) | TCPHDR_ACK;
+        if (skb.dataLen() > 0) {
+            tcpFlags |= TCPHDR_PSH;
+        }
+
+        ByteBuf buf = TcpPacketBuilder.buildRaw(
+                ft.dstAddrBytes(), ft.dstPort(),
+                ft.srcAddrBytes(), ft.srcPort(),
+                skb.startSeq(), rcv_nxt,
+                tcpFlags, selectAdvertisedWindow(sock),
+                rawOptions, skb.payload(), skb.dataLen());
+
+        sock.channel().writeAndFlush(buf);
+        tcp_event_ack_sent(sock, rcv_nxt);
+
+        if (skb.dataLen() > 0) {
+            tcp_event_data_sent(sock);
+        }
+        return 0;
+    }
+
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L182">tcp_event_ack_sent</a>
      */
@@ -581,6 +691,11 @@ public final class TcpOutput {
         // TODO: pingpong increment
     }
 
+    private void tcp_event_data_sent(TcpSock sock) {
+        // TODO: tp.lsndtime = tcp_jiffies32()
+        // TODO: pingpong increment
+    }
+
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L633">tcp_established_options</a>
      */
@@ -589,27 +704,36 @@ public final class TcpOutput {
         return null;
     }
 
+    private byte[] tcp_established_options(TcpSock sock, TcpSegmentEntry skb) {
+        // TODO: TCP timestamps, SACK blocks
+        return null;
+    }
+
     /**
      * Advance SND.NXT, promote skb from write queue to RTX queue, arm RTO.
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2595">tcp_event_new_data_sent</a>
      */
-    private void tcp_event_new_data_sent(TcpConnection conn, TcpSegmentEntry skb) {
-        conn.sndNxt(skb.endSeq());
+    private void tcp_event_new_data_sent(TcpSock sock, TcpSegmentEntry skb) {
+        sock.sndNxt(skb.endSeq());
 
-        conn.sendBuffer().pollWrite();
-        final boolean startRto = !conn.sendBuffer().hasRtxPending();
+        sock.sendBuffer().pollWrite();
+        final boolean startRto = !sock.sendBuffer().hasRtxPending();
         skb.updateSentTime(System.nanoTime() / 1_000L);
-        conn.sendBuffer().enqueueRtx(skb);
+        sock.sendBuffer().enqueueRtx(skb);
 
-        conn.incrementPacketsOut();
+        sock.incrementPacketsOut();
 
         if (startRto) {
-            TcpRetransmitter.INSTANCE.scheduleRetransmit(conn);
+            TcpRetransmitter.INSTANCE.scheduleRetransmit(sock);
         }
     }
 
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L566">tcp_minshall_update</a> */
     private void tcp_minshall_update(TcpConnection conn, int mss_now, TcpSegmentEntry skb) {
+        // TODO: snd_sml
+    }
+
+    private void tcp_minshall_update(TcpSock sock, int mss_now, TcpSegmentEntry skb) {
         // TODO: snd_sml
     }
 
@@ -620,6 +744,10 @@ public final class TcpOutput {
 
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2745">tcp_in_cwnd_reduction</a> */
     private boolean tcp_in_cwnd_reduction(TcpConnection conn) {
+        return false;
+    }
+
+    private boolean tcp_in_cwnd_reduction(TcpSock sock) {
         return false;
     }
 
@@ -642,6 +770,12 @@ public final class TcpOutput {
         return Math.min(Math.max(wnd, 0), 65535);
     }
 
+    private static int selectAdvertisedWindow(TcpSock sock) {
+        sock.rcvWup(sock.rcvNxt());
+        int wnd = sock.rcvWnd() >> sock.rcvWscale();
+        return Math.min(Math.max(wnd, 0), 65535);
+    }
+
     private static FourTuple fourTuple(TcpConnection conn) {
         return conn.fourTuple();
     }
@@ -649,5 +783,17 @@ public final class TcpOutput {
     /** Single write-path: all established-state sends go through here. */
     private static void writeRaw(TcpConnection conn, ByteBuf buf) {
         conn.channel().writeAndFlush(buf);
+    }
+
+    private void tcp_event_ack_sent(TcpSock sock, int rcv_nxt) {
+        if (rcv_nxt != sock.rcvNxt()) {
+            return;
+        }
+        if (sock.hasAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER)) {
+            if (sock.hasAckPending(TcpConstants.ACK_TIMER)) {
+                TcpTimerScheduler.INSTANCE.cancelDelayedAck(sock);
+            }
+            sock.clearAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER);
+        }
     }
 }

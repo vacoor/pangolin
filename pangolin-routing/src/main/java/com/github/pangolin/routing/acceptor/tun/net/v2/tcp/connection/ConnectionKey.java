@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection;
 
 /**
- * Type-safe per-connection attribute key, analogous to Netty's {@code AttributeKey<T>}.
- * RFC extensions store their per-connection state in {@link TcpConnection}'s attribute map
+ * Type-safe per-socket attribute key, analogous to Netty's {@code AttributeKey<T>}.
+ * RFC extensions store their per-socket state in {@code TcpSock}'s attribute map
  * using a unique key instance.
  *
  * <p>Naming convention: {@code "{rfc-id}.{impl-name}"}, e.g. {@code "rfc5681.newreno"}.

@@ -3,6 +3,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
@@ -16,6 +17,23 @@ public class TcpOutOps {
             return false;
         }
         return __tcp_oow_rate_limited(conn, last_oow_ack_time);
+    }
+
+    public static boolean tcp_oow_rate_limited(TcpSock sock, final TcpPacketBuf pkt) {
+        if (sock == null || !sock.hasConnection()) {
+            return false;
+        }
+        if (pkt.tcpSeq() != determineEndSeq(pkt) && !pkt.isSyn()) {
+            return false;
+        }
+        if (0 != sock.lastOowAckTimeMs()) {
+            final long elapsed = tcp_jiffies32() - sock.lastOowAckTimeMs();
+            if (0 <= elapsed && elapsed < TcpConstants.INVALID_ACK_RATELIMIT_MS) {
+                return true;
+            }
+        }
+        sock.lastOowAckTimeMs(tcp_jiffies32());
+        return false;
     }
 
     private static boolean __tcp_oow_rate_limited(TcpConnection conn, long last_oow_ack_time) {

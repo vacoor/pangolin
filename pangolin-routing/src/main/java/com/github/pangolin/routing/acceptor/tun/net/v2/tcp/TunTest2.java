@@ -7,12 +7,10 @@ import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
-import lombok.extern.slf4j.Slf4j;
 
 /**
  *
  */
-@Slf4j
 public class TunTest2 {
 
     public static void main(String[] args) throws Exception {

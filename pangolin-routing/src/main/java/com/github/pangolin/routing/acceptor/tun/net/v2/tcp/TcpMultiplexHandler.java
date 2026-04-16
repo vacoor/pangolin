@@ -5,11 +5,13 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketHand
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.Tcp4Multiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.DataConsumer;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.UnknownHostException;
 
@@ -17,9 +19,9 @@ import java.net.UnknownHostException;
  * v2 TCP ingress now follows v1 architecture:
  * TCP logic is handled by {@link TcpMultiplexer}, not Netty pipeline handlers.
  */
-@Slf4j
 public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
 
+    private static final Logger log = LoggerFactory.getLogger(TcpMultiplexHandler.class);
     private static final byte PROTO_TCP = 6;
 
     private final DnsEngine dnsEngine;
@@ -55,7 +57,7 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
     }
 
     protected TcpMultiplexer create() {
-        return new TcpMultiplexer(TcpConfig.builder().build(), dataConsumer);
+        return new Tcp4Multiplexer(TcpConfig.builder().build(), dataConsumer);
     }
 
     public boolean write(final FourTuple key, final ByteBuf data) {

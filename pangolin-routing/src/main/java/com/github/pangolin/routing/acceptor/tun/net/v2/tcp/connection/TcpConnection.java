@@ -1,24 +1,12 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection;
 
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.cc.CongestionControl;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.cc.NoopCongestionControl;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.loss.LossDetector;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.loss.NoopLossDetector;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.rtt.NoopRttEstimator;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.rtt.RttEstimator;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.timestamp.NoopTimestampExtension;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.timestamp.TcpTimestampExtension;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpConnectionTimers;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.function.Consumer;
 
 /**
  * Rich domain model for a single TCP connection (RFC 9293).
@@ -74,17 +62,22 @@ public final class TcpConnection {
     private final FourTuple fourTuple;
 
     // ── RFC extension per-conn state storage ────────────────────────────────
-    private final Map<ConnectionKey<?>, Object> attributes = new HashMap<>();
-
     // ── Buffers ─────────────────────────────────────────────────────────────
     private final TcpSendBuffer sendBuffer;
     private final TcpReceiveBuffer receiveBuffer;
 
     // ── Pluggable extensions ─────────────────────────────────────────────────
-    private final RttEstimator rttEstimator;
-    private final CongestionControl congestionControl;
-    private final LossDetector lossDetector;
-    private final TcpTimestampExtension timestampExt;
+    private boolean timestampEnabled;
+    private int recentTimestamp;
+    private long srttUs;
+    private long rttvarUs;
+    private int rtoBackoffShift;
+    private int cwnd = TcpConstants.TCP_INIT_CWND;
+    private int ssthresh = Integer.MAX_VALUE;
+    private int dupacks;
+    private int caIncrCounter;
+    private String congestionState = "OPEN";
+    private int highSeq;
 
     // ── Timer slots ──────────────────────────────────────────────────────────
     private final TcpConnectionTimers timers = new TcpConnectionTimers();
@@ -108,10 +101,6 @@ public final class TcpConnection {
         this.rcvWscale = b.rcvWscale;
         this.skShutdown = 0;
         this.lastOowAckTimeMs = 0L;
-        this.rttEstimator = b.rttEstimator;
-        this.congestionControl = b.congestionControl;
-        this.lossDetector = b.lossDetector;
-        this.timestampExt = b.timestampExt;
         this.sendBuffer = new TcpSendBuffer();
         this.receiveBuffer = new TcpReceiveBuffer(channel.alloc());
     }
@@ -234,6 +223,10 @@ public final class TcpConnection {
         this.sndNxt = v;
     }
 
+    public void sndUna(int v) {
+        this.sndUna = v;
+    }
+
     public void writeSeq(int v) {
         this.writeSeq = v;
     }
@@ -245,6 +238,10 @@ public final class TcpConnection {
     public void sndWnd(int v) {
         this.sndWnd = v;
         if (Integer.compareUnsigned(v, maxWindow) > 0) this.maxWindow = v;
+    }
+
+    public void maxWindow(int v) {
+        this.maxWindow = v;
     }
 
     public void sndWl1(int v) {
@@ -263,8 +260,32 @@ public final class TcpConnection {
         this.rcvMss = v;
     }
 
+    public void mss(int v) {
+        this.mss = v;
+    }
+
+    public void sndWscale(int v) {
+        this.sndWscale = v;
+    }
+
+    public void rcvWscale(int v) {
+        this.rcvWscale = v;
+    }
+
+    public void bytesAcked(long v) {
+        this.bytesAcked = v;
+    }
+
+    public void packetsOut(int v) {
+        this.packetsOut = v;
+    }
+
     public void skShutdown(int mask) {
         this.skShutdown = mask;
+    }
+
+    public void ackPending(int v) {
+        this.ackPending = v;
     }
 
     public void addShutdown(int how) {
@@ -393,35 +414,50 @@ public final class TcpConnection {
 
     // ── Extension attributes ─────────────────────────────────────────────────
 
-    @SuppressWarnings("unchecked")
-    public <T> T getAttr(ConnectionKey<T> key) {
-        return (T) attributes.get(key);
-    }
-
-    public <T> void setAttr(ConnectionKey<T> key, T value) {
-        attributes.put(key, value);
-    }
-
-    public void removeAttr(ConnectionKey<?> key) {
-        attributes.remove(key);
-    }
-
     // ── Pluggable extensions ─────────────────────────────────────────────────
 
-    public RttEstimator rttEstimator() {
-        return rttEstimator;
+    public boolean timestampEnabled() {
+        return timestampEnabled;
     }
 
-    public CongestionControl congestionControl() {
-        return congestionControl;
+    public int recentTimestamp() {
+        return recentTimestamp;
     }
 
-    public LossDetector lossDetector() {
-        return lossDetector;
+    public long srttUs() {
+        return srttUs;
     }
 
-    public TcpTimestampExtension timestampExt() {
-        return timestampExt;
+    public long rttvarUs() {
+        return rttvarUs;
+    }
+
+    public int rtoBackoffShift() {
+        return rtoBackoffShift;
+    }
+
+    public int cwnd() {
+        return cwnd;
+    }
+
+    public int ssthresh() {
+        return ssthresh;
+    }
+
+    public int dupacks() {
+        return dupacks;
+    }
+
+    public int caIncrCounter() {
+        return caIncrCounter;
+    }
+
+    public String congestionState() {
+        return congestionState;
+    }
+
+    public int highSeq() {
+        return highSeq;
     }
 
     // ── Timers / buffers ─────────────────────────────────────────────────────
@@ -445,10 +481,6 @@ public final class TcpConnection {
      */
     public void close() {
         timers.cancelAll();
-        rttEstimator.onConnectionClosed(this);
-        congestionControl.onConnectionClosed(this);
-        lossDetector.onConnectionClosed(this);
-        timestampExt.onConnectionClosed(this);
         sendBuffer.releaseAll();
         receiveBuffer.releaseAll();
     }
@@ -473,12 +505,6 @@ public final class TcpConnection {
         private int mss = 1460;
         private int sndWscale;
         private int rcvWscale;
-        private RttEstimator rttEstimator = NoopRttEstimator.INSTANCE;
-        private CongestionControl congestionControl = NoopCongestionControl.INSTANCE;
-        private Consumer<TcpConnection> retransmitCallback = c -> {
-        };
-        private LossDetector lossDetector = NoopLossDetector.INSTANCE;
-        private TcpTimestampExtension timestampExt = NoopTimestampExtension.INSTANCE;
 
         public Builder channel(Channel ch) {
             this.channel = ch;
@@ -541,44 +567,13 @@ public final class TcpConnection {
             return this;
         }
 
-        public Builder rttEstimator(RttEstimator e) {
-            this.rttEstimator = e;
-            return this;
-        }
-
-        /**
-         * Set CC and the retransmit callback together (they are always paired).
-         * The CC triggers retransmit via callback; RFC 9293 {@code TcpRetransmitter} executes it.
-         */
-        public Builder congestionControl(CongestionControl cc,
-                                         Consumer<TcpConnection> callback) {
-            this.congestionControl = cc;
-            this.retransmitCallback = callback;
-            return this;
-        }
-
-        public Builder lossDetector(LossDetector d) {
-            this.lossDetector = d;
-            return this;
-        }
-
-        public Builder timestampExt(TcpTimestampExtension t) {
-            this.timestampExt = t;
-            return this;
-        }
-
         public TcpConnection build() {
             if (channel == null) throw new IllegalStateException("channel must be set");
             if (fourTuple == null) throw new IllegalStateException("fourTuple must be set");
             if (!rcvWupSet) {
                 rcvWup = rcvNxt;
             }
-            TcpConnection conn = new TcpConnection(this);
-            rttEstimator.init(conn);
-            congestionControl.init(conn, retransmitCallback);
-            lossDetector.init(conn);
-            timestampExt.init(conn);
-            return conn;
+            return new TcpConnection(this);
         }
     }
 }

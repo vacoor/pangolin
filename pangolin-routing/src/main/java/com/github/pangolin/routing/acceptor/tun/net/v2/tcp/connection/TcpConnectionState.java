@@ -11,11 +11,11 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection;
  *   <li>{@link #TCP_SYN_SENT} — active-open only; TUN stack is passive-open, never used</li>
  * </ul>
  *
- * <p>{@link TcpConnection} is created by {@code TcpHandshaker.finishHandshake()} after the
+ * <p>{@link TcpConnection} is created from the v2 {@code ng} open-request path after the
  * final ACK passes sequence validation, analogous to Linux {@code tcp_create_openreq_child()}.
  * The connection starts in {@link #TCP_SYN_RECV} and transitions to {@link #TCP_ESTABLISHED}
- * inside {@code TcpEstablishedHandler} once the ACK is processed — mirroring the
- * {@code TCP_SYN_RECV} case in Linux {@code tcp_rcv_state_process()}.
+ * inside the multiplexer state machine, mirroring the {@code TCP_SYN_RECV} case in Linux
+ * {@code tcp_rcv_state_process()}.
  */
 public enum TcpConnectionState {
 

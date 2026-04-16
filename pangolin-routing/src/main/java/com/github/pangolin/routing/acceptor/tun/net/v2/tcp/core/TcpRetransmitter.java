@@ -1,17 +1,13 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TimerType;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 
 /**
  * RFC 9293 retransmission: re-sends the oldest unacknowledged segment.
- * Called by:
- * <ul>
- *   <li>{@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.cc.CongestionControl}
- *       on fast retransmit (3 dupACKs)</li>
- *   <li>The retransmit timer on RTO expiry</li>
- * </ul>
+ * Called by fast retransmit in the inlined ACK/congestion-control path and by the
+ * retransmit timer on RTO expiry.
  */
 public final class TcpRetransmitter {
 
@@ -21,10 +17,9 @@ public final class TcpRetransmitter {
 
     /**
      * Retransmit the oldest unacknowledged segment.
-     * Used as the {@code retransmitCallback} injected into {@code CongestionControl.init()}.
      */
-    public void retransmit(TcpConnection conn) {
-        TcpOutput.INSTANCE.tcp_retransmit_skb(conn);
+    public void retransmit(TcpSock sock) {
+        TcpOutput.INSTANCE.tcp_retransmit_skb(sock);
     }
 
     /**
@@ -36,23 +31,29 @@ public final class TcpRetransmitter {
      *   <li>Reschedule the retransmit timer</li>
      * </ol>
      */
-    public void onTimeout(TcpConnection conn) {
-        conn.congestionControl().onTimeout(conn);
-        conn.rttEstimator().backoff(conn);
-        retransmit(conn);
-        scheduleRetransmit(conn);
+    public void onTimeout(TcpSock sock) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        sock.onTimeoutByCc();
+        sock.backoffRto();
+        retransmit(sock);
+        scheduleRetransmit(sock);
     }
 
     /** Arm the retransmit timer for the current RTO. */
-    public void scheduleRetransmit(TcpConnection conn) {
-        long rtoMs = conn.rttEstimator().rtoMs(conn);
+    public void scheduleRetransmit(TcpSock sock) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        long rtoMs = sock.rtoMs();
         TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
-                conn, TimerType.RETRANSMIT, rtoMs, () -> onTimeout(conn));
+                sock, TimerType.RETRANSMIT, rtoMs, () -> onTimeout(sock));
     }
 
     /** Cancel the retransmit timer (called when RTX queue becomes empty). */
-    public void cancelRetransmit(TcpConnection conn) {
-        TcpTimerScheduler.INSTANCE.cancelWriteTimer(conn);
+    public void cancelRetransmit(TcpSock sock) {
+        TcpTimerScheduler.INSTANCE.cancelWriteTimer(sock);
     }
 
     /**
@@ -66,11 +67,14 @@ public final class TcpRetransmitter {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_rearm_rto</a>
      */
-    public void rearmRto(TcpConnection conn) {
-        if (conn.packetsOut() == 0) {
-            cancelRetransmit(conn);
+    public void rearmRto(TcpSock sock) {
+        if (sock == null) {
+            return;
+        }
+        if (sock.packetsOut() == 0) {
+            cancelRetransmit(sock);
         } else {
-            scheduleRetransmit(conn);
+            scheduleRetransmit(sock);
         }
     }
 }
