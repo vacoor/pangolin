@@ -4,6 +4,7 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpRetransmitter;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established.TcpDataHandler;
@@ -16,6 +17,9 @@ import io.netty.channel.ChannelHandlerContext;
 
 import java.util.HashMap;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.TCP_INIT_CWND;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.TCP_MSS_DEFAULT;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
 
@@ -24,6 +28,13 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSe
  * TUN ingress calls this class directly.
  */
 public final class TcpMultiplexer {
+    private static final int FLAG_DATA = 0x01;
+    private static final int FLAG_WIN_UPDATE = 0x02;
+    private static final int FLAG_SLOWPATH = 0x100;
+    private static final int FLAG_SND_UNA_ADVANCED = 0x400;
+    private static final int FLAG_UPDATE_TS_RECENT = 0x4000;
+    private static final int FLAG_NO_CHALLENGE_ACK = 0x8000;
+
     @FunctionalInterface
     public interface DataConsumer {
         void onData(FourTuple key, ByteBuf data);
@@ -112,6 +123,7 @@ public final class TcpMultiplexer {
 
     private void tcp_rcv_established(ChannelHandlerContext ctx, FourTuple key, TcpConnection conn, TcpPacketBuf pkt) {
         if (pkt.isRst()) {
+            conn.close();
             establishedRegistry.remove(key);
             return;
         }
@@ -124,20 +136,22 @@ public final class TcpMultiplexer {
             }
             return;
         }
+        if (pkt.isSyn()) {
+            TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, false);
+            return;
+        }
 
         final int priorSndUna = conn.sndUna();
-        if (pkt.isAck()) {
-            int ack = pkt.tcpAckNum();
-            if (!before(ack, conn.sndUna()) && !after(ack, conn.sndNxt())) {
-                conn.sndUnaUpdate(ack);
-                conn.cleanRtxQueue(ack);
-                if (after(conn.sndUna(), priorSndUna)) {
-                    TcpRetransmitter.INSTANCE.rearmRto(conn);
-                }
-            } else if (after(ack, conn.sndNxt())) {
-                TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, false);
-                return;
-            }
+        if (pkt.isAck() && !processAck(conn, pkt)) {
+            TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, false);
+            return;
+        }
+
+        if (conn.state() == TcpConnectionState.TCP_SYN_RECV && after(conn.sndUna(), priorSndUna)) {
+            tcpInitWl(conn, pkt.tcpSeq());
+            conn.state(TcpConnectionState.TCP_ESTABLISHED);
+            tcpInitTransfer(conn);
+            conn.rcvMss(tcpInitializeRcvMss(conn));
         }
 
         if (pkt.tcpPayloadLength() > 0 && conn.state().canReceive()) {
@@ -152,6 +166,15 @@ public final class TcpMultiplexer {
             conn.rcvNxt(conn.rcvNxt() + 1);
             conn.state(TcpConnectionState.CLOSE_WAIT);
             TcpOutput.INSTANCE.tcp_send_ack(conn);
+        }
+
+        if (conn.tcpSendHead() != null) {
+            TcpOutput.INSTANCE.tcp_write_xmit(
+                    conn,
+                    conn.mss(),
+                    com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.TCP_NAGLE_OFF,
+                    0
+            );
         }
     }
 
@@ -171,5 +194,126 @@ public final class TcpMultiplexer {
             return !after(seq, rcvWndEnd);
         }
         return true;
+    }
+
+    private boolean processAck(TcpConnection conn, TcpPacketBuf pkt) {
+        if (!pkt.isAck()) {
+            return true;
+        }
+        final int priorSndUna = conn.sndUna();
+        final int priorPktsOut = conn.packetsOut();
+        int result = tcpAck(conn, pkt, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT | FLAG_NO_CHALLENGE_ACK);
+        if (result < 0) {
+            return false;
+        }
+        if (after(conn.sndUna(), priorSndUna)) {
+            TcpRetransmitter.INSTANCE.rearmRto(conn);
+            if (priorPktsOut > 0) {
+                int newlyAcked = Math.max(1, priorPktsOut - conn.packetsOut());
+                conn.congestionControl().onAck(conn, newlyAcked, true);
+                conn.rttEstimator().resetBackoff(conn);
+            }
+        }
+        return true;
+    }
+
+    private int tcpAck(TcpConnection conn, TcpPacketBuf pkt, int flags) {
+        final int priorSndUna = conn.sndUna();
+        final int priorPktsOut = conn.packetsOut();
+        final int ackSeq = pkt.tcpSeq();
+        final int ack = pkt.tcpAckNum();
+
+        if (before(ack, priorSndUna)) {
+            final int maxWindow = (int) Math.min(conn.maxWindow(), conn.bytesAcked());
+            if (before(ack, priorSndUna - maxWindow)) {
+                if (0 == (flags & FLAG_NO_CHALLENGE_ACK)) {
+                    TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, false);
+                }
+                return -SkbDropReasonConstants.SKB_DROP_REASON_TCP_TOO_OLD_ACK;
+            }
+            return 0;
+        }
+
+        if (after(ack, conn.sndNxt())) {
+            return -SkbDropReasonConstants.SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
+        }
+
+        if (after(ack, priorSndUna)) {
+            flags |= FLAG_SND_UNA_ADVANCED;
+        }
+
+        if (0 != (flags & FLAG_UPDATE_TS_RECENT)) {
+            conn.timestampExt().updateRecent(conn, ackSeq);
+        }
+
+        if ((flags & (FLAG_SLOWPATH | FLAG_SND_UNA_ADVANCED)) == FLAG_SND_UNA_ADVANCED) {
+            conn.sndWl1(ackSeq);
+            flags |= FLAG_WIN_UPDATE;
+        } else {
+            if (ackSeq != determineEndSeq(pkt)) {
+                flags |= FLAG_DATA;
+            }
+            flags |= tcpAckUpdateWindow(conn, pkt, 0 != (flags & FLAG_SND_UNA_ADVANCED));
+        }
+
+        conn.sndUnaUpdate(ack);
+        if (priorPktsOut == 0) {
+            tcpAckProbe(conn);
+            return 1;
+        }
+
+        long rttUs = rttSample(conn, pkt);
+        conn.rttEstimator().addSample(conn, rttUs);
+        conn.cleanRtxQueue(ack);
+        conn.lossDetector().onAck(conn, ack, flags);
+        return 1;
+    }
+
+    private static void tcpAckProbe(TcpConnection conn) {
+        if (conn.tcpSendHead() == null) {
+            return;
+        }
+        if (conn.sndWnd() > 0) {
+            TcpRetransmitter.INSTANCE.cancelRetransmit(conn);
+        }
+    }
+
+    private static int tcpAckUpdateWindow(TcpConnection conn, TcpPacketBuf pkt, boolean newDataAcked) {
+        int seg = pkt.tcpSeq();
+        int nwin = pkt.tcpWindow() << conn.sndWscale();
+        if (newDataAcked
+                || after(seg, conn.sndWl1())
+                || (seg == conn.sndWl1() && (before(conn.sndWnd(), nwin) || nwin == 0))) {
+            conn.sndWl1(seg);
+            conn.sndWnd(nwin);
+            return FLAG_WIN_UPDATE;
+        }
+        return 0;
+    }
+
+    private static long rttSample(TcpConnection conn, TcpPacketBuf pkt) {
+        TcpSegmentEntry head = conn.sendBuffer().peekRtx();
+        if (head == null) return -1;
+        if (head.isRetransmitted()) return -1;
+        if (!after(pkt.tcpAckNum(), head.startSeq())) return -1;
+        long nowUs = System.nanoTime() / 1_000L;
+        return nowUs - head.sentTimeUs();
+    }
+
+    private static void tcpInitWl(TcpConnection conn, int seq) {
+        conn.sndWl1(seq);
+    }
+
+    private static void tcpInitTransfer(TcpConnection conn) {
+        // v2 extensions are initialized in TcpConnection.Builder#build.
+    }
+
+    private static int tcpInitializeRcvMss(TcpConnection conn) {
+        int mss = conn.mss();
+        int hint = mss;
+        hint = Math.min(hint, conn.rcvWnd() / 2);
+        hint = Math.min(hint, TCP_INIT_CWND * mss);
+        hint = Math.max(hint, TCP_MSS_DEFAULT);
+        return hint;
     }
 }
