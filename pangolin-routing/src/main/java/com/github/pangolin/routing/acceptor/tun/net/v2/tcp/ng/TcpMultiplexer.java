@@ -42,6 +42,7 @@ public final class TcpMultiplexer {
 
     private static final DataConsumer DROP_DATA = (key, data) -> data.release();
 
+    private final ListenSock listenSock;
     private final TcpHandshakerFactory handshakerFactory;
     private final HashMap<FourTuple, TcpHandshaker> synRegistry = new HashMap<>();
     private final HashMap<FourTuple, TcpConnection> establishedRegistry = new HashMap<>();
@@ -52,45 +53,94 @@ public final class TcpMultiplexer {
     }
 
     public TcpMultiplexer(TcpConfig config, DataConsumer dataConsumer) {
+        this.listenSock = new ListenSock();
         this.handshakerFactory = new TcpHandshakerFactory(config);
         this.dataConsumer = dataConsumer == null ? DROP_DATA : dataConsumer;
     }
 
     public void tcp_rcv(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
+        tcp_v4_rcv(ctx, pkt);
+    }
+
+    private void tcp_v4_rcv(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
+        final LookupResult sk = __inet_lookup_skb(pkt);
+        try {
+            int err = tcp_v4_do_rcv(ctx, sk, pkt);
+            if (err != 0) {
+                TcpOutput.INSTANCE.tcp_v4_send_reset(ctx, pkt);
+                if (sk.kind == SockKind.ESTABLISHED && sk.conn != null) {
+                    sk.conn.close();
+                    establishedRegistry.remove(sk.key);
+                }
+            }
+        } catch (Throwable cause) {
+            if (sk.kind == SockKind.ESTABLISHED && sk.conn != null) {
+                sk.conn.close();
+                establishedRegistry.remove(sk.key);
+            }
+            throw cause;
+        }
+    }
+
+    private LookupResult __inet_lookup_skb(TcpPacketBuf pkt) {
         final FourTuple key = FourTuple.of(pkt);
 
         TcpConnection conn = establishedRegistry.get(key);
         if (conn != null) {
-            tcp_rcv_established(ctx, key, conn, pkt);
-            return;
+            return LookupResult.established(key, conn);
         }
 
         TcpHandshaker handshaker = synRegistry.get(key);
         if (handshaker != null) {
-            TcpConnection nsk = handshaker.finishHandshake(ctx.channel(), pkt);
-            if (nsk == null) {
-                return;
-            }
-            synRegistry.remove(key);
-            establishedRegistry.put(key, nsk);
-            tcp_rcv_established(ctx, key, nsk, pkt);
-            return;
+            return LookupResult.synRecv(key, handshaker);
         }
+        return LookupResult.listen(key, listenSock);
+    }
 
-        // LISTEN state
+    private int tcp_v4_do_rcv(ChannelHandlerContext ctx, LookupResult sk, TcpPacketBuf pkt) {
+        return tcp_rcv_state_process(ctx, sk, pkt);
+    }
+
+    private int tcp_rcv_state_process(ChannelHandlerContext ctx, LookupResult sk, TcpPacketBuf pkt) {
+        switch (sk.kind) {
+            case LISTEN:
+                if (sk.listenSock.state() != TcpConnectionState.TCP_LISTEN) {
+                    return -1;
+                }
+                return tcp_listen_state_process(ctx, sk.key, pkt);
+            case SYN_RECV:
+                return tcp_syn_recv_state_process(ctx, sk.key, sk.handshaker, pkt);
+            case ESTABLISHED:
+                return tcp_connected_state_process(ctx, sk.key, sk.conn, pkt);
+            default:
+                return 0;
+        }
+    }
+
+    private int tcp_listen_state_process(ChannelHandlerContext ctx, FourTuple key, TcpPacketBuf pkt) {
         if (pkt.isAck()) {
-            TcpOutput.INSTANCE.tcp_v4_send_reset(ctx, pkt);
-            return;
+            return -1;
         }
         if (pkt.isRst()) {
-            return;
+            return 0;
         }
         if (!pkt.isSyn() || pkt.isFin()) {
-            return;
+            return 0;
         }
         TcpHandshaker hs = handshakerFactory.newHandshaker(pkt);
         synRegistry.put(key, hs);
         hs.handshake(ctx.channel(), pkt);
+        return 0;
+    }
+
+    private int tcp_syn_recv_state_process(ChannelHandlerContext ctx, FourTuple key, TcpHandshaker handshaker, TcpPacketBuf pkt) {
+        TcpConnection nsk = handshaker.finishHandshake(ctx.channel(), pkt);
+        if (nsk == null) {
+            return 0;
+        }
+        synRegistry.remove(key);
+        establishedRegistry.put(key, nsk);
+        return tcp_connected_state_process(ctx, key, nsk, pkt);
     }
 
     /**
@@ -121,30 +171,51 @@ public final class TcpMultiplexer {
         return true;
     }
 
-    private void tcp_rcv_established(ChannelHandlerContext ctx, FourTuple key, TcpConnection conn, TcpPacketBuf pkt) {
+    private int tcp_connected_state_process(ChannelHandlerContext ctx, FourTuple key, TcpConnection conn, TcpPacketBuf pkt) {
+        switch (conn.state()) {
+            case TCP_SYN_RECV:
+                return tcp_syn_recv_child_state_process(ctx, key, conn, pkt);
+            case TCP_ESTABLISHED:
+            case CLOSE_WAIT:
+            case FIN_WAIT_1:
+            case FIN_WAIT_2:
+            case CLOSING:
+            case LAST_ACK:
+            case TIME_WAIT:
+                return tcp_established_like_state_process(ctx, key, conn, pkt);
+            default:
+                return 0;
+        }
+    }
+
+    private int tcp_syn_recv_child_state_process(ChannelHandlerContext ctx, FourTuple key, TcpConnection conn, TcpPacketBuf pkt) {
+        return tcp_established_like_state_process(ctx, key, conn, pkt);
+    }
+
+    private int tcp_established_like_state_process(ChannelHandlerContext ctx, FourTuple key, TcpConnection conn, TcpPacketBuf pkt) {
         if (pkt.isRst()) {
             conn.close();
             establishedRegistry.remove(key);
-            return;
+            return 0;
         }
         if (!pkt.isAck() && !pkt.isSyn()) {
-            return;
+            return 0;
         }
         if (!tcpSequenceAcceptable(conn, pkt)) {
             if (!pkt.isRst()) {
                 TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, false);
             }
-            return;
+            return 0;
         }
         if (pkt.isSyn()) {
             TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, false);
-            return;
+            return 0;
         }
 
         final int priorSndUna = conn.sndUna();
         if (pkt.isAck() && !processAck(conn, pkt)) {
             TcpOutput.INSTANCE.tcp_send_challenge_ack(conn, false);
-            return;
+            return 0;
         }
 
         if (conn.state() == TcpConnectionState.TCP_SYN_RECV && after(conn.sndUna(), priorSndUna)) {
@@ -176,6 +247,7 @@ public final class TcpMultiplexer {
                     0
             );
         }
+        return 0;
     }
 
     private static boolean tcpSequenceAcceptable(TcpConnection conn, TcpPacketBuf pkt) {
@@ -315,5 +387,50 @@ public final class TcpMultiplexer {
         hint = Math.min(hint, TCP_INIT_CWND * mss);
         hint = Math.max(hint, TCP_MSS_DEFAULT);
         return hint;
+    }
+
+    private enum SockKind {
+        LISTEN,
+        SYN_RECV,
+        ESTABLISHED
+    }
+
+    private static final class ListenSock {
+        private final TcpConnectionState state = TcpConnectionState.TCP_LISTEN;
+
+        private ListenSock() {
+        }
+
+        private TcpConnectionState state() {
+            return state;
+        }
+    }
+
+    private static final class LookupResult {
+        private final SockKind kind;
+        private final FourTuple key;
+        private final ListenSock listenSock;
+        private final TcpHandshaker handshaker;
+        private final TcpConnection conn;
+
+        private LookupResult(SockKind kind, FourTuple key, ListenSock listenSock, TcpHandshaker handshaker, TcpConnection conn) {
+            this.kind = kind;
+            this.key = key;
+            this.listenSock = listenSock;
+            this.handshaker = handshaker;
+            this.conn = conn;
+        }
+
+        private static LookupResult listen(FourTuple key, ListenSock listenSock) {
+            return new LookupResult(SockKind.LISTEN, key, listenSock, null, null);
+        }
+
+        private static LookupResult synRecv(FourTuple key, TcpHandshaker handshaker) {
+            return new LookupResult(SockKind.SYN_RECV, key, null, handshaker, null);
+        }
+
+        private static LookupResult established(FourTuple key, TcpConnection conn) {
+            return new LookupResult(SockKind.ESTABLISHED, key, null, null, conn);
+        }
     }
 }
