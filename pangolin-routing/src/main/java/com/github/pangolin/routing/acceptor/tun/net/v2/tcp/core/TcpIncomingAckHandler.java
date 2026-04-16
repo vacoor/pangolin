@@ -125,7 +125,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
 
         // ── tcp_ack: step 5 ACK field processing ──────────────────────────
         final int priorSndUna = conn.sndUna();
-        int reason = tcp_ack(conn, pkt, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT | FLAG_NO_CHALLENGE_ACK);
+        int reason = tcpAck(conn, pkt, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT | FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {
             if (TcpConnectionState.TCP_SYN_RECV.equals(conn.state())) {
                 // FIXME send one RST
@@ -157,22 +157,22 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
     // ── tcp_ack flags (mirrors Linux net/ipv4/tcp_input.c flag bitmask) ───
     /** Incoming frame contained data.
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L97">FLAG_DATA</a> */
-    private static final int FLAG_DATA            = 0x01;
+    public static final int FLAG_DATA            = 0x01;
 
     /** Incoming ACK was a window update.
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L97">FLAG_WIN_UPDATE</a> */
-    private static final int FLAG_WIN_UPDATE      = 0x02;
+    public static final int FLAG_WIN_UPDATE      = 0x02;
 
     /** Do not skip RFC checks for window update.
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L97">FLAG_SLOWPATH</a> */
-    static final int FLAG_SLOWPATH                = 0x100;
+    public static final int FLAG_SLOWPATH                = 0x100;
 
     /** SND.UNA was changed (!= FLAG_DATA_ACKED).
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L97">FLAG_SND_UNA_ADVANCED</a> */
-    private static final int FLAG_SND_UNA_ADVANCED = 0x400;
+    public static final int FLAG_SND_UNA_ADVANCED = 0x400;
 
-    static final int FLAG_UPDATE_TS_RECENT        = 0x4000;
-    static final int FLAG_NO_CHALLENGE_ACK        = 0x8000;
+    public static final int FLAG_UPDATE_TS_RECENT        = 0x4000;
+    public static final int FLAG_NO_CHALLENGE_ACK        = 0x8000;
 
     /**
      * Step-5 ACK field processing, mirroring Linux {@code tcp_ack()}.
@@ -190,7 +190,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L4246">tcp_ack</a>
      */
-    private int tcp_ack(TcpConnection conn, TcpPacketBuf pkt, int flags) {
+    public static int tcpAck(TcpConnection conn, TcpPacketBuf pkt, int flags) {
         final int priorSndUna  = conn.sndUna();
         final int priorPktsOut = conn.packetsOut();                 // ≈ prior_packets_out
         final int ackSeq       = pkt.tcpSeq();                      // ≈ ack_seq
@@ -240,7 +240,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
             if (ackSeq != determineEndSeq(pkt)) {
                 flags |= FLAG_DATA;                             // segment carries data
             }
-            flags |= tcp_ack_update_window(conn, pkt, 0 != (flags & FLAG_SND_UNA_ADVANCED));  // ≈ tcp_ack_update_window
+            flags |= tcpAckUpdateWindow(conn, pkt, 0 != (flags & FLAG_SND_UNA_ADVANCED));  // ≈ tcp_ack_update_window
         }
 
         // Advance SND.UNA only — does NOT drain the RTX queue.
@@ -286,7 +286,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3546">tcp_ack_probe</a>
      */
-    private static void tcpAckProbe(TcpConnection conn) {
+    public static void tcpAckProbe(TcpConnection conn) {
         if (conn.tcpSendHead() == null) {
             return;     // nothing to send — no probe timer active
         }
@@ -303,7 +303,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
      * @return {@link #FLAG_WIN_UPDATE} if the window was updated, {@code 0} otherwise
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3688">tcp_ack_update_window</a>
      */
-    private static int tcp_ack_update_window(TcpConnection conn, TcpPacketBuf pkt,
+    public static int tcpAckUpdateWindow(TcpConnection conn, TcpPacketBuf pkt,
                                              boolean newDataAcked) {
         int seg  = pkt.tcpSeq();
         int nwin = pkt.tcpWindow() << conn.sndWscale();
@@ -322,7 +322,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
      *
      * @return RTT in microseconds, or {@code -1} to signal "skip" (retransmitted segment)
      */
-    private static long rttSample(TcpConnection conn, TcpPacketBuf pkt) {
+    public static long rttSample(TcpConnection conn, TcpPacketBuf pkt) {
         TcpSegmentEntry head = conn.sendBuffer().peekRtx();
         if (head == null) return -1;
         if (head.isRetransmitted()) return -1;  // Karn: don't sample retransmits
