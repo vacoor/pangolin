@@ -1310,6 +1310,7 @@ public class TcpOutput {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L4328">tcp_write_wakeup</a>
      */
+    @SuppressWarnings("deprecation")
     protected int tcp_write_wakeup(final Channel net, TcpSock tp, int mib) {
         if (TCP_CLOSE.equals(tp.state())) {
             return -1;

@@ -116,12 +116,11 @@ public class TcpInput {
     public static ChannelFuture tcp_done(ChannelHandlerContext ctx, TcpConnection conn, ChannelPromise closePromise) {
         conn.state(TcpConnectionState.TCP_CLOSED);
         conn.skShutdown(TcpConstants.SHUTDOWN_MASK);
-
-        if (closePromise != null) {
-            return ctx.close(closePromise);
-        } else {
-            return ctx.close();
+        conn.close();
+        if (closePromise != null && !closePromise.isDone()) {
+            closePromise.trySuccess();
         }
+        return null;
     }
 
     public static ChannelFuture tcp_done(ChannelHandlerContext ctx, TcpSock sock, ChannelPromise closePromise) {
@@ -130,11 +129,11 @@ public class TcpInput {
         }
         sock.state(TcpConnectionState.TCP_CLOSED);
         sock.skShutdown(TcpConstants.SHUTDOWN_MASK);
-        if (closePromise != null) {
-            return ctx.close(closePromise);
-        } else {
-            return ctx.close();
+        sock.close();
+        if (closePromise != null && !closePromise.isDone()) {
+            closePromise.trySuccess();
         }
+        return null;
     }
 
     /** Maps an errno constant to the closest Java exception. */

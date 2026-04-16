@@ -13,7 +13,6 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelPromise;
 import io.netty.util.concurrent.ScheduledFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +33,8 @@ public final class TcpHandshaker {
     private final int rcvNxt;
     private final int clientMss;
     private final int clientWscale;
+    private final boolean clientTimestamp;
+    private final int clientTsVal;
     private final int clientInitWnd;
     private final byte[] srcAddrBytes;
     private final int srcPort;
@@ -46,6 +47,7 @@ public final class TcpHandshaker {
     private int synAckRetries = 0;
     private int synAckSendEpoch = 0;
     private ScheduledFuture<?> synAckTimer = null;
+    private Runnable synAckFailureAction = () -> {};
 
     TcpHandshaker(TcpPacketBuf synPkt, TcpConfig config) {
         this.config = config;
@@ -60,8 +62,11 @@ public final class TcpHandshaker {
         ByteBuf opts = synPkt.tcpOptionsSlice();
         int parsedMss = TcpOptionCodec.parseMss(opts);
         int parsedWscale = config.windowScalingEnabled() ? TcpOptionCodec.parseWindowScale(opts) : -1;
+        long[] parsedTs = config.timestampsEnabled() ? TcpOptionCodec.parseTimestamp(opts) : null;
         this.clientMss = (parsedMss > 0) ? Math.min(parsedMss, config.mss()) : config.mss();
         this.clientWscale = parsedWscale;
+        this.clientTimestamp = parsedTs != null;
+        this.clientTsVal = parsedTs != null ? (int) parsedTs[0] : 0;
         this.sndIsn = TcpUtils.secureSeq(srcAddrBytes, srcPort, dstAddrBytes, dstPort);
     }
 
@@ -88,6 +93,10 @@ public final class TcpHandshaker {
         }
     }
 
+    public void synAckFailureAction(Runnable action) {
+        this.synAckFailureAction = action == null ? () -> {} : action;
+    }
+
     public void retransmitSynAck(Channel connChannel) {
         if (!synAckSent) {
             return;
@@ -96,28 +105,20 @@ public final class TcpHandshaker {
         sendSynAck(connChannel);
     }
 
-    public void handshake(Channel connChannel, TcpPacketBuf pkt) {
-        final ChannelPromise upstreamConnector = connChannel.newPromise();
-        upstreamConnector.addListener((ChannelFutureListener) f -> {
-            if (f.isSuccess()) {
-                sendSynAck(connChannel);
-            } else {
-                connChannel.close();
-            }
-        });
-        connChannel.eventLoop().schedule(() -> upstreamConnector.setSuccess(), 1, TimeUnit.SECONDS);
+    public void sendSynAckAfterBackendConnected(Channel connChannel) {
+        sendSynAck(connChannel);
     }
 
-    public void abort(Channel connChannel) {
+    public void abort() {
         cancelRetransmitTimer();
-        connChannel.close();
     }
 
     public ChannelFuture sendResetAndAbort(Channel connChannel, TcpPacketBuf pkt) {
-        return sendRst(connChannel, pkt).addListener((ChannelFutureListener) f -> connChannel.close());
+        cancelRetransmitTimer();
+        return sendRst(connChannel, pkt);
     }
 
-    public TcpSock buildChildSock(Channel connChannel, TcpPacketBuf pkt) {
+    public TcpSock buildChildSock(Channel netChannel, Channel childChannel, TcpPacketBuf pkt) {
         int negotiatedMss = Math.min(clientMss, config.mss());
         int peerWnd = pkt.tcpWindow();
         if (clientWscale >= 0) {
@@ -128,7 +129,8 @@ public final class TcpHandshaker {
         log.debug("[TCP] [HANDSHAKE] 3WH complete: mss={}, peerWscale={}", negotiatedMss, clientWscale);
 
         return TcpSock.createChild(
-                connChannel,
+                netChannel,
+                childChannel,
                 FourTuple.of(dstAddrBytes, dstPort, srcAddrBytes, srcPort),
                 sndIsn,
                 sndIsn + 1,
@@ -137,21 +139,23 @@ public final class TcpHandshaker {
                 config.initialRcvWnd(),
                 negotiatedMss,
                 clientWscale >= 0 ? clientWscale : 0,
-                clientWscale >= 0 ? config.windowScale() : 0
+                clientWscale >= 0 ? config.windowScale() : 0,
+                clientTimestamp,
+                clientTsVal
         );
     }
 
-    public TcpSock finishHandshake(Channel connChannel, TcpPacketBuf pkt) {
+    public TcpSock finishHandshake(Channel netChannel, Channel childChannel, TcpPacketBuf pkt) {
         final int seq = pkt.tcpSeq();
         if (pkt.isRst()) {
             if (seq == rcvNxt) {
-                abort(connChannel);
+                abort();
             }
             return null;
         }
 
         if (seq == rcvIsn && (pkt.tcpFlags() & (TCP_FLAG_RST | TCP_FLAG_SYN | TCP_FLAG_ACK)) == TCP_FLAG_SYN) {
-            retransmitSynAck(connChannel);
+            retransmitSynAck(netChannel);
             return null;
         }
 
@@ -163,11 +167,11 @@ public final class TcpHandshaker {
             log.warn("[TCP] [HANDSHAKE] ACK number mismatch: expected {}, got {}",
                     Integer.toUnsignedString(sndIsn + 1),
                     Integer.toUnsignedString(pkt.tcpAckNum()));
-            sendResetAndAbort(connChannel, pkt);
+            sendResetAndAbort(netChannel, pkt);
             return null;
         }
 
-        return buildChildSock(connChannel, pkt);
+        return buildChildSock(netChannel, childChannel, pkt);
     }
 
     private void sendSynAck(Channel connChannel) {
@@ -198,8 +202,8 @@ public final class TcpHandshaker {
 
     private void scheduleRetransmit(Channel connChannel) {
         if (synAckRetries >= MAX_SYNACK_RETRIES) {
-            log.debug("[TCP] [HANDSHAKE] SYN-ACK max retransmits ({}) reached - closing", MAX_SYNACK_RETRIES);
-            connChannel.close();
+            log.debug("[TCP] [HANDSHAKE] SYN-ACK max retransmits ({}) reached - aborting half-open socket", MAX_SYNACK_RETRIES);
+            synAckFailureAction.run();
             return;
         }
         long delayMs = SYNACK_RTO_INIT_MS << Math.min(synAckRetries, 6);
@@ -211,11 +215,13 @@ public final class TcpHandshaker {
     }
 
     private byte[] buildSynAckOptions() {
-        ByteBuf tmp = Unpooled.buffer(12);
+        ByteBuf tmp = Unpooled.buffer(clientTimestamp ? 24 : 12);
         try {
             int ourMss = config.mss();
             int ourWscale = (clientWscale >= 0) ? config.windowScale() : -1;
-            TcpOptionCodec.writeSynOptions(tmp, ourMss, ourWscale);
+            Long tsval = clientTimestamp ? (System.nanoTime() / 1_000_000L) & 0xFFFFFFFFL : null;
+            Long tsecr = clientTimestamp ? ((long) clientTsVal & 0xFFFFFFFFL) : null;
+            TcpOptionCodec.writeSynOptions(tmp, ourMss, ourWscale, tsval, tsecr);
             byte[] result = new byte[tmp.readableBytes()];
             tmp.readBytes(result);
             return result;

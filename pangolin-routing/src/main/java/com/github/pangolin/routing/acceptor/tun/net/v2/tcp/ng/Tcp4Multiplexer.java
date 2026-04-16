@@ -8,7 +8,14 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
+import com.github.pangolin.routing.support.SocketChannelFactory;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.EventLoopGroup;
+
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler.FLAG_NO_CHALLENGE_ACK;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler.FLAG_SLOWPATH;
@@ -18,13 +25,26 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSe
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
 
 public class Tcp4Multiplexer extends TcpMultiplexer {
+    private final SocketChannelFactory socketChannelFactory;
+    private final EventLoopGroup childGroup;
+    private final int connTimeoutMs;
 
     public Tcp4Multiplexer(TcpConfig config) {
-        super(config);
+        this(config, null, null, null);
     }
 
     public Tcp4Multiplexer(TcpConfig config, DataConsumer dataConsumer) {
+        this(config, null, null, dataConsumer);
+    }
+
+    public Tcp4Multiplexer(TcpConfig config,
+                           SocketChannelFactory socketChannelFactory,
+                           EventLoopGroup childGroup,
+                           DataConsumer dataConsumer) {
         super(config, dataConsumer);
+        this.socketChannelFactory = socketChannelFactory;
+        this.childGroup = childGroup;
+        this.connTimeoutMs = 5_000;
     }
 
     @Override
@@ -109,12 +129,15 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
                     return 0;
                 }
                 if (pkt.isSyn() && !pkt.isFin()) {
+                    if (sk_acceptq_is_full()) {
+                        return -1;
+                    }
                     tcp_request_sock req = conn_request(net, sk, pkt);
                     if (req == null) {
                         return -1;
                     }
                     addToHalfQueue(sk, req);
-                    req.request().handshake(net.channel(), pkt);
+                    startHandshake(net, req, pkt);
                     return 0;
                 }
                 return 0;
@@ -128,7 +151,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
             return -1;
         }
 
-        TcpIncomingPreValidator validator = new TcpIncomingPreValidator(sk);
+        TcpIncomingPreValidator validator = new TcpIncomingPreValidator(sk, () -> tcp_done(sk));
         if (!validator.validate(net, pkt)) {
             return 0;
         }
@@ -208,7 +231,8 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
     }
 
     protected TcpSock tcp_v4_syn_recv_sock(ChannelHandlerContext net, TcpSock listenSock, TcpPacketBuf pkt, tcp_request_sock req) {
-        TcpSock newsk = init(req.request().buildChildSock(net.channel(), pkt));
+        TcpSock newsk = init(req.request().buildChildSock(net.channel(), req.childChannel(), pkt));
+        newsk.childCloseListener(req.handshakeCloseListener());
         newsk.state(TcpConnectionState.TCP_SYN_RECV);
         return newsk;
     }
@@ -253,13 +277,12 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         if (!sk.hasConnection()) {
             return;
         }
-        TcpTimerScheduler.INSTANCE.scheduleKeepalive(sk, config.finWait2TimeoutMs(), () -> {
-            if (sk.state() == TcpConnectionState.FIN_WAIT_2) {
-                sk.state(TcpConnectionState.TIME_WAIT);
-                sk.addShutdown(TcpConstants.RCV_SHUTDOWN);
-                sk.channel().close();
-            }
-        });
+        final int tmo = sk.tcpFinTimeMs();
+        if (tmo > TcpConstants.TIME_WAIT_MS) {
+            TcpTimerScheduler.INSTANCE.scheduleKeepalive(sk, tmo - TcpConstants.TIME_WAIT_MS, () -> onFinWait2Keepalive(sk));
+        } else {
+            tcp_time_wait(sk, TcpConnectionState.FIN_WAIT_2, tmo);
+        }
     }
 
     private static boolean hasDataBeyondRcvNxt(TcpSock sk, TcpPacketBuf pkt) {
@@ -267,5 +290,61 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         int endSeq = determineEndSeq(pkt);
         return endSeq != seq && after(endSeq - (pkt.isFin() ? 1 : 0), sk.rcvNxt());
     }
-}
 
+    private void startHandshake(ChannelHandlerContext net, tcp_request_sock req, TcpPacketBuf pkt) {
+        if (socketChannelFactory == null || childGroup == null) {
+            send_reset(net, pkt, -88);
+            inet_csk_destroy_sock(req);
+            return;
+        }
+
+        final InetSocketAddress target = resolveTarget(pkt);
+        req.synPacket((TcpPacketBuf) pkt.retain());
+        req.request().synAckFailureAction(() -> inet_csk_destroy_sock(req));
+        req.handshakeCloseListener(future -> {
+            if (req.synPacket() != null) {
+                TcpOutput.INSTANCE.tcp_v4_send_reset(net, req.synPacket());
+            }
+            inet_csk_destroy_sock(req);
+        });
+
+        req.connectFuture(socketChannelFactory.open(target, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
+        }).addListener((ChannelFutureListener) future -> {
+            if (future.isSuccess()) {
+                req.childChannel(future.channel());
+                req.request().sendSynAckAfterBackendConnected(net.channel());
+                future.channel().closeFuture().addListener(req.handshakeCloseListener());
+            } else {
+                if (req.synPacket() != null) {
+                    req.request().sendResetAndAbort(net.channel(), req.synPacket());
+                }
+                inet_csk_destroy_sock(req);
+            }
+        }));
+    }
+
+    private InetSocketAddress resolveTarget(TcpPacketBuf pkt) {
+        final InetAddress resolved = pkt.resolvedDstAddr() != null ? pkt.resolvedDstAddr() : pkt.dstAddr();
+        final String host = resolved.getHostName();
+        if (!resolved.getHostAddress().equals(host)) {
+            return InetSocketAddress.createUnresolved(host, pkt.tcpDstPort());
+        }
+        return new InetSocketAddress(resolved, pkt.tcpDstPort());
+    }
+
+    private void onFinWait2Keepalive(TcpSock sk) {
+        if (!sk.hasConnection() || sk.state() != TcpConnectionState.FIN_WAIT_2) {
+            return;
+        }
+        if (sk.linger2() >= 0) {
+            final int tmo = sk.tcpFinTimeMs() - (int) TcpConstants.TIME_WAIT_MS;
+            if (tmo > 0) {
+                tcp_time_wait(sk, TcpConnectionState.FIN_WAIT_2, tmo);
+                return;
+            }
+        }
+        sk.addShutdown(TcpConstants.RCV_SHUTDOWN);
+        TcpOutput.INSTANCE.tcp_send_reset(sk);
+        tcp_done(sk);
+    }
+}

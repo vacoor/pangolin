@@ -151,6 +151,13 @@ public final class TcpOptionCodec {
         out.writeByte(2);
     }
 
+    public static void writeSynOptions(ByteBuf out, int mss, int wscale, Long tsval, Long tsecr) {
+        writeSynOptions(out, mss, wscale);
+        if (tsval != null && tsecr != null) {
+            writeTimestampOption(out, tsval, tsecr);
+        }
+    }
+
     /**
      * Write timestamp option into {@code out}:
      * NOP(1B) + NOP(1B) + Timestamp kind(1B) + len(1B) + tsval(4B) + tsecr(4B) = 12 bytes.

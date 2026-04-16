@@ -8,7 +8,6 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpReceive
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpInput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpRetransmitter;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.established.TcpDataHandler;
@@ -18,10 +17,15 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpConnectionTimers;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
+import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
@@ -36,6 +40,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSe
 
 @Slf4j
 public abstract class TcpMultiplexer {
+    public static final int DEFAULT_MAX_SYN_BACKLOG = 1024;
 
     private enum CongestionState {
         OPEN,
@@ -73,6 +78,7 @@ public abstract class TcpMultiplexer {
     protected final DataConsumer dataConsumer;
     protected final Map<FourTuple, tcp_request_sock> synRegistry;
     protected final Map<FourTuple, TcpSock> establishedRegistry;
+    protected final int maxSynBacklog;
     protected TcpSock listenSock;
 
     protected TcpMultiplexer(TcpConfig config) {
@@ -85,6 +91,7 @@ public abstract class TcpMultiplexer {
         this.dataConsumer = dataConsumer == null ? DROP_DATA : dataConsumer;
         this.synRegistry = new HashMap<>();
         this.establishedRegistry = new HashMap<>();
+        this.maxSynBacklog = DEFAULT_MAX_SYN_BACKLOG;
         init();
     }
 
@@ -126,7 +133,7 @@ public abstract class TcpMultiplexer {
         if (pkt.isRst()) {
             if (pkt.tcpSeq() == handshaker.rcvNxt()) {
                 inet_csk_destroy_sock(req);
-                handshaker.abort(net.channel());
+                handshaker.abort();
             }
             return null;
         }
@@ -142,8 +149,13 @@ public abstract class TcpMultiplexer {
             return null;
         }
 
+        if (!handshaker.synAckSent() || req.childChannel() == null) {
+            return null;
+        }
+
         if (pkt.tcpAckNum() != handshaker.sndIsn() + 1) {
             handshaker.sendResetAndAbort(net.channel(), pkt);
+            inet_csk_destroy_sock(req);
             return null;
         }
 
@@ -155,6 +167,10 @@ public abstract class TcpMultiplexer {
     }
 
     protected void moveToEstablished(final tcp_request_sock req, final TcpSock sock) {
+        if (req.synPacket() != null) {
+            req.synPacket().release();
+            req.synPacket(null);
+        }
         synRegistry.remove(req.fourTuple(), req);
         establishedRegistry.put(sock.fourTuple(), sock);
     }
@@ -178,6 +194,22 @@ public abstract class TcpMultiplexer {
 
     public void inet_csk_destroy_sock(tcp_request_sock req) {
         req.request().cancelRetransmitTimer();
+        if (req.connectFuture() != null && req.connectFuture().channel() != null) {
+            if (req.handshakeCloseListener() != null) {
+                req.connectFuture().channel().closeFuture().removeListener(req.handshakeCloseListener());
+            }
+            req.connectFuture().channel().close();
+        }
+        if (req.childChannel() != null && req.childChannel().isOpen()) {
+            if (req.handshakeCloseListener() != null) {
+                req.childChannel().closeFuture().removeListener(req.handshakeCloseListener());
+            }
+            req.childChannel().close();
+        }
+        if (req.synPacket() != null) {
+            req.synPacket().release();
+            req.synPacket(null);
+        }
         synRegistry.remove(req.fourTuple(), req);
     }
 
@@ -192,18 +224,23 @@ public abstract class TcpMultiplexer {
     }
 
     public void tcp_time_wait(ChannelHandlerContext ctx, TcpSock tp, TcpConnectionState state) {
+        tcp_time_wait(tp, state, config.timeWaitMs());
+    }
+
+    public void tcp_time_wait(TcpSock tp, TcpConnectionState state, long timeoutMs) {
         if (!tp.hasConnection()) {
             return;
         }
-        tp.state(state);
-        if (TcpConnectionState.TIME_WAIT == state) {
-            TcpInput.tcp_done(ctx, tp, null);
-            return;
-        }
+        tp.state(TcpConnectionState.TIME_WAIT);
+        TcpTimerScheduler.INSTANCE.scheduleKeepalive(tp, Math.max(timeoutMs, 1L), () -> tcp_done(tp));
     }
 
     public void consume(final ChannelHandlerContext ctx, final TcpPacketBuf pkt) {
         tcp_rcv(ctx, pkt);
+    }
+
+    public boolean sk_acceptq_is_full() {
+        return synRegistry.size() >= maxSynBacklog;
     }
 
     public boolean write(final FourTuple key, final ByteBuf data) {
@@ -212,13 +249,7 @@ public abstract class TcpMultiplexer {
             data.release();
             return false;
         }
-        sk.tcp_queue_skb(new TcpSegmentEntry(
-                data,
-                sk.writeSeq(),
-                data.readableBytes(),
-                (byte) com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.TCPHDR_ACK,
-                0L));
-        tcp_push_pending_frames(sk);
+        enqueueWrite(sk, data, true);
         return true;
     }
 
@@ -226,47 +257,49 @@ public abstract class TcpMultiplexer {
         if (!sk.hasConnection() || !pkt.isAck()) {
             return 1;
         }
-        final int priorSndUna = sk.sndUna();
-        final int priorPktsOut = sk.packetsOut();
-        int result = TcpIncomingAckHandler.tcpAck(sk, pkt, flag);
-        if (result < 0) {
-            return result;
-        }
-        if (after(sk.sndUna(), priorSndUna)) {
-            TcpRetransmitter.INSTANCE.rearmRto(sk);
-            if (priorPktsOut > 0) {
-                int newlyAcked = Math.max(1, priorPktsOut - sk.packetsOut());
-                sk.onAckedByCc(newlyAcked, true);
-                sk.resetRtoBackoff();
-            }
-        }
-        return result;
+        return TcpIncomingAckHandler.tcpAck(sk, pkt, flag);
     }
 
     protected int tcp_data_queue(ChannelHandlerContext ctx, TcpSock sk, TcpPacketBuf pkt) {
         if (!sk.hasConnection()) {
             return 0;
         }
+        int priorRcvNxt = sk.rcvNxt();
+        boolean receivedPayload = false;
         if (pkt.tcpPayloadLength() > 0 && sk.state().canReceive()) {
+            receivedPayload = true;
+            sk.onDataReceived(pkt.tcpPayloadLength());
             ByteBuf data = TcpDataHandler.INSTANCE.onData(sk, pkt);
             if (data != null) {
-                dataConsumer.onData(sk.fourTuple(), data);
+                consume(sk, data);
             }
-            TcpOutput.INSTANCE.tcp_send_ack(sk);
         }
 
         if (pkt.isFin() && sk.state().canReceive()) {
             sk.rcvNxt(sk.rcvNxt() + 1);
             sk.state(TcpConnectionState.CLOSE_WAIT);
+            sk.enterPingpongMode();
             TcpOutput.INSTANCE.tcp_send_ack(sk);
         }
         tcp_push_pending_frames(sk);
+        if (receivedPayload && !pkt.isFin()) {
+            if (pkt.tcpSeq() != priorRcvNxt && sk.rcvNxt() == priorRcvNxt) {
+                sk.enterQuickAckMode(TcpConstants.TCP_INIT_CWND);
+                sk.addAckPending(TcpConstants.ACK_NOW);
+            } else {
+                sk.addAckPending(TcpConstants.ACK_SCHED);
+            }
+            tcp_ack_snd_check(sk);
+        }
         return 0;
     }
 
     protected void tcp_push_pending_frames(TcpSock sk) {
         if (sk.hasConnection() && sk.tcpSendHead() != null) {
-            TcpOutput.INSTANCE.tcp_write_xmit(sk, sk.mss(), TCP_NAGLE_OFF, 0);
+            boolean needProbe = TcpOutput.INSTANCE.tcp_write_xmit(sk, sk.mss(), TCP_NAGLE_OFF, 0);
+            if (needProbe) {
+                armProbe0(sk);
+            }
         }
     }
 
@@ -292,7 +325,56 @@ public abstract class TcpMultiplexer {
         }
     }
 
-    protected static void tcp_init_transfer(TcpSock sk) {
+    protected void tcp_init_transfer(TcpSock sk) {
+        if (sk == null || !sk.hasBackendChannel()) {
+            return;
+        }
+        sk.probeTimerAction(() -> tcp_probe_timer(sk));
+        sk.keepaliveTimerAction(() -> tcp_keepalive_timer(sk));
+
+        final Channel childChannel = sk.childChannel();
+        final ChannelFutureListener handshakeCloseListener = sk.childCloseListener();
+        sk.childCloseListener(future -> {
+            final TcpConnectionState state = sk.state();
+            if (tcp_close_state(sk)) {
+                TcpOutput.INSTANCE.tcp_send_fin(sk);
+            }
+        });
+
+        childChannel.closeFuture().addListener(sk.childCloseListener());
+        if (handshakeCloseListener != null) {
+            childChannel.closeFuture().removeListener(handshakeCloseListener);
+        }
+        childChannel.pipeline().addLast(new ChannelInboundHandlerAdapter() {
+            @Override
+            public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+                try {
+                    final ByteBuf buf = (ByteBuf) msg;
+                    final int mss = TcpOutput.INSTANCE.tcp_current_mss(sk);
+                    final int total = buf.readableBytes();
+
+                    for (int offset = 0; offset < total; ) {
+                        final int len = Math.min(total - offset, mss);
+                        final boolean flush = offset + len >= total;
+                        enqueueWrite(sk, buf.retainedSlice(buf.readerIndex() + offset, len), flush);
+                        offset += len;
+                    }
+                } finally {
+                    ReferenceCountUtil.release(msg);
+                }
+            }
+
+            @Override
+            public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+                TcpOutput.INSTANCE.tcp_send_reset(sk);
+                tcp_done(sk);
+                if (ctx.channel().isOpen()) {
+                    ctx.channel().close();
+                }
+            }
+        });
+        childChannel.config().setAutoRead(true);
+        armKeepalive(sk, sk.keepaliveTimeMs());
     }
 
     protected static int tcp_initialize_rcv_mss(TcpSock sk) {
@@ -303,6 +385,179 @@ public abstract class TcpMultiplexer {
         int hint = Math.min(mss, sk.rcvWnd() / 2);
         hint = Math.min(hint, TCP_INIT_CWND * mss);
         return Math.max(hint, TCP_MSS_DEFAULT);
+    }
+
+    protected void tcp_ack_snd_check(TcpSock sk) {
+        if (!sk.hasAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_NOW)) {
+            return;
+        }
+        if ((after(sk.rcvNxt(), sk.rcvWup() + sk.rcvMss()) && sk.rcvWnd() >= sk.tcp_receive_window())
+                || sk.inQuickAckMode()
+                || sk.hasAckPending(TcpConstants.ACK_NOW)) {
+            TcpOutput.INSTANCE.tcp_send_ack(sk);
+            return;
+        }
+        tcp_send_delayed_ack(sk);
+    }
+
+    protected void tcp_send_delayed_ack(TcpSock sk) {
+        long ato = Math.max(1L, sk.ackTimeoutMs());
+        if (sk.inPingpongMode()) {
+            ato = Math.max(ato, config.delayedAckMs());
+        }
+        sk.addAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER);
+        TcpTimerScheduler.INSTANCE.scheduleDelayedAck(sk, ato, () -> tcp_delack_timer(sk));
+    }
+
+    protected void tcp_delack_timer(TcpSock sk) {
+        if (!sk.hasConnection() || !sk.hasAckPending(TcpConstants.ACK_TIMER)) {
+            return;
+        }
+        sk.clearAckPending(TcpConstants.ACK_TIMER);
+        if (!sk.hasAckPending(TcpConstants.ACK_SCHED)) {
+            return;
+        }
+        if (!sk.inPingpongMode()) {
+            sk.ackTimeoutMs(Math.min(sk.ackTimeoutMs() << 1, sk.rtoMs()));
+        } else {
+            sk.exitPingpongMode();
+            sk.ackTimeoutMs(TcpConstants.TCP_ATO_MIN_MS);
+        }
+        TcpOutput.INSTANCE.tcp_send_ack(sk);
+    }
+
+    protected void armProbe0(TcpSock sk) {
+        if (!sk.hasConnection() || sk.packetsOut() != 0 || sk.tcpSendHead() == null) {
+            return;
+        }
+        TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
+                sk,
+                com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TimerType.ZERO_WINDOW_PROBE,
+                sk.tcpProbe0BaseMs(),
+                () -> tcp_probe_timer(sk)
+        );
+    }
+
+    protected void tcp_probe_timer(TcpSock sk) {
+        if (!sk.hasConnection()) {
+            return;
+        }
+        if (sk.packetsOut() > 0 || sk.tcpSendHead() == null) {
+            sk.resetProbeState();
+            return;
+        }
+
+        long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+        if (sk.probesTstampMs() == 0L) {
+            sk.probesTstampMs(now);
+        } else if (sk.userTimeoutMs() > 0 && now - sk.probesTstampMs() >= sk.userTimeoutMs()) {
+            sk.skErr(110);
+            TcpOutput.INSTANCE.tcp_send_reset(sk);
+            tcp_done(sk);
+            return;
+        }
+
+        if (sk.probesOut() >= TcpConstants.TCP_RETRIES2) {
+            sk.skErr(110);
+            TcpOutput.INSTANCE.tcp_send_reset(sk);
+            tcp_done(sk);
+            return;
+        }
+
+        long timeout = TcpOutput.INSTANCE.tcp_send_probe0(sk);
+        if (timeout > 0L) {
+            TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
+                    sk,
+                    com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TimerType.ZERO_WINDOW_PROBE,
+                    timeout,
+                    () -> tcp_probe_timer(sk)
+            );
+        }
+    }
+
+    protected void armKeepalive(TcpSock sk, long delayMs) {
+        if (!sk.hasConnection()
+                || !sk.keepaliveEnabled()
+                || sk.state() == TcpConnectionState.TIME_WAIT
+                || sk.state() == TcpConnectionState.TCP_CLOSED
+                || sk.state() == TcpConnectionState.TCP_LISTEN
+                || sk.state() == TcpConnectionState.TCP_SYN_RECV) {
+            return;
+        }
+        TcpTimerScheduler.INSTANCE.scheduleKeepalive(sk, Math.max(delayMs, 1L), () -> tcp_keepalive_timer(sk));
+    }
+
+    protected void tcp_keepalive_timer(TcpSock sk) {
+        if (!sk.hasConnection() || !sk.keepaliveEnabled()) {
+            return;
+        }
+
+        if (sk.state() == TcpConnectionState.FIN_WAIT_2) {
+            return;
+        }
+
+        if (sk.packetsOut() > 0 || sk.tcpSendHead() != null) {
+            armKeepalive(sk, sk.keepaliveTimeMs());
+            return;
+        }
+
+        long elapsed = sk.keepaliveElapsedMs();
+        if (elapsed < sk.keepaliveTimeMs()) {
+            armKeepalive(sk, sk.keepaliveTimeMs() - elapsed);
+            return;
+        }
+
+        long userTimeout = sk.userTimeoutMs();
+        if ((userTimeout > 0L && elapsed >= userTimeout && sk.probesOut() > 0)
+                || (userTimeout == 0L && sk.probesOut() >= sk.keepaliveProbes())) {
+            sk.skErr(110);
+            TcpOutput.INSTANCE.tcp_send_reset(sk);
+            tcp_done(sk);
+            return;
+        }
+
+        int err = TcpOutput.INSTANCE.tcp_write_wakeup(sk, 1);
+        long next;
+        if (err <= 0) {
+            sk.probesOut(sk.probesOut() + 1);
+            next = sk.keepaliveIntvlMs();
+        } else {
+            next = TcpConstants.TCP_RESOURCE_PROBE_INTERVAL_MS;
+        }
+        armKeepalive(sk, next);
+    }
+
+    protected void consume(TcpSock sk, ByteBuf data) {
+        if (sk != null && sk.hasBackendChannel()) {
+            sk.childChannel().writeAndFlush(data);
+            return;
+        }
+        dataConsumer.onData(sk.fourTuple(), data);
+    }
+
+    protected void enqueueWrite(TcpSock sk, ByteBuf data, boolean flush) {
+        final Runnable task = () -> {
+            if (!sk.hasConnection() || !sk.state().canSend()) {
+                data.release();
+                return;
+            }
+            sk.tcp_queue_skb(new TcpSegmentEntry(
+                    data,
+                    sk.writeSeq(),
+                    data.readableBytes(),
+                    (byte) TcpConstants.TCPHDR_ACK,
+                    0L));
+            if (flush) {
+                tcp_push_pending_frames(sk);
+            }
+        };
+
+        final EventLoop owner = sk.eventLoop();
+        if (owner != null && !owner.inEventLoop()) {
+            owner.execute(task);
+        } else {
+            task.run();
+        }
     }
 
     protected abstract static class SockCommon {
@@ -324,6 +579,8 @@ public abstract class TcpMultiplexer {
     public static class TcpSock extends SockCommon {
         private TcpConnection conn;
         private Channel channel;
+        private Channel childChannel;
+        private ChannelFutureListener childCloseListener;
         private TcpSendBuffer sendBuffer;
         private TcpReceiveBuffer receiveBuffer;
         private TcpConnectionTimers timers;
@@ -336,6 +593,7 @@ public abstract class TcpMultiplexer {
         private int sndWnd;
         private int maxWindow;
         private int sndWl1;
+        private int sndSml;
         private int rcvWnd;
         private int rcvWup;
         private int rcvMss;
@@ -350,9 +608,25 @@ public abstract class TcpMultiplexer {
         private long lastOowAckTimeMs;
         private boolean timestampEnabled;
         private int recentTimestamp;
+        private int quickAckCount;
+        private long ackTimeoutMs;
+        private int pingpongCount;
+        private long lastRecvTimeMs;
+        private long lastSendTimeMs;
         private long srttUs;
         private long rttvarUs;
         private int rtoBackoffShift;
+        private int linger2;
+        private int probeBackoffShift;
+        private int probesOut;
+        private long probesTstampMs;
+        private long userTimeoutMs;
+        private long keepaliveTimeMs;
+        private long keepaliveIntvlMs;
+        private int keepaliveProbes;
+        private boolean keepaliveEnabled;
+        private Runnable probeTimerAction = () -> {};
+        private Runnable keepaliveTimerAction = () -> {};
         private int cwnd = TcpConstants.TCP_INIT_CWND;
         private int ssthresh = Integer.MAX_VALUE;
         private int dupacks;
@@ -386,6 +660,7 @@ public abstract class TcpMultiplexer {
         }
 
         public static TcpSock createChild(Channel channel,
+                                          Channel childChannel,
                                           FourTuple fourTuple,
                                           int sndUna,
                                           int sndNxt,
@@ -394,9 +669,12 @@ public abstract class TcpMultiplexer {
                                           int rcvWnd,
                                           int mss,
                                           int sndWscale,
-                                          int rcvWscale) {
+                                          int rcvWscale,
+                                          boolean timestampEnabled,
+                                          int recentTimestamp) {
             TcpSock sock = new TcpSock(fourTuple);
             sock.channel = channel;
+            sock.childChannel = childChannel;
             sock.sendBuffer = new TcpSendBuffer();
             sock.receiveBuffer = new TcpReceiveBuffer(channel.alloc());
             sock.timers = new TcpConnectionTimers();
@@ -408,6 +686,7 @@ public abstract class TcpMultiplexer {
             sock.sndWnd = sndWnd;
             sock.maxWindow = sndWnd;
             sock.sndWl1 = 0;
+            sock.sndSml = sndUna;
             sock.rcvWnd = rcvWnd;
             sock.rcvWup = rcvNxt;
             sock.rcvMss = mss;
@@ -415,6 +694,9 @@ public abstract class TcpMultiplexer {
             sock.sndWscale = sndWscale;
             sock.rcvWscale = rcvWscale;
             sock.initInlineTcpState();
+            sock.timestampEnabled = timestampEnabled;
+            sock.recentTimestamp = recentTimestamp;
+            sock.linger2 = (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
             return sock;
         }
 
@@ -426,6 +708,10 @@ public abstract class TcpMultiplexer {
             return channel != null && sendBuffer != null && receiveBuffer != null;
         }
 
+        public boolean hasBackendChannel() {
+            return childChannel != null && childChannel.isActive();
+        }
+
         public void attach(TcpConnection conn) {
             attach(conn, true);
         }
@@ -433,6 +719,7 @@ public abstract class TcpMultiplexer {
         public void attach(TcpConnection conn, boolean initializeExtensions) {
             this.conn = conn;
             this.channel = conn == null ? null : conn.channel();
+            this.childChannel = null;
             this.sendBuffer = conn == null ? null : conn.sendBuffer();
             this.receiveBuffer = conn == null ? null : conn.receiveBuffer();
             this.timers = conn == null ? null : conn.timers();
@@ -446,9 +733,23 @@ public abstract class TcpMultiplexer {
         private void initInlineTcpState() {
             timestampEnabled = false;
             recentTimestamp = 0;
+            quickAckCount = 0;
+            ackTimeoutMs = TcpConstants.DELAYED_ACK_MS;
+            pingpongCount = 0;
+            lastRecvTimeMs = 0L;
+            lastSendTimeMs = 0L;
             srttUs = 0L;
             rttvarUs = 0L;
             rtoBackoffShift = 0;
+            linger2 = (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
+            probeBackoffShift = 0;
+            probesOut = 0;
+            probesTstampMs = 0L;
+            userTimeoutMs = 0L;
+            keepaliveTimeMs = TcpConstants.TCP_KEEPALIVE_TIME_MS;
+            keepaliveIntvlMs = TcpConstants.TCP_KEEPALIVE_INTVL_MS;
+            keepaliveProbes = TcpConstants.TCP_KEEPALIVE_PROBES;
+            keepaliveEnabled = false;
             cwnd = TcpConstants.TCP_INIT_CWND;
             ssthresh = Integer.MAX_VALUE;
             dupacks = 0;
@@ -481,6 +782,7 @@ public abstract class TcpMultiplexer {
             this.sndWnd = conn.sndWnd();
             this.maxWindow = conn.maxWindow();
             this.sndWl1 = conn.sndWl1();
+            this.sndSml = conn.sndSml();
             this.rcvWnd = conn.rcvWnd();
             this.rcvWup = conn.rcvWup();
             this.rcvMss = conn.rcvMss();
@@ -495,6 +797,11 @@ public abstract class TcpMultiplexer {
             this.lastOowAckTimeMs = conn.lastOowAckTimeMs();
             this.timestampEnabled = conn.timestampEnabled();
             this.recentTimestamp = conn.recentTimestamp();
+            this.quickAckCount = conn.quickAckCount();
+            this.ackTimeoutMs = conn.ackTimeoutMs();
+            this.pingpongCount = conn.pingpongCount();
+            this.lastRecvTimeMs = conn.lastRecvTimeMs();
+            this.lastSendTimeMs = conn.lastSendTimeMs();
             this.srttUs = conn.srttUs();
             this.rttvarUs = conn.rttvarUs();
             this.rtoBackoffShift = conn.rtoBackoffShift();
@@ -510,6 +817,22 @@ public abstract class TcpMultiplexer {
 
         public Channel channel() {
             return channel;
+        }
+
+        public Channel childChannel() {
+            return childChannel;
+        }
+
+        public void childChannel(Channel channel) {
+            this.childChannel = channel;
+        }
+
+        public ChannelFutureListener childCloseListener() {
+            return childCloseListener;
+        }
+
+        public void childCloseListener(ChannelFutureListener listener) {
+            this.childCloseListener = listener;
         }
 
         public EventLoop eventLoop() {
@@ -581,6 +904,14 @@ public abstract class TcpMultiplexer {
 
         public void sndWl1(int v) {
             this.sndWl1 = v;
+        }
+
+        public int sndSml() {
+            return sndSml;
+        }
+
+        public void sndSml(int v) {
+            this.sndSml = v;
         }
 
         public int rcvWnd() {
@@ -730,6 +1061,7 @@ public abstract class TcpMultiplexer {
             }
         }
 
+        @SuppressWarnings("unchecked")
         public <T> T getAttr(ConnectionKey<T> key) {
             return (T) attributes.get(key);
         }
@@ -758,6 +1090,12 @@ public abstract class TcpMultiplexer {
             if (timers != null) {
                 timers.cancelAll();
             }
+            if (childChannel != null && childChannel.isOpen()) {
+                if (childCloseListener != null) {
+                    childChannel.closeFuture().removeListener(childCloseListener);
+                }
+                childChannel.close();
+            }
             if (sendBuffer != null) {
                 sendBuffer.releaseAll();
             }
@@ -770,6 +1108,14 @@ public abstract class TcpMultiplexer {
             return timestampEnabled;
         }
 
+        public void timestampEnabled(boolean v) {
+            this.timestampEnabled = v;
+        }
+
+        public int recentTimestamp() {
+            return recentTimestamp;
+        }
+
         public boolean pawsRejected(int tsval) {
             return timestampEnabled && Integer.compareUnsigned(tsval, recentTimestamp) < 0;
         }
@@ -777,6 +1123,96 @@ public abstract class TcpMultiplexer {
         public void updateRecentTimestamp(int tsval) {
             if (timestampEnabled) {
                 recentTimestamp = tsval;
+            }
+        }
+
+        public int quickAckCount() {
+            return quickAckCount;
+        }
+
+        public void quickAckCount(int v) {
+            quickAckCount = Math.max(v, 0);
+        }
+
+        public long ackTimeoutMs() {
+            return ackTimeoutMs;
+        }
+
+        public void ackTimeoutMs(long v) {
+            ackTimeoutMs = Math.max(v, 1L);
+        }
+
+        public boolean inQuickAckMode() {
+            return quickAckCount > 0 && !inPingpongMode();
+        }
+
+        public void enterQuickAckMode(int maxQuickAcks) {
+            incrQuickAckCount(maxQuickAcks);
+            exitPingpongMode();
+            ackTimeoutMs = TcpConstants.TCP_ATO_MIN_MS;
+        }
+
+        public void decQuickAckMode() {
+            if (quickAckCount > 0) {
+                quickAckCount--;
+                if (quickAckCount == 0) {
+                    ackTimeoutMs = TcpConstants.DELAYED_ACK_MS;
+                }
+            }
+        }
+
+        public void enterPingpongMode() {
+            pingpongCount = 1;
+        }
+
+        public void exitPingpongMode() {
+            pingpongCount = 0;
+        }
+
+        public boolean inPingpongMode() {
+            return pingpongCount >= TcpConstants.TCP_PINGPONG_THRESH;
+        }
+
+        public void incPingpongCount() {
+            if (pingpongCount < 0xFF) {
+                pingpongCount++;
+            }
+        }
+
+        public void onDataReceived() {
+            onDataReceived(0);
+        }
+
+        public void onDataReceived(int len) {
+            if (len >= rcvMss) {
+                rcvMss = Math.min(len, mss);
+            }
+            long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+            if (lastRecvTimeMs == 0L) {
+                incrQuickAckCount(TcpConstants.TCP_MAX_QUICKACKS);
+                ackTimeoutMs = TcpConstants.TCP_ATO_MIN_MS;
+            } else {
+                long m = now - lastRecvTimeMs;
+                if (m <= TcpConstants.TCP_ATO_MIN_MS / 2) {
+                    ackTimeoutMs = (ackTimeoutMs >> 1) + TcpConstants.TCP_ATO_MIN_MS / 2;
+                } else if (m < ackTimeoutMs) {
+                    ackTimeoutMs = Math.min((ackTimeoutMs >> 1) + m, rtoMs());
+                } else if (m > ackTimeoutMs) {
+                    incrQuickAckCount(TcpConstants.TCP_MAX_QUICKACKS);
+                }
+            }
+            lastRecvTimeMs = now;
+        }
+
+        public void onSegmentReceived() {
+            lastRecvTimeMs = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+        }
+
+        public void onDataSent() {
+            long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+            lastSendTimeMs = now;
+            if (lastRecvTimeMs != 0 && now - lastRecvTimeMs < ackTimeoutMs) {
+                incPingpongCount();
             }
         }
 
@@ -806,6 +1242,10 @@ public abstract class TcpMultiplexer {
             return Math.min(Math.max(rtoMs, TcpConstants.RTO_MIN_MS), TcpConstants.RTO_MAX_MS);
         }
 
+        public long srttUs() {
+            return srttUs;
+        }
+
         public void backoffRto() {
             if (rtoBackoffShift < 6) {
                 rtoBackoffShift++;
@@ -814,6 +1254,147 @@ public abstract class TcpMultiplexer {
 
         public void resetRtoBackoff() {
             rtoBackoffShift = 0;
+        }
+
+        public int linger2() {
+            return linger2;
+        }
+
+        public void linger2(int linger2) {
+            this.linger2 = linger2;
+        }
+
+        public void incrQuickAckCount(int maxQuickAcks) {
+            int quickacks = rcvWnd / Math.max(rcvMss << 1, 1);
+            if (quickacks == 0) {
+                quickacks = 2;
+            }
+            quickAckCount = Math.max(quickAckCount, Math.min(quickacks, maxQuickAcks));
+        }
+
+        public int tcpFinTimeMs() {
+            int finTimeout = linger2 != 0 ? linger2 : (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
+            long rto = rtoMs();
+            long minTimeout = (rto << 2) - (rto >> 1);
+            if (finTimeout < minTimeout) {
+                finTimeout = (int) minTimeout;
+            }
+            return finTimeout;
+        }
+
+        public int probeBackoffShift() {
+            return probeBackoffShift;
+        }
+
+        public void probeBackoffShift(int probeBackoffShift) {
+            this.probeBackoffShift = Math.max(probeBackoffShift, 0);
+        }
+
+        public void incProbeBackoff() {
+            if (probeBackoffShift < 31) {
+                probeBackoffShift++;
+            }
+        }
+
+        public int probesOut() {
+            return probesOut;
+        }
+
+        public void probesOut(int probesOut) {
+            this.probesOut = Math.max(probesOut, 0);
+        }
+
+        public long probesTstampMs() {
+            return probesTstampMs;
+        }
+
+        public void probesTstampMs(long probesTstampMs) {
+            this.probesTstampMs = Math.max(probesTstampMs, 0L);
+        }
+
+        public long userTimeoutMs() {
+            return userTimeoutMs;
+        }
+
+        public void userTimeoutMs(long userTimeoutMs) {
+            this.userTimeoutMs = Math.max(userTimeoutMs, 0L);
+        }
+
+        public long keepaliveTimeMs() {
+            return keepaliveTimeMs;
+        }
+
+        public long keepaliveIntvlMs() {
+            return keepaliveIntvlMs;
+        }
+
+        public int keepaliveProbes() {
+            return keepaliveProbes;
+        }
+
+        public boolean keepaliveEnabled() {
+            return keepaliveEnabled;
+        }
+
+        public void keepaliveEnabled(boolean keepaliveEnabled) {
+            this.keepaliveEnabled = keepaliveEnabled;
+        }
+
+        public long keepaliveElapsedMs() {
+            long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+            long lastActivity = lastRecvTimeMs != 0L ? lastRecvTimeMs : lastSendTimeMs;
+            if (lastActivity == 0L) {
+                return 0L;
+            }
+            return Math.max(now - lastActivity, 0L);
+        }
+
+        public long tcpRtoMaxMs() {
+            return TcpConstants.RTO_MAX_MS;
+        }
+
+        public long tcpProbe0BaseMs() {
+            return Math.max(rtoMs(), TcpConstants.RTO_MIN_MS);
+        }
+
+        public long tcpProbe0WhenMs(long maxWhenMs) {
+            int backoff = Math.min(9, probeBackoffShift);
+            long when = tcpProbe0BaseMs() << backoff;
+            return Math.min(when, maxWhenMs);
+        }
+
+        public long tcpClampProbe0ToUserTimeout(long whenMs) {
+            if (userTimeoutMs == 0L || probesTstampMs == 0L) {
+                return whenMs;
+            }
+            long elapsed = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32() - probesTstampMs;
+            if (elapsed < 0L) {
+                elapsed = 0L;
+            }
+            long remaining = Math.max(userTimeoutMs - elapsed, TcpConstants.RTO_MIN_MS);
+            return Math.min(remaining, whenMs);
+        }
+
+        public void resetProbeState() {
+            probeBackoffShift = 0;
+            probesOut = 0;
+            probesTstampMs = 0L;
+        }
+
+        public Runnable probeTimerAction() {
+            return probeTimerAction;
+        }
+
+        public void probeTimerAction(Runnable probeTimerAction) {
+            this.probeTimerAction = probeTimerAction == null ? () -> {} : probeTimerAction;
+        }
+
+        public Runnable keepaliveTimerAction() {
+            return keepaliveTimerAction;
+        }
+
+        public void keepaliveTimerAction(Runnable keepaliveTimerAction) {
+            this.keepaliveTimerAction = keepaliveTimerAction == null ? () -> {} : keepaliveTimerAction;
         }
 
         public void onAckedByCc(int newlyAcked, boolean advanced) {
@@ -878,6 +1459,10 @@ public abstract class TcpMultiplexer {
     protected static final class tcp_request_sock extends SockCommon {
         private final TcpSock listener;
         private final TcpHandshaker request;
+        private ChannelFuture connectFuture;
+        private Channel childChannel;
+        private ChannelFutureListener handshakeCloseListener;
+        private TcpPacketBuf synPacket;
 
         protected tcp_request_sock(FourTuple key, TcpSock listener, TcpHandshaker request) {
             super(key);
@@ -893,6 +1478,38 @@ public abstract class TcpMultiplexer {
             return request;
         }
 
+        public ChannelFuture connectFuture() {
+            return connectFuture;
+        }
+
+        public void connectFuture(ChannelFuture connectFuture) {
+            this.connectFuture = connectFuture;
+        }
+
+        public Channel childChannel() {
+            return childChannel;
+        }
+
+        public void childChannel(Channel childChannel) {
+            this.childChannel = childChannel;
+        }
+
+        public ChannelFutureListener handshakeCloseListener() {
+            return handshakeCloseListener;
+        }
+
+        public void handshakeCloseListener(ChannelFutureListener handshakeCloseListener) {
+            this.handshakeCloseListener = handshakeCloseListener;
+        }
+
+        public TcpPacketBuf synPacket() {
+            return synPacket;
+        }
+
+        public void synPacket(TcpPacketBuf synPacket) {
+            this.synPacket = synPacket;
+        }
+
         @Override
         public TcpConnectionState state() {
             return TcpConnectionState.TCP_SYN_RECV;
@@ -903,4 +1520,3 @@ public abstract class TcpMultiplexer {
         }
     }
 }
-

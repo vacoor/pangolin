@@ -56,6 +56,22 @@ public final class TcpConstants {
     // ---- FIN_WAIT_2 ----
     /** FIN_WAIT_2 timeout; cf. Linux tcp_fin_timeout sysctl (default 60 s) */
     public static final long FIN_WAIT_2_TIMEOUT_MS = 60_000L;
+    /** Minimum delayed-ACK / persist base interval counterpart (Linux HZ/25). */
+    public static final long TCP_ATO_MIN_MS = 40L;
+    /** Resource pressure probe interval (Linux TCP_RESOURCE_PROBE_INTERVAL). */
+    public static final long TCP_RESOURCE_PROBE_INTERVAL_MS = 500L;
+    /** Linux tcp_retries2 default. */
+    public static final int TCP_RETRIES2 = 15;
+    /** Linux tcp_keepalive_probes default. */
+    public static final int TCP_KEEPALIVE_PROBES = 9;
+    /** Linux tcp_keepalive_time default. */
+    public static final long TCP_KEEPALIVE_TIME_MS = 7_200_000L;
+    /** Linux tcp_keepalive_intvl default. */
+    public static final long TCP_KEEPALIVE_INTVL_MS = 75_000L;
+    /** Linux tcp_pingpong_thresh default. */
+    public static final int TCP_PINGPONG_THRESH = 1;
+    /** Linux TCP_MAX_QUICKACKS. */
+    public static final int TCP_MAX_QUICKACKS = 16;
 
     // ---- Delayed ACK ----
     /** Maximum delayed ACK delay: 40 ms (RFC 9293 §3.8.6.2.2) */

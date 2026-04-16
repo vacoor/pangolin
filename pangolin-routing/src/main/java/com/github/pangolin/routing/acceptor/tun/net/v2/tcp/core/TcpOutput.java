@@ -7,12 +7,15 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TimerType;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.buffer.Unpooled;
 
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_clock_ms;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.*;
 
@@ -182,7 +185,7 @@ public final class TcpOutput {
      * Drain the send buffer: segment and transmit pending data within the current
      * congestion window and peer receive window.
      *
-     * @param conn     the connection whose send buffer to drain
+     * @param sock     the socket whose send buffer to drain
      * @param mss_now  current MSS (≈ {@code tcp_current_mss()})
      * @param nonagle  Nagle flags ({@link TcpConstants#TCP_NAGLE_OFF} etc.)
      * @param push_one 0 = send as many as allowed; 1 = at most one; 2 = force loss probe
@@ -290,6 +293,7 @@ public final class TcpOutput {
             if (tcp_in_cwnd_reduction(sock)) {
             }
             if (push_one != 2) {
+                tcp_schedule_loss_probe(sock);
             }
             return false;
         }
@@ -313,6 +317,61 @@ public final class TcpOutput {
         sock.tcp_queue_skb(new TcpSegmentEntry(
                 empty, sock.writeSeq(), 0, (byte) (TCPHDR_ACK | TCPHDR_FIN), 0L));
         tcp_write_xmit(sock, sock.mss(), TCP_NAGLE_OFF, 0);
+    }
+
+    public int tcp_write_wakeup(TcpSock sock, int mib) {
+        if (sock == null || !sock.hasConnection() || sock.state() == com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState.TCP_CLOSED) {
+            return -1;
+        }
+
+        TcpSegmentEntry skb = sock.tcpSendHead();
+        int wndEnd = sock.sndUna() + sock.sndWnd();
+        if (skb != null && TcpSequence.before(skb.startSeq(), wndEnd)) {
+            int priorPackets = sock.packetsOut();
+            long priorSndNxt = Integer.toUnsignedLong(sock.sndNxt());
+            tcp_write_xmit(sock, tcp_current_mss(sock), TCP_NAGLE_OFF, 1);
+            return (sock.packetsOut() != priorPackets || Integer.toUnsignedLong(sock.sndNxt()) != priorSndNxt) ? 0 : 0;
+        }
+        return tcp_xmit_probe_skb(sock, 0, mib);
+    }
+
+    public long tcp_send_probe0(TcpSock sock) {
+        if (sock == null || !sock.hasConnection()) {
+            return -1L;
+        }
+        int err = tcp_write_wakeup(sock, 0);
+
+        if (sock.packetsOut() > 0 || sock.tcpSendHead() == null) {
+            sock.resetProbeState();
+            return -1L;
+        }
+
+        sock.probesOut(sock.probesOut() + 1);
+        long timeout;
+        if (err <= 0) {
+            if (sock.probeBackoffShift() < TcpConstants.TCP_RETRIES2) {
+                sock.incProbeBackoff();
+            }
+            timeout = sock.tcpProbe0WhenMs(TcpConstants.RTO_MAX_MS);
+        } else {
+            timeout = TcpConstants.TCP_RESOURCE_PROBE_INTERVAL_MS;
+        }
+
+        timeout = sock.tcpClampProbe0ToUserTimeout(timeout);
+        return timeout;
+    }
+
+    public void tcp_send_loss_probe(TcpSock sock) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        if (sock.tcpSendHead() != null) {
+            tcp_write_xmit(sock, tcp_current_mss(sock), TCP_NAGLE_OFF, 2);
+            return;
+        }
+        if (sock.sendBuffer() != null && sock.sendBuffer().peekRtx() != null) {
+            tcp_retransmit_skb(sock);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -417,11 +476,11 @@ public final class TcpOutput {
 
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L55">tcp_mstamp_refresh</a> */
     private void tcp_mstamp_refresh(TcpConnection conn) {
-        // TODO: update tp->tcp_clock_cache / tp->tcp_mstamp
+        // v2 connection view does not keep a separate tcp_clock_cache/tcp_mstamp field.
     }
 
     private void tcp_mstamp_refresh(TcpSock sock) {
-        // TODO: update tp->tcp_clock_cache / tp->tcp_mstamp
+        // v2 does not cache tcp_clock_cache/tcp_mstamp separately; RTT uses per-segment stamps.
     }
 
     /**
@@ -435,6 +494,18 @@ public final class TcpOutput {
 
     private int tcp_mtu_probe(TcpSock sock) {
         return -1;
+    }
+
+    /**
+     * Current MSS estimate for the send path.
+     * Mirrors the role of Linux {@code tcp_current_mss()} but keeps the existing
+     * v2 simplification: use the negotiated/application MSS directly.
+     */
+    public int tcp_current_mss(TcpSock sock) {
+        if (sock == null || sock.mss() <= 0) {
+            return TcpConstants.TCP_MSS_DEFAULT;
+        }
+        return sock.mss();
     }
 
     /**
@@ -673,40 +744,67 @@ public final class TcpOutput {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L182">tcp_event_ack_sent</a>
      */
     private void tcp_event_ack_sent(TcpConnection conn, int rcv_nxt) {
-        if (rcv_nxt != conn.rcvNxt()) return;
-        // TODO: tcp_dec_quickack_mode(conn)
+        if (rcv_nxt != conn.rcvNxt()) {
+            return;
+        }
+        conn.decQuickAckMode();
         if (conn.hasAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER)) {
             if (conn.hasAckPending(TcpConstants.ACK_TIMER)) {
                 TcpTimerScheduler.INSTANCE.cancelDelayedAck(conn);
             }
             conn.clearAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER);
         }
+        conn.clearAckPending(TcpConstants.ACK_NOW);
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L163">tcp_event_data_sent</a>
      */
     private void tcp_event_data_sent(TcpConnection conn) {
-        // TODO: tp.lsndtime = tcp_jiffies32()
-        // TODO: pingpong increment
+        conn.onDataSent();
     }
 
     private void tcp_event_data_sent(TcpSock sock) {
-        // TODO: tp.lsndtime = tcp_jiffies32()
-        // TODO: pingpong increment
+        sock.onDataSent();
     }
 
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L633">tcp_established_options</a>
      */
     private byte[] tcp_established_options(TcpConnection conn, TcpSegmentEntry skb) {
-        // TODO: TCP timestamps, SACK blocks
-        return null;
+        if (!conn.timestampEnabled()) {
+            return null;
+        }
+        ByteBuf optBuf = Unpooled.buffer(12);
+        try {
+            long tsval = tcp_clock_ms() & 0xFFFFFFFFL;
+            long tsecr = ((long) conn.recentTimestamp()) & 0xFFFFFFFFL;
+            com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec
+                    .writeTimestampOption(optBuf, tsval, tsecr);
+            byte[] bytes = new byte[optBuf.readableBytes()];
+            optBuf.readBytes(bytes);
+            return bytes;
+        } finally {
+            optBuf.release();
+        }
     }
 
     private byte[] tcp_established_options(TcpSock sock, TcpSegmentEntry skb) {
-        // TODO: TCP timestamps, SACK blocks
-        return null;
+        if (!sock.timestampEnabled()) {
+            return null;
+        }
+        ByteBuf optBuf = Unpooled.buffer(12);
+        try {
+            long tsval = tcp_clock_ms() & 0xFFFFFFFFL;
+            long tsecr = ((long) sock.recentTimestamp()) & 0xFFFFFFFFL;
+            com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec
+                    .writeTimestampOption(optBuf, tsval, tsecr);
+            byte[] bytes = new byte[optBuf.readableBytes()];
+            optBuf.readBytes(bytes);
+            return bytes;
+        } finally {
+            optBuf.release();
+        }
     }
 
     /**
@@ -723,18 +821,51 @@ public final class TcpOutput {
 
         sock.incrementPacketsOut();
 
-        if (startRto) {
+        if (startRto || (sock.timers() != null && sock.timers().writeTimerType == TimerType.TLP_PROBE)) {
             TcpRetransmitter.INSTANCE.scheduleRetransmit(sock);
         }
     }
 
+    private void tcp_schedule_loss_probe(TcpSock sock) {
+        if (sock == null || !sock.hasConnection() || sock.packetsOut() == 0 || sock.sndWnd() == 0) {
+            return;
+        }
+        if (sock.packetsOut() > 2) {
+            return;
+        }
+        if (sock.timers() != null && sock.timers().writeTimerType == TimerType.ZERO_WINDOW_PROBE) {
+            return;
+        }
+        long timeout = tcp_tlp_timeout(sock);
+        if (timeout <= 0L || timeout >= sock.rtoMs()) {
+            return;
+        }
+        TcpRetransmitter.INSTANCE.scheduleLossProbe(sock, timeout);
+    }
+
+    private long tcp_tlp_timeout(TcpSock sock) {
+        long srttMs = sock.srttUs() > 0L
+                ? Math.max(sock.srttUs() / 1_000L, 1L)
+                : Math.max(sock.rtoMs() >> 1, 1L);
+        long timeout = (srttMs << 1) + Math.max(sock.ackTimeoutMs(), TcpConstants.TCP_ATO_MIN_MS);
+        long rto = sock.rtoMs();
+        if (rto <= 1L) {
+            return 1L;
+        }
+        return Math.max(1L, Math.min(timeout, rto - 1L));
+    }
+
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L566">tcp_minshall_update</a> */
     private void tcp_minshall_update(TcpConnection conn, int mss_now, TcpSegmentEntry skb) {
-        // TODO: snd_sml
+        if (skb.dataLen() < tcp_skb_pcount(skb) * mss_now) {
+            conn.sndSml(skb.endSeq());
+        }
     }
 
     private void tcp_minshall_update(TcpSock sock, int mss_now, TcpSegmentEntry skb) {
-        // TODO: snd_sml
+        if (skb.dataLen() < tcp_skb_pcount(skb) * mss_now) {
+            sock.sndSml(skb.endSeq());
+        }
     }
 
     /** Always 1 — no TSO/GSO. */
@@ -753,7 +884,7 @@ public final class TcpOutput {
 
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2359">tcp_cwnd_validate</a> */
     private void tcp_cwnd_validate(boolean is_cwnd_limited) {
-        // TODO: tp->is_cwnd_limited, tp->max_packets_out
+        // v2 does not persist is_cwnd_limited/max_packets_out yet.
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -785,15 +916,30 @@ public final class TcpOutput {
         conn.channel().writeAndFlush(buf);
     }
 
+    private int tcp_xmit_probe_skb(TcpSock sock, int urgent, int mib) {
+        final FourTuple ft = sock.fourTuple();
+        int seq = sock.sndUna() - (urgent == 0 ? 1 : 0);
+        ByteBuf buf = TcpPacketBuilder.buildRaw(
+                ft.dstAddrBytes(), ft.dstPort(),
+                ft.srcAddrBytes(), ft.srcPort(),
+                seq, sock.rcvNxt(),
+                TCPHDR_ACK, selectAdvertisedWindow(sock), null, null, 0);
+        sock.channel().writeAndFlush(buf);
+        tcp_event_ack_sent(sock, sock.rcvNxt());
+        return 0;
+    }
+
     private void tcp_event_ack_sent(TcpSock sock, int rcv_nxt) {
         if (rcv_nxt != sock.rcvNxt()) {
             return;
         }
+        sock.decQuickAckMode();
         if (sock.hasAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER)) {
             if (sock.hasAckPending(TcpConstants.ACK_TIMER)) {
                 TcpTimerScheduler.INSTANCE.cancelDelayedAck(sock);
             }
             sock.clearAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER);
         }
+        sock.clearAckPending(TcpConstants.ACK_NOW);
     }
 }

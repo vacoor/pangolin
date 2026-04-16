@@ -4,12 +4,17 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.net.ConnectException;
+import java.net.SocketException;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils.logFormat;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
@@ -18,7 +23,6 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropRe
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants.SKB_DROP_REASON_TCP_OLD_SEQUENCE;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants.SKB_DROP_REASON_TCP_RESET;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants.SKB_NOT_DROPPED_YET;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpInput.tcp_reset;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.tcp_oow_rate_limited;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
@@ -26,10 +30,16 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSe
 public class TcpIncomingPreValidator {
     private static final Logger log = LoggerFactory.getLogger(TcpIncomingPreValidator.class);
     private final TcpSock sock;
+    private final Runnable resetAction;
     private ChannelPromise closePromise;
 
     public TcpIncomingPreValidator(TcpSock sock) {
+        this(sock, () -> {});
+    }
+
+    public TcpIncomingPreValidator(TcpSock sock, Runnable resetAction) {
         this.sock = sock;
+        this.resetAction = resetAction == null ? () -> {} : resetAction;
     }
 
     public void closePromise(ChannelPromise p) {
@@ -66,22 +76,24 @@ public class TcpIncomingPreValidator {
         int reason = tcp_sequence(sock, pkt);
         if (reason != SKB_NOT_DROPPED_YET) {
             if (!pkt.isRst()) {
+                sock.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
+                sock.addAckPending(TcpConstants.ACK_SCHED);
                 if (pkt.isSyn()) {
                     TcpOutput.INSTANCE.tcp_send_challenge_ack(sock, accecnReflector);
                     return false;
                 }
-                if (tcp_oow_rate_limited(sock, pkt)) {
+                if (!tcp_oow_rate_limited(sock, pkt)) {
                     TcpOutput.INSTANCE.tcp_send_ack(sock);
                 }
             } else if (tcp_reset_check(sock, pkt)) {
-                tcp_reset(ctx, sock, closePromise);
+                tcp_reset(ctx);
             }
             return false;
         }
 
         if (pkt.isRst()) {
             if (pkt.tcpSeq() == sock.rcvNxt() || tcp_reset_check(sock, pkt)) {
-                tcp_reset(ctx, sock, closePromise);
+                tcp_reset(ctx);
                 return false;
             }
             TcpOutput.INSTANCE.tcp_send_challenge_ack(sock, false);
@@ -99,11 +111,47 @@ public class TcpIncomingPreValidator {
                 return true;
             }
 
+            sock.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
+            sock.addAckPending(TcpConstants.ACK_SCHED);
             TcpOutput.INSTANCE.tcp_send_challenge_ack(sock, accecnReflector);
             return false;
         }
 
         return true;
+    }
+
+    private void tcp_reset(ChannelHandlerContext ctx) {
+        final int err;
+        switch (sock.state()) {
+            case TCP_SYN_SENT:
+                err = 111;
+                break;
+            case CLOSE_WAIT:
+                err = 32;
+                break;
+            case TCP_CLOSED:
+                return;
+            default:
+                err = 104;
+                break;
+        }
+        sock.skErr(err);
+        resetAction.run();
+        if (closePromise != null && !closePromise.isDone()) {
+            closePromise.trySuccess();
+        }
+        ctx.fireExceptionCaught(errException(err));
+    }
+
+    private static Exception errException(int err) {
+        switch (err) {
+            case 111:
+                return new ConnectException("Connection refused");
+            case 32:
+                return new IOException("Broken pipe");
+            default:
+                return new SocketException("Connection reset");
+        }
     }
 
     private static int tcp_sequence(TcpSock sock, TcpPacketBuf pkt) {

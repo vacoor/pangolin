@@ -223,7 +223,7 @@ public interface Route {
          */
         public short rtm_index;
         /**
-         * flags, incl. kern & message, e.g. DONE.
+         * flags, incl. kern &amp; message, e.g. DONE.
          */
         public int rtm_flags;
         /**
@@ -291,7 +291,7 @@ public interface Route {
          */
         public short rtm_index;
         /**
-         * flags, incl. kern & message, e.g. DONE.
+         * flags, incl. kern &amp; message, e.g. DONE.
          */
         public int rtm_flags;
         /**

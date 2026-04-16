@@ -1,10 +1,12 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.ConnectionKey;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpIncomingPreValidator;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
@@ -61,7 +63,6 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
             return;
         }
 
-        final int priorSndUna = sock.sndUna();
         int reason = tcpAck(sock, pkt, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT | FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {
             if (sock.state() == com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState.TCP_SYN_RECV) {
@@ -72,10 +73,6 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
                 return;
             }
         }
-
-        if (after(sock.sndUna(), priorSndUna)) {
-            TcpRetransmitter.INSTANCE.rearmRto(sock);
-        }
         ctx.fireChannelRead(msg);
     }
 
@@ -84,6 +81,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         final int priorPktsOut = sock.packetsOut();
         final int ackSeq = pkt.tcpSeq();
         final int ack = pkt.tcpAckNum();
+        sock.onSegmentReceived();
 
         if (before(ack, priorSndUna)) {
             final int maxWindow = (int) Math.min(sock.maxWindow(), sock.bytesAcked());
@@ -105,7 +103,10 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         }
 
         if ((flags & FLAG_UPDATE_TS_RECENT) != 0) {
-            sock.updateRecentTimestamp(ackSeq);
+            int tsval = parseTimestampValue(pkt);
+            if (tsval >= 0) {
+                sock.updateRecentTimestamp(tsval);
+            }
         }
 
         if ((flags & (FLAG_SLOWPATH | FLAG_SND_UNA_ADVANCED)) == FLAG_SND_UNA_ADVANCED) {
@@ -119,6 +120,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         }
 
         sock.sndUnaUpdate(ack);
+        sock.probesOut(0);
 
         if (priorPktsOut == 0) {
             tcpAckProbe(sock);
@@ -129,21 +131,40 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         sock.addRttSample(rttUs);
         sock.cleanRtxQueue(ack);
 
-        if ((flags & FLAG_SND_UNA_ADVANCED) != 0) {
+        if (after(sock.sndUna(), priorSndUna)) {
+            TcpRetransmitter.INSTANCE.rearmRto(sock);
             int newlyAcked = Math.max(1, priorPktsOut - sock.packetsOut());
             sock.onAckedByCc(newlyAcked, true);
             sock.resetRtoBackoff();
+        } else if (priorPktsOut > 0
+                && ack == priorSndUna
+                && (flags & (FLAG_DATA | FLAG_WIN_UPDATE)) == 0) {
+            sock.onAckedByCc(1, false);
         }
-        return 1;
+
+        return Math.max(flags, 1);
     }
 
     public static void tcpAckProbe(TcpSock sock) {
-        if (sock.tcpSendHead() == null) {
+        TcpSegmentEntry head = sock.tcpSendHead();
+        if (head == null) {
             return;
         }
-        if (sock.sndWnd() > 0) {
-            TcpRetransmitter.INSTANCE.cancelRetransmit(sock);
+        int wndEnd = sock.sndUna() + sock.sndWnd();
+        if (!after(head.endSeq(), wndEnd)) {
+            sock.probeBackoffShift(0);
+            sock.probesTstampMs(0L);
+            TcpTimerScheduler.INSTANCE.cancelWriteTimer(sock);
+            return;
         }
+        long when = sock.tcpProbe0WhenMs(sock.tcpRtoMaxMs());
+        when = sock.tcpClampProbe0ToUserTimeout(when);
+        TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
+                sock,
+                com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TimerType.ZERO_WINDOW_PROBE,
+                when,
+                () -> sock.probeTimerAction().run()
+        );
     }
 
     public static int tcpAckUpdateWindow(TcpSock sock, TcpPacketBuf pkt, boolean newDataAcked) {
@@ -166,5 +187,10 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         }
         long nowUs = System.nanoTime() / 1_000L;
         return nowUs - head.sentTimeUs();
+    }
+
+    private static int parseTimestampValue(TcpPacketBuf pkt) {
+        long[] ts = TcpOptionCodec.parseTimestamp(pkt.tcpOptionsSlice());
+        return ts == null ? -1 : (int) ts[0];
     }
 }

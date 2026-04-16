@@ -8,8 +8,12 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.Tcp4Multiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.DataConsumer;
+import com.github.pangolin.routing.support.SocketChannelFactory;
+import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,16 +30,30 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
 
     private final DnsEngine dnsEngine;
     private final DataConsumer dataConsumer;
+    private final SocketChannelFactory socketChannelFactory;
+    private final EventLoopGroup childGroup;
     private final TcpMultiplexer multiplexer;
 
     public TcpMultiplexHandler(final DnsEngine dnsEngine) {
-        this(dnsEngine, null);
+        this(dnsEngine, new StandardSocketChannelFactory(null), null);
     }
 
     public TcpMultiplexHandler(final DnsEngine dnsEngine, final DataConsumer dataConsumer) {
+        this(dnsEngine, new StandardSocketChannelFactory(null), dataConsumer);
+    }
+
+    public TcpMultiplexHandler(final DnsEngine dnsEngine, final SocketChannelFactory socketChannelFactory) {
+        this(dnsEngine, socketChannelFactory, null);
+    }
+
+    public TcpMultiplexHandler(final DnsEngine dnsEngine,
+                               final SocketChannelFactory socketChannelFactory,
+                               final DataConsumer dataConsumer) {
         super(PROTO_TCP);
         this.dnsEngine = dnsEngine;
         this.dataConsumer = dataConsumer;
+        this.socketChannelFactory = socketChannelFactory;
+        this.childGroup = new NioEventLoopGroup();
         this.multiplexer = create();
     }
 
@@ -57,7 +75,7 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
     }
 
     protected TcpMultiplexer create() {
-        return new Tcp4Multiplexer(TcpConfig.builder().build(), dataConsumer);
+        return new Tcp4Multiplexer(TcpConfig.builder().build(), socketChannelFactory, childGroup, dataConsumer);
     }
 
     public boolean write(final FourTuple key, final ByteBuf data) {
@@ -66,6 +84,15 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
 
     public TcpMultiplexer multiplexer() {
         return multiplexer;
+    }
+
+    @Override
+    public void handlerRemoved(final ChannelHandlerContext ctx) throws Exception {
+        try {
+            childGroup.shutdownGracefully();
+        } finally {
+            super.handlerRemoved(ctx);
+        }
     }
 
     protected java.net.InetAddress resolveDstAddress(final byte[] addr) throws UnknownHostException {

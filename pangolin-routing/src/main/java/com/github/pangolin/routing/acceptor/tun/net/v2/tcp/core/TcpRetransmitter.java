@@ -43,12 +43,46 @@ public final class TcpRetransmitter {
 
     /** Arm the retransmit timer for the current RTO. */
     public void scheduleRetransmit(TcpSock sock) {
+        scheduleRetransmit(sock, sock == null ? 0L : sock.rtoMs());
+    }
+
+    public void scheduleRetransmit(TcpSock sock, long delayMs) {
         if (sock == null || !sock.hasConnection()) {
             return;
         }
-        long rtoMs = sock.rtoMs();
         TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
-                sock, TimerType.RETRANSMIT, rtoMs, () -> onTimeout(sock));
+                sock, TimerType.RETRANSMIT, Math.max(delayMs, 1L), () -> onTimeout(sock));
+    }
+
+    public void scheduleLossProbe(TcpSock sock, long delayMs) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        TcpTimerScheduler.INSTANCE.rearmWriteTimerIfEarlier(
+                sock, TimerType.TLP_PROBE, Math.max(delayMs, 1L), () -> onLossProbe(sock));
+    }
+
+    public void scheduleReorderTimeout(TcpSock sock, long delayMs) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        TcpTimerScheduler.INSTANCE.rearmWriteTimerIfEarlier(
+                sock, TimerType.REORDER_TIMEOUT, Math.max(delayMs, 1L), () -> onReorderTimeout(sock));
+    }
+
+    public void onLossProbe(TcpSock sock) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        TcpOutput.INSTANCE.tcp_send_loss_probe(sock);
+        scheduleRetransmit(sock);
+    }
+
+    public void onReorderTimeout(TcpSock sock) {
+        if (sock == null || !sock.hasConnection()) {
+            return;
+        }
+        // v1 当前也只保留了 REO timeout 分支入口，没有实质 RACK 处理。
     }
 
     /** Cancel the retransmit timer (called when RTX queue becomes empty). */
@@ -74,7 +108,15 @@ public final class TcpRetransmitter {
         if (sock.packetsOut() == 0) {
             cancelRetransmit(sock);
         } else {
-            scheduleRetransmit(sock);
+            long rtoMs = sock.rtoMs();
+            if (sock.timers() != null) {
+                TimerType type = sock.timers().writeTimerType;
+                if (type == TimerType.REORDER_TIMEOUT || type == TimerType.TLP_PROBE) {
+                    long remaining = sock.timers().writeTimerExpires - System.currentTimeMillis();
+                    rtoMs = Math.max(remaining, 1L);
+                }
+            }
+            scheduleRetransmit(sock, rtoMs);
         }
     }
 }

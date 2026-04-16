@@ -66,7 +66,7 @@ public class inet_connection_sock extends inet_sock {
          * <p>
          * //     * @see #tcp_event_data_recv(TcpPacket)
          *
-         * @see TcpOutput#tcp_event_data_sent
+         * 由发送路径更新，见 {@code TcpOutput} 中对应的 ACK/发送状态维护逻辑。
          */
         public long timeout;
 

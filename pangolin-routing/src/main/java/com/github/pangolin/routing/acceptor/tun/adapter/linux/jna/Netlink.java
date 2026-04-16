@@ -98,7 +98,7 @@ public interface Netlink {
      */
     int NLMSG_OVERRUN = 0x4;
     /**
-     * < 0x10: reserved control messages.
+     * {@code < 0x10}: reserved control messages.
      */
     int NLMSG_MIN_TYPE = 0x10;
 

@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 
 import java.net.URL;
+import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -150,7 +151,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
         reader.setUpstreamFactories(upstreamFactories);
         reader.setUpstreamCombiners(upstreamCombiners);
         reader.setRoutePredicateFactories(predicateFactories);
-        return reader.load(new URL(url), parent);
+        return reader.load(URI.create(url).toURL(), parent);
     }
 
 }

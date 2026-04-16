@@ -797,6 +797,7 @@ public class TcpInput {
         }
     }
 
+    @SuppressWarnings("deprecation")
     private int tcp_clean_rtx_queue(final TcpSock tp, final int prior_snd_una) {
         // https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3340
 

@@ -23,6 +23,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
@@ -194,7 +195,7 @@ public class ExternalRouteContextFactory extends AbstractRouteContextFactory {
 
         ExternalRouteContextFactory factory = new ExternalRouteContextFactory();
         factory.setUpstreamFactories(ServiceLoader.load(UpstreamFactory.class));
-        RouteContext routeContext = factory.create(new URL(url), null);
+        RouteContext routeContext = factory.create(URI.create(url).toURL(), null);
         System.out.println(routeContext);
     }
 }

@@ -1,12 +1,16 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection;
 
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.cc.CongestionControl;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.rtt.RttEstimator;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpConnectionTimers;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
+
+import java.util.function.Consumer;
 
 /**
  * Rich domain model for a single TCP connection (RFC 9293).
@@ -28,6 +32,7 @@ public final class TcpConnection {
     private int sndWnd;    // SND.WND — peer's receive window
     private int maxWindow; // maximum SND.WND ever seen from peer (Linux: tp->max_window)
     private int sndWl1;    // SND.WL1 (linux: tp->snd_wl1) — SEQ of last window-update segment
+    private int sndSml;    // linux: tp->snd_sml
     private int rcvWnd;    // RCV.WND — our advertised receive window
     private int rcvWup;    // RCV.WUP — receive-window update point (Linux-style)
     private int rcvMss;    // RCV.MSS (linux: icsk_ack.rcv_mss) — effective receive MSS for delayed-ACK
@@ -69,6 +74,11 @@ public final class TcpConnection {
     // ── Pluggable extensions ─────────────────────────────────────────────────
     private boolean timestampEnabled;
     private int recentTimestamp;
+    private int quickAckCount;
+    private long ackTimeoutMs;
+    private int pingpongCount;
+    private long lastRecvTimeMs;
+    private long lastSendTimeMs;
     private long srttUs;
     private long rttvarUs;
     private int rtoBackoffShift;
@@ -78,6 +88,9 @@ public final class TcpConnection {
     private int caIncrCounter;
     private String congestionState = "OPEN";
     private int highSeq;
+    private CongestionControl congestionControl;
+    private Consumer<TcpConnection> fastRetransmitAction;
+    private RttEstimator rttEstimator;
 
     // ── Timer slots ──────────────────────────────────────────────────────────
     private final TcpConnectionTimers timers = new TcpConnectionTimers();
@@ -93,6 +106,7 @@ public final class TcpConnection {
         this.sndWnd = b.sndWnd;
         this.maxWindow = b.sndWnd;  // initialise to the first advertised window
         this.sndWl1 = b.sndWl1;
+        this.sndSml = b.sndUna;
         this.rcvWnd = b.rcvWnd;
         this.rcvWup = b.rcvWup;
         this.rcvMss = b.mss;    // tcp_initialize_rcv_mss will refine this in ESTABLISHED transition
@@ -101,8 +115,18 @@ public final class TcpConnection {
         this.rcvWscale = b.rcvWscale;
         this.skShutdown = 0;
         this.lastOowAckTimeMs = 0L;
+        this.timestampEnabled = b.timestampEnabled;
+        this.recentTimestamp = b.recentTimestamp;
+        this.quickAckCount = 0;
+        this.ackTimeoutMs = TcpConstants.DELAYED_ACK_MS;
+        this.pingpongCount = 0;
+        this.lastRecvTimeMs = 0L;
+        this.lastSendTimeMs = 0L;
         this.sendBuffer = new TcpSendBuffer();
         this.receiveBuffer = new TcpReceiveBuffer(channel.alloc());
+        this.congestionControl = b.congestionControl;
+        this.fastRetransmitAction = b.fastRetransmitAction;
+        this.rttEstimator = b.rttEstimator;
     }
 
     // ── Accessors ────────────────────────────────────────────────────────────
@@ -157,6 +181,10 @@ public final class TcpConnection {
 
     public int sndWl1() {
         return sndWl1;
+    }
+
+    public int sndSml() {
+        return sndSml;
     }
 
     public int rcvWnd() {
@@ -246,6 +274,10 @@ public final class TcpConnection {
 
     public void sndWl1(int v) {
         this.sndWl1 = v;
+    }
+
+    public void sndSml(int v) {
+        this.sndSml = v;
     }
 
     public void rcvWnd(int v) {
@@ -420,44 +452,171 @@ public final class TcpConnection {
         return timestampEnabled;
     }
 
+    public void timestampEnabled(boolean timestampEnabled) {
+        this.timestampEnabled = timestampEnabled;
+    }
+
     public int recentTimestamp() {
         return recentTimestamp;
+    }
+
+    public void recentTimestamp(int recentTimestamp) {
+        this.recentTimestamp = recentTimestamp;
+    }
+
+    public void updateRecentTimestamp(int tsval) {
+        if (timestampEnabled) {
+            recentTimestamp = tsval;
+        }
+    }
+
+    public int quickAckCount() {
+        return quickAckCount;
+    }
+
+    public void quickAckCount(int quickAckCount) {
+        this.quickAckCount = Math.max(quickAckCount, 0);
+    }
+
+    public long ackTimeoutMs() {
+        return ackTimeoutMs;
+    }
+
+    public void ackTimeoutMs(long ackTimeoutMs) {
+        this.ackTimeoutMs = Math.max(ackTimeoutMs, 1L);
+    }
+
+    public boolean inPingpongMode() {
+        return pingpongCount >= TcpConstants.TCP_PINGPONG_THRESH;
+    }
+
+    public int pingpongCount() {
+        return pingpongCount;
+    }
+
+    public long lastRecvTimeMs() {
+        return lastRecvTimeMs;
+    }
+
+    public long lastSendTimeMs() {
+        return lastSendTimeMs;
+    }
+
+    public void exitPingpongMode() {
+        pingpongCount = 0;
+    }
+
+    public void decQuickAckMode() {
+        if (quickAckCount > 0) {
+            quickAckCount--;
+            if (quickAckCount == 0) {
+                ackTimeoutMs = TcpConstants.DELAYED_ACK_MS;
+            }
+        }
+    }
+
+    public void onDataSent() {
+        long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+        lastSendTimeMs = now;
+        if (lastRecvTimeMs != 0L && now - lastRecvTimeMs < ackTimeoutMs) {
+            if (pingpongCount < 0xFF) {
+                pingpongCount++;
+            }
+        }
+    }
+
+    public void onSegmentReceived() {
+        lastRecvTimeMs = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
     }
 
     public long srttUs() {
         return srttUs;
     }
 
+    public void srttUs(long srttUs) {
+        this.srttUs = srttUs;
+    }
+
     public long rttvarUs() {
         return rttvarUs;
+    }
+
+    public void rttvarUs(long rttvarUs) {
+        this.rttvarUs = rttvarUs;
     }
 
     public int rtoBackoffShift() {
         return rtoBackoffShift;
     }
 
+    public void rtoBackoffShift(int rtoBackoffShift) {
+        this.rtoBackoffShift = Math.max(rtoBackoffShift, 0);
+    }
+
     public int cwnd() {
         return cwnd;
+    }
+
+    public void cwnd(int cwnd) {
+        this.cwnd = Math.max(cwnd, 1);
     }
 
     public int ssthresh() {
         return ssthresh;
     }
 
+    public void ssthresh(int ssthresh) {
+        this.ssthresh = Math.max(ssthresh, 2);
+    }
+
     public int dupacks() {
         return dupacks;
+    }
+
+    public void dupacks(int dupacks) {
+        this.dupacks = Math.max(dupacks, 0);
     }
 
     public int caIncrCounter() {
         return caIncrCounter;
     }
 
+    public void caIncrCounter(int caIncrCounter) {
+        this.caIncrCounter = Math.max(caIncrCounter, 0);
+    }
+
     public String congestionState() {
         return congestionState;
     }
 
+    public void congestionState(String congestionState) {
+        this.congestionState = congestionState;
+    }
+
     public int highSeq() {
         return highSeq;
+    }
+
+    public void highSeq(int highSeq) {
+        this.highSeq = highSeq;
+    }
+
+    public CongestionControl congestionControl() {
+        return congestionControl;
+    }
+
+    public Consumer<TcpConnection> fastRetransmitAction() {
+        return fastRetransmitAction;
+    }
+
+    public void fireFastRetransmit() {
+        if (fastRetransmitAction != null) {
+            fastRetransmitAction.accept(this);
+        }
+    }
+
+    public RttEstimator rttEstimator() {
+        return rttEstimator;
     }
 
     // ── Timers / buffers ─────────────────────────────────────────────────────
@@ -505,6 +664,11 @@ public final class TcpConnection {
         private int mss = 1460;
         private int sndWscale;
         private int rcvWscale;
+        private boolean timestampEnabled;
+        private int recentTimestamp;
+        private CongestionControl congestionControl;
+        private Consumer<TcpConnection> fastRetransmitAction;
+        private RttEstimator rttEstimator;
 
         public Builder channel(Channel ch) {
             this.channel = ch;
@@ -567,9 +731,33 @@ public final class TcpConnection {
             return this;
         }
 
+        public Builder timestampEnabled(boolean v) {
+            this.timestampEnabled = v;
+            return this;
+        }
+
+        public Builder recentTimestamp(int v) {
+            this.recentTimestamp = v;
+            return this;
+        }
+
+        public Builder congestionControl(CongestionControl congestionControl,
+                                         Consumer<TcpConnection> fastRetransmitAction) {
+            this.congestionControl = congestionControl;
+            this.fastRetransmitAction = fastRetransmitAction;
+            return this;
+        }
+
+        public Builder rttEstimator(RttEstimator rttEstimator) {
+            this.rttEstimator = rttEstimator;
+            return this;
+        }
+
         public TcpConnection build() {
             if (channel == null) throw new IllegalStateException("channel must be set");
-            if (fourTuple == null) throw new IllegalStateException("fourTuple must be set");
+            if (fourTuple == null) {
+                fourTuple = FourTuple.of(new byte[]{0, 0, 0, 0}, 0, new byte[]{0, 0, 0, 0}, 0);
+            }
             if (!rcvWupSet) {
                 rcvWup = rcvNxt;
             }
