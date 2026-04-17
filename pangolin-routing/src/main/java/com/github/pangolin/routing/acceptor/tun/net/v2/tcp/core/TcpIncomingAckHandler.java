@@ -130,6 +130,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         long rttUs = rttSample(sock, pkt);
         sock.addRttSample(rttUs);
         sock.cleanRtxQueue(ack);
+        tcpProcessTlpAck(sock, ack);
 
         if (after(sock.sndUna(), priorSndUna)) {
             TcpRetransmitter.INSTANCE.rearmRto(sock);
@@ -143,6 +144,16 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         }
 
         return Math.max(flags, 1);
+    }
+
+    private static void tcpProcessTlpAck(TcpSock sock, int ack) {
+        int tlpHighSeq = sock.tlpHighSeq();
+        if (tlpHighSeq == 0) {
+            return;
+        }
+        if (sock.packetsOut() == 0 || !before(ack, tlpHighSeq)) {
+            sock.tlpHighSeq(0);
+        }
     }
 
     public static void tcpAckProbe(TcpSock sock) {

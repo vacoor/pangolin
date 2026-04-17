@@ -830,6 +830,9 @@ public final class TcpOutput {
         if (sock == null || !sock.hasConnection() || sock.packetsOut() == 0 || sock.sndWnd() == 0) {
             return;
         }
+        if (sock.tlpHighSeq() != 0) {
+            return;
+        }
         if (sock.packetsOut() > 2) {
             return;
         }
@@ -840,6 +843,7 @@ public final class TcpOutput {
         if (timeout <= 0L || timeout >= sock.rtoMs()) {
             return;
         }
+        sock.tlpHighSeq(sock.sndNxt());
         TcpRetransmitter.INSTANCE.scheduleLossProbe(sock, timeout);
     }
 

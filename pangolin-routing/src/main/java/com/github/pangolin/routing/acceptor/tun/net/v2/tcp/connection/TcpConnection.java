@@ -88,6 +88,7 @@ public final class TcpConnection {
     private int caIncrCounter;
     private String congestionState = "OPEN";
     private int highSeq;
+    private int tlpHighSeq;
     private CongestionControl congestionControl;
     private Consumer<TcpConnection> fastRetransmitAction;
     private RttEstimator rttEstimator;
@@ -599,6 +600,14 @@ public final class TcpConnection {
 
     public void highSeq(int highSeq) {
         this.highSeq = highSeq;
+    }
+
+    public int tlpHighSeq() {
+        return tlpHighSeq;
+    }
+
+    public void tlpHighSeq(int tlpHighSeq) {
+        this.tlpHighSeq = tlpHighSeq;
     }
 
     public CongestionControl congestionControl() {

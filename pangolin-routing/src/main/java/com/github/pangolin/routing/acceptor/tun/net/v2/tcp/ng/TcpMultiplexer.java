@@ -633,6 +633,7 @@ public abstract class TcpMultiplexer {
         private int caIncrCounter;
         private CongestionState congestionState = CongestionState.OPEN;
         private int highSeq;
+        private int tlpHighSeq;
 
         protected TcpSock() {
             this(null, false);
@@ -756,6 +757,7 @@ public abstract class TcpMultiplexer {
             caIncrCounter = 0;
             congestionState = CongestionState.OPEN;
             highSeq = 0;
+            tlpHighSeq = 0;
         }
 
         private void loadFromConnection(TcpConnection conn) {
@@ -813,6 +815,7 @@ public abstract class TcpMultiplexer {
                     ? CongestionState.OPEN
                     : CongestionState.valueOf(conn.congestionState());
             this.highSeq = conn.highSeq();
+            this.tlpHighSeq = conn.tlpHighSeq();
         }
 
         public Channel channel() {
@@ -1403,6 +1406,7 @@ public abstract class TcpMultiplexer {
                     ssthresh = Math.max(cwnd / 2, 2);
                     cwnd = ssthresh + 3;
                     highSeq = sndNxt;
+                    tlpHighSeq = 0;
                     congestionState = CongestionState.RECOVERY;
                     caIncrCounter = 0;
                     TcpRetransmitter.INSTANCE.retransmit(this);
@@ -1438,7 +1442,16 @@ public abstract class TcpMultiplexer {
             cwnd = 1;
             dupacks = 0;
             caIncrCounter = 0;
+            tlpHighSeq = 0;
             congestionState = CongestionState.LOSS;
+        }
+
+        public int tlpHighSeq() {
+            return tlpHighSeq;
+        }
+
+        public void tlpHighSeq(int tlpHighSeq) {
+            this.tlpHighSeq = tlpHighSeq;
         }
 
         public int cwnd() {

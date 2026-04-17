@@ -35,6 +35,7 @@ public final class TcpRetransmitter {
         if (sock == null || !sock.hasConnection()) {
             return;
         }
+        sock.tlpHighSeq(0);
         sock.onTimeoutByCc();
         sock.backoffRto();
         retransmit(sock);
@@ -87,6 +88,9 @@ public final class TcpRetransmitter {
 
     /** Cancel the retransmit timer (called when RTX queue becomes empty). */
     public void cancelRetransmit(TcpSock sock) {
+        if (sock != null) {
+            sock.tlpHighSeq(0);
+        }
         TcpTimerScheduler.INSTANCE.cancelWriteTimer(sock);
     }
 
