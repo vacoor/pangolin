@@ -194,7 +194,7 @@ public class LinuxTunAdapter extends TunAdapter {
             ifr2.ifr_ifru.setType("ifru_flags");
             ifr2.ifr_ifru.ifru_flags = If.IFF_UP | If.IFF_RUNNING | If.IFF_POINTOPOINT | If.IFF_MULTICAST;
             if (LIBC.ioctl(skfd, Sockios.SIOCSIFFLAGS, ifr2) < 0) {
-                throw new LastErrorException(Native.getLastError());
+                LinuxUtils.throwLastErrorException(Native.getLastError());
             }
 
             int mtuToUse = mtu;

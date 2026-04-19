@@ -178,7 +178,8 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
         } else {
             throw new IllegalArgumentException();
         }
-        route0(nlmsg_type, family, dst.getAddress(), prefix, gw.getAddress(), ifindex);
+        final byte[] gwBytes = gw == null ? new byte[0] : gw.getAddress();
+        route0(nlmsg_type, family, dst.getAddress(), prefix, gwBytes, ifindex);
     }
 
     /**
@@ -198,55 +199,95 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
 
         final int sockfd = bind();
         try {
-            final int wLen = NLMSGHDR_SIZE + RTMSG_SIZE
+            final int wCapacity = NLMSGHDR_SIZE + RTMSG_SIZE
                     + rtaAlign(RTATTR_SIZE + dst.length) * 2
                     + rtaAlign(RTATTR_SIZE + 4);
 
-            final Memory wBuf = new Memory(wLen);
+            final Memory wBuf = new Memory(wCapacity);
+            try {
+                int bytesWritten = 0;
+                final Netlink.nlmsghdr nlm = new Netlink.nlmsghdr(wBuf.share(bytesWritten));
+                // nlmsg_len 延迟到写完所有 rtattr 后再回填（BUG-2）
+                short flags = (short) (Netlink.NLM_F_REQUEST | Netlink.NLM_F_ACK);
+                if (RtNetlink.RTM_NEWROUTE == nlmsg_type) {
+                    flags |= Netlink.NLM_F_CREATE;
+                }
+                nlm.nlmsg_flags = flags;
+                nlm.nlmsg_type = nlmsg_type;
+                nlm.nlmsg_seq = 1;
+                nlm.nlmsg_pid = LIBC.getpid();
+                bytesWritten += nlm.size();
 
-            int bytesWritten = 0;
-            final Netlink.nlmsghdr nlm = new Netlink.nlmsghdr(wBuf.share(bytesWritten));
-            nlm.nlmsg_len = wLen;
-            nlm.nlmsg_flags = Netlink.NLM_F_REQUEST | Netlink.NLM_F_CREATE;
-            nlm.nlmsg_type = nlmsg_type;
-            nlm.write();
-            bytesWritten += nlm.size();
+                final RtNetlink.rtmsg rtm = new RtNetlink.rtmsg(wBuf.share(bytesWritten));
+                rtm.rtm_family = family;
+                rtm.rtm_dst_len = (byte) prefix;
 
-            final RtNetlink.rtmsg rtm = new RtNetlink.rtmsg(wBuf.share(bytesWritten));
-            rtm.rtm_family = family;
-            rtm.rtm_dst_len = (byte) prefix;
+                rtm.rtm_table = (byte) RtNetlink.RT_TABLE_MAIN;
+                rtm.rtm_protocol = RtNetlink.RTPROT_STATIC;
+                rtm.rtm_scope = RtNetlink.RT_SCOPE_UNIVERSE;
+                rtm.rtm_type = RtNetlink.RTN_UNICAST;
+                rtm.write();
+                bytesWritten += rtm.size();
 
-            rtm.rtm_table = (byte) RtNetlink.RT_TABLE_MAIN;
-            rtm.rtm_protocol = RtNetlink.RTPROT_STATIC;
-            rtm.rtm_scope = RtNetlink.RT_SCOPE_UNIVERSE;
-            rtm.rtm_type = RtNetlink.RTN_UNICAST;
-            rtm.write();
-            bytesWritten += rtm.size();
+                bytesWritten += writeBytesRtAttr(wBuf.share(bytesWritten), (short) RtNetlink.RTA_DST, dst);
+                if (gw.length > 0) {
+                    bytesWritten += writeBytesRtAttr(wBuf.share(bytesWritten), (short) RtNetlink.RTA_GATEWAY, gw);
+                }
+                if (0 != ifindex) {
+                    bytesWritten += writeIntRtAttr(wBuf.share(bytesWritten), (short) RtNetlink.RTA_OIF, ifindex);
+                }
 
-            bytesWritten += writeBytesRtAttr(wBuf.share(bytesWritten), (short) RtNetlink.RTA_DST, dst);
-            if (gw.length > 0) {
-                bytesWritten += writeBytesRtAttr(wBuf.share(bytesWritten), (short) RtNetlink.RTA_GATEWAY, gw);
-            }
-            if (0 != ifindex) {
-                bytesWritten += writeIntRtAttr(wBuf.share(bytesWritten), (short) RtNetlink.RTA_OIF, ifindex);
-            }
+                nlm.nlmsg_len = bytesWritten;
+                nlm.write();
 
-            if (LIBC.send(sockfd, nlm.getPointer(), bytesWritten, 0) < 0) {
-                LinuxUtils.throwLastErrorException(Native.getLastError());
+                if (LIBC.send(sockfd, nlm.getPointer(), bytesWritten, 0) < 0) {
+                    LinuxUtils.throwLastErrorException(Native.getLastError());
+                }
+
+                checkAck(sockfd);
+            } finally {
+                wBuf.close();
             }
         } finally {
             LIBC.close(sockfd);
         }
     }
 
+    /**
+     * Receive and parse the ACK from a netlink request. Throws on non-zero error code.
+     */
+    private static void checkAck(final int sockfd) {
+        final Memory rBuf = new Memory(8192);
+        try {
+            final int size = LIBC.recv(sockfd, rBuf, (int) rBuf.size(), 0);
+            if (size < 0) {
+                LinuxUtils.throwLastErrorException(Native.getLastError());
+            }
+            if (size < NLMSGHDR_SIZE) {
+                return;
+            }
+            final Netlink.nlmsghdr nlmR = new Netlink.nlmsghdr(rBuf);
+            nlmR.read();
+            if (Netlink.NLMSG_ERROR == nlmR.nlmsg_type) {
+                // struct nlmsgerr { int error; struct nlmsghdr msg; }
+                final int err = rBuf.getInt(nlmR.size());
+                if (0 != err) {
+                    LinuxUtils.throwLastErrorException(-err);
+                }
+            }
+        } finally {
+            rBuf.close();
+        }
+    }
+
     private static int writeIntRtAttr(final Pointer ptr, final short type, final int ifindex) {
         final RtNetlink.rtattr rta = new RtNetlink.rtattr(ptr);
-        rta.rta_len = (byte) (rta.size() + 4);
+        rta.rta_len = (short) (rta.size() + 4);
         rta.rta_type = type;
         rta.write();
 
         ptr.setInt(rta.size(), ifindex);
-        return rtaAlign(rta.size() + 4);
+        return rtaAlign(rta.rta_len);
     }
 
     /**
@@ -257,8 +298,8 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
      * @return the bytes written
      */
     static int writeBytesRtAttr(final Pointer ptr, final short rtaType, final byte[] bytes) {
-        RtNetlink.rtattr rta = new RtNetlink.rtattr(ptr);
-        rta.rta_len = (byte) (rta.size() + bytes.length);
+        final RtNetlink.rtattr rta = new RtNetlink.rtattr(ptr);
+        rta.rta_len = (short) (rta.size() + bytes.length);
         rta.rta_type = rtaType;
         rta.write();
 
@@ -306,7 +347,7 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
             }
 
             final List<Route> routes = Lists.newLinkedList();
-            final Memory rBuf = new Memory(2096);
+            final Memory rBuf = new Memory(8192);
             int size;
             while ((size = LIBC.recv(sockfd, rBuf, (int) rBuf.size(), 0)) > 0) {
                 /*-

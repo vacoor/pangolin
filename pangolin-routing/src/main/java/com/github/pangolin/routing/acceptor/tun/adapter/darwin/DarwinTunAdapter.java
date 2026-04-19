@@ -318,6 +318,9 @@ public class DarwinTunAdapter extends TunAdapter {
                 } catch (final NumberFormatException e) {
                     throw new IllegalArgumentException(ILLEGAL_NAME_EXCEPTION);
                 }
+                if (index < 0 || index >= Short.MAX_VALUE) {
+                    throw new IllegalArgumentException(ILLEGAL_NAME_EXCEPTION);
+                }
             } else {
                 throw new IllegalArgumentException(ILLEGAL_NAME_EXCEPTION);
             }

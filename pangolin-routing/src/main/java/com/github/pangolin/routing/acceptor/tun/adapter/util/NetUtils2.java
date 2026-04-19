@@ -60,9 +60,27 @@ public class NetUtils2 {
             final Inet6Address v6 = (Inet6Address) ipAddress;
             final BigInteger netmask = prefixToSubnetMask6(prefix);
             final BigInteger networkAddress = ipAddressToInt6(v6).and(netmask);
-            return toInet6Address(networkAddress.toByteArray(), v6.getScopeId());
+            return toInet6Address(toFixedBytes(networkAddress, 16), v6.getScopeId());
         }
         throw new UnsupportedOperationException();
+    }
+
+    /**
+     * BigInteger.toByteArray() 是有符号表示：首字节最高位为 1 时会前补 0x00 得到 N+1 字节；
+     * 数值较小时可能少于 N 字节。此处对齐到指定长度，保留低 N 字节。
+     */
+    private static byte[] toFixedBytes(final BigInteger value, final int len) {
+        final byte[] raw = value.toByteArray();
+        if (raw.length == len) {
+            return raw;
+        }
+        final byte[] out = new byte[len];
+        if (raw.length > len) {
+            System.arraycopy(raw, raw.length - len, out, 0, len);
+        } else {
+            System.arraycopy(raw, 0, out, len - raw.length, raw.length);
+        }
+        return out;
     }
 
     public static InetAddress toInetAddress(final byte[] addr) {

@@ -234,9 +234,11 @@ public class WindowsTunAdapter extends TunAdapter {
             } catch (final LastErrorException e) {
                 if (null != session) {
                     WintunEndSession(session);
+                    session = null;
                 }
                 if (null != adapter) {
                     WintunCloseAdapter(adapter);
+                    adapter = null;
                 }
 
                 if (WinError.ERROR_ALREADY_EXISTS == e.getErrorCode() && ++i < 3) {

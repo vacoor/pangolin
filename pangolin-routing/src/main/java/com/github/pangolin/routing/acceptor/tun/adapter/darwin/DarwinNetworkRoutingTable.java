@@ -179,55 +179,62 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
                                final InetAddress dst, final InetAddress netmask,
                                final InetAddress gw, final short rtm_index) {
         final int rtmsgMaxSize = RT_MSGHDR_SIZE + SOCKADDR_IN6_SIZE * 3 + SOCKADDR_DL_SIZE;
+        /*-
+         * 当前只写一条路由；循环体与 rtmsgMaxSize * N 的缓冲结构为将来批量添加路由预留，
+         * 届时只需把常量 1 替换为实际条数即可。
+         */
+        final int count = 1;
 
         int bytesWritten = 0;
-        final Memory buffer = new Memory(rtmsgMaxSize * 1);
-        for (int i = 0; i < 1; i++) {
-            final Pointer ptr = buffer.share(bytesWritten);
-            final com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.rt_msghdr rtm = new com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.rt_msghdr(ptr);
-            rtm.rtm_msglen = (short) buffer.size();
-            rtm.rtm_version = com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTM_VERSION;
-            rtm.rtm_type = rtm_type;
-            rtm.rtm_flags = com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTF_UP | com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTF_GATEWAY | com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTF_STATIC;
-            rtm.rtm_pid = 0;
-            rtm.rtm_seq = i + 1;
-            rtm.write();
-
-            int offset = rtm.size();
-            if (null != dst) {
-                rtm.rtm_addrs |= com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTA_DST;
-                offset += writeSockAddrIn(ptr.share(offset), dst);
-            }
-            if (null != gw) {
-                rtm.rtm_addrs |= com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTA_GATEWAY;
-                offset += writeSockAddrIn(ptr.share(offset), gw);
-            }
-            if (null != netmask) {
-                rtm.rtm_addrs |= com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTA_NETMASK;
-                offset += writeSockAddrIn(ptr.share(offset), netmask);
-            }
-            if (rtm_index != 0) {
-                rtm.rtm_addrs |= com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTA_IFP;
-                rtm.rtm_index = rtm_index;
-                offset += writeSockAddrDl(ptr.share(offset), rtm_index);
-            }
-
-            rtm.rtm_msglen = (short) offset;
-            rtm.write();
-            bytesWritten += offset;
-        }
-
-        final int fd = LIBC.socket(AF_ROUTE, SOCK_RAW, AF_UNSPEC);
-        if (fd < 0) {
-            throwLastErrorException(Native.getLastError());
-        }
+        final Memory buffer = new Memory((long) rtmsgMaxSize * count);
         try {
-            final int actualBytesWritten = LIBC.write(fd, buffer, bytesWritten);
-            if (actualBytesWritten != bytesWritten) {
+            for (int i = 0; i < count; i++) {
+                final Pointer ptr = buffer.share(bytesWritten);
+                final com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.rt_msghdr rtm = new com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.rt_msghdr(ptr);
+                rtm.rtm_version = com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTM_VERSION;
+                rtm.rtm_type = rtm_type;
+                rtm.rtm_flags = com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTF_UP | com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTF_GATEWAY | com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTF_STATIC;
+                rtm.rtm_pid = 0;
+                rtm.rtm_seq = i + 1;
+
+                int offset = rtm.size();
+                if (null != dst) {
+                    rtm.rtm_addrs |= com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTA_DST;
+                    offset += writeSockAddrIn(ptr.share(offset), dst);
+                }
+                if (null != gw) {
+                    rtm.rtm_addrs |= com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTA_GATEWAY;
+                    offset += writeSockAddrIn(ptr.share(offset), gw);
+                }
+                if (null != netmask) {
+                    rtm.rtm_addrs |= com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTA_NETMASK;
+                    offset += writeSockAddrIn(ptr.share(offset), netmask);
+                }
+                if (rtm_index != 0) {
+                    rtm.rtm_addrs |= com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTA_IFP;
+                    rtm.rtm_index = rtm_index;
+                    offset += writeSockAddrDl(ptr.share(offset), rtm_index);
+                }
+
+                rtm.rtm_msglen = (short) offset;
+                rtm.write();
+                bytesWritten += offset;
+            }
+
+            final int fd = LIBC.socket(AF_ROUTE, SOCK_RAW, AF_UNSPEC);
+            if (fd < 0) {
                 throwLastErrorException(Native.getLastError());
             }
+            try {
+                final int actualBytesWritten = LIBC.write(fd, buffer, bytesWritten);
+                if (actualBytesWritten != bytesWritten) {
+                    throwLastErrorException(Native.getLastError());
+                }
+            } finally {
+                LIBC.close(fd);
+            }
         } finally {
-            LIBC.close(fd);
+            buffer.close();
         }
     }
 
@@ -300,7 +307,10 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
                 rtm.read();
 
                 if ((rtm.rtm_flags & com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTF_UP) != 0 && rtm.rtm_type == com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTM_GET) {
-                    routes.add(parseRouteEntry(rtm));
+                    final Route entry = parseRouteEntry(rtm);
+                    if (null != entry) {
+                        routes.add(entry);
+                    }
                 }
 
                 // move pointer to next route entry.
@@ -340,9 +350,15 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
         final InetAddress dst = null != tab[com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTAX_DST] ? parseInetAddress(tab[com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTAX_DST]) : null;
         final InetAddress gw = null != tab[com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTAX_GATEWAY] ? parseInetAddress(tab[com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTAX_GATEWAY]) : null;
 
+        // AF_LINK 作为 RTAX_DST 的条目（例如 link-scoped route），parseInetAddress 返回 null，
+        // 后续 Route 使用端会 NPE；此类条目无意义，直接跳过
+        if (null == dst) {
+            return null;
+        }
+
         final int cidr = null != tab[com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTAX_NETMASK]
                 ? parseNetmask(tab[com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTAX_NETMASK])
-                : null != dst && (rtm.rtm_flags & com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTF_HOST) != 0
+                : (rtm.rtm_flags & com.github.pangolin.routing.acceptor.tun.adapter.darwin.jna.Route.RTF_HOST) != 0
                 ? dst.getAddress().length * Byte.SIZE
                 : 0;
 
