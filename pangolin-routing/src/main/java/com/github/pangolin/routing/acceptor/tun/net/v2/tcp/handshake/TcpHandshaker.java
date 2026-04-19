@@ -48,6 +48,12 @@ public final class TcpHandshaker {
     private int synAckSendEpoch = 0;
     private ScheduledFuture<?> synAckTimer = null;
     private Runnable synAckFailureAction = () -> {};
+    /**
+     * 最近一次 SYN-ACK 的发送时戳(微秒),用于三次握手 ACK 到达时的
+     * {@code tcp_synack_rtt_meas} RTT 采样。对应 Linux {@code tcp_rsk(req)->snt_synack}。
+     * {@code 0L} 表示尚未发送。
+     */
+    private long synAckSentUs = 0L;
 
     TcpHandshaker(TcpPacketBuf synPkt, TcpConfig config) {
         this.config = config;
@@ -84,6 +90,38 @@ public final class TcpHandshaker {
 
     public boolean synAckSent() {
         return synAckSent;
+    }
+
+    /**
+     * @return 最近一次 SYN-ACK 的发送微秒时戳;尚未发送时返回 {@code 0L}。
+     *         用于 {@code tcp_synack_rtt_meas} RTT 采样(对齐 Linux {@code snt_synack})。
+     */
+    public long synAckSentUs() {
+        return synAckSentUs;
+    }
+
+    public int clientMss() {
+        return clientMss;
+    }
+
+    public int clientWscale() {
+        return clientWscale;
+    }
+
+    public boolean clientTimestamp() {
+        return clientTimestamp;
+    }
+
+    public int clientTsVal() {
+        return clientTsVal;
+    }
+
+    public int clientInitWnd() {
+        return clientInitWnd;
+    }
+
+    public int serverWscale() {
+        return clientWscale >= 0 ? config.windowScale() : 0;
     }
 
     public void cancelRetransmitTimer() {
@@ -181,6 +219,7 @@ public final class TcpHandshaker {
 
         cancelRetransmitTimer();
         synAckSent = true;
+        synAckSentUs = System.nanoTime() / 1_000L;
         final int epoch = ++synAckSendEpoch;
         TcpOutput.INSTANCE.tcp_send_synack(
                 connChannel,

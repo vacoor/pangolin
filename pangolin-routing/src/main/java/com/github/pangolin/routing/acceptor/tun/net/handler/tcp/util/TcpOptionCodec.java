@@ -92,6 +92,41 @@ public final class TcpOptionCodec {
     }
 
     /**
+     * 解析 SACK 选项(Kind=5)块序列。每块 8 字节(left_edge + right_edge),
+     * 返回扁平整数数组 {@code [start1, end1, start2, end2, ...]};选项缺失或无块时返回
+     * {@code null}。对齐 Linux {@code tcp_parse_sack} 的写法。
+     */
+    public static int[] parseSackBlocks(ByteBuf opts) {
+        int i = opts.readerIndex();
+        int end = i + opts.readableBytes();
+        while (i < end) {
+            byte kind = opts.getByte(i);
+            if (kind == OPT_EOL) break;
+            if (kind == OPT_NOP) { i++; continue; }
+            if (i + 1 >= end) break;
+            int len = opts.getUnsignedByte(i + 1);
+            if (len < 2 || i + len > end) break;
+            if (kind == OPT_SACK) {
+                int blockBytes = len - 2;
+                if (blockBytes <= 0 || blockBytes % 8 != 0) {
+                    return null;
+                }
+                int pairs = blockBytes / 8;
+                int[] out = new int[pairs * 2];
+                int off = i + 2;
+                for (int p = 0; p < pairs; p++) {
+                    out[2 * p]     = opts.getInt(off);
+                    out[2 * p + 1] = opts.getInt(off + 4);
+                    off += 8;
+                }
+                return out;
+            }
+            i += len;
+        }
+        return null;
+    }
+
+    /**
      * Extract timestamp option (Kind=8). Returns [tsval, tsecr] or null if not present.
      */
     public static long[] parseTimestamp(ByteBuf opts) {

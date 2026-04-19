@@ -3,6 +3,8 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMib;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMibStats;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
@@ -67,6 +69,7 @@ public class TcpIncomingPreValidator {
             long[] ts = TcpOptionCodec.parseTimestamp(opts);
             if (ts != null && sock.pawsRejected((int) ts[0])) {
                 if (!pkt.isRst()) {
+                    TcpMibStats.INSTANCE.inc(TcpMib.PAWSESTABREJECTED);
                     TcpOutput.INSTANCE.tcp_send_ack(sock);
                     return false;
                 }
@@ -75,10 +78,12 @@ public class TcpIncomingPreValidator {
 
         int reason = tcp_sequence(sock, pkt);
         if (reason != SKB_NOT_DROPPED_YET) {
+            TcpMibStats.INSTANCE.incDrop(reason);
             if (!pkt.isRst()) {
                 sock.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
                 sock.addAckPending(TcpConstants.ACK_SCHED);
                 if (pkt.isSyn()) {
+                    TcpMibStats.INSTANCE.inc(TcpMib.TCPSYNCHALLENGE);
                     TcpOutput.INSTANCE.tcp_send_challenge_ack(sock, accecnReflector);
                     return false;
                 }
@@ -113,6 +118,8 @@ public class TcpIncomingPreValidator {
 
             sock.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
             sock.addAckPending(TcpConstants.ACK_SCHED);
+            TcpMibStats.INSTANCE.inc(TcpMib.TCPSYNCHALLENGE);
+            TcpMibStats.INSTANCE.incDrop(SKB_DROP_REASON_TCP_INVALID_SYN);
             TcpOutput.INSTANCE.tcp_send_challenge_ack(sock, accecnReflector);
             return false;
         }

@@ -62,6 +62,42 @@ public final class TcpConnection {
      */
     private long lastOowAckTimeMs;
 
+    /**
+     * IP Type-of-Service field (mirrors Linux {@code struct inet_sock.tos}).
+     * Used when emitting outbound IP headers (v2 does not yet consume it but the
+     * slot is required for v1 parity).
+     */
+    private int tos;
+
+    // ── RFC 5961 per-socket challenge-ACK rate limit ─────────────────────────
+    /**
+     * Timestamp (ms) of the current one-second challenge-ACK accounting window
+     * (mirrors Linux {@code tp->challenge_timestamp}).
+     */
+    private long ipv4TcpChallengeTimestamp;
+    /**
+     * Challenge ACKs emitted inside the current accounting window
+     * (mirrors Linux {@code tp->challenge_count}).
+     */
+    private int ipv4TcpChallengeCount;
+
+    // ── IcskAck bookkeeping (mirrors Linux struct inet_connection_sock::icsk_ack) ─
+    /**
+     * Number of consecutive delayed-ACK retries (mirrors Linux {@code icsk_ack.retry}).
+     */
+    private int icskAckRetry;
+    /**
+     * Length of the last data segment received, used for {@code icsk_ack.rcv_mss}
+     * tuning in {@code tcp_measure_rcv_mss} (mirrors Linux {@code icsk_ack.last_seg_size}).
+     */
+    private int icskAckLastSegSize;
+    /**
+     * Last data-segment arrival time (ms) used for ATO / delayed-ACK decisions
+     * (mirrors Linux {@code icsk_ack.lrcvtime}).  Note this is distinct from
+     * {@link #lastRecvTimeMs}, which tracks any-segment activity for keepalive.
+     */
+    private long icskAckLrcvtimeMs;
+
     // ── Netty integration ───────────────────────────────────────────────────
     private final Channel channel;
     private final FourTuple fourTuple;
@@ -74,6 +110,11 @@ public final class TcpConnection {
     // ── Pluggable extensions ─────────────────────────────────────────────────
     private boolean timestampEnabled;
     private int recentTimestamp;
+    /**
+     * 最近一次刷新 {@code recentTimestamp} 的本地接收秒级时戳,对应 Linux
+     * {@code tcp_options_received.ts_recent_stamp};用于 PAWS 24 天陈旧分支。
+     */
+    private int tsRecentStamp;
     private int quickAckCount;
     private long ackTimeoutMs;
     private int pingpongCount;
@@ -82,6 +123,20 @@ public final class TcpConnection {
     private long srttUs;
     private long rttvarUs;
     private int rtoBackoffShift;
+    /** 首段重传的发送微秒时戳 — 对应 Linux {@code tp->retrans_stamp}。 */
+    private long retransStamp;
+    /** 当前 recovery 阶段累计的未覆盖重传段数 — 对应 Linux {@code tp->undo_retrans}。 */
+    private int undoRetrans;
+    /** 缓存的发送侧当前有效 MSS — 对应 Linux {@code tp->mss_cache}。 */
+    private int mssCache;
+    /** 最近一次驱动 {@code mssCache} 的 PMTU — 对应 Linux {@code icsk->icsk_pmtu_cookie}。 */
+    private int pmtuCookie;
+    /** TCP 头 + 已协商 ESTABLISHED 选项总长度 — 对应 Linux {@code tp->tcp_header_len}。 */
+    private int tcpHeaderLen;
+    /** 当前路径 MTU(外部 ICMP PTB / PMTU 发现写入)— 对应 Linux {@code dst_mtu(sk->sk_dst_cache)}。 */
+    private int dstMtu;
+    /** SACK 已覆盖未累计 ACK 的段数 — 对应 Linux {@code tp->sacked_out}。 */
+    private int sackedOut;
     private int cwnd = TcpConstants.TCP_INIT_CWND;
     private int ssthresh = Integer.MAX_VALUE;
     private int dupacks;
@@ -112,12 +167,25 @@ public final class TcpConnection {
         this.rcvWup = b.rcvWup;
         this.rcvMss = b.mss;    // tcp_initialize_rcv_mss will refine this in ESTABLISHED transition
         this.mss = b.mss;
+        // PMTU / tcp_header_len 初始化(对齐 Linux tcp_create_openreq_child)
+        this.tcpHeaderLen = TcpConstants.TCP_MIN_HEADER_LEN
+                + (b.timestampEnabled ? TcpConstants.TCP_TSOPT_WIRE_LEN : 0);
+        this.mssCache = b.mss;
+        this.pmtuCookie = 0;
+        this.dstMtu = 0;
         this.sndWscale = b.sndWscale;
         this.rcvWscale = b.rcvWscale;
         this.skShutdown = 0;
         this.lastOowAckTimeMs = 0L;
+        this.tos = 0;
+        this.ipv4TcpChallengeTimestamp = 0L;
+        this.ipv4TcpChallengeCount = 0;
+        this.icskAckRetry = 0;
+        this.icskAckLastSegSize = 0;
+        this.icskAckLrcvtimeMs = 0L;
         this.timestampEnabled = b.timestampEnabled;
         this.recentTimestamp = b.recentTimestamp;
+        this.tsRecentStamp = b.timestampEnabled ? (int) (System.currentTimeMillis() / 1000L) : 0;
         this.quickAckCount = 0;
         this.ackTimeoutMs = TcpConstants.DELAYED_ACK_MS;
         this.pingpongCount = 0;
@@ -202,6 +270,31 @@ public final class TcpConnection {
 
     public int mss() {
         return mss;
+    }
+
+    /** 对应 Linux {@code tp->mss_cache}。 */
+    public int mssCache() {
+        return mssCache;
+    }
+
+    /** 对应 Linux {@code icsk->icsk_pmtu_cookie}。 */
+    public int pmtuCookie() {
+        return pmtuCookie;
+    }
+
+    /** 对应 Linux {@code tp->tcp_header_len}。 */
+    public int tcpHeaderLen() {
+        return tcpHeaderLen;
+    }
+
+    /** 对应 Linux {@code dst_mtu(sk->sk_dst_cache)};外部 PMTU 发现路径写入。 */
+    public int dstMtu() {
+        return dstMtu;
+    }
+
+    /** 对应 Linux {@code tp->sacked_out}。 */
+    public int sackedOut() {
+        return sackedOut;
     }
 
     public int sndWscale() {
@@ -297,6 +390,26 @@ public final class TcpConnection {
         this.mss = v;
     }
 
+    public void mssCache(int v) {
+        this.mssCache = Math.max(v, 0);
+    }
+
+    public void pmtuCookie(int v) {
+        this.pmtuCookie = Math.max(v, 0);
+    }
+
+    public void tcpHeaderLen(int v) {
+        this.tcpHeaderLen = Math.max(v, 0);
+    }
+
+    public void dstMtu(int v) {
+        this.dstMtu = Math.max(v, 0);
+    }
+
+    public void sackedOut(int v) {
+        this.sackedOut = Math.max(v, 0);
+    }
+
     public void sndWscale(int v) {
         this.sndWscale = v;
     }
@@ -358,6 +471,54 @@ public final class TcpConnection {
         this.lastOowAckTimeMs = v;
     }
 
+    public int tos() {
+        return tos;
+    }
+
+    public void tos(int v) {
+        this.tos = v;
+    }
+
+    public long ipv4TcpChallengeTimestamp() {
+        return ipv4TcpChallengeTimestamp;
+    }
+
+    public void ipv4TcpChallengeTimestamp(long v) {
+        this.ipv4TcpChallengeTimestamp = v;
+    }
+
+    public int ipv4TcpChallengeCount() {
+        return ipv4TcpChallengeCount;
+    }
+
+    public void ipv4TcpChallengeCount(int v) {
+        this.ipv4TcpChallengeCount = v;
+    }
+
+    public int icskAckRetry() {
+        return icskAckRetry;
+    }
+
+    public void icskAckRetry(int v) {
+        this.icskAckRetry = Math.max(v, 0);
+    }
+
+    public int icskAckLastSegSize() {
+        return icskAckLastSegSize;
+    }
+
+    public void icskAckLastSegSize(int v) {
+        this.icskAckLastSegSize = Math.max(v, 0);
+    }
+
+    public long icskAckLrcvtimeMs() {
+        return icskAckLrcvtimeMs;
+    }
+
+    public void icskAckLrcvtimeMs(long v) {
+        this.icskAckLrcvtimeMs = v;
+    }
+
     /**
      * Advance SND.UNA to {@code ackSeq} — does <b>not</b> drain the RTX queue.
      * Mirrors Linux {@code tcp_snd_una_update}: updates only {@code snd_una} and
@@ -396,6 +557,14 @@ public final class TcpConnection {
      */
     public void incrementPacketsOut() {
         packetsOut++;
+    }
+
+    /**
+     * Decrement {@code packets_out} — used by {@code tcp_clean_rtx_queue} for each SKB removed
+     * from the RTX queue (mirrors Linux {@code tp->packets_out -= acked_pcount}).
+     */
+    public void decrementPacketsOut(int count) {
+        packetsOut = Math.max(0, packetsOut - count);
     }
 
     /**
@@ -465,9 +634,18 @@ public final class TcpConnection {
         this.recentTimestamp = recentTimestamp;
     }
 
+    public int tsRecentStamp() {
+        return tsRecentStamp;
+    }
+
+    public void tsRecentStamp(int tsRecentStamp) {
+        this.tsRecentStamp = tsRecentStamp;
+    }
+
     public void updateRecentTimestamp(int tsval) {
         if (timestampEnabled) {
             recentTimestamp = tsval;
+            tsRecentStamp = (int) (System.currentTimeMillis() / 1000L);
         }
     }
 
@@ -552,6 +730,22 @@ public final class TcpConnection {
 
     public void rtoBackoffShift(int rtoBackoffShift) {
         this.rtoBackoffShift = Math.max(rtoBackoffShift, 0);
+    }
+
+    public long retransStamp() {
+        return retransStamp;
+    }
+
+    public void retransStamp(long retransStamp) {
+        this.retransStamp = retransStamp;
+    }
+
+    public int undoRetrans() {
+        return undoRetrans;
+    }
+
+    public void undoRetrans(int undoRetrans) {
+        this.undoRetrans = Math.max(undoRetrans, 0);
     }
 
     public int cwnd() {
