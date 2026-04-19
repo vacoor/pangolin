@@ -280,12 +280,19 @@ public class WindowsTunAdapter extends TunAdapter {
     }
 
     private int copyPacket(final Pointer packetPointer, final int offset, final ByteBuffer packet) {
-        final ByteBuffer src = packet.duplicate();
-        int written = offset;
-        while (src.hasRemaining()) {
-            packetPointer.setByte(written++, src.get());
+    final int len = packet.remaining();
+        if (0 == len) {
+            return offset;
         }
-        return written;
+        if (packet.hasArray()) {
+            packetPointer.write(offset, packet.array(), packet.arrayOffset() + packet.position(), len);
+            packet.position(packet.position() + len);
+        } else {
+            final byte[] tmp = new byte[len];
+            packet.get(tmp);
+            packetPointer.write(offset, tmp, 0, len);
+        }
+        return offset + len;
     }
 
     private int checkPacketSize(final int size) throws IOException {

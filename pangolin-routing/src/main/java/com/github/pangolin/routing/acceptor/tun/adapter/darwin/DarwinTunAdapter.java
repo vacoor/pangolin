@@ -136,6 +136,17 @@ public class DarwinTunAdapter extends TunAdapter {
 
             final NativeLong written = LIBC.writev(fd, iov, iov.length);
             checkWriteResult("writev()", written.longValue(), expected);
+
+            // AF 头不计入调用方 buffer，从 payload 部分开始推进 position
+            long remaining = written.longValue() - AF_BYTES;
+            for (final ByteBuffer buf : packet) {
+                if (remaining <= 0) {
+                    break;
+                }
+                final int take = (int) Math.min(remaining, buf.remaining());
+                buf.position(buf.position() + take);
+                remaining -= take;
+            }
         } finally {
             closeMemories(manualMemories);
         }
@@ -150,18 +161,21 @@ public class DarwinTunAdapter extends TunAdapter {
     }
 
     private int write(final LibC.Iovec[] iov, final int offset, final ByteBuffer buf, final List<Memory> memories) {
-        // TODO why dumplicate?
-        final ByteBuffer src = buf.duplicate();
-        final int len = src.remaining();
-        Pointer ptr;
-        if (src.isDirect()) {
-            ptr = Native.getDirectBufferPointer(src).share(src.position());
+        // 只准备 iovec，不动 position；真正的消费（推进 position）由外层 writev 成功后统一完成
+        final int len = buf.remaining();
+        final Pointer ptr;
+        if (buf.isDirect()) {
+            ptr = Native.getDirectBufferPointer(buf).share(buf.position());
         } else {
             log.warn("Non-direct -> Direct memory.");
             final Memory memory = new Memory(len);
             memories.add(memory);
-            for (int i = 0; src.hasRemaining(); i++) {
-                memory.setByte(i, src.get());
+            if (buf.hasArray()) {
+                memory.write(0, buf.array(), buf.arrayOffset() + buf.position(), len);
+            } else {
+                final byte[] tmp = new byte[len];
+                buf.duplicate().get(tmp);
+                memory.write(0, tmp, 0, len);
             }
             ptr = memory;
         }
@@ -183,26 +197,25 @@ public class DarwinTunAdapter extends TunAdapter {
     }
 
     private void write0(final ByteBuffer packet) throws IOException {
-        // TODO why dumplicate?
-        final ByteBuffer src = packet.duplicate();
-        final int ipVersion = src.get(src.position()) >> 4;
+        final int ipVersion = packet.get(packet.position()) >> 4;
         final int addressFamily = addressFamily(ipVersion);
 
-        final ByteBuffer buf = ByteBuffer.allocateDirect(
-                AF_BYTES + src.remaining()
-        );
+        final int payloadLen = packet.remaining();
+        final ByteBuffer buf = ByteBuffer.allocateDirect(AF_BYTES + payloadLen);
         buf.put(new byte[]{
                 (byte) (addressFamily >> 24),
                 (byte) (addressFamily >> 16),
                 (byte) (addressFamily >> 8),
                 (byte) addressFamily
         });
-        buf.put(src);
+        // 用局部副本把 payload 拷入 direct buf，避免在 write 成功前污染 packet 的 position
+        buf.put(packet.duplicate());
         buf.flip();
 
         final int expected = buf.remaining();
         final int written = LIBC.write(fd, buf, expected);
         checkWriteResult("write()", written, expected);
+        packet.position(packet.position() + payloadLen);
     }
 
     /**

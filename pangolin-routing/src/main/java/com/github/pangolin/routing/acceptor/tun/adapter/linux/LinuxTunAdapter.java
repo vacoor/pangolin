@@ -85,11 +85,11 @@ public class LinuxTunAdapter extends TunAdapter {
     @Override
     protected void write0(final ByteBuffer[] packet) throws IOException {
         if (1 == packet.length) {
-            // TODO why duplicate?
-            final ByteBuffer buf = packet[0].duplicate();
+            final ByteBuffer buf = packet[0];
             final int expected = buf.remaining();
             final int written = LIBC.write(fd, buf, expected);
             checkWriteResult("write()", written, expected);
+            buf.position(buf.position() + written);
         } else {
             final List<Memory> manualMemories = Lists.newArrayList();
             final LibC.Iovec[] iov = (LibC.Iovec[]) new LibC.Iovec().toArray(packet.length);
@@ -101,6 +101,16 @@ public class LinuxTunAdapter extends TunAdapter {
 
                 final NativeLong written = LIBC.writev(fd, iov, iov.length);
                 checkWriteResult("writev()", written.longValue(), expected);
+
+                long remaining = written.longValue();
+                for (final ByteBuffer buf : packet) {
+                    if (remaining <= 0) {
+                        break;
+                    }
+                    final int take = (int) Math.min(remaining, buf.remaining());
+                    buf.position(buf.position() + take);
+                    remaining -= take;
+                }
             } finally {
                 closeMemories(manualMemories);
             }
@@ -116,18 +126,21 @@ public class LinuxTunAdapter extends TunAdapter {
     }
 
     private int write(final LibC.Iovec[] iov, final int offset, final ByteBuffer buf, final List<Memory> memories) {
-        // TODO why duplicate?
-        final ByteBuffer src = buf.duplicate();
-        final int len = src.remaining();
-        Pointer ptr;
-        if (src.isDirect()) {
-            ptr = Native.getDirectBufferPointer(src).share(src.position());
+        // 只准备 iovec，不动 position；真正的消费（推进 position）由外层 writev 成功后统一完成
+        final int len = buf.remaining();
+        final Pointer ptr;
+        if (buf.isDirect()) {
+            ptr = Native.getDirectBufferPointer(buf).share(buf.position());
         } else {
             log.warn("Non-direct -> Direct memory.");
             final Memory memory = new Memory(len);
             memories.add(memory);
-            for (int i = 0; src.hasRemaining(); i++) {
-                memory.setByte(i, src.get());
+            if (buf.hasArray()) {
+                memory.write(0, buf.array(), buf.arrayOffset() + buf.position(), len);
+            } else {
+                final byte[] tmp = new byte[len];
+                buf.duplicate().get(tmp);
+                memory.write(0, tmp, 0, len);
             }
             ptr = memory;
         }
