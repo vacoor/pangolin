@@ -2,9 +2,10 @@ package com.github.pangolin.routing.acceptor.tun.adapter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public abstract class TunAdapter {
-    protected volatile boolean closed;
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     public abstract String name();
 
@@ -21,14 +22,13 @@ public abstract class TunAdapter {
     }
 
     private void checkOpen() {
-        if (closed) {
+        if (closed.get()) {
             throw new IllegalStateException("Device is closed.");
         }
     }
 
     public void destroy() throws IOException {
-        if (!closed) {
-            closed = true;
+        if (closed.compareAndSet(false, true)) {
             destroy0();
         }
     }

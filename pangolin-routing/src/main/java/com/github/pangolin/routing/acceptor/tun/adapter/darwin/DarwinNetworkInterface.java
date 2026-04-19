@@ -271,7 +271,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
      * @param address a IPv6 InterfaceAddresses bound to this network interface
      */
     private static void deleteInet6InterfaceAddress0(final String ifname, final Inet6Address address, final int prefix) {
-        final int fd = fd4();
+        final int fd = fd6();
         try {
             deleteInet6InterfaceAddress(fd, ifname, address, toNetmask(address, prefix));
         } finally {
