@@ -268,10 +268,15 @@ public class DarwinTunAdapter extends TunAdapter {
 
             ifnameToUse = Native.toString(sockName.name, US_ASCII);
 
+            /*-
+             * OPT-8: ifconfig 式 ioctl（SIOCSIFMTU/SIOCGIFMTU）语义上应走独立的
+             * AF_INET DGRAM socket，而非复用 utun 的 SYSPROTO_CONTROL fd；
+             * 后者在当前 macOS 能工作，但属于非标准用法，后续版本可能被收紧。
+             */
             if (0 < mtuToUse) {
-                DarwinNetworkInterface.setMTU(fd, ifnameToUse, mtuToUse);
+                DarwinNetworkInterface.setMTU0(ifnameToUse, mtuToUse);
             } else {
-                mtuToUse = DarwinNetworkInterface.getMTU(fd, ifnameToUse);
+                mtuToUse = DarwinNetworkInterface.getMTU0(ifnameToUse);
             }
 
             final DarwinNetworkInterface nix = DarwinNetworkInterface.getByName(ifnameToUse);

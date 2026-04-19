@@ -320,61 +320,68 @@ public class LinuxNetworkRoutingTable extends NetworkRoutingTable {
         try {
             final int wLen = NLMSGHDR_SIZE + RTMSG_SIZE;
             final Memory wBuf = new Memory(nlmsgAlign(wLen));
+            try {
+                int bytesWritten = 0;
+                final Netlink.nlmsghdr nlm = new Netlink.nlmsghdr(wBuf.share(bytesWritten));
+                nlm.nlmsg_len = wLen;
+                nlm.nlmsg_type = RtNetlink.RTM_GETROUTE;
+                nlm.nlmsg_flags = Netlink.NLM_F_REQUEST | Netlink.NLM_F_DUMP;
+                nlm.nlmsg_seq = 1;
+                nlm.nlmsg_pid = LIBC.getpid();
+                nlm.write();
+                bytesWritten += nlm.size();
 
-            int bytesWritten = 0;
-            final Netlink.nlmsghdr nlm = new Netlink.nlmsghdr(wBuf.share(bytesWritten));
-            nlm.nlmsg_len = wLen;
-            nlm.nlmsg_type = RtNetlink.RTM_GETROUTE;
-            nlm.nlmsg_flags = Netlink.NLM_F_REQUEST | Netlink.NLM_F_DUMP;
-            nlm.nlmsg_seq = 1;
-            nlm.nlmsg_pid = LIBC.getpid();
-            nlm.write();
-            bytesWritten += nlm.size();
-
-            final RtNetlink.rtmsg rtm = new RtNetlink.rtmsg(wBuf.share(bytesWritten));
-            rtm.rtm_family = family;
-            rtm.rtm_table = (byte) RtNetlink.RT_TABLE_MAIN;
-            /*-
-            rt.rtm_protocol = RTPROT_STATIC;
-            rt.rtm_scope = RT_SCOPE_UNIVERSE;
-            rt.rtm_type = RTN_UNICAST;
-            */
-            rtm.write();
-            bytesWritten += rtm.size();
-
-            if (LIBC.send(sockfd, wBuf, bytesWritten, 0) < 0) {
-                LinuxUtils.throwLastErrorException(Native.getLastError());
-            }
-
-            final List<Route> routes = Lists.newLinkedList();
-            final Memory rBuf = new Memory(8192);
-            int size;
-            while ((size = LIBC.recv(sockfd, rBuf, (int) rBuf.size(), 0)) > 0) {
+                final RtNetlink.rtmsg rtm = new RtNetlink.rtmsg(wBuf.share(bytesWritten));
+                rtm.rtm_family = family;
+                rtm.rtm_table = (byte) RtNetlink.RT_TABLE_MAIN;
                 /*-
-                 * Parse nlmsg.
-                 */
-                for (int bytesRead = 0; bytesRead < size; ) {
-                    final Pointer ptr = rBuf.share(bytesRead, size - bytesRead);
-                    final Netlink.nlmsghdr nlmR = new Netlink.nlmsghdr(ptr);
-                    nlmR.read();
+                rt.rtm_protocol = RTPROT_STATIC;
+                rt.rtm_scope = RT_SCOPE_UNIVERSE;
+                rt.rtm_type = RTN_UNICAST;
+                */
+                rtm.write();
+                bytesWritten += rtm.size();
 
-                    if (nlmR.nlmsg_type == Netlink.NLMSG_ERROR) {
-                        return routes;
-                    }
-                    if (nlmR.nlmsg_type == Netlink.NLMSG_DONE) {
-                        return routes;
-                    }
-                    if (nlmR.nlmsg_type == RtNetlink.RTM_NEWROUTE) {
-                        final int len = nlmR.nlmsg_len - nlmR.size();
-                        final RtNetlink.rtmsg rtmR = new RtNetlink.rtmsg(ptr.share(nlmR.size(), len));
-                        rtmR.read();
-
-                        routes.add(parseRouteEntry(rtmR, len));
-                    }
-                    bytesRead += nlmsgAlign(nlmR.nlmsg_len);
+                if (LIBC.send(sockfd, wBuf, bytesWritten, 0) < 0) {
+                    LinuxUtils.throwLastErrorException(Native.getLastError());
                 }
+
+                final List<Route> routes = Lists.newLinkedList();
+                final Memory rBuf = new Memory(8192);
+                try {
+                    int size;
+                    while ((size = LIBC.recv(sockfd, rBuf, (int) rBuf.size(), 0)) > 0) {
+                        /*-
+                         * Parse nlmsg.
+                         */
+                        for (int bytesRead = 0; bytesRead < size; ) {
+                            final Pointer ptr = rBuf.share(bytesRead, size - bytesRead);
+                            final Netlink.nlmsghdr nlmR = new Netlink.nlmsghdr(ptr);
+                            nlmR.read();
+
+                            if (nlmR.nlmsg_type == Netlink.NLMSG_ERROR) {
+                                return routes;
+                            }
+                            if (nlmR.nlmsg_type == Netlink.NLMSG_DONE) {
+                                return routes;
+                            }
+                            if (nlmR.nlmsg_type == RtNetlink.RTM_NEWROUTE) {
+                                final int len = nlmR.nlmsg_len - nlmR.size();
+                                final RtNetlink.rtmsg rtmR = new RtNetlink.rtmsg(ptr.share(nlmR.size(), len));
+                                rtmR.read();
+
+                                routes.add(parseRouteEntry(rtmR, len));
+                            }
+                            bytesRead += nlmsgAlign(nlmR.nlmsg_len);
+                        }
+                    }
+                    return routes;
+                } finally {
+                    rBuf.close();
+                }
+            } finally {
+                wBuf.close();
             }
-            return routes;
         } finally {
             LIBC.close(sockfd);
         }

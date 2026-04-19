@@ -10,7 +10,7 @@ import java.util.Arrays;
 public class NetUtils2 {
 
     public static <A extends InetAddress> A cidrToNetmaskAddress(final A address, final int prefix) {
-        byte[] bytes = cidrPrefixToNetmask(new byte[address.getAddress().length], prefix);
+        byte[] bytes = cidrPrefixToNetmask(address.getAddress().length, prefix);
         try {
             return (A) InetAddress.getByAddress(bytes);
         } catch (UnknownHostException e) {
@@ -18,20 +18,21 @@ public class NetUtils2 {
         }
     }
 
-    public static byte[] cidrPrefixToNetmask(final byte[] bytes, int prefix) {
-        final byte[] netmask = Arrays.copyOf(bytes, bytes.length);
-        Arrays.fill(netmask, (byte) 0xFF);
-        /*
-        if (prefix == Byte.SIZE * bytes.length) {
-            return netmask;
-        }
-        netmask[prefix / Byte.SIZE] <<= prefix % Byte.SIZE;
-        prefix += prefix % Byte.SIZE;
-        */
+    /**
+     * 由 CIDR 前缀长度生成对应长度的子网掩码字节数组。
+     *
+     * @param addressLen 地址长度（IPv4=4, IPv6=16）
+     * @param prefix     CIDR 前缀长度
+     * @return 子网掩码的字节数组
+     */
+    public static byte[] cidrPrefixToNetmask(final int addressLen, final int prefix) {
+        final byte[] netmask = new byte[addressLen];
         for (int offset = prefix / Byte.SIZE; offset < netmask.length; offset++) {
-             int bits = Math.min(Byte.SIZE, Math.max(0, prefix - offset * Byte.SIZE));
+            final int bits = Math.min(Byte.SIZE, Math.max(0, prefix - offset * Byte.SIZE));
             netmask[offset] = (byte) (0xFF << (Byte.SIZE - bits));
         }
+        // 前 prefix/8 个字节保持 0xFF
+        Arrays.fill(netmask, 0, prefix / Byte.SIZE, (byte) 0xFF);
         return netmask;
     }
 

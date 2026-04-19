@@ -387,7 +387,7 @@ public class WindowsNetworkInterface implements NetworkInterfaceEx {
      */
     static void addInterfaceAddress0(final int ifIndex, final Inet4Address address, final byte prefixLength) {
         final byte[] addr = address.getAddress();
-        final byte[] mask = NetUtils2.cidrPrefixToNetmask(addr, prefixLength);
+        final byte[] mask = NetUtils2.cidrPrefixToNetmask(addr.length, prefixLength);
         final int addrInt = (addr[0] & 0xff) << 24 | (addr[1] & 0xff) << 16 | (addr[2] & 0xff) << 8 | addr[3] & 0xff;
         final int maskInt = (mask[0] & 0xff) << 24 | (mask[1] & 0xff) << 16 | (mask[2] & 0xff) << 8 | mask[3] & 0xff;
         final int err = IP_HLP_API.AddIPAddress(addrInt, maskInt, ifIndex, new IntByReference(), new IntByReference());
