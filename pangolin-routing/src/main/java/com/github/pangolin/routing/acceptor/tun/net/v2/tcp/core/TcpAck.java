@@ -2,15 +2,9 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.ConnectionKey;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSkb;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpIncomingPreValidator;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelPromise;
-import org.slf4j.Logger;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants.SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
@@ -18,16 +12,17 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropRe
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
 
-public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
+/**
+ * 入站 ACK 处理静态入口 — 对齐 Linux {@code tcp_ack} 及 {@code tcp_sacktag_write_queue} /
+ * {@code tcp_clean_rtx_queue} / {@code tcp_rack_detect_loss} 家族。
+ *
+ * <p>历史上本类曾以 netty {@code ChannelInboundHandler} 形式注册到 per-connection pipeline,
+ * 随 v2 向 {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer}
+ * 主循环集中分发演进后,handler 身份已移除,仅保留标志位常量与静态入口供主循环调用。
+ */
+public final class TcpAck {
 
-    public enum AckResult {
-        NONE,
-        OLD_OR_DUP,
-        NEW_DATA_ACKED
-    }
-
-    public static final ConnectionKey<AckResult> ACK_RESULT_KEY =
-            ConnectionKey.of("tcp.segment-validator.ack-result");
+    private TcpAck() {}
 
     public static final int FLAG_DATA = 0x01;
     public static final int FLAG_WIN_UPDATE = 0x02;
@@ -40,46 +35,6 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
     public static final int FLAG_SND_UNA_ADVANCED = 0x400;
     public static final int FLAG_UPDATE_TS_RECENT = 0x4000;
     public static final int FLAG_NO_CHALLENGE_ACK = 0x8000;
-
-    private final TcpSock sock;
-    private final Logger log;
-    private final TcpIncomingPreValidator incomingValidator;
-    private ChannelPromise closePromise;
-
-    public TcpIncomingAckHandler(TcpSock sock, Logger log) {
-        this.sock = sock;
-        this.log = log;
-        this.incomingValidator = new TcpIncomingPreValidator(sock);
-    }
-
-    public void closePromise(ChannelPromise p) {
-        this.closePromise = p;
-        this.incomingValidator.closePromise(p);
-    }
-
-    @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (!(msg instanceof TcpPacketBuf)) {
-            ctx.fireChannelRead(msg);
-            return;
-        }
-        TcpPacketBuf pkt = (TcpPacketBuf) msg;
-        if (!incomingValidator.validate(ctx, pkt)) {
-            return;
-        }
-
-        int reason = tcpAck(sock, pkt, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT | FLAG_NO_CHALLENGE_ACK);
-        if (reason <= 0) {
-            if (sock.state() == com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState.TCP_SYN_RECV) {
-                return;
-            }
-            if (reason < 0) {
-                TcpOutput.INSTANCE.tcp_send_challenge_ack(sock, false);
-                return;
-            }
-        }
-        ctx.fireChannelRead(msg);
-    }
 
     public static int tcpAck(TcpSock sock, TcpPacketBuf pkt, int flags) {
         final int priorSndUna = sock.sndUna();
@@ -164,8 +119,8 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
      * <p>v2 当前实现范围:
      * <ul>
      *   <li><b>完全覆盖</b>:段 {@code [seq, endSeq)} 完全落在某 SACK 块内时打位。</li>
-     *   <li><b>部分覆盖</b>:暂不做 {@code tcp_fragment} 切分 — 保守跳过。Linux 会拆段
-     *       以精确记账,v2 首版容忍该段稍后可能被误重传(不破坏正确性)。</li>
+     *   <li><b>部分覆盖</b>:通过 {@link #carveToBlock} 两次 {@code splitRtx}
+     *       对齐左/右边界后再 tag。</li>
      *   <li><b>[start, end) 低于 {@code priorSndUna}</b>:该块已由累计 ACK 吸收,
      *       {@code tcp_clean_rtx_queue} 马上会释放对应段,此处跳过以免无谓 tag。</li>
      * </ul>
@@ -285,7 +240,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
      * 将 {@code skb} 切成恰好覆盖 {@code [iStart, iEnd)} 的单段 — 对齐 Linux
      * {@code tcp_match_skb_to_sack}:
      * <ul>
-     *   <li>左边界对齐 ({@code segStart < iStart}):{@link TcpSendBuffer#splitRtx} 在
+     *   <li>左边界对齐 ({@code segStart < iStart}):{@code TcpSendBuffer.splitRtx} 在
      *       {@code iStart} 切段,新 tail 作为后续处理目标。</li>
      *   <li>右边界对齐 ({@code segEnd > iEnd}):对 target 再在 {@code iEnd} 切一次,
      *       target 保留 head 部分,tail 余留给 RTX 队列等待后续 ACK / SACK。</li>

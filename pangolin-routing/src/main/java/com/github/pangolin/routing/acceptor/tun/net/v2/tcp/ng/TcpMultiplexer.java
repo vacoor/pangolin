@@ -8,7 +8,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpReceive
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSkb;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpAck;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpRetransmitter;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.handshake.TcpHandshaker;
@@ -416,7 +416,7 @@ public abstract class TcpMultiplexer {
         if (!sk.hasConnection() || !pkt.isAck()) {
             return 1;
         }
-        return TcpIncomingAckHandler.tcpAck(sk, pkt, flag);
+        return TcpAck.tcpAck(sk, pkt, flag);
     }
 
     /**
@@ -2104,7 +2104,7 @@ public abstract class TcpMultiplexer {
                     // 对齐 Linux tcp_enter_recovery → tcp_mark_head_lost:NewReno 无 SACK
                     // 信息驱动 LOST 标记,进入 Fast Retransmit 前先把队首段记为 LOST,
                     // 这样 tcp_retransmit_skb 的 LOST 优先路径能与 RACK 场景保持一致。
-                    TcpIncomingAckHandler.tcp_mark_head_lost(this, 1);
+                    TcpAck.tcp_mark_head_lost(this, 1);
                     TcpRetransmitter.INSTANCE.retransmit(this);
                 } else if (congestionState == CongestionState.RECOVERY) {
                     cwnd++;

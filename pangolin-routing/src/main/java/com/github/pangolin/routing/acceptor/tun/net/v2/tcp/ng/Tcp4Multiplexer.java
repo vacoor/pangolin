@@ -18,9 +18,9 @@ import io.netty.channel.EventLoopGroup;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler.FLAG_NO_CHALLENGE_ACK;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler.FLAG_SLOWPATH;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler.FLAG_UPDATE_TS_RECENT;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpAck.FLAG_NO_CHALLENGE_ACK;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpAck.FLAG_SLOWPATH;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpAck.FLAG_UPDATE_TS_RECENT;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
