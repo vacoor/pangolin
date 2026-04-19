@@ -268,6 +268,10 @@ public final class TcpOutput {
         boolean is_cwnd_limited = false;
         boolean is_rwnd_limited = false;
 
+        // tcp_slow_start_after_idle_check:空闲 > RTO 后 burst 前先回退 cwnd 到 TCP_INIT_CWND。
+        // Linux 在 tcp_sendmsg_locked / tcp_push_one 路径上游调用,v2 合并到 tcp_write_xmit 入口。
+        sock.tcpSlowStartAfterIdleCheck();
+
         tcp_mstamp_refresh(sock);
 
         if (push_one == 0) {
@@ -353,7 +357,7 @@ public final class TcpOutput {
 
         is_cwnd_limited |= (sock.packetsOut() >= sock.cwnd());
         if (sent_pkts != 0 || is_cwnd_limited) {
-            tcp_cwnd_validate(is_cwnd_limited);
+            sock.tcpCwndValidate(is_cwnd_limited);
         }
         if (sent_pkts != 0) {
             if (tcp_in_cwnd_reduction(sock)) {
@@ -1066,6 +1070,9 @@ public final class TcpOutput {
         sock.sendBuffer().enqueueRtx(skb);
 
         sock.incrementPacketsOut();
+        // 对齐 Linux tcp_event_new_data_sent 内的 snd_cwnd_used 高水位刷新:
+        // packets_out 增长到新高点时同步推进 snd_cwnd_used + snd_cwnd_stamp。
+        sock.onDataSentUpdateCwndUsed();
 
         if (startRto || (sock.timers() != null && sock.timers().writeTimerType == TimerType.TLP_PROBE)) {
             TcpRetransmitter.INSTANCE.scheduleRetransmit(sock);
@@ -1132,10 +1139,9 @@ public final class TcpOutput {
         return false;
     }
 
-    /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2359">tcp_cwnd_validate</a> */
-    private void tcp_cwnd_validate(boolean is_cwnd_limited) {
-        // v2 does not persist is_cwnd_limited/max_packets_out yet.
-    }
+    // tcp_cwnd_validate / tcp_cwnd_application_limited / tcp_cwnd_restart 已迁移至
+    // TcpSock(与 Linux 把它们放在 tcp_sock 状态机边缘一致);TcpOutput 只在
+    // tcp_write_xmit 尾部调用 sock.tcpCwndValidate(is_cwnd_limited)。
 
     // ═══════════════════════════════════════════════════════════════════════
     // Shared helpers

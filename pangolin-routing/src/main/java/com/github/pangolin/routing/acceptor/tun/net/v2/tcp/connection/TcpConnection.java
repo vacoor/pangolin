@@ -138,6 +138,24 @@ public final class TcpConnection {
     private int sackedOut;
     private int cwnd = TcpConstants.TCP_INIT_CWND;
     private int ssthresh = Integer.MAX_VALUE;
+    /**
+     * cwnd 最近一次被 {@code tcp_cwnd_validate} 确认可用的毫秒时戳 —
+     * 对应 Linux {@code tp->snd_cwnd_stamp}(单位 {@code tcp_jiffies32})。
+     * 用于 app-limited 场景下判定是否到了 {@code tcp_cwnd_application_limited} 收敛点。
+     */
+    private long sndCwndStampMs;
+    /**
+     * cwnd 当前窗口内的最高发包水位 — 对应 Linux {@code tp->snd_cwnd_used}。
+     * 只在 non-cwnd-limited 期间跟踪,用于 application-limited 时把 cwnd
+     * 回收到 {@code (cwnd + snd_cwnd_used) / 2}。
+     */
+    private int sndCwndUsed;
+    /**
+     * 当前窗口是否 cwnd 受限 — 对应 Linux {@code tp->is_cwnd_limited}。
+     * 置位后持续到下一次 {@code tcp_cwnd_application_limited} 清理;
+     * clear 后不主动 application-limit cwnd。
+     */
+    private boolean isCwndLimited;
     private int dupacks;
     private int caIncrCounter;
     private String congestionState = "OPEN";
@@ -190,6 +208,9 @@ public final class TcpConnection {
         this.pingpongCount = 0;
         this.lastRecvTimeMs = 0L;
         this.lastSendTimeMs = 0L;
+        this.sndCwndStampMs = 0L;
+        this.sndCwndUsed = 0;
+        this.isCwndLimited = false;
         this.sendBuffer = new TcpSendBuffer();
         this.receiveBuffer = new TcpReceiveBuffer(channel.alloc());
         this.congestionControl = b.congestionControl;
@@ -761,6 +782,33 @@ public final class TcpConnection {
 
     public void ssthresh(int ssthresh) {
         this.ssthresh = Math.max(ssthresh, 2);
+    }
+
+    /** 对应 Linux {@code tp->snd_cwnd_stamp}(单位 ms)。 */
+    public long sndCwndStampMs() {
+        return sndCwndStampMs;
+    }
+
+    public void sndCwndStampMs(long sndCwndStampMs) {
+        this.sndCwndStampMs = sndCwndStampMs;
+    }
+
+    /** 对应 Linux {@code tp->snd_cwnd_used}。 */
+    public int sndCwndUsed() {
+        return sndCwndUsed;
+    }
+
+    public void sndCwndUsed(int sndCwndUsed) {
+        this.sndCwndUsed = Math.max(sndCwndUsed, 0);
+    }
+
+    /** 对应 Linux {@code tp->is_cwnd_limited}。 */
+    public boolean isCwndLimited() {
+        return isCwndLimited;
+    }
+
+    public void isCwndLimited(boolean isCwndLimited) {
+        this.isCwndLimited = isCwndLimited;
     }
 
     public int dupacks() {

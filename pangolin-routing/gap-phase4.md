@@ -3,13 +3,17 @@
 继 Phase 3 全部收敛后做的广义审计,聚焦 Linux 主干 TCP 特性中 v2 仍缺失或是 stub
 的部分。每项按 **当前状态 / 对齐点 / 影响 / 建议优先级** 展开。
 
+> **最近一次更新**:2026-04-19 — F2 `tcp_cwnd_validate` 与 F3
+> `tcp_slow_start_after_idle` / `tcp_cwnd_restart` 已合入(见 "已对齐" 节)。
+
 ## 状态速览
 
 | 级别      | 数 | 项目 |
 |-----------|----|------|
-| 🔴 高     | 4 | F1 DSACK · F2 tcp_cwnd_validate · F3 slow_start_after_idle · F4 Undo 机制 |
+| 🔴 高     | 2 | F1 DSACK · F4 Undo 机制 |
 | 🟡 中     | 5 | F5 PRR · F6 Limited Transmit · F7 Disorder/CWR 子态 · F8 reo_wnd 动态调整 · F9 tcp_collapse_retrans |
 | 🟢 低     | 4 | F10 ECN 协商/CE 响应 · F11 F-RTO · F12 MTU probing(RFC 4821)· F13 ABC |
+| ✅ 已对齐 | 2 | F2 tcp_cwnd_validate · F3 slow_start_after_idle |
 
 "高/中/低" 的判据:**高**=协议正确性或明显性能回归;**中**=优化但有明确收益;
 **低**=专项能力,可按需启用。
@@ -28,29 +32,6 @@
 - **影响**:无法检测伪重传(spurious retransmission);RACK 的 reo_wnd 失去自适应
   依据(见 F8);RTT 样本可能被重传段污染。
 - **建议**:先做接收端 DSACK 生成(代价小、对方能直接受益),再做发送端消费。
-
-### F2 — `tcp_cwnd_validate` / application-limited 追踪
-
-- **当前状态**:`TcpOutput.tcp_cwnd_validate` 是空 stub(`// v2 does not persist
-  is_cwnd_limited/max_packets_out yet`)。
-- **对齐点**:`tcp_cwnd_validate`(tcp_output.c:2359) — 追踪 `is_cwnd_limited`,
-  在 app 长时间低于 cwnd 时通过 `tcp_cwnd_application_limited` 回落 `snd_cwnd`,
-  防止 cwnd 无上限膨胀。
-- **影响**:低速应用不再受 cwnd 约束,下一次 burst 可能触发网络丢包;与 F3
-  配合时 idle 恢复行为异常。
-- **建议**:先记录 `is_cwnd_limited` 标志 + `lsndtime`,再补 idle 条件下的
-  `tcp_cwnd_application_limited` 收敛。
-
-### F3 — `tcp_slow_start_after_idle` / `tcp_cwnd_restart`
-
-- **当前状态**:完全未实现。idle 后下次 burst 直接以历史 cwnd 发送。
-- **对齐点**:`tcp_cwnd_restart`(tcp_output.c:150) — `idle > RTO` 时
-  `cwnd = max(cwnd / 2^(idle/RTO), restart_cwnd)`(其中 restart_cwnd 取
-  `min(init_cwnd, cwnd)`)。
-- **影响**:空闲后恢复发包时 cwnd 偏大,易引发 loss;这是 Linux 默认开启的
-  (`sysctl_tcp_slow_start_after_idle=1`)。
-- **建议**:与 F2 打包做;`lastSendTimeMs` 字段已存在,直接扩展 `tcp_write_xmit`
-  入口判断即可。
 
 ### F4 — Undo 机制(`tcp_try_undo_*`)
 
@@ -151,8 +132,7 @@
 
 ## 推荐顺序(按依赖关系)
 
-1. **F2 + F3** — application-limited 追踪 + idle restart:字段已基本齐备,
-   代价小,立即解决"idle 后 burst 引发 loss"的实际回归。
+1. ~~**F2 + F3**~~ ✅ 已完成(见 "已对齐" 节)。
 2. **F1 接收端 DSACK 生成** — 代价小、对方受益,可独立发布。
 3. **F4 Undo 最小闭环**(TSECR-based) — 解决伪快速重传后吞吐塌陷。
 4. **F1 发送端 DSACK 消费 → F8 reo_wnd 动态调整** — 数据链路。
@@ -162,3 +142,33 @@
 8. **F11 F-RTO** — 建在 F4 之上。
 9. **F7 Disorder/CWR + F10 ECN** — 打包一起。
 10. **F12 MTU probing / F13 ABC** — 按需启用。
+
+---
+
+## ✅ 已对齐
+
+### F2 — `tcp_cwnd_validate` / application-limited 追踪(2026-04-19)
+
+- **落点**:
+  - `TcpSock.tcpCwndValidate(boolean)` + `tcpCwndApplicationLimited()`
+    (`TcpMultiplexer.java`)
+  - `TcpSock.onDataSentUpdateCwndUsed()` — 在 `tcp_event_new_data_sent` 中调用,
+    跟踪 `snd_cwnd_used` 高水位
+  - 新增字段:`sndCwndStampMs / sndCwndUsed / isCwndLimited`
+    (在 `TcpConnection` 与 `TcpSock` 双份持有,经 `loadFromConnection` 同步)
+- **对齐语义**:当发送路径非 cwnd 受限且距上次标定 >= RTO 时,`cwnd = (cwnd +
+  max(snd_cwnd_used, init_cwnd)) / 2`;CA_Open 下同时 clamp `ssthresh` 到
+  `max(ssthresh, 3*cwnd/4 + 1)`,对齐 `tcp_current_ssthresh` 近似。
+- **外部调用**:`TcpOutput.tcp_write_xmit` 末尾 `sock.tcpCwndValidate(is_cwnd_limited)`。
+
+### F3 — `tcp_slow_start_after_idle` / `tcp_cwnd_restart`(2026-04-19)
+
+- **落点**:
+  - `TcpSock.tcpSlowStartAfterIdleCheck()` + `tcpCwndRestart(delta, rtoMs)`
+    (`TcpMultiplexer.java`)
+  - 新增 sysctl:`SysctlOptions.ipv4_sysctl_tcp_slow_start_after_idle`(默认 true)
+- **对齐语义**:入 `tcp_write_xmit` 前检查 `packetsOut == 0 && lastSendTimeMs != 0
+  && (now - lastSendTimeMs) > rto`,满足则 `cwnd >>= 1` 按 `delta/rto` 步数衰减,
+  下限为 `min(TCP_INIT_CWND, cwnd)`;进入前若 CA_Open 则先把 ssthresh clamp 到
+  `max(ssthresh, 3*cwnd/4 + 1)`。
+- **外部调用**:`TcpOutput.tcp_write_xmit` 入口 `sock.tcpSlowStartAfterIdleCheck()`。

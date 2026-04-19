@@ -84,6 +84,18 @@ public final class SysctlOptions {
      */
     public static boolean ipv4_sysctl_tcp_timestamps = true;
 
+    // ---- 空闲后慢启动 (RFC 5681 §4.1) ----
+    /**
+     * 空闲时长超过 RTO 后下一次发送前是否把 {@code snd_cwnd} 回退到
+     * {@link TcpConstants#TCP_INIT_CWND} 上限之内 — 对齐 Linux
+     * {@code sysctl_tcp_slow_start_after_idle}(默认开启)。
+     *
+     * <p>关闭后 idle 恢复发包时直接使用历史 {@code snd_cwnd},易在路径已变差时
+     * 触发 burst loss;开启可与 {@code tcp_cwnd_validate} 配合,给应用层恢复
+     * 发送一个保守 ACK clock。
+     */
+    public static boolean ipv4_sysctl_tcp_slow_start_after_idle = true;
+
     // ---- 内存压力统计 (Linux tcp_memory_allocated / sysctl_tcp_mem) ----
     /**
      * 全局 TCP 占用字节数 — 对齐 Linux {@code tcp_memory_allocated} /
