@@ -1,6 +1,5 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection;
 
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.cc.CongestionControl;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.rtt.RttEstimator;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
@@ -573,7 +572,7 @@ public final class TcpConnection {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h">tcp_send_head</a>
      */
-    public TcpSegmentEntry tcpSendHead() {
+    public TcpSkb tcpSendHead() {
         return sendBuffer.peekWrite();
     }
 
@@ -596,7 +595,7 @@ public final class TcpConnection {
      * @param skb fully initialised segment entry; ownership transferred to the write queue
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498">tcp_queue_skb</a>
      */
-    public void tcp_queue_skb(TcpSegmentEntry skb) {
+    public void tcp_queue_skb(TcpSkb skb) {
         // WRITE_ONCE(tp->write_seq, TCP_SKB_CB(skb)->end_seq)
         writeSeq = skb.endSeq();
         sendBuffer.enqueue(skb);

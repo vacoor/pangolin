@@ -5,8 +5,8 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnect
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.ConnectionKey;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpReceiveBuffer;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSkb;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpIncomingAckHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
@@ -890,7 +890,7 @@ public abstract class TcpMultiplexer {
                 data.release();
                 return;
             }
-            sk.tcp_queue_skb(new TcpSegmentEntry(
+            sk.tcp_queue_skb(new TcpSkb(
                     data,
                     sk.writeSeq(),
                     data.readableBytes(),
@@ -1589,11 +1589,11 @@ public abstract class TcpMultiplexer {
             packetsOut = Math.max(0, packetsOut - count);
         }
 
-        public TcpSegmentEntry tcpSendHead() {
+        public TcpSkb tcpSendHead() {
             return sendBuffer == null ? null : sendBuffer.peekWrite();
         }
 
-        public void tcp_queue_skb(TcpSegmentEntry skb) {
+        public void tcp_queue_skb(TcpSkb skb) {
             if (sendBuffer != null) {
                 writeSeq = skb.endSeq();
                 sendBuffer.enqueue(skb);

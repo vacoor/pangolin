@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection;
 
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.SysctlOptions;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
@@ -16,9 +17,11 @@ import java.util.function.IntConsumer;
  *
  * <p>Mirrors Linux {@code sk->sk_receive_queue} + {@code tp->out_of_order_queue}:
  * <ul>
- *   <li>The OFO queue is keyed by segment {@code seq} and carries FIN metadata
- *       so that a FIN arriving ahead of its data can be replayed when the gap
- *       is filled (aligns with v1 {@code OfoEntry.fin}).</li>
+ *   <li>The OFO queue is keyed by segment {@code seq} and stores {@link TcpSkb}
+ *       entries — the same struct used by the send / RTX paths, mirroring Linux's
+ *       shared {@code struct sk_buff} + {@code TCP_SKB_CB} across all TCP queues.
+ *       {@link TcpSkb#isFin()} carries the FIN bit so that a FIN arriving ahead of
+ *       its data can be replayed when the gap is filled.</li>
  *   <li>{@link #rmemAlloc()} reports OFO + in-order bytes (Linux
  *       {@code atomic_read(&sk->sk_rmem_alloc)}). The OFO budget
  *       ({@link #OFO_MAX_BYTES}) is enforced against the OFO-only slice via
@@ -35,8 +38,8 @@ public final class TcpReceiveBuffer {
     /** Maximum payload bytes allowed in the OFO queue (mirrors Linux {@code sk_rcvbuf / 2} heuristic). */
     public static final int OFO_MAX_BYTES = 256 * 1024;
 
-    /** Out-of-order segment queue: seq → entry. */
-    private final TreeMap<Integer, OfoEntry> ofoQueue = new TreeMap<>(Integer::compareUnsigned);
+    /** Out-of-order segment queue: seq → SKB. */
+    private final TreeMap<Integer, TcpSkb> ofoQueue = new TreeMap<>(Integer::compareUnsigned);
 
     /** Accumulated in-order data ready for the application. */
     private final CompositeByteBuf readBuffer;
@@ -133,32 +136,32 @@ public final class TcpReceiveBuffer {
         }
 
         // ── Trim leading overlap against predecessor ──
-        Map.Entry<Integer, OfoEntry> pred = ofoQueue.lowerEntry(seq);
+        Map.Entry<Integer, TcpSkb> pred = ofoQueue.lowerEntry(seq);
         if (pred != null) {
-            OfoEntry prev = pred.getValue();
-            if (TcpSequence.after(prev.endSeq, seq)) {
-                if (!TcpSequence.after(endSeq, prev.endSeq)) {
+            TcpSkb prev = pred.getValue();
+            if (TcpSequence.after(prev.endSeq(), seq)) {
+                if (!TcpSequence.after(endSeq, prev.endSeq())) {
                     data.release();
                     return false;
                 }
-                seq = prev.endSeq;
+                seq = prev.endSeq();
             }
         }
 
         // ── Evict or trim overlapping successors ──
-        java.util.Iterator<Map.Entry<Integer, OfoEntry>> it =
+        java.util.Iterator<Map.Entry<Integer, TcpSkb>> it =
                 ofoQueue.tailMap(seq).entrySet().iterator();
         while (it.hasNext()) {
-            OfoEntry succ = it.next().getValue();
-            if (!TcpSequence.before(succ.seq, endSeq)) {
+            TcpSkb succ = it.next().getValue();
+            if (!TcpSequence.before(succ.startSeq(), endSeq)) {
                 break;
             }
-            if (!TcpSequence.before(endSeq, succ.endSeq)) {
-                removeOfoBytes(succ.payload.readableBytes());
+            if (!TcpSequence.before(endSeq, succ.endSeq())) {
+                removeOfoBytes(succ.payload().readableBytes());
                 succ.release();
                 it.remove();
             } else {
-                endSeq = succ.seq;
+                endSeq = succ.startSeq();
                 break;
             }
         }
@@ -182,7 +185,9 @@ public final class TcpReceiveBuffer {
         }
         data.release();
 
-        ofoQueue.put(seq, new OfoEntry(seq, endSeq, slice, retainedFin));
+        // endSeq() = startSeq + dataLen + (fin ? 1 : 0),因此有 FIN 时 dataLen 需扣除 1。
+        byte flags = (byte) (retainedFin ? TcpConstants.TCPHDR_FIN : 0);
+        ofoQueue.put(seq, new TcpSkb(slice, seq, payloadLen, flags, 0L));
         addOfoBytes(slice.readableBytes());
         return true;
     }
@@ -195,8 +200,8 @@ public final class TcpReceiveBuffer {
         int target = Math.max(1, ofoQueue.size() / 2);
         int pruned = 0;
         while (pruned < target && !ofoQueue.isEmpty()) {
-            Map.Entry<Integer, OfoEntry> last = ofoQueue.pollLastEntry();
-            removeOfoBytes(last.getValue().payload.readableBytes());
+            Map.Entry<Integer, TcpSkb> last = ofoQueue.pollLastEntry();
+            removeOfoBytes(last.getValue().payload().readableBytes());
             last.getValue().release();
             pruned++;
         }
@@ -212,32 +217,32 @@ public final class TcpReceiveBuffer {
     private DrainOutcome drainOfo(int rcvNxt) {
         boolean finDelivered = false;
         while (!ofoQueue.isEmpty()) {
-            Map.Entry<Integer, OfoEntry> head = ofoQueue.firstEntry();
-            OfoEntry entry = head.getValue();
+            Map.Entry<Integer, TcpSkb> head = ofoQueue.firstEntry();
+            TcpSkb entry = head.getValue();
 
             // Still out-of-order — stop.
-            if (TcpSequence.after(entry.seq, rcvNxt)) {
+            if (TcpSequence.after(entry.startSeq(), rcvNxt)) {
                 break;
             }
 
             ofoQueue.pollFirstEntry();
-            removeOfoBytes(entry.payload.readableBytes());
+            removeOfoBytes(entry.payload().readableBytes());
 
             // Pure duplicate: entirely before rcvNxt.
-            if (!TcpSequence.after(entry.endSeq, rcvNxt)) {
+            if (!TcpSequence.after(entry.endSeq(), rcvNxt)) {
                 entry.release();
                 continue;
             }
 
-            int trimOffset  = rcvNxt - entry.seq;
-            int deliverLen  = entry.endSeq - rcvNxt - (entry.fin ? 1 : 0);
+            int trimOffset  = rcvNxt - entry.startSeq();
+            int deliverLen  = entry.endSeq() - rcvNxt - (entry.isFin() ? 1 : 0);
             if (deliverLen > 0) {
-                ByteBuf slice = entry.payload.retainedSlice(
-                        entry.payload.readerIndex() + trimOffset, deliverLen);
+                ByteBuf slice = entry.payload().retainedSlice(
+                        entry.payload().readerIndex() + trimOffset, deliverLen);
                 addInorder(slice);
             }
-            rcvNxt = entry.endSeq;
-            boolean wasFin = entry.fin;
+            rcvNxt = entry.endSeq();
+            boolean wasFin = entry.isFin();
             entry.release();
 
             if (wasFin) {
@@ -292,7 +297,7 @@ public final class TcpReceiveBuffer {
     public void releaseAll() {
         int drainBytes = ofoBytes + inorderBytes;
         readBuffer.release();
-        for (OfoEntry e : ofoQueue.values()) {
+        for (TcpSkb e : ofoQueue.values()) {
             e.release();
         }
         ofoQueue.clear();
@@ -333,31 +338,6 @@ public final class TcpReceiveBuffer {
     }
 
     // ---- Nested types ----
-
-    /**
-     * A single entry in the out-of-order queue.  Mirrors Linux
-     * {@code struct sk_buff} with {@code TCP_SKB_CB} for the OFO tree;
-     * we retain a payload slice so the owning packet can be released independently.
-     */
-    public static final class OfoEntry {
-        public final int     seq;
-        public final int     endSeq;
-        public final ByteBuf payload;
-        public final boolean fin;
-
-        public OfoEntry(int seq, int endSeq, ByteBuf payload, boolean fin) {
-            this.seq     = seq;
-            this.endSeq  = endSeq;
-            this.payload = payload;
-            this.fin     = fin;
-        }
-
-        public void release() {
-            if (payload != null && payload != Unpooled.EMPTY_BUFFER) {
-                payload.release();
-            }
-        }
-    }
 
     /** Result of {@link #offer}: new RCV.NXT plus whether a FIN was delivered. */
     public static final class OfferResult {

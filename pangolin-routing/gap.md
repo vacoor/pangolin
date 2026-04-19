@@ -4,7 +4,7 @@
 内核 `net/ipv4/tcp_*.c` 的对齐进度。每条残余 gap 按 **当前状态 / 残余 / 影响 / 建议**
 四要素展开。
 
-> 最近一次更新:2026-04-19 — Phase 3 批次 6 / 7 / 8 / 10 + D3-a / D3-b + D2 动态 PMTU + D3 SACK tagging 入站主循环 + E3 TIME_WAIT bucket + TcpTimewaitSock mini-sock + E1 MIB / drop-reason 统计骨架 + E3 PAWS / TW_SYN 复用 + D3 任意边界 tcp_fragment + SACK 局部重叠切段记账 + RACK scoreboard + tcp_mark_head_lost + D1 残余 rmem_alloc + tcp_under_memory_pressure + tcp_win_from_space scaling_ratio + E2 tcp_fin 全状态 switch + E3 FIN_WAIT_2 子状态(tw_substate)+ **E2 SYN_RECV FIN 同构路径核验** 已合入。原"路径差异"条目全部收敛(SYN_RECV FIN 已确认同构,`__tcp_retransmit_skb` SYN fix-up 为 v2 架构前提,不作防御性代码)。
+> 最近一次更新:2026-04-19 — Phase 3 批次 6 / 7 / 8 / 10 + D3-a / D3-b + D2 动态 PMTU + D3 SACK tagging 入站主循环 + E3 TIME_WAIT bucket + TcpTimewaitSock mini-sock + E1 MIB / drop-reason 统计骨架 + E3 PAWS / TW_SYN 复用 + D3 任意边界 tcp_fragment + SACK 局部重叠切段记账 + RACK scoreboard + tcp_mark_head_lost + D1 残余 rmem_alloc + tcp_under_memory_pressure + tcp_win_from_space scaling_ratio + E2 tcp_fin 全状态 switch + E3 FIN_WAIT_2 子状态(tw_substate)+ E2 SYN_RECV FIN 同构路径核验 + **统一 SKB 数据结构 `TcpSkb`(write / rtx / OFO 三路复用)** 已合入。原"路径差异"条目全部收敛(SYN_RECV FIN 已确认同构,`__tcp_retransmit_skb` SYN fix-up 为 v2 架构前提,不作防御性代码)。
 
 ---
 

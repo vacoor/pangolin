@@ -3,7 +3,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.ConnectionKey;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSkb;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpIncomingPreValidator;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
@@ -194,8 +194,8 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
             if (!after(end, priorSndUna)) continue;
 
             // 本块扫描以快照为准,允许 carveToBlock 在遍历过程中对 RTX 队列做切分操作。
-            TcpSegmentEntry[] snap = sock.sendBuffer().rtxSnapshot();
-            for (TcpSegmentEntry skb : snap) {
+            TcpSkb[] snap = sock.sendBuffer().rtxSnapshot();
+            for (TcpSkb skb : snap) {
                 final int segStart = skb.startSeq();
                 final int segEnd   = skb.endSeq();
                 // 段已越过 SACK 块尾,后续段更高序,停止本块扫描
@@ -208,7 +208,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
                 final int iEnd   = after(segEnd, end)      ? end   : segEnd;
                 if (!before(iStart, iEnd)) continue;
 
-                TcpSegmentEntry target = carveToBlock(sock, skb, iStart, iEnd);
+                TcpSkb target = carveToBlock(sock, skb, iStart, iEnd);
                 if (target == null) continue;
 
                 if (!target.isSackAcked()) {
@@ -251,7 +251,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         final long reoWndUs = Math.max(srttUs > 0 ? srttUs >>> 2 : 1_000L, 1_000L);
         final long lossBoundary = rackMstamp - reoWndUs;
 
-        for (TcpSegmentEntry skb : sock.sendBuffer().rtxView()) {
+        for (TcpSkb skb : sock.sendBuffer().rtxView()) {
             if (skb.isSackAcked() || skb.isLost()) continue;
             final long sentUs = skb.sentTimeUs();
             if (sentUs <= 0L) continue;
@@ -270,7 +270,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
     public static void tcp_mark_head_lost(TcpSock sock, int packets) {
         if (sock == null || packets <= 0 || !sock.sendBuffer().hasRtxPending()) return;
         int remaining = packets;
-        for (TcpSegmentEntry skb : sock.sendBuffer().rtxView()) {
+        for (TcpSkb skb : sock.sendBuffer().rtxView()) {
             if (remaining <= 0) break;
             if (skb.isSackAcked() || skb.isLost()) {
                 continue;
@@ -292,17 +292,17 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
      * </ul>
      * 返回切分完毕、与 SACK 交集完全匹配的段;失败返回 {@code null}。
      */
-    private static TcpSegmentEntry carveToBlock(TcpSock sock, TcpSegmentEntry skb, int iStart, int iEnd) {
-        TcpSegmentEntry target = skb;
+    private static TcpSkb carveToBlock(TcpSock sock, TcpSkb skb, int iStart, int iEnd) {
+        TcpSkb target = skb;
         if (before(target.startSeq(), iStart)) {
-            TcpSegmentEntry tail = sock.sendBuffer().splitRtx(target, iStart);
+            TcpSkb tail = sock.sendBuffer().splitRtx(target, iStart);
             if (tail == null) {
                 return null;
             }
             target = tail;
         }
         if (after(target.endSeq(), iEnd)) {
-            TcpSegmentEntry tail = sock.sendBuffer().splitRtx(target, iEnd);
+            TcpSkb tail = sock.sendBuffer().splitRtx(target, iEnd);
             if (tail == null) {
                 return null;
             }
@@ -326,7 +326,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
         int ackedPcount = 0;
         final int ack = sock.sndUna();
 
-        TcpSegmentEntry skb;
+        TcpSkb skb;
         int ackedRetrans = 0;
         int sackedDecr = 0;
         int lostDecr = 0;
@@ -405,7 +405,7 @@ public final class TcpIncomingAckHandler extends ChannelInboundHandlerAdapter {
     }
 
     public static void tcpAckProbe(TcpSock sock) {
-        TcpSegmentEntry head = sock.tcpSendHead();
+        TcpSkb head = sock.tcpSendHead();
         if (head == null) {
             return;
         }

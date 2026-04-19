@@ -2,7 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.TcpSegmentEntry;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSkb;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.SysctlOptions;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
@@ -182,9 +182,9 @@ public final class TcpOutput {
         }
         // (0) 选段:若 RACK/FACK 已标记 LOST,优先重传 LOST 段;否则退回到 RTX 头段
         //     对齐 Linux {@code tcp_xmit_retransmit_queue} 的 LOST 驱动 + 首段兜底。
-        TcpSegmentEntry oldest = null;
+        TcpSkb oldest = null;
         if (sock.lostOut() > 0) {
-            for (TcpSegmentEntry skb : sock.sendBuffer().rtxView()) {
+            for (TcpSkb skb : sock.sendBuffer().rtxView()) {
                 if (skb.isSackAcked()) continue;
                 if (skb.isLost()) {
                     oldest = skb;
@@ -280,7 +280,7 @@ public final class TcpOutput {
         }
 
         final int max_segs = tcp_tso_segs(sock, mss_now);
-        TcpSegmentEntry skb;
+        TcpSkb skb;
         while ((skb = sock.tcpSendHead()) != null) {
             if (tcp_pacing_check(sock)) {
                 break;
@@ -380,7 +380,7 @@ public final class TcpOutput {
             return;
         }
         ByteBuf empty = sock.channel().alloc().buffer(0, 0);
-        sock.tcp_queue_skb(new TcpSegmentEntry(
+        sock.tcp_queue_skb(new TcpSkb(
                 empty, sock.writeSeq(), 0, (byte) (TCPHDR_ACK | TCPHDR_FIN), 0L));
         tcp_write_xmit(sock, sock.mss(), TCP_NAGLE_OFF, 0);
     }
@@ -390,7 +390,7 @@ public final class TcpOutput {
             return -1;
         }
 
-        TcpSegmentEntry skb = sock.tcpSendHead();
+        TcpSkb skb = sock.tcpSendHead();
         int wndEnd = sock.sndUna() + sock.sndWnd();
         if (skb != null && TcpSequence.before(skb.startSeq(), wndEnd)) {
             int priorPackets = sock.packetsOut();
@@ -741,41 +741,41 @@ public final class TcpOutput {
     }
 
     /** Always 1 — no TSO/GSO. @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1614">tcp_set_skb_tso_segs</a> */
-    private int tcp_set_skb_tso_segs(TcpSegmentEntry skb, int mss_now) {
+    private int tcp_set_skb_tso_segs(TcpSkb skb, int mss_now) {
         return 1;
     }
 
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1985">tcp_snd_wnd_test</a> */
-    private boolean tcp_snd_wnd_test(TcpConnection conn, TcpSegmentEntry skb, int mss_now) {
+    private boolean tcp_snd_wnd_test(TcpConnection conn, TcpSkb skb, int mss_now) {
         int end_seq = skb.startSeq() + Math.min(skb.dataLen(), mss_now);
         int wnd_end = conn.sndUna() + conn.sndWnd();
         return !TcpSequence.after(end_seq, wnd_end);
     }
 
-    private boolean tcp_snd_wnd_test(TcpSock sock, TcpSegmentEntry skb, int mss_now) {
+    private boolean tcp_snd_wnd_test(TcpSock sock, TcpSkb skb, int mss_now) {
         int end_seq = skb.startSeq() + Math.min(skb.dataLen(), mss_now);
         int wnd_end = sock.sndUna() + sock.sndWnd();
         return !TcpSequence.after(end_seq, wnd_end);
     }
 
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1780">tcp_skb_is_last</a> */
-    private boolean tcp_skb_is_last(TcpConnection conn, TcpSegmentEntry skb) {
+    private boolean tcp_skb_is_last(TcpConnection conn, TcpSkb skb) {
         return conn.sendBuffer().writeQueueSize() == 1;
     }
 
-    private boolean tcp_skb_is_last(TcpSock sock, TcpSegmentEntry skb) {
+    private boolean tcp_skb_is_last(TcpSock sock, TcpSkb skb) {
         return sock.sendBuffer().writeQueueSize() == 1;
     }
 
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1785">tcp_nagle_test</a> */
-    private boolean tcp_nagle_test(TcpConnection conn, TcpSegmentEntry skb, int mss_now, int nonagle) {
+    private boolean tcp_nagle_test(TcpConnection conn, TcpSkb skb, int mss_now, int nonagle) {
         if ((nonagle & (TCP_NAGLE_OFF | TCP_NAGLE_PUSH)) != 0) {
             return true;
         }
         return skb.dataLen() >= mss_now || conn.packetsOut() == 0;
     }
 
-    private boolean tcp_nagle_test(TcpSock sock, TcpSegmentEntry skb, int mss_now, int nonagle) {
+    private boolean tcp_nagle_test(TcpSock sock, TcpSkb skb, int mss_now, int nonagle) {
         if ((nonagle & (TCP_NAGLE_OFF | TCP_NAGLE_PUSH)) != 0) {
             return true;
         }
@@ -783,13 +783,13 @@ public final class TcpOutput {
     }
 
     /** TSO deferral — not implemented; always {@code false}. @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2065">tcp_tso_should_defer</a> */
-    private boolean tcp_tso_should_defer(TcpConnection conn, TcpSegmentEntry skb,
+    private boolean tcp_tso_should_defer(TcpConnection conn, TcpSkb skb,
                                          boolean is_cwnd_limited, boolean is_rwnd_limited,
                                          int max_segs) {
         return false;
     }
 
-    private boolean tcp_tso_should_defer(TcpSock sock, TcpSegmentEntry skb,
+    private boolean tcp_tso_should_defer(TcpSock sock, TcpSkb skb,
                                          boolean is_cwnd_limited, boolean is_rwnd_limited,
                                          int max_segs) {
         return false;
@@ -805,12 +805,12 @@ public final class TcpOutput {
     }
 
     /** Simplified: always {@code mss_now}. @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1741">tcp_mss_split_point</a> */
-    private int tcp_mss_split_point(TcpConnection conn, TcpSegmentEntry skb, int mss_now,
+    private int tcp_mss_split_point(TcpConnection conn, TcpSkb skb, int mss_now,
                                     int cwnd_quota, int nonagle) {
         return mss_now;
     }
 
-    private int tcp_mss_split_point(TcpSock sock, TcpSegmentEntry skb, int mss_now,
+    private int tcp_mss_split_point(TcpSock sock, TcpSkb skb, int mss_now,
                                     int cwnd_quota, int nonagle) {
         return mss_now;
     }
@@ -819,7 +819,7 @@ public final class TcpOutput {
      * Split write-queue head at {@code limit} bytes.
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1559">tcp_fragment</a>
      */
-    private boolean tcp_fragment(TcpConnection conn, TcpSegmentEntry skb, int limit, int mss_now) {
+    private boolean tcp_fragment(TcpConnection conn, TcpSkb skb, int limit, int mss_now) {
         ByteBuf origPayload = skb.payload();
         int     origReader  = origPayload.readerIndex();
 
@@ -830,8 +830,8 @@ public final class TcpOutput {
         byte headFlags = (byte) (skb.tcpFlags() & ~(TCPHDR_FIN | TCPHDR_PSH));
         byte tailFlags = skb.tcpFlags();
 
-        TcpSegmentEntry headEntry = new TcpSegmentEntry(headBuf, skb.startSeq(),         limit,   headFlags, 0L);
-        TcpSegmentEntry tailEntry = new TcpSegmentEntry(tailBuf, skb.startSeq() + limit, tailLen, tailFlags, 0L);
+        TcpSkb headEntry = new TcpSkb(headBuf, skb.startSeq(),         limit,   headFlags, 0L);
+        TcpSkb tailEntry = new TcpSkb(tailBuf, skb.startSeq() + limit, tailLen, tailFlags, 0L);
 
         conn.sendBuffer().pollWrite().release();
         conn.sendBuffer().enqueueWriteFirst(tailEntry);
@@ -839,7 +839,7 @@ public final class TcpOutput {
         return false;
     }
 
-    private boolean tcp_fragment(TcpSock sock, TcpSegmentEntry skb, int limit, int mss_now) {
+    private boolean tcp_fragment(TcpSock sock, TcpSkb skb, int limit, int mss_now) {
         ByteBuf origPayload = skb.payload();
         int origReader = origPayload.readerIndex();
 
@@ -850,8 +850,8 @@ public final class TcpOutput {
         byte headFlags = (byte) (skb.tcpFlags() & ~(TCPHDR_FIN | TCPHDR_PSH));
         byte tailFlags = skb.tcpFlags();
 
-        TcpSegmentEntry headEntry = new TcpSegmentEntry(headBuf, skb.startSeq(), limit, headFlags, 0L);
-        TcpSegmentEntry tailEntry = new TcpSegmentEntry(tailBuf, skb.startSeq() + limit, tailLen, tailFlags, 0L);
+        TcpSkb headEntry = new TcpSkb(headBuf, skb.startSeq(), limit, headFlags, 0L);
+        TcpSkb tailEntry = new TcpSkb(tailBuf, skb.startSeq() + limit, tailLen, tailFlags, 0L);
 
         sock.sendBuffer().pollWrite().release();
         sock.sendBuffer().enqueueWriteFirst(tailEntry);
@@ -871,14 +871,14 @@ public final class TcpOutput {
      *   <li>头段清掉 {@code FIN / PSH} 位(不能随中间段出现),尾段保留原 flags;</li>
      *   <li>{@code sacked}(含 {@code TCPCB_SACKED_RETRANS / EVER_RETRANS / LOST} 等)
      *       由 head / tail 各自继承,保证 sacktag 状态不被切分破坏;</li>
-     *   <li>{@code sentTimeUs} 同样继承(重传调用者会在随后 {@link TcpSegmentEntry#updateSentTime}
+     *   <li>{@code sentTimeUs} 同样继承(重传调用者会在随后 {@link TcpSkb#updateSentTime}
      *       更新 head 的时间戳);</li>
      *   <li>切分后的两段按 head → tail 顺序插回队首,维持 seq 升序。</li>
      * </ul>
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1559">tcp_fragment</a>
      */
-    private boolean tcp_rtx_fragment(TcpSock sock, TcpSegmentEntry skb, int limit) {
+    private boolean tcp_rtx_fragment(TcpSock sock, TcpSkb skb, int limit) {
         if (limit <= 0 || limit >= skb.dataLen()) {
             return false;
         }
@@ -892,12 +892,12 @@ public final class TcpOutput {
         byte headFlags = (byte) (skb.tcpFlags() & ~(TCPHDR_FIN | TCPHDR_PSH));
         byte tailFlags = skb.tcpFlags();
 
-        TcpSegmentEntry headEntry = new TcpSegmentEntry(
+        TcpSkb headEntry = new TcpSkb(
                 headBuf, skb.startSeq(), limit, headFlags, skb.sacked(), skb.sentTimeUs());
-        TcpSegmentEntry tailEntry = new TcpSegmentEntry(
+        TcpSkb tailEntry = new TcpSkb(
                 tailBuf, skb.startSeq() + limit, tailLen, tailFlags, skb.sacked(), skb.sentTimeUs());
 
-        TcpSegmentEntry polled = sock.sendBuffer().pollRtx();
+        TcpSkb polled = sock.sendBuffer().pollRtx();
         if (polled != null) {
             polled.release();
         }
@@ -907,20 +907,20 @@ public final class TcpOutput {
     }
 
     /** Not implemented; always {@code false}. @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2374">tcp_small_queue_check</a> */
-    private boolean tcp_small_queue_check(TcpConnection conn, TcpSegmentEntry skb, int push_one) {
+    private boolean tcp_small_queue_check(TcpConnection conn, TcpSkb skb, int push_one) {
         return false;
     }
 
-    private boolean tcp_small_queue_check(TcpSock sock, TcpSegmentEntry skb, int push_one) {
+    private boolean tcp_small_queue_check(TcpSock sock, TcpSkb skb, int push_one) {
         return false;
     }
 
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1486">tcp_transmit_skb</a> */
-    private int tcp_transmit_skb(TcpConnection conn, TcpSegmentEntry skb) {
+    private int tcp_transmit_skb(TcpConnection conn, TcpSkb skb) {
         return __tcp_transmit_skb(conn, skb, conn.rcvNxt());
     }
 
-    private int tcp_transmit_skb(TcpSock sock, TcpSegmentEntry skb) {
+    private int tcp_transmit_skb(TcpSock sock, TcpSkb skb) {
         return __tcp_transmit_skb(sock, skb, sock.rcvNxt());
     }
 
@@ -928,7 +928,7 @@ public final class TcpOutput {
      * Build and write one data segment.
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1290">__tcp_transmit_skb</a>
      */
-    private int __tcp_transmit_skb(TcpConnection conn, TcpSegmentEntry skb, int rcv_nxt) {
+    private int __tcp_transmit_skb(TcpConnection conn, TcpSkb skb, int rcv_nxt) {
         if (skb == null) return -1;
 
         final byte[]    rawOptions = tcp_established_options(conn, skb);
@@ -957,7 +957,7 @@ public final class TcpOutput {
         return 0;
     }
 
-    private int __tcp_transmit_skb(TcpSock sock, TcpSegmentEntry skb, int rcv_nxt) {
+    private int __tcp_transmit_skb(TcpSock sock, TcpSkb skb, int rcv_nxt) {
         if (skb == null) {
             return -1;
         }
@@ -1017,7 +1017,7 @@ public final class TcpOutput {
     /**
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L633">tcp_established_options</a>
      */
-    private byte[] tcp_established_options(TcpConnection conn, TcpSegmentEntry skb) {
+    private byte[] tcp_established_options(TcpConnection conn, TcpSkb skb) {
         if (!conn.timestampEnabled()) {
             return null;
         }
@@ -1035,7 +1035,7 @@ public final class TcpOutput {
         }
     }
 
-    private byte[] tcp_established_options(TcpSock sock, TcpSegmentEntry skb) {
+    private byte[] tcp_established_options(TcpSock sock, TcpSkb skb) {
         if (!sock.timestampEnabled()) {
             return null;
         }
@@ -1057,7 +1057,7 @@ public final class TcpOutput {
      * Advance SND.NXT, promote skb from write queue to RTX queue, arm RTO.
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2595">tcp_event_new_data_sent</a>
      */
-    private void tcp_event_new_data_sent(TcpSock sock, TcpSegmentEntry skb) {
+    private void tcp_event_new_data_sent(TcpSock sock, TcpSkb skb) {
         sock.sndNxt(skb.endSeq());
 
         sock.sendBuffer().pollWrite();
@@ -1106,20 +1106,20 @@ public final class TcpOutput {
     }
 
     /** @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L566">tcp_minshall_update</a> */
-    private void tcp_minshall_update(TcpConnection conn, int mss_now, TcpSegmentEntry skb) {
+    private void tcp_minshall_update(TcpConnection conn, int mss_now, TcpSkb skb) {
         if (skb.dataLen() < tcp_skb_pcount(skb) * mss_now) {
             conn.sndSml(skb.endSeq());
         }
     }
 
-    private void tcp_minshall_update(TcpSock sock, int mss_now, TcpSegmentEntry skb) {
+    private void tcp_minshall_update(TcpSock sock, int mss_now, TcpSkb skb) {
         if (skb.dataLen() < tcp_skb_pcount(skb) * mss_now) {
             sock.sndSml(skb.endSeq());
         }
     }
 
     /** Always 1 — no TSO/GSO. */
-    private int tcp_skb_pcount(TcpSegmentEntry skb) {
+    private int tcp_skb_pcount(TcpSkb skb) {
         return 1;
     }
 
