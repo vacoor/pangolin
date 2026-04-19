@@ -550,7 +550,11 @@ public abstract class TcpMultiplexer {
      *
      * <ul>
      *   <li><b>SYN_RECV / ESTABLISHED</b>:迁移至 {@link TcpConnectionState#CLOSE_WAIT},
-     *       置 pingpong,发 ACK。</li>
+     *       置 pingpong,发 ACK。v2 正常路径下 SYN_RECV + FIN+ACK 会先由
+     *       {@code tcp_rcv_state_process} 的 SYN_RECV 分支 {@code tcp_try_establish} 迁入
+     *       ESTABLISHED,再进入 {@code tcp_data_queue} 命中 ESTABLISHED case;与 Linux
+     *       {@code tcp_rcv_state_process} 先 {@code tcp_set_state(ESTABLISHED)} fall-through
+     *       到末尾 {@code tcp_data_queue} 的路径等价。两侧 SYN_RECV case 均作防御性合并保留。</li>
      *   <li><b>CLOSE_WAIT / CLOSING / LAST_ACK</b>:重传 FIN,状态保持,发 ACK。</li>
      *   <li><b>FIN_WAIT_1</b>:simultaneous close,先发 ACK 再迁 {@link TcpConnectionState#CLOSING}
      *       (对齐 Linux tcp_input.c:4355)。</li>

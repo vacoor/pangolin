@@ -4,7 +4,7 @@
 内核 `net/ipv4/tcp_*.c` 的对齐进度。每条残余 gap 按 **当前状态 / 残余 / 影响 / 建议**
 四要素展开。
 
-> 最近一次更新:2026-04-19 — Phase 3 批次 6 / 7 / 8 / 10 + D3-a / D3-b + D2 动态 PMTU + D3 SACK tagging 入站主循环 + E3 TIME_WAIT bucket + TcpTimewaitSock mini-sock + E1 MIB / drop-reason 统计骨架 + E3 PAWS / TW_SYN 复用 + D3 任意边界 tcp_fragment + SACK 局部重叠切段记账 + RACK scoreboard + tcp_mark_head_lost + D1 残余 rmem_alloc + tcp_under_memory_pressure + tcp_win_from_space scaling_ratio + E2 tcp_fin 全状态 switch + **E3 FIN_WAIT_2 子状态(tw_substate)** 已合入。
+> 最近一次更新:2026-04-19 — Phase 3 批次 6 / 7 / 8 / 10 + D3-a / D3-b + D2 动态 PMTU + D3 SACK tagging 入站主循环 + E3 TIME_WAIT bucket + TcpTimewaitSock mini-sock + E1 MIB / drop-reason 统计骨架 + E3 PAWS / TW_SYN 复用 + D3 任意边界 tcp_fragment + SACK 局部重叠切段记账 + RACK scoreboard + tcp_mark_head_lost + D1 残余 rmem_alloc + tcp_under_memory_pressure + tcp_win_from_space scaling_ratio + E2 tcp_fin 全状态 switch + E3 FIN_WAIT_2 子状态(tw_substate)+ **E2 SYN_RECV FIN 同构路径核验** 已合入。原"路径差异"条目全部收敛(SYN_RECV FIN 已确认同构,`__tcp_retransmit_skb` SYN fix-up 为 v2 架构前提,不作防御性代码)。
 
 ---
 
@@ -15,31 +15,17 @@
 | ⛔ 阻塞     |   0    | —                                      |
 | ⚠️ 降级     |   0    | —                                      |
 | 🔧 基础设施 |   0    | —                                      |
-| ℹ️ 路径差异 |   2    | E2 SYN_RECV FIN、D3 SYN fix-up(架构差异,不计 gap) |
-| ✅ 已对齐   |  22    | 见文末"已对齐清单"                     |
+| ℹ️ 路径差异 |   0    | —                                      |
+| ✅ 已对齐   |  23    | 见文末"已对齐清单"                     |
+
+> v2 架构前提(不构成差异):SYN / SYN-ACK 由 `TcpHandshaker` 独立管理,不进入
+> `TcpSendBuffer` RTX 队列;因此 Linux `__tcp_retransmit_skb` 中
+> `before(seq, snd_una) && skb->syn → TCPHDR_SYN 清位 + seq++` 分支对应的竞态
+> 在 v2 不可达,不需要也不应该在 `tcp_retransmit_skb` 里保留防御性代码。
 
 ## 推进顺序
 
 (无待办项 — 全部对齐完成。)
-
----
-
-## 路径差异(行为等价,不计 gap)
-
-### E2 — SYN_RECV 阶段 FIN 的分发点
-
-- **Linux**:`tcp_input.c:4318` `tcp_fin` switch 覆盖 SYN_RECV / ESTABLISHED / CLOSE_WAIT /
-  CLOSING / LAST_ACK / FIN_WAIT_1 / FIN_WAIT_2 全部状态。
-- **v2**:`TcpMultiplexer.tcp_fin` 只处理 ESTABLISHED → CLOSE_WAIT;其余状态由
-  `Tcp4Multiplexer.tcp_fin_state_process` 与各调用点就地处理。SYN_RECV 阶段 FIN 由
-  `tcp_rcv_state_process` 的其它分支吸收。
-- **结论**:行为与 Linux 等价,只是路径不同,无需补齐。
-
-### D3 — SYN fix-up 分支
-
-- **Linux**:`__tcp_retransmit_skb` 中 `before(seq, snd_una) && skb->syn` → 清 SYN + `seq++`。
-- **v2**:SYN 由 `TcpHandshaker` 管理,**不落入数据 RTX 队列**,此分支在 v2 架构下永不触发。
-- **结论**:架构差异,无需补齐。
 
 ---
 
@@ -70,6 +56,7 @@
 | E1     | MIB / `SKB_DROP_REASON_*` 骨架      | `TcpMib` 枚举(18 条 `LINUX_MIB_*` / `TCP_MIB_*` 对齐项)+ `TcpMibStats`(`AtomicLongArray` 双计数器家族 + snapshot)+ 主路径投递:PAWSESTABREJECTED / TCPSYNCHALLENGE / TCPCHALLENGEACK / OUTOFWINDOWICMPS / TCPTIMEWAITCREATED / TCPRETRANSSEGS + PreValidator / AckHandler / TcpOutput drop_reason 落点 |
 | E1     | `linger2 < 0 → tcp_done` 主路径     | FIN_WAIT_1 → FIN_WAIT_2 路径 + `onFinWait2Keepalive`(批次 5)                                            |
 | E2     | `tcp_fin` 全状态 switch 合并        | `TcpMultiplexer.tcp_fin(ctx, sk)` 单点覆盖 SYN_RECV/ESTABLISHED/CLOSE_WAIT/CLOSING/LAST_ACK/FIN_WAIT_1/FIN_WAIT_2;删除 `Tcp4Multiplexer.tcp_fin_state_process`,FIN+data 统一走 `tcp_data_queue → queue_and_out → tcp_fin`,FIN_WAIT_1 → CLOSING、FIN_WAIT_2 → TIME_WAIT 由全状态 switch 驱动;对齐 Linux `tcp_fin`(tcp_input.c:4318) |
+| E2-SR  | SYN_RECV + FIN 与 Linux 同构分发    | `tcp_rcv_state_process` SYN_RECV → `tcp_try_establish`(state=ESTABLISHED)→ `tcp_data_queue` → `queue_and_out` → `tcp_fin`(ESTABLISHED 分支)→ CLOSE_WAIT;与 Linux 先 `tcp_set_state(ESTABLISHED)` 再 fall-through 到末尾 `tcp_data_queue` 的路径完全一致,`tcp_fin` switch 的 SYN_RECV/ESTABLISHED 合并 case 在两侧均作为正常命中点 |
 
 ---
 
