@@ -13,9 +13,9 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.sun.jna.*;
 import com.sun.jna.ptr.IntByReference;
-import jdk.jshell.spi.ExecutionControl;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -88,6 +88,13 @@ public class DarwinTunAdapter extends TunAdapter {
         final int packetSize = mtu + AF_BYTES;
         final ByteBuffer buf = ByteBuffer.allocateDirect(packetSize);
         final int bytesRead = LIBC.read(fd, buf, packetSize);
+        if (bytesRead < 0) {
+            throw ioException("read() failed", Native.getLastError());
+        }
+        if (bytesRead <= AF_BYTES) {
+            throw new EOFException("TUN device returned incomplete packet.");
+        }
+        buf.limit(bytesRead).position(0);
 
         // 4-bytes address family
         final int addressFamily = buf.getInt(0);
@@ -99,8 +106,7 @@ public class DarwinTunAdapter extends TunAdapter {
         log.trace("IPv{} packet read.", ipVersion);
 
         // skip 4-bytes address family
-        buf.position(AF_BYTES).limit(bytesRead);
-        return buf;
+        return buf.position(AF_BYTES).slice();
     }
 
     /**
@@ -121,14 +127,15 @@ public class DarwinTunAdapter extends TunAdapter {
 
         final List<Memory> manualMemories = Lists.newArrayList();
         final LibC.Iovec[] iov = (LibC.Iovec[]) new LibC.Iovec().toArray(1 + packet.length);
+        int expected = 0;
         try {
-            write(iov, 0, addressFamilyBuf, manualMemories);
+            expected += write(iov, 0, addressFamilyBuf, manualMemories);
             for (int i = 0; i < packet.length; i++) {
-                write(iov, i + 1, packet[i], manualMemories);
+                expected += write(iov, i + 1, packet[i], manualMemories);
             }
 
             final NativeLong written = LIBC.writev(fd, iov, iov.length);
-            Preconditions.checkState(written.longValue() >= 0, "Failed to write packet: %s", written);
+            checkWriteResult("writev()", written.longValue(), expected);
         } finally {
             closeMemories(manualMemories);
         }
@@ -142,22 +149,25 @@ public class DarwinTunAdapter extends TunAdapter {
         }
     }
 
-    private LibC.Iovec write(final LibC.Iovec[] iov, final int offset, final ByteBuffer buf, final List<Memory> memories) {
+    private int write(final LibC.Iovec[] iov, final int offset, final ByteBuffer buf, final List<Memory> memories) {
+        // TODO why dumplicate?
+        final ByteBuffer src = buf.duplicate();
+        final int len = src.remaining();
         Pointer ptr;
-        if (buf.isDirect()) {
-            ptr = Native.getDirectBufferPointer(buf).share(buf.position());
+        if (src.isDirect()) {
+            ptr = Native.getDirectBufferPointer(src).share(src.position());
         } else {
             log.warn("Non-direct -> Direct memory.");
-            final Memory memory = new Memory(buf.remaining());
+            final Memory memory = new Memory(len);
             memories.add(memory);
-            for (int i = 0; buf.hasRemaining(); i++) {
-                memory.setByte(i, buf.get());
+            for (int i = 0; src.hasRemaining(); i++) {
+                memory.setByte(i, src.get());
             }
             ptr = memory;
         }
         iov[offset].iov_base = ptr;
-        iov[offset].iov_len = new NativeLong(buf.remaining());
-        return iov[offset];
+        iov[offset].iov_len = new NativeLong(len);
+        return len;
     }
 
     private int addressFamily(final int ipVersion) throws IOException {
@@ -173,11 +183,13 @@ public class DarwinTunAdapter extends TunAdapter {
     }
 
     private void write0(final ByteBuffer packet) throws IOException {
-        final int ipVersion = packet.get(packet.position()) >> 4;
+        // TODO why dumplicate?
+        final ByteBuffer src = packet.duplicate();
+        final int ipVersion = src.get(src.position()) >> 4;
         final int addressFamily = addressFamily(ipVersion);
 
         final ByteBuffer buf = ByteBuffer.allocateDirect(
-                AF_BYTES + packet.remaining()
+                AF_BYTES + src.remaining()
         );
         buf.put(new byte[]{
                 (byte) (addressFamily >> 24),
@@ -185,10 +197,12 @@ public class DarwinTunAdapter extends TunAdapter {
                 (byte) (addressFamily >> 8),
                 (byte) addressFamily
         });
-        buf.put(packet);
+        buf.put(src);
         buf.flip();
 
-        LIBC.write(fd, buf, buf.remaining());
+        final int expected = buf.remaining();
+        final int written = LIBC.write(fd, buf, expected);
+        checkWriteResult("write()", written, expected);
     }
 
     /**
@@ -212,62 +226,74 @@ public class DarwinTunAdapter extends TunAdapter {
     public static DarwinTunAdapter open(final String ifname, final int mtu,
                                         final InterfaceAddressEx... bindings) {
         final int scUnit = nameToUnit(ifname);
-
-        // create socket
-        final int fd = LIBC.socket(Socket.AF_SYSTEM, Socket.SOCK_DGRAM, SysDomain.SYSPROTO_CONTROL);
-        if (fd < 0) {
-            DarwinUtils.throwLastErrorException(Native.getLastError());
-        }
-
-        // mark socket as utun device
-        final KernControl.ctl_info ctlInfo = new KernControl.ctl_info(IfUtun.UTUN_CONTROL_NAME);
-        if (LIBC.ioctl(fd, KernControl.CTLIOCGINFO, ctlInfo) < 0) {
-            DarwinUtils.throwLastErrorException(Native.getLastError());
-        }
-
-        // define address of socket
-        final KernControl.sockaddr_ctl address = new KernControl.sockaddr_ctl((byte) Socket.AF_SYSTEM, (short) SysDomain.SYSPROTO_CONTROL, ctlInfo.ctl_id, scUnit);
-        if (LIBC.connect(fd, address, address.sc_len) < 0) {
-            DarwinUtils.throwLastErrorException(Native.getLastError());
-        }
-
-        // get socket name
-        final SockName sockName = new SockName();
-        final IntByReference sockNameLen = new IntByReference(SockName.LENGTH);
-        if (LIBC.getsockopt(fd, SysDomain.SYSPROTO_CONTROL, IfUtun.UTUN_OPT_IFNAME, sockName, sockNameLen) < 0) {
-            DarwinUtils.throwLastErrorException(Native.getLastError());
-        }
-
-        final String ifnameToUse = Native.toString(sockName.name, US_ASCII);
-
-        // get or set interface MTU
+        int fd = -1;
+        boolean success = false;
+        String ifnameToUse = null;
         int mtuToUse = mtu;
-        if (0 < mtuToUse) {
-            DarwinNetworkInterface.setMTU(fd, ifnameToUse, mtuToUse);
-        } else {
-            mtuToUse = DarwinNetworkInterface.getMTU(fd, ifnameToUse);
-        }
 
-        final DarwinNetworkInterface nix = DarwinNetworkInterface.getByName(ifnameToUse);
-        final Set<InetAddress> processes = Sets.newHashSet();
-        for (final InterfaceAddressEx binding : bindings) {
-            nix.addInterfaceAddress(binding);
+        try {
+            fd = LIBC.socket(Socket.AF_SYSTEM, Socket.SOCK_DGRAM, SysDomain.SYSPROTO_CONTROL);
+            if (fd < 0) {
+                DarwinUtils.throwLastErrorException(Native.getLastError());
+            }
 
-            /*-
-             * Mac OS is a strong-end system model, only accepting datagrams
-             * where the destination address matches the interface.
-             *
-             * Add default TUN network routes:
-             * sudo route add -net 198.18.0.0/24 198.18.0.1
-             */
-            final InetAddress gw = binding.getAddress();
-            final int prefix = binding.getNetworkPrefixLength();
-            final InetAddress dst = NetUtils2.getNetworkAddress(gw, prefix);
-            if (processes.add(dst) && dst instanceof Inet4Address) {
-                DarwinNetworkRoutingTable.add0(dst, prefix, gw, ifnameToUse);
+            final KernControl.ctl_info ctlInfo = new KernControl.ctl_info(IfUtun.UTUN_CONTROL_NAME);
+            if (LIBC.ioctl(fd, KernControl.CTLIOCGINFO, ctlInfo) < 0) {
+                DarwinUtils.throwLastErrorException(Native.getLastError());
+            }
+
+            final KernControl.sockaddr_ctl address = new KernControl.sockaddr_ctl((byte) Socket.AF_SYSTEM, (short) SysDomain.SYSPROTO_CONTROL, ctlInfo.ctl_id, scUnit);
+            if (LIBC.connect(fd, address, address.sc_len) < 0) {
+                DarwinUtils.throwLastErrorException(Native.getLastError());
+            }
+
+            final SockName sockName = new SockName();
+            final IntByReference sockNameLen = new IntByReference(SockName.LENGTH);
+            if (LIBC.getsockopt(fd, SysDomain.SYSPROTO_CONTROL, IfUtun.UTUN_OPT_IFNAME, sockName, sockNameLen) < 0) {
+                DarwinUtils.throwLastErrorException(Native.getLastError());
+            }
+
+            ifnameToUse = Native.toString(sockName.name, US_ASCII);
+
+            if (0 < mtuToUse) {
+                DarwinNetworkInterface.setMTU(fd, ifnameToUse, mtuToUse);
+            } else {
+                mtuToUse = DarwinNetworkInterface.getMTU(fd, ifnameToUse);
+            }
+
+            final DarwinNetworkInterface nix = DarwinNetworkInterface.getByName(ifnameToUse);
+            final Set<InetAddress> processes = Sets.newHashSet();
+            for (final InterfaceAddressEx binding : bindings) {
+                nix.addInterfaceAddress(binding);
+
+                final InetAddress gw = binding.getAddress();
+                final int prefix = binding.getNetworkPrefixLength();
+                final InetAddress dst = NetUtils2.getNetworkAddress(gw, prefix);
+                if (processes.add(dst) && dst instanceof Inet4Address) {
+                    DarwinNetworkRoutingTable.add0(dst, prefix, gw, ifnameToUse);
+                }
+            }
+            success = true;
+            return new DarwinTunAdapter(fd, ifnameToUse, mtuToUse);
+        } finally {
+            if (!success && fd >= 0) {
+                LIBC.close(fd);
             }
         }
-        return new DarwinTunAdapter(fd, ifnameToUse, mtuToUse);
+    }
+
+    private IOException ioException(final String operation, final int errno) {
+        return new IOException(String.format("%s: [%s] %s", operation, errno, LIBC.strerror(errno)));
+    }
+
+    private void checkWriteResult(final String operation, final long written, final long expected) throws IOException {
+        if (written < 0) {
+            throw ioException(operation + " failed", Native.getLastError());
+        }
+        Preconditions.checkState(expected >= 0, "Expected packet length must be non-negative");
+        if (written != expected) {
+            throw new IOException(String.format("%s short write: expected=%s actual=%s", operation, expected, written));
+        }
     }
 
     private static int nameToUnit(final String ifname) {

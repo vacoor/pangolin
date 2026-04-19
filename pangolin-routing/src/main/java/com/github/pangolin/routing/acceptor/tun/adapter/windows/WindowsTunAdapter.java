@@ -65,19 +65,23 @@ public class WindowsTunAdapter extends TunAdapter {
      * {@inheritDoc}
      */
     @Override
-    protected ByteBuffer read0() {
+    protected ByteBuffer read0() throws IOException {
         do {
             try {
-                // read from wintun
                 final IntByReference packetSizeRef = new IntByReference();
                 Pointer packetPointer = null;
                 try {
                     packetPointer = WintunReceivePacket(session, packetSizeRef);
+
+                    // copy from Wintun ring buffer.
+                    final int size = packetSizeRef.getValue();
+                    final ByteBuffer packet = ByteBuffer.allocateDirect(size);
+                    packet.put(packetPointer.getByteBuffer(0, size));
+                    packet.flip();
+
                     final int ipVersion = packetPointer.getByte(0) >> 4;
                     log.trace("IPv{} packet read.", ipVersion);
-
-                    final int size = packetSizeRef.getValue();
-                    return packetPointer.getByteBuffer(0, size);
+                    return packet;
                 } finally {
                     if (null != packetPointer) {
                         WintunReleaseReceivePacket(session, packetPointer);
@@ -111,27 +115,24 @@ public class WindowsTunAdapter extends TunAdapter {
             for (final ByteBuffer buf : packet) {
                 len += buf.remaining();
             }
+            checkPacketSize(len);
 
             final WinDef.DWORD size = new WinDef.DWORD(len);
             final Pointer packetPointer = WintunAllocateSendPacket(session, size);
-            for (int i = 0, written = 0; i < packet.length; i++) {
-                for (; packet[i].hasRemaining(); written++) {
-                    packetPointer.setByte(written, packet[i].get());
-                }
+            int written = 0;
+            for (final ByteBuffer buf : packet) {
+                written = copyPacket(packetPointer, written, buf);
             }
             WintunSendPacket(session, packetPointer);
         }
     }
 
-    private void write0(final ByteBuffer packet) {
-        final WinDef.DWORD size = new WinDef.DWORD(packet.remaining());
+    private void write0(final ByteBuffer packet) throws IOException {
+        final int len = checkPacketSize(packet.remaining());
+        final WinDef.DWORD size = new WinDef.DWORD(len);
         final Pointer packetPointer = WintunAllocateSendPacket(session, size);
 
-        // packetPointer.write(0, packet, offset, len);
-        for (int offset = 0; packet.hasRemaining(); offset++) {
-            packetPointer.setByte(offset, packet.get());
-        }
-
+        copyPacket(packetPointer, 0, packet);
         WintunSendPacket(session, packetPointer);
     }
 
@@ -268,8 +269,8 @@ public class WindowsTunAdapter extends TunAdapter {
             if (err.getErrorCode() != WinError.ERROR_NOT_FOUND) {
                 throw err;
             }
-            return null;
         }
+        return null;
     }
 
     private static long getLuid(final WINTUN_ADAPTER_HANDLE adapter) {
@@ -278,4 +279,19 @@ public class WindowsTunAdapter extends TunAdapter {
         return luidRef.getValue();
     }
 
+    private int copyPacket(final Pointer packetPointer, final int offset, final ByteBuffer packet) {
+        final ByteBuffer src = packet.duplicate();
+        int written = offset;
+        while (src.hasRemaining()) {
+            packetPointer.setByte(written++, src.get());
+        }
+        return written;
+    }
+
+    private int checkPacketSize(final int size) throws IOException {
+        if (size < 0 || size > WINTUN_MAX_IP_PACKET_SIZE) {
+            throw new IOException("Invalid Wintun packet size: " + size);
+        }
+        return size;
+    }
 }

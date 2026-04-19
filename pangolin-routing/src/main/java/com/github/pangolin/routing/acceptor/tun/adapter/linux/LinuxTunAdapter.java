@@ -13,6 +13,7 @@ import com.google.common.collect.Lists;
 import com.sun.jna.*;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -59,15 +60,18 @@ public class LinuxTunAdapter extends TunAdapter {
      * {@inheritDoc}
      */
     @Override
-    protected ByteBuffer read0() {
+    protected ByteBuffer read0() throws IOException {
         // read from socket
         final int mtu = getMTU();
-
         final ByteBuffer buf = ByteBuffer.allocateDirect(mtu);
         final int bytesRead = LIBC.read(fd, buf, mtu);
-        if (-1 == bytesRead) {
-            throw new IllegalStateException("fd closed");
+        if (bytesRead < 0) {
+            throw ioException("read() failed", Native.getLastError());
         }
+        if (bytesRead == 0) {
+            throw new EOFException("TUN device reached EOF.");
+        }
+        buf.limit(bytesRead).position(0);
 
         final int ipVersion = buf.get(0) >> 4;
         log.trace("IPv{} packet read.", ipVersion);
@@ -81,17 +85,22 @@ public class LinuxTunAdapter extends TunAdapter {
     @Override
     protected void write0(final ByteBuffer[] packet) throws IOException {
         if (1 == packet.length) {
-            LIBC.write(fd, packet[0], packet[0].remaining());
+            // TODO why duplicate?
+            final ByteBuffer buf = packet[0].duplicate();
+            final int expected = buf.remaining();
+            final int written = LIBC.write(fd, buf, expected);
+            checkWriteResult("write()", written, expected);
         } else {
             final List<Memory> manualMemories = Lists.newArrayList();
             final LibC.Iovec[] iov = (LibC.Iovec[]) new LibC.Iovec().toArray(packet.length);
+            int expected = 0;
             try {
                 for (int i = 0; i < packet.length; i++) {
-                    write(iov, i, packet[i], manualMemories);
+                    expected += write(iov, i, packet[i], manualMemories);
                 }
 
                 final NativeLong written = LIBC.writev(fd, iov, iov.length);
-                Preconditions.checkState(written.longValue() >= 0, "Failed to write packet: %s", written);
+                checkWriteResult("writev()", written.longValue(), expected);
             } finally {
                 closeMemories(manualMemories);
             }
@@ -106,22 +115,25 @@ public class LinuxTunAdapter extends TunAdapter {
         }
     }
 
-    private LibC.Iovec write(final LibC.Iovec[] iov, final int offset, final ByteBuffer buf, final List<Memory> memories) {
+    private int write(final LibC.Iovec[] iov, final int offset, final ByteBuffer buf, final List<Memory> memories) {
+        // TODO why duplicate?
+        final ByteBuffer src = buf.duplicate();
+        final int len = src.remaining();
         Pointer ptr;
-        if (buf.isDirect()) {
-            ptr = Native.getDirectBufferPointer(buf).share(buf.position());
+        if (src.isDirect()) {
+            ptr = Native.getDirectBufferPointer(src).share(src.position());
         } else {
             log.warn("Non-direct -> Direct memory.");
-            final Memory memory = new Memory(buf.remaining());
+            final Memory memory = new Memory(len);
             memories.add(memory);
-            for (int i = 0; buf.hasRemaining(); i++) {
-                memory.setByte(i, buf.get());
+            for (int i = 0; src.hasRemaining(); i++) {
+                memory.setByte(i, src.get());
             }
             ptr = memory;
         }
         iov[offset].iov_base = ptr;
-        iov[offset].iov_len = new NativeLong(buf.remaining());
-        return iov[offset];
+        iov[offset].iov_len = new NativeLong(len);
+        return len;
     }
 
     /**
@@ -138,48 +150,75 @@ public class LinuxTunAdapter extends TunAdapter {
                                        final InterfaceAddressEx... bindings) throws Exception {
         final String ifnameToCreate = checkName(tunName);
 
-        // open tun device.
-        final int fd = LIBC.open("/dev/net/tun", O_RDWR);
-        if (fd < 0) {
-            LinuxUtils.throwLastErrorException(Native.getLastError());
-        }
+        int fd = -1;
+        int skfd = -1;
+        boolean success = false;
 
-        // configure/create actual tun device.
-        final If.ifreq ifr = new If.ifreq(ifnameToCreate);
-        ifr.ifr_ifru.setType("ifru_flags");
-        ifr.ifr_ifru.ifru_flags = IfTun.IFF_TUN | IfTun.IFF_NO_PI;
-        if (LIBC.ioctl(fd, IfTun.TUNSETIFF, ifr) < 0) {
-            LinuxUtils.throwLastErrorException(Native.getLastError());
-        }
+        try {
+            // open tun device.
+            fd = LIBC.open("/dev/net/tun", O_RDWR);
+            if (fd < 0) {
+                LinuxUtils.throwLastErrorException(Native.getLastError());
+            }
 
-        final String ifnameToUse = Native.toString(ifr.ifr_name, StandardCharsets.US_ASCII);
+            // configure/create actual tun device.
+            final If.ifreq ifr = new If.ifreq(ifnameToCreate);
+            ifr.ifr_ifru.setType("ifru_flags");
+            ifr.ifr_ifru.ifru_flags = IfTun.IFF_TUN | IfTun.IFF_NO_PI;
+            if (LIBC.ioctl(fd, IfTun.TUNSETIFF, ifr) < 0) {
+                LinuxUtils.throwLastErrorException(Native.getLastError());
+            }
 
-        final int skfd = LIBC.socket(Socket.AF_INET, Socket.SOCK_DGRAM, 0);
-        if (skfd < 0) {
-            LinuxUtils.throwLastErrorException(Native.getLastError());
-        }
+            final String ifnameToUse = Native.toString(ifr.ifr_name, StandardCharsets.US_ASCII);
 
-        // Set the tun device to active and ready to transfer packets.
-        final If.ifreq ifr2 = new If.ifreq(ifnameToUse);
-        ifr2.ifr_ifru.setType("ifru_flags");
-        ifr2.ifr_ifru.ifru_flags = If.IFF_UP | If.IFF_RUNNING | If.IFF_POINTOPOINT | If.IFF_MULTICAST;
-        if (LIBC.ioctl(skfd, Sockios.SIOCSIFFLAGS, ifr2) < 0) {
-            throw new LastErrorException(Native.getLastError());
-        }
+            skfd = LIBC.socket(Socket.AF_INET, Socket.SOCK_DGRAM, 0);
+            if (skfd < 0) {
+                LinuxUtils.throwLastErrorException(Native.getLastError());
+            }
 
-        int mtuToUse = mtu;
-        if (0 < mtuToUse) {
-            LinuxNetworkInterface.setMTU(skfd, ifnameToUse, mtuToUse);
-        } else {
-            mtuToUse = LinuxNetworkInterface.getMTU(skfd, ifnameToUse);
-        }
-        LIBC.close(skfd);
+            // Set the tun device to active and ready to transfer packets.
+            final If.ifreq ifr2 = new If.ifreq(ifnameToUse);
+            ifr2.ifr_ifru.setType("ifru_flags");
+            ifr2.ifr_ifru.ifru_flags = If.IFF_UP | If.IFF_RUNNING | If.IFF_POINTOPOINT | If.IFF_MULTICAST;
+            if (LIBC.ioctl(skfd, Sockios.SIOCSIFFLAGS, ifr2) < 0) {
+                throw new LastErrorException(Native.getLastError());
+            }
 
-        final LinuxNetworkInterface nix = LinuxNetworkInterface.getByName(ifnameToUse);
-        for (final InterfaceAddressEx binding : bindings) {
-            nix.addInterfaceAddress(binding);
+            int mtuToUse = mtu;
+            if (0 < mtuToUse) {
+                LinuxNetworkInterface.setMTU(skfd, ifnameToUse, mtuToUse);
+            } else {
+                mtuToUse = LinuxNetworkInterface.getMTU(skfd, ifnameToUse);
+            }
+
+            final LinuxNetworkInterface nix = LinuxNetworkInterface.getByName(ifnameToUse);
+            for (final InterfaceAddressEx binding : bindings) {
+                nix.addInterfaceAddress(binding);
+            }
+            success = true;
+            return new LinuxTunAdapter(fd, ifnameToUse, mtuToUse);
+        } finally {
+            if (skfd >= 0) {
+                LIBC.close(skfd);
+            }
+            if (!success && fd >= 0) {
+                LIBC.close(fd);
+            }
         }
-        return new LinuxTunAdapter(fd, ifnameToUse, mtuToUse);
+    }
+
+    private IOException ioException(final String operation, final int errno) {
+        return new IOException(String.format("%s: [%s] %s", operation, errno, LIBC.strerror(errno)));
+    }
+
+    private void checkWriteResult(final String operation, final long written, final long expected) throws IOException {
+        if (written < 0) {
+            throw ioException(operation + " failed", Native.getLastError());
+        }
+        Preconditions.checkState(expected >= 0, "Expected packet length must be non-negative");
+        if (written != expected) {
+            throw new IOException(String.format("%s short write: expected=%s actual=%s", operation, expected, written));
+        }
     }
 
     private static String checkName(final String name) {
