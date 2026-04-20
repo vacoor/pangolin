@@ -74,13 +74,71 @@ public final class TcpOutput {
         final int rcv_nxt = sock.rcvNxt();
         FourTuple ft = sock.fourTuple();
         int wnd = selectAdvertisedWindow(sock);
+        byte[] options = tcp_build_ack_options(sock);
         ByteBuf buf = TcpPacketBuilder.buildRaw(
                 ft.dstAddrBytes(), ft.dstPort(),
                 ft.srcAddrBytes(), ft.srcPort(),
                 sock.sndNxt(), rcv_nxt,
-                TCPHDR_ACK, wnd, null, null, 0);
+                TCPHDR_ACK, wnd, options, null, 0);
         sock.channel().writeAndFlush(buf);
         tcp_event_ack_sent(sock, rcv_nxt);
+    }
+
+    /**
+     * 组装 pure ACK 段的 TCP 选项 — 对齐 Linux {@code __tcp_send_ack} 中
+     * {@code tcp_options_write} 的 TSopt + SACK 分支。
+     *
+     * <p>选项顺序(与 Linux 一致):TSopt(若协商)→ SACK(含 DSACK)。最多 4 个 SACK 块
+     * (RFC 2018 §3 上限)。若存在待发 DSACK,放在 SACK 块首位(RFC 2883 §4)。
+     *
+     * <p>此方法仅作用于 pure ACK 段(不携带数据),因此 SACK 追加带来的 34 字节选项空间
+     * 不会影响数据段的 MSS 计算 — 数据段走的是 {@code tcp_established_options(sock, skb)},
+     * 不含 SACK。
+     */
+    private byte[] tcp_build_ack_options(TcpSock sock) {
+        final boolean hasTs = sock.timestampEnabled();
+        final int[] dsack = new int[2];
+        final boolean hasDsack = sock.consumeDsack(dsack);
+        final int maxSackBlocks = hasDsack ? 3 : 4;
+        final int[] sackScratch = new int[2 * maxSackBlocks];
+        final int sackCount = sock.receiveBuffer().computeSackBlocks(sackScratch, maxSackBlocks);
+        final int totalBlocks = (hasDsack ? 1 : 0) + sackCount;
+
+        if (!hasTs && totalBlocks == 0) {
+            return null;
+        }
+
+        int capacity = 0;
+        if (hasTs) capacity += 12;
+        if (totalBlocks > 0) capacity += 2 + 2 + 8 * totalBlocks;
+        ByteBuf buf = Unpooled.buffer(capacity);
+        try {
+            if (hasTs) {
+                long tsval = tcp_clock_ms() & 0xFFFFFFFFL;
+                long tsecr = ((long) sock.recentTimestamp()) & 0xFFFFFFFFL;
+                com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec
+                        .writeTimestampOption(buf, tsval, tsecr);
+            }
+            if (totalBlocks > 0) {
+                int[] blocks = new int[2 * totalBlocks];
+                int idx = 0;
+                if (hasDsack) {
+                    blocks[idx++] = dsack[0];
+                    blocks[idx++] = dsack[1];
+                }
+                for (int i = 0; i < sackCount; i++) {
+                    blocks[idx++] = sackScratch[2 * i];
+                    blocks[idx++] = sackScratch[2 * i + 1];
+                }
+                com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec
+                        .writeSackOption(buf, blocks, totalBlocks);
+            }
+            byte[] out = new byte[buf.readableBytes()];
+            buf.readBytes(out);
+            return out;
+        } finally {
+            buf.release();
+        }
     }
 
     /**
@@ -227,6 +285,25 @@ public final class TcpOutput {
             }
         }
 
+        // (3.5) tcp_collapse_retrans:重传前若段严重小于 MSS 且相邻段合并后仍 ≤ MSS,
+        //       将两段合并成一个,降低段开销 / ACK 噪声。对齐 Linux
+        //       __tcp_retransmit_skb 中 tcp_collapse_retrans 的尝试点(in_flight 较小、
+        //       段未被 SACK 时生效)。
+        if (!oldest.isSackAcked() && oldest.dataLen() < sock.mss()) {
+            com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.CollapseResult cr
+                    = sock.sendBuffer().collapseRtx(oldest, sock.mss());
+            if (cr != null) {
+                // 对齐 Linux tcp_adjust_pcount:合并吞掉 next 段,packetsOut/lostOut 按
+                // next 的 sacked 位集递减。未实现 retransOut 计数,LOST / 记账相关项
+                // 用现有字段兜底。
+                sock.decrementPacketsOut(1);
+                if ((cr.droppedSacked & com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.TCPCB_LOST) != 0) {
+                    sock.decrLostOut(1);
+                }
+                oldest = cr.merged;
+            }
+        }
+
         // (4) retrans_stamp / undo_retrans 统计:首次进入重传路径打时戳,
         //     每个段首次被标记为 retransmitted 时 undo_retrans++(对齐 Linux
         //     __tcp_retransmit_skb: if (!tp->retrans_stamp) tp->retrans_stamp = ...;
@@ -241,6 +318,9 @@ public final class TcpOutput {
 
         oldest.markRetransmitted();
         oldest.updateSentTime(nowUs);
+        // 对齐 Linux tcp_rate_skb_sent:重传时同样重置 tx.delivered 为当前 tp->delivered,
+        // 让本次重传在被 ACK 时参与最新 rs->prior_delivered 评估(而非沿用原始发送快照)。
+        oldest.txDelivered(sock.delivered());
         TcpMibStats.INSTANCE.inc(TcpMib.TCPRETRANSSEGS);
         __tcp_transmit_skb(sock, oldest, sock.rcvNxt());
     }
@@ -736,12 +816,36 @@ public final class TcpOutput {
     }
 
     /**
+     * 返回本次 {@code tcp_write_xmit} 迭代允许吐出的段配额。
+     *
+     * <p>基线逻辑与 Linux {@code tcp_cwnd_test} 一致:{@code cwnd - in_flight}(in_flight
+     * 取 RTX 队列长度)。在基线为 0 时追加 RFC 3042 Limited Transmit 分支 —
+     * {@code CA_Open} 且 {@code dupacks ∈ [1, 2]} 时,允许把 dupack 计数当作额外配额,
+     * 保证前两个 dupack 各带出 1 个新段,维持 ACK clock,减少 FR/RTO 概率。
+     *
+     * <p>Linux 通过 {@code tcp_add_reno_sack} 在 NewReno 下把 {@code sacked_out++}
+     * 来等价缩小 in_flight,v2 未维护 NewReno {@code sacked_out} 记账,因此改为在此
+     * 位置显式补回。
+     *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2303">tcp_cwnd_test</a>
+     * @see <a href="https://datatracker.ietf.org/doc/html/rfc3042">RFC 3042 Limited Transmit</a>
      */
     private int tcp_cwnd_test(TcpSock sock) {
-        int cwnd = sock.cwnd();
-        int in_flight = sock.sendBuffer().rtxQueueSize();
-        return Math.max(0, cwnd - in_flight);
+        final int cwnd = sock.cwnd();
+        final int in_flight = sock.sendBuffer().rtxQueueSize();
+        int bonus = 0;
+        if (sock.isCaOpen()) {
+            final int dupacks = sock.dupacks();
+            if (dupacks >= 1) {
+                bonus = Math.min(dupacks, 2);
+            }
+        }
+        final int quota = Math.max(0, cwnd + bonus - in_flight);
+        if (bonus > 0 && in_flight >= cwnd && quota > 0) {
+            // 真正用到 Limited Transmit 额度(基线 cwnd - in_flight 已耗尽),才计入 MIB。
+            TcpMibStats.INSTANCE.inc(TcpMib.TCPLIMITEDTRANSMIT);
+        }
+        return quota;
     }
 
     /** Always 1 — no TSO/GSO. @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1614">tcp_set_skb_tso_segs</a> */
@@ -900,6 +1004,8 @@ public final class TcpOutput {
                 headBuf, skb.startSeq(), limit, headFlags, skb.sacked(), skb.sentTimeUs());
         TcpSkb tailEntry = new TcpSkb(
                 tailBuf, skb.startSeq() + limit, tailLen, tailFlags, skb.sacked(), skb.sentTimeUs());
+        headEntry.txDelivered(skb.txDelivered());
+        tailEntry.txDelivered(skb.txDelivered());
 
         TcpSkb polled = sock.sendBuffer().pollRtx();
         if (polled != null) {
@@ -1067,6 +1173,9 @@ public final class TcpOutput {
         sock.sendBuffer().pollWrite();
         final boolean startRto = !sock.sendBuffer().hasRtxPending();
         skb.updateSentTime(System.nanoTime() / 1_000L);
+        // 对齐 Linux tcp_rate_skb_sent:发送瞬间把 tp->delivered 打戳到 TCP_SKB_CB(skb)->tx.delivered,
+        // 供 tcp_rate_gen / tcp_rack_update_reo_wnd 的 1-RTT 门控读回本段"发出时的投递水位"。
+        skb.txDelivered(sock.delivered());
         sock.sendBuffer().enqueueRtx(skb);
 
         sock.incrementPacketsOut();

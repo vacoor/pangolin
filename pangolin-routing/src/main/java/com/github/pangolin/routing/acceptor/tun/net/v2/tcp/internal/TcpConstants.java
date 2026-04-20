@@ -95,6 +95,23 @@ public final class TcpConstants {
     public static final int TCP_PINGPONG_THRESH = 1;
     /** Linux TCP_MAX_QUICKACKS. */
     public static final int TCP_MAX_QUICKACKS = 16;
+    /**
+     * Linux {@code TCP_RACK_RECOVERY_THRESH}(net/ipv4/tcp_recovery.c)— DSACK 后 RACK
+     * {@code reo_wnd_steps} 维持的 ACK 数。取 16 对齐 Linux 默认值。
+     */
+    public static final int TCP_RACK_RECOVERY_THRESH = 16;
+    /**
+     * Linux {@code tcp_min_rtt_wlen} / {@code sysctl_tcp_min_rtt_wlen} 默认值 300 s —
+     * RACK / BBR 等路径 {@code tcp_min_rtt} 基于 Kathleen Nichols Windowed Filter 的
+     * 时间窗(秒,配合 {@code tcp_jiffies32} 毫秒坐标使用时换算为毫秒)。
+     */
+    public static final int TCP_MIN_RTT_WIN_SEC = 300;
+    /**
+     * {@code tcp_min_rtt} "无测量值" 哨兵 — 对齐 Linux {@code ~0U} 语义(unsigned max)。
+     * Java 侧以 {@link Integer#MAX_VALUE} 表达,消费者可用 {@code minRtt() < MAX} 判定
+     * 是否有有效样本。
+     */
+    public static final int TCP_MIN_RTT_NO_SAMPLE = Integer.MAX_VALUE;
 
     // ---- Delayed ACK ----
     /** Maximum delayed ACK delay: 40 ms (RFC 9293 §3.8.6.2.2) */

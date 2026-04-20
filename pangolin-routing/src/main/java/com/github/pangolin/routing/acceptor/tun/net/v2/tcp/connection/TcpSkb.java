@@ -45,6 +45,17 @@ public final class TcpSkb {
      */
     private       int     sacked;
     private       long    sentTimeUs;   // stamped at transmission time (0 while in write queue / OFO)
+    /**
+     * 发送(或重传)时 {@code tp->delivered} 的快照 — 对齐 Linux
+     * {@code TCP_SKB_CB(skb)->tx.delivered}(tcp_rate_skb_sent)。
+     * 在 {@code tcp_clean_rtx_queue} / {@code tcp_sacktag_write_queue} 把该段判为投递
+     * 时,用该字段去刷新本 ACK 的 {@code rs->prior_delivered}(取最大值 —— 即本 ACK
+     * 里"最晚发出且已被确认"的段对应的 delivered 快照)。
+     * <p>RACK {@code reo_wnd_steps} 1-RTT 门控(S-3)以此为坐标:若 {@code prior_delivered
+     * < rack.last_delivered},说明本 ACK 所确认的段是在上次 reo_wnd 调整之前发出的,
+     * 同一 RTT 内不再重复步进。
+     */
+    private       int     txDelivered;
 
     public TcpSkb(ByteBuf payload, int startSeq, int dataLen,
                   byte tcpFlags, long sentTimeUs) {
@@ -59,6 +70,7 @@ public final class TcpSkb {
         this.tcpFlags   = tcpFlags;
         this.sacked     = sacked;
         this.sentTimeUs = sentTimeUs;
+        this.txDelivered = 0;
     }
 
     /**
@@ -120,6 +132,11 @@ public final class TcpSkb {
     }
 
     public void updateSentTime(long us)      { this.sentTimeUs = us; }
+
+    /** 读取 {@code TCP_SKB_CB->tx.delivered} — 发送时 {@code tp->delivered} 的快照。 */
+    public int  txDelivered()                { return txDelivered; }
+    /** 写入 {@code TCP_SKB_CB->tx.delivered};由 {@code tcp_rate_skb_sent} 等价点调用。 */
+    public void txDelivered(int d)           { this.txDelivered = d; }
 
     public void release() {
         if (payload != null) payload.release();

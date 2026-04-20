@@ -518,6 +518,12 @@ public abstract class TcpMultiplexer {
         final TcpReceiveBuffer.OfferResult r = sk.receiveBuffer()
                 .offer(seq, endSeq, priorRcvNxt, segment, fin);
         sk.rcvNxt(r.rcvNxt);
+        if (r.hasDsack()) {
+            // 对齐 Linux tcp_dsack_set:接收到已在 RCV.NXT 之前的整段 → 下一次 ACK 携带 DSACK
+            sk.setDsack(r.dsackStart, r.dsackEnd);
+            sk.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
+            sk.addAckPending(TcpConstants.ACK_NOW);
+        }
 
         if (sk.receiveBuffer().isReadable()) {
             consume(sk, sk.receiveBuffer().readAll());
@@ -629,13 +635,18 @@ public abstract class TcpMultiplexer {
                 ? payload.retainedSlice()
                 : io.netty.buffer.Unpooled.EMPTY_BUFFER;
 
-        boolean queued = sk.receiveBuffer().offerOfo(seq, endSeq, segment, fin);
-        if (!queued) {
-            // 内存紧张或完全被覆盖,保持接收窗口外语义不变
+        TcpReceiveBuffer.OfoResult r = sk.receiveBuffer().offerOfo(seq, endSeq, segment, fin);
+        if (r.hasDsack()) {
+            // 对齐 Linux tcp_data_queue_ofo → tcp_dsack_set (Case 3 of RFC 2883):
+            // 新 OFO 段与已存 OFO 段重叠时,重复区段通过下一次 ACK 首块以 DSACK 通告。
+            sk.setDsack(r.dsackStart, r.dsackEnd);
+        }
+        if (!r.queued && !r.hasDsack()) {
+            // 预算耗尽或空段丢弃,且无 DSACK 需要回 — 维持接收窗口外语义不变
             return;
         }
 
-        // OFO 段抵达:立即 quickack 并安排 ACK_NOW 以触发 SACK/DSACK 通告
+        // OFO 段抵达 或 产生了 DSACK:立即 quickack 并安排 ACK_NOW 以触发 SACK/DSACK 通告
         sk.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
         sk.addAckPending(TcpConstants.ACK_NOW);
     }
@@ -1054,6 +1065,54 @@ public abstract class TcpMultiplexer {
          * 采 {@code sockTime - sentTimeUs} 近似。
          */
         private long rackRttUs;
+        /**
+         * RACK {@code reo_wnd} 的步长系数 — 对应 Linux {@code tp->rack.reo_wnd_steps}。
+         * 初始 1;每当观察到 DSACK 事件(发送端视角)在 1 RTT 外被确认时递增,直至上限
+         * {@link TcpConstants#TCP_RACK_RECOVERY_THRESH} × 16。{@link #tcpRackUpdateReoWnd}
+         * 在 {@code reoWndPersist} 耗尽且无 DSACK 时衰减回 1。
+         */
+        private int rackReoWndSteps;
+        /**
+         * RACK {@code reo_wnd} 持续计数 — 对应 Linux {@code tp->rack.reo_wnd_persist}。
+         * DSACK 事件后复位为 {@link TcpConstants#TCP_RACK_RECOVERY_THRESH}(16),每次
+         * {@link #tcpRackUpdateReoWnd} 递减;到 0 时衰减 {@link #rackReoWndSteps} 回 1。
+         */
+        private int rackReoWndPersist;
+        /**
+         * 是否看到本轮 ACK 窗口内的 DSACK — 对应 Linux {@code tp->rack.dsack_seen}。
+         * 由 {@code tcp_sacktag_write_queue} 识别 DSACK 首块时置位,
+         * {@link #tcpRackUpdateReoWnd} 消费后清零。
+         */
+        private boolean rackDsackSeen;
+        /**
+         * 每段递增的"已投递"计数 — 对应 Linux {@code tp->delivered}。
+         * 段被累计 ACK 或新 SACK 标记时 +1;发送(含重传)时会被 {@code tcp_rate_skb_sent}
+         * 快照到 {@code TCP_SKB_CB(skb)->tx.delivered},RACK 1-RTT 门控据此计算时序。
+         */
+        private int delivered;
+        /**
+         * RACK 上次调整 {@code reo_wnd_steps} 时 {@link #delivered} 的快照 —
+         * 对应 Linux {@code tp->rack.last_delivered}。
+         * 1-RTT 门控:本 ACK 所确认段的 {@code tx.delivered} 早于该值时,属于同一 RTT
+         * 的旧 DSACK,不再重复步进。
+         */
+        private int rackLastDelivered;
+        /**
+         * 每 ACK 瞬态 scratchpad:本 ACK 内"已投递段"的 {@code tx.delivered} 最大值 —
+         * 对应 Linux {@code rate_sample.prior_delivered}。{@code tcpAck} 入口清零,
+         * {@code tcp_clean_rtx_queue} / {@code tcp_sacktag_write_queue} 识别新投递段时
+         * 刷新,{@link #tcpRackUpdateReoWnd} 据此判断 1-RTT 门控。
+         */
+        private int rackAckPriorDelivered;
+        /**
+         * 对齐 Linux {@code tp->rtt_min} — 以 Kathleen Nichols Windowed Filter 维护
+         * 时间窗 {@link TcpConstants#TCP_MIN_RTT_WIN_SEC}(默认 300 秒)内的 RTT 最小值,
+         * 单位微秒,时间坐标毫秒(与 {@code tcp_jiffies32} 一致)。{@link #addRttSample}
+         * 每次采样喂入,{@link #minRttUs} 读回窗内 running min;RACK
+         * {@code reo_wnd = min((min_rtt * steps) >> 2, srtt >> 3)} 依赖本字段。
+         */
+        private final com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.WinMinMax rttMinFilter
+                = new com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.WinMinMax();
         private int linger2;
         private int probeBackoffShift;
         private int probesOut;
@@ -1089,6 +1148,41 @@ public abstract class TcpMultiplexer {
         private CongestionState congestionState = CongestionState.OPEN;
         private int highSeq;
         private int tlpHighSeq;
+        /**
+         * 下一次发 ACK 需要通告的 DSACK 块 {@code [dsackStart, dsackEnd)}
+         * (对应 Linux {@code tp->duplicate_sack[0]})。{@code dsackStart == dsackEnd}
+         * 表示无待发 DSACK。DSACK 发送后由 {@link #consumeDsack} 清零,保证只通告一次。
+         */
+        private int dsackStart;
+        private int dsackEnd;
+        /**
+         * 进入 Recovery/Loss 前的 {@code cwnd} 快照 — 对应 Linux {@code tp->prior_cwnd}。
+         * {@link #tcpTryUndoRecovery} 判定伪重传通过后,用它恢复 pre-loss 拥塞窗口。
+         */
+        private int priorCwnd;
+        /**
+         * 进入 Recovery/Loss 前的 {@code ssthresh} 快照 — 对应 Linux {@code tp->prior_ssthresh}。
+         */
+        private int priorSsthresh;
+        /**
+         * 进入 Recovery/Loss 时的 {@code snd_una} 快照 — 对应 Linux {@code tp->undo_marker}。
+         * 非 0 表示当前存在一次 undo 机会;{@link #tcpUndoCwndReduction} 执行后清零。
+         */
+        private int undoMarker;
+        /**
+         * F-RTO high mark — 对应 Linux {@code tp->high_seq}(在 F-RTO 语境下的快照):
+         * RTO 触发瞬间 {@code snd_nxt} 的副本,作为后续 ACK 判定伪 RTO 的参照线。
+         * {@code frtoCounter != 0} 时有效,{@link #tcpUndoCwndReduction} /
+         * {@link #clearFrto} 或自然退出 CA_Loss 时清零。
+         */
+        private int frtoHighmark;
+        /**
+         * F-RTO 状态机 — 对应 Linux {@code tp->frto}:{@code 0} 表示未武装,
+         * {@code 1} 表示本轮 RTO 已武装 F-RTO(等待首个 ACK 判定是否伪触发)。
+         * 命中 {@link #tcpProcessFrto} 后清零,落入 {@link TcpMib#TCPSPURIOUSRTOS} 记账;
+         * 未命中则在首次有效 ACK 后降级回 CA_Loss 常规路径。
+         */
+        private int frtoCounter;
 
         protected TcpSock() {
             this(null, false);
@@ -1171,6 +1265,13 @@ public abstract class TcpMultiplexer {
             sock.lostOut    = 0;
             sock.rackMstamp = 0L;
             sock.rackRttUs  = 0L;
+            sock.rackReoWndSteps   = 1;
+            sock.rackReoWndPersist = 0;
+            sock.rackDsackSeen     = false;
+            sock.delivered             = 0;
+            sock.rackLastDelivered     = 0;
+            sock.rackAckPriorDelivered = 0;
+            sock.rttMinFilter.reset(0, TcpConstants.TCP_MIN_RTT_NO_SAMPLE);
             sock.linger2 = (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
             return sock;
         }
@@ -1236,6 +1337,13 @@ public abstract class TcpMultiplexer {
             lostOut = 0;
             rackMstamp = 0L;
             rackRttUs = 0L;
+            rackReoWndSteps = 1;
+            rackReoWndPersist = 0;
+            rackDsackSeen = false;
+            delivered = 0;
+            rackLastDelivered = 0;
+            rackAckPriorDelivered = 0;
+            rttMinFilter.reset(0, TcpConstants.TCP_MIN_RTT_NO_SAMPLE);
             linger2 = (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
             probeBackoffShift = 0;
             probesOut = 0;
@@ -1255,6 +1363,13 @@ public abstract class TcpMultiplexer {
             congestionState = CongestionState.OPEN;
             highSeq = 0;
             tlpHighSeq = 0;
+            dsackStart = 0;
+            dsackEnd = 0;
+            priorCwnd = 0;
+            priorSsthresh = 0;
+            undoMarker = 0;
+            frtoHighmark = 0;
+            frtoCounter = 0;
         }
 
         private void loadFromConnection(TcpConnection conn) {
@@ -1833,6 +1948,24 @@ public abstract class TcpMultiplexer {
                 srttUs = (7 * srttUs + rttUs) / 8;
             }
             rtoBackoffShift = 0;
+
+            // 对齐 Linux tcp_update_rtt_min(tcp_input.c):每次 RTT 采样喂 Windowed Filter,
+            // 窗长 TCP_MIN_RTT_WIN_SEC × 1000(毫秒坐标,与 tcp_jiffies32 同基);
+            // 值 clamp 到 int 半区避免极端 rtt 溢出,min 语义下上界裁剪是安全的。
+            final int nowJiffiesMs = (int) com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+            final int sampleUs = (rttUs > Integer.MAX_VALUE)
+                    ? Integer.MAX_VALUE - 1
+                    : (int) rttUs;
+            rttMinFilter.update(TcpConstants.TCP_MIN_RTT_WIN_SEC * 1_000, nowJiffiesMs, sampleUs);
+        }
+
+        /**
+         * 当前窗内 RTT running min(微秒)— 对齐 Linux {@code tcp_min_rtt}。
+         * 尚无采样时返回 {@link TcpConstants#TCP_MIN_RTT_NO_SAMPLE}(消费者据此退化到 {@code srtt}
+         * 派生值,保持 RACK 在冷启动阶段的保守行为)。
+         */
+        public int minRttUs() {
+            return rttMinFilter.min();
         }
 
         public long rtoMs() {
@@ -1941,6 +2074,260 @@ public abstract class TcpMultiplexer {
             this.lostOut = Math.max(this.lostOut - n, 0);
         }
 
+        /**
+         * 登记下一次 ACK 要通告的 DSACK 块 {@code [start, end)} — 对齐 Linux
+         * {@code tcp_dsack_set}。已存在待发 DSACK 时以最新值覆盖(v2 当前只通告一次,
+         * 不做 Linux 的 DSACK extend/coalesce)。
+         */
+        public void setDsack(int start, int end) {
+            if (start == end) return;
+            this.dsackStart = start;
+            this.dsackEnd = end;
+        }
+
+        /** 当前是否有待通告的 DSACK 块。 */
+        public boolean hasPendingDsack() {
+            return dsackStart != dsackEnd;
+        }
+
+        public int dsackStart() { return dsackStart; }
+        public int dsackEnd() { return dsackEnd; }
+
+        /**
+         * 读取并清零当前待发的 DSACK。返回 {@code true} 表示本次读取到有效块 —
+         * 对齐 Linux {@code tcp_send_ack} 调用 {@code tcp_write_xmit} 后
+         * {@code tp->duplicate_sack[0]} 清零的语义。
+         */
+        public boolean consumeDsack(int[] dst) {
+            if (dsackStart == dsackEnd) {
+                return false;
+            }
+            dst[0] = dsackStart;
+            dst[1] = dsackEnd;
+            dsackStart = 0;
+            dsackEnd = 0;
+            return true;
+        }
+
+        public int priorCwnd() { return priorCwnd; }
+        public int priorSsthresh() { return priorSsthresh; }
+        public int undoMarker() { return undoMarker; }
+        public int frtoHighmark() { return frtoHighmark; }
+        public int frtoCounter() { return frtoCounter; }
+
+        /**
+         * 清除 F-RTO 武装状态 — 对应 Linux {@code tp->frto = 0}。
+         * 在 {@link #tcpUndoCwndReduction}、伪 RTO 判定命中后或自然退出 CA_Loss 时调用,
+         * 避免 F-RTO 高水位影响下一轮 RTO 判定。
+         */
+        public void clearFrto() {
+            this.frtoHighmark = 0;
+            this.frtoCounter = 0;
+        }
+
+        /**
+         * 对齐 Linux {@code tcp_init_undo}:进入 Recovery/Loss 前,把当前
+         * {@code cwnd / ssthresh / snd_una} 快照到 {@code prior_cwnd / prior_ssthresh
+         * / undo_marker},为后续 {@code tcp_try_undo_*} 提供回滚基线。
+         *
+         * <p>同时把 {@code undo_retrans / retrans_stamp} 清零 — 本 epoch 的
+         * 计数/打戳由 {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput#tcp_retransmit_skb}
+         * 在首次重传时写入,避免上一 epoch 的残留污染 DSACK-driven undo 判定
+         * (Linux 在 {@code __tcp_retransmit_skb} 自增 {@code undo_retrans} 前并不
+         * 显式清零;v2 因上一 epoch 的自然退出路径不再保留 {@code tcp_clean_rtx_queue}
+         * 兜底,统一在此处重置)。
+         */
+        public void tcpInitUndo() {
+            priorCwnd = cwnd;
+            priorSsthresh = (ssthresh == Integer.MAX_VALUE) ? 0 : ssthresh;
+            undoMarker = sndUna;
+            undoRetrans = 0;
+            retransStamp = 0L;
+        }
+
+        /**
+         * 对齐 Linux {@code tcp_undo_cwnd_reduction} (tcp_input.c):
+         * 将 {@code cwnd / ssthresh} 回滚到 {@link #tcpInitUndo} 记录的快照(取 max
+         * 防止恢复期已自然增长的 cwnd 被压回);清空 {@code undo_marker /
+         * retrans_stamp / undo_retrans},结束本轮 undo 机会。
+         *
+         * @param unmarkLoss 为 {@code true} 时同时清空 {@code lost_out}
+         *                   (tcp_try_undo_loss 专用);{@code false} 保留 LOST 位
+         */
+        public void tcpUndoCwndReduction(boolean unmarkLoss) {
+            if (priorCwnd > 0) {
+                cwnd = Math.max(cwnd, priorCwnd);
+            }
+            if (priorSsthresh > 0) {
+                ssthresh = Math.max(ssthresh, priorSsthresh);
+            }
+            undoMarker = 0;
+            retransStamp = 0L;
+            undoRetrans = 0;
+            clearFrto();
+            if (unmarkLoss) {
+                lostOut = 0;
+            }
+        }
+
+        /**
+         * 对齐 Linux {@code tcp_try_undo_recovery} (tcp_input.c:2672) 的 TSECR-based
+         * 最小闭环:
+         * <ol>
+         *   <li>当前 CA_Recovery 且 {@code undo_marker / retrans_stamp} 均有效(有一次
+         *       undo 机会);</li>
+         *   <li>本 ACK 的 TSECR(对端 echo 回来的我们之前发送段的 TSval)早于
+         *       {@code retrans_stamp} — 说明被 ACK 的段是原始段而非重传副本,重传属伪触发;</li>
+         *   <li>命中则调 {@link #tcpUndoCwndReduction} 回滚 cwnd/ssthresh,并把
+         *       CA 状态直接迁到 CA_Open(跳过自然 {@code cwnd = ssthresh} deflate)。</li>
+         * </ol>
+         * {@code !tp->undo_retrans} 兜底路径由 {@link #tcpTryUndoDsack()} 单独承担:
+         * {@code TcpAck.tcp_sacktag_write_queue} 在 DSACK Case 1/2 时按 Linux
+         * {@code tcp_check_dsack} 守卫递减 {@code undoRetrans},清零后在
+         * {@code TcpAck.tcpAck} 尾部命中 DSACK undo 分支。
+         *
+         * @param tsecr 本次 ACK 的 TSECR(32-bit ms);传 {@code -1} 表示无时戳选项,
+         *              无法判定,返回 {@code false}
+         * @return {@code true} 若本次 ACK 触发了 undo 并已迁至 CA_Open
+         * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_try_undo_recovery</a>
+         */
+        public boolean tcpTryUndoRecovery(int tsecr) {
+            if (congestionState != CongestionState.RECOVERY) return false;
+            if (undoMarker == 0 || retransStamp == 0L) return false;
+            if (tsecr == -1) return false;
+            final int retransStampMs = (int) (retransStamp / 1000L);
+            if (!com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before(tsecr, retransStampMs)) {
+                return false;
+            }
+            tcpUndoCwndReduction(false);
+            congestionState = CongestionState.OPEN;
+            caIncrCounter = 0;
+            dupacks = 0;
+            return true;
+        }
+
+        /**
+         * 对齐 Linux {@code tcp_try_undo_loss} (tcp_input.c:2722) 的 TSECR-based 伪 RTO 闭环:
+         * <ol>
+         *   <li>当前 CA_Loss 且 {@code undo_marker / retrans_stamp} 均有效(RTO 进入 Loss 时
+         *       {@link #tcpInitUndo} 已完成快照);</li>
+         *   <li>本 ACK 的 TSECR 早于 {@code retrans_stamp} — 说明被 ACK 的段是原始段而非
+         *       RTO 触发的重传副本,判定为伪 RTO;</li>
+         *   <li>命中则 {@link #tcpUndoCwndReduction} 回滚 cwnd/ssthresh 至 pre-RTO 快照,
+         *       CA 状态直接迁到 CA_Open,重置 {@code dupacks / caIncrCounter}。</li>
+         * </ol>
+         * Linux 的 {@code !tp->undo_retrans} 兜底(所有被 DSACK 抵消的重传)在 v2 中
+         * 由 {@link #tcpTryUndoDsack()} 承担,CA_Loss 场景下与本方法共享入口分支 —
+         * 若 TSECR 未命中,{@code TcpAck.tcpAck} 会继续检查 DSACK undo 路径。
+         *
+         * @param tsecr 本次 ACK 的 TSECR(32-bit ms);传 {@code -1} 表示无时戳选项
+         * @return {@code true} 若本次 ACK 触发了 Loss undo 并已迁至 CA_Open
+         * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_try_undo_loss</a>
+         */
+        public boolean tcpTryUndoLoss(int tsecr) {
+            if (congestionState != CongestionState.LOSS) return false;
+            if (undoMarker == 0 || retransStamp == 0L) return false;
+            if (tsecr == -1) return false;
+            final int retransStampMs = (int) (retransStamp / 1000L);
+            if (!com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before(tsecr, retransStampMs)) {
+                return false;
+            }
+            tcpUndoCwndReduction(false);
+            congestionState = CongestionState.OPEN;
+            caIncrCounter = 0;
+            dupacks = 0;
+            return true;
+        }
+
+        /**
+         * 对齐 Linux {@code tcp_process_loss} 中 F-RTO 分支(RFC 5682 / tcp_input.c
+         * 中 {@code tp->frto} 消费路径)—— 基于 ACK 累计覆盖 {@code snd_nxt_at_rto}
+         * 判定伪 RTO,独立于 TSECR 通道:
+         * <ol>
+         *   <li>当前 CA_Loss 且 {@link #frtoCounter} {@code == 1}(本轮 RTO 已武装);</li>
+         *   <li>本 ACK 的 {@code sndUna} 已追平或越过 {@link #frtoHighmark}
+         *       (= RTO 瞬间的 {@code snd_nxt})— 意味着 RTO 之前在飞的**所有**原始段
+         *       都已被累计 ACK 吸收,而 CA_Loss 期间 {@code cwnd = 1} 仅发出重传副本,
+         *       没有任何新数据能推高 {@code snd_una} 到该水位;因此 RTO 属伪触发。</li>
+         *   <li>命中则 {@link #tcpUndoCwndReduction}{@code (true)} 回滚
+         *       {@code cwnd/ssthresh} 并清 {@code lost_out}(RTO 的 LOST 标记需一并清除),
+         *       迁 CA_Open,重置 {@code dupacks / caIncrCounter},{@link #clearFrto}
+         *       由 {@code tcpUndoCwndReduction} 顺带完成。</li>
+         * </ol>
+         * 与 {@link #tcpTryUndoLoss(int)}(TSECR)互补:TSECR 通道精确但依赖时戳选项
+         * 启用 + ACK 对端正确 echo;F-RTO 通道不依赖时戳,但要求 RTO 之前存在在飞数据
+         * 以形成有效参照线({@link #onTimeoutByCc} 武装时已守卫 {@code after(sndNxt,
+         * undoMarker)})。Linux 中两条分支由 {@code tcp_process_loss} 内部择一触发,
+         * 对应 v2 在 {@code TcpAck.tcpAck} 尾部的 {@code FULLUNDO → LOSSUNDO →
+         * SPURIOUSRTOS → DSACKUNDO} else-if 链中按顺序判定,命中后互斥。
+         *
+         * @return {@code true} 若本次 ACK 触发了 F-RTO undo 并已迁至 CA_Open
+         * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_process_loss</a>
+         */
+        public boolean tcpProcessFrto() {
+            if (congestionState != CongestionState.LOSS) return false;
+            if (frtoCounter == 0) return false;
+            if (undoMarker == 0) return false;
+            if (com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before(sndUna, frtoHighmark)) {
+                return false;
+            }
+            tcpUndoCwndReduction(true);
+            congestionState = CongestionState.OPEN;
+            caIncrCounter = 0;
+            dupacks = 0;
+            return true;
+        }
+
+        /**
+         * 对齐 Linux {@code tcp_try_undo_dsack} (tcp_input.c) 的 DSACK-driven undo:
+         * <ol>
+         *   <li>当前处于 CA_Recovery 或 CA_Loss 且 {@code undo_marker} 已在
+         *       {@link #tcpInitUndo} 中建立;</li>
+         *   <li>本 epoch 至少发出过一次重传({@code retransStamp != 0L} 间接表明
+         *       {@code __tcp_retransmit_skb} 命中过,对应 Linux 的 {@code tp->undo_retrans}
+         *       曾被自增);</li>
+         *   <li>在 {@code TcpAck.tcp_sacktag_write_queue} 经 DSACK Case 1/2 递减后
+         *       {@code undoRetrans == 0} — 等价于 Linux {@code !tp->undo_retrans},
+         *       说明所有重传副本都已被 DSACK 抵消,判定为伪触发。</li>
+         * </ol>
+         * 命中则 {@link #tcpUndoCwndReduction}(false) 回滚 {@code cwnd/ssthresh},
+         * 直接迁 CA_Open 并清零 {@code dupacks / caIncrCounter}。
+         *
+         * <p>与 {@link #tcpTryUndoRecovery(int)} / {@link #tcpTryUndoLoss(int)} 互斥:
+         * {@code TcpAck.tcpAck} 按 FULL → LOSS → DSACK 顺序 else-if 判断,对齐
+         * Linux {@code tcp_fastretrans_alert} 中 {@code tcp_packet_delayed} 优先
+         * 于 {@code !tp->undo_retrans} 兜底的流程。
+         *
+         * @return {@code true} 若本次 ACK 触发了 DSACK undo 并已迁至 CA_Open
+         * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_try_undo_dsack</a>
+         */
+        public boolean tcpTryUndoDsack() {
+            if (congestionState != CongestionState.RECOVERY && congestionState != CongestionState.LOSS) {
+                return false;
+            }
+            if (undoMarker == 0 || retransStamp == 0L) return false;
+            if (undoRetrans != 0) return false;
+            tcpUndoCwndReduction(false);
+            congestionState = CongestionState.OPEN;
+            caIncrCounter = 0;
+            dupacks = 0;
+            return true;
+        }
+
+        /**
+         * 当前连续 dupack 计数 — 对应 Linux {@code tp->dup_acks}(近似)。RFC 3042
+         * Limited Transmit 在 {@code TcpOutput.tcp_cwnd_test} 读取该值,在
+         * {@code dupacks ∈ [1, 2]} 且 {@link #isCaOpen()} 时放宽 cwnd 预算。
+         */
+        public int dupacks() { return dupacks; }
+
+        /**
+         * 当前 CA 状态是否为 {@code CA_Open} — {@code CongestionState} 枚举对 ng 包外不可见,
+         * 暴露此谓词供 {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput}
+         * 判定 RFC 3042 Limited Transmit 是否生效。
+         */
+        public boolean isCaOpen() { return congestionState == CongestionState.OPEN; }
+
         /** RACK 最新 SACKed 段 {@code sentTimeUs};单调更新。 */
         public long rackMstamp() { return rackMstamp; }
         public void updateRack(long sentTimeUs, long rttUs) {
@@ -1950,6 +2337,70 @@ public abstract class TcpMultiplexer {
             }
         }
         public long rackRttUs() { return rackRttUs; }
+
+        /** RACK {@code reo_wnd_steps} — 参与 {@code reo_wnd = base × steps} 的动态缩放。 */
+        public int rackReoWndSteps() { return rackReoWndSteps; }
+        /** 设置 {@code tp->rack.dsack_seen};由 {@code tcp_sacktag_write_queue} DSACK 首块命中时调用。 */
+        public void setRackDsackSeen(boolean seen) { this.rackDsackSeen = seen; }
+        /** 当前是否已观察到待消费 DSACK 事件。 */
+        public boolean rackDsackSeen() { return rackDsackSeen; }
+
+        /** 读取 {@code tp->delivered}(段投递计数)。 */
+        public int  delivered()                    { return delivered; }
+        /** {@code tp->delivered++};在累计 ACK 或新 SACK 标记释放段时调用。 */
+        public void incrDelivered(int n)           { this.delivered += Math.max(n, 0); }
+        /** {@code rs->prior_delivered} scratchpad:本 ACK 内"已投递段" tx.delivered 的最大值。 */
+        public int  rackAckPriorDelivered()        { return rackAckPriorDelivered; }
+        /** {@code tcpAck} 入口复位 / {@code clean_rtx / sacktag} 路径用单调最大值刷新。 */
+        public void updateRackAckPriorDelivered(int txDelivered) {
+            if (after(txDelivered, rackAckPriorDelivered)) {
+                rackAckPriorDelivered = txDelivered;
+            }
+        }
+        /** {@code tcpAck} 入口清零 scratchpad。 */
+        public void clearRackAckPriorDelivered()   { this.rackAckPriorDelivered = 0; }
+        /** {@code tp->rack.last_delivered} — 上次 reo_wnd 步进时的 {@code tp->delivered} 快照。 */
+        public int  rackLastDelivered()            { return rackLastDelivered; }
+
+        /**
+         * 对齐 Linux {@code tcp_rack_update_reo_wnd} (tcp_recovery.c):
+         * <ul>
+         *   <li>S-3 1-RTT 门控:若本 ACK 里 {@code rs->prior_delivered} 早于
+         *       {@code tp->rack.last_delivered},说明被确认的段是在上次 reo_wnd 调整之前
+         *       发出的,属同一 RTT 的旧 DSACK → 清 {@code dsack_seen} 不再步进;</li>
+         *   <li>若 DSACK 事件有效 → {@code reo_wnd_steps++}(封顶 0xFF),同步更新
+         *       {@code rack.last_delivered = tp->delivered},并把
+         *       {@code reo_wnd_persist} 复位为
+         *       {@link TcpConstants#TCP_RACK_RECOVERY_THRESH}(16);</li>
+         *   <li>否则 {@code reo_wnd_persist} 递减;到 0 时衰减 {@code reo_wnd_steps}
+         *       回 1,恢复默认 reo_wnd。</li>
+         * </ul>
+         * 对应 MIB 计数 {@code TCPDSACKRECV} 已在 {@code tcp_sacktag_write_queue} 计入。
+         *
+         * @param priorDelivered 本 ACK 所确认段的 {@code TCP_SKB_CB->tx.delivered} 最大值
+         *                       (对应 Linux {@code rs->prior_delivered});{@code 0} 表示
+         *                       本 ACK 未确认任何已打戳的段(例如纯窗口更新),直接返回。
+         */
+        public void tcpRackUpdateReoWnd(int priorDelivered) {
+            if (priorDelivered == 0) {
+                return;
+            }
+            // S-3: Disregard DSACK if a rtt has not passed since we adjusted reo_wnd
+            if (rackDsackSeen
+                    && before(priorDelivered, rackLastDelivered)) {
+                rackDsackSeen = false;
+            }
+            if (rackDsackSeen) {
+                rackReoWndSteps   = Math.min(rackReoWndSteps + 1, 0xFF);
+                rackDsackSeen     = false;
+                rackLastDelivered = delivered;
+                rackReoWndPersist = TcpConstants.TCP_RACK_RECOVERY_THRESH;
+            } else if (rackReoWndPersist <= 0) {
+                rackReoWndSteps = 1;
+            } else {
+                rackReoWndPersist--;
+            }
+        }
 
         public int linger2() {
             return linger2;
@@ -2095,6 +2546,9 @@ public abstract class TcpMultiplexer {
         public void onAckedByCc(int newlyAcked, boolean advanced) {
             if (!advanced) {
                 if (++dupacks == 3 && congestionState == CongestionState.OPEN) {
+                    // 对齐 Linux tcp_init_undo:进 Recovery 前快照 cwnd/ssthresh/snd_una,
+                    // 为后续 tcp_try_undo_recovery 提供回滚基线。
+                    tcpInitUndo();
                     ssthresh = Math.max(cwnd / 2, 2);
                     cwnd = ssthresh + 3;
                     highSeq = sndNxt;
@@ -2119,6 +2573,9 @@ public abstract class TcpMultiplexer {
             } else if (congestionState == CongestionState.LOSS) {
                 congestionState = CongestionState.OPEN;
                 caIncrCounter = 0;
+                // 自然退出 CA_Loss(非 F-RTO / TSECR undo 路径)时一并清 F-RTO 武装,
+                // 避免 high_mark 悬挂影响下一轮 RTO 判定。
+                clearFrto();
             }
 
             dupacks = 0;
@@ -2134,6 +2591,19 @@ public abstract class TcpMultiplexer {
         }
 
         public void onTimeoutByCc() {
+            // 对齐 Linux tcp_enter_loss → tcp_init_undo:RTO 前快照 cwnd/ssthresh/snd_una,
+            // F4-2 tcp_try_undo_loss 将据此判定伪 RTO 并回滚。
+            tcpInitUndo();
+            // 对齐 Linux tcp_enter_loss 中 F-RTO 武装条件(RFC 5682):
+            // 有 undo 机会(undoMarker 已建立)且 RTO 瞬间仍有在飞数据(sndNxt > undoMarker),
+            // 才把 snd_nxt 快照为 frto_high_mark,等待后续 ACK 判定伪 RTO;否则 RTO 无可用
+            // 参照线(单段队列 / 连接刚建立 / snd.nxt == snd.una)直接跳过 F-RTO。
+            if (undoMarker != 0 && after(sndNxt, undoMarker)) {
+                frtoHighmark = sndNxt;
+                frtoCounter = 1;
+            } else {
+                clearFrto();
+            }
             ssthresh = Math.max(cwnd / 2, 2);
             cwnd = 1;
             dupacks = 0;

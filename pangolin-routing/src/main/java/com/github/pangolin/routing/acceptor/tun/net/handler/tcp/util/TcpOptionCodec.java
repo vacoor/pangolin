@@ -205,4 +205,27 @@ public final class TcpOptionCodec {
         out.writeInt((int) tsval);
         out.writeInt((int) tsecr);
     }
+
+    /**
+     * 写入 SACK 选项 (Kind=5) — 对齐 Linux {@code tcp_options_write} 的 SACK 分支:
+     * NOP(1B) + NOP(1B) + Kind=5(1B) + Length(1B) + n × (left_edge(4B) + right_edge(4B))。
+     * 总字节数 = 2 + 2 + 8n,整体 4 字节对齐。
+     *
+     * <p>{@code blocks} 扁平存放 {@code [start1, end1, start2, end2, ...]},至少需要
+     * {@code 2 * nBlocks} 个元素。{@code nBlocks} 取值范围 1..4(RFC 2018 上限)。
+     *
+     * <p>DSACK(RFC 2883)作为 SACK 选项的第一个块时,调用方应把 DSACK 块放到
+     * {@code blocks[0..1]} 位置再调用本方法。
+     */
+    public static void writeSackOption(ByteBuf out, int[] blocks, int nBlocks) {
+        if (nBlocks <= 0) return;
+        out.writeByte(OPT_NOP);
+        out.writeByte(OPT_NOP);
+        out.writeByte(OPT_SACK);
+        out.writeByte(2 + 8 * nBlocks);
+        for (int i = 0; i < nBlocks; i++) {
+            out.writeInt(blocks[2 * i]);
+            out.writeInt(blocks[2 * i + 1]);
+        }
+    }
 }

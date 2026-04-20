@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection;
 
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -187,6 +188,10 @@ public final class TcpSendBuffer {
         TcpSkb tail = new TcpSkb(
                 tailBuf, target.startSeq() + offset, tailLen, tailFlags,
                 target.sacked(), target.sentTimeUs());
+        // 发送时 tp->delivered 快照随 split 一同继承 — 拆分后两半的"发送时已投递段数"
+        // 保持不变,对齐 Linux tcp_fragment 保留 TCP_SKB_CB(skb)->tx 的语义。
+        head.txDelivered(target.txDelivered());
+        tail.txDelivered(target.txDelivered());
 
         // O(n) 原地替换:rtxQueue 为 ArrayDeque,iterator 不支持 remove + insertAfter。
         // SACK 块 ≤ 4、RTX 段数量有限,量级可接受。
@@ -210,6 +215,108 @@ public final class TcpSendBuffer {
         }
         target.release();
         return tail;
+    }
+
+    /**
+     * {@link #collapseRtx} 的返回值 — 承载合并后的段与被丢弃段 {@code next} 的
+     * {@code sacked} 位集,便于调用方按 {@code TCPCB_LOST / RETRANS} 等位递减对应
+     * {@code packets_out / lost_out / retrans_out} 计数(对齐 Linux
+     * {@code tcp_adjust_pcount})。
+     */
+    public static final class CollapseResult {
+        public final TcpSkb merged;
+        public final int droppedSacked;
+        public CollapseResult(TcpSkb merged, int droppedSacked) {
+            this.merged = merged;
+            this.droppedSacked = droppedSacked;
+        }
+    }
+
+    /**
+     * 就地把 RTX 队列中 {@code head} 与紧随其后的相邻段合并成单个 ≤ {@code mssNow}
+     * 的段;若相邻段不存在、序号不连续、合并后超过 {@code mssNow}、任一侧含
+     * {@link TcpConstants#TCPHDR_SYN} 或已被 SACK 确认则放弃合并并返回 {@code null}。
+     *
+     * <p>对齐 Linux {@code tcp_collapse_retrans} (tcp_output.c:2829):重传前把相邻的
+     * 小段合并成 MSS 大小以减少段开销 / ACK 噪声。与 Linux 规则对齐:
+     * <ul>
+     *   <li>合并后 {@code tcp_flags} 取两段并集,覆盖 FIN/PSH;SYN 不参与合并(Linux
+     *       {@code tcp_skb_can_collapse} 里早已把 SYN 排除,此处显式兜底)。</li>
+     *   <li>{@code sacked} 继承 head,再 OR 上 next 的
+     *       {@link TcpConstants#TCPCB_EVER_RETRANS} 以保留历史重传痕迹 —
+     *       对齐 Linux {@code TCP_SKB_CB(skb)->sacked |= TCP_SKB_CB(next)->sacked & TCPCB_EVER_RETRANS}。
+     *       其他位集(LOST / RETRANS / SACKED_ACKED)<b>不</b>进入合并段,由调用方
+     *       用返回的 {@link CollapseResult#droppedSacked} 调整对应计数。</li>
+     *   <li>{@code sentTimeUs} 取两段较早者,对齐 Linux
+     *       {@code tcp_skb_collapse_tstamp},保证 RACK / RTT 估计走更保守路径。</li>
+     *   <li>任一段带 {@link TcpConstants#TCPCB_SACKED_ACKED} 时拒绝合并 —
+     *       已 SACK 段必须独立保留,以便 {@code tcp_clean_rtx_queue} 精确记账。</li>
+     * </ul>
+     *
+     * @param head   合并起点段(必须当前仍在 rtxQueue 首段或中段)
+     * @param mssNow 当前 MSS 上限
+     * @return {@link CollapseResult} 成功合并时非 {@code null};前置条件不满足返回
+     *         {@code null},队列不变
+     */
+    public CollapseResult collapseRtx(TcpSkb head, int mssNow) {
+        if (head == null || mssNow <= 0) return null;
+
+        TcpSkb[] snap = rtxQueue.toArray(new TcpSkb[0]);
+        int idx = -1;
+        for (int i = 0; i < snap.length - 1; i++) {
+            if (snap[i] == head) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx < 0) return null;
+
+        TcpSkb next = snap[idx + 1];
+        if (next == null) return null;
+
+        if (head.endSeq() != next.startSeq()) return null;
+        if (head.isSyn() || next.isSyn()) return null;
+        if (head.isSackAcked() || next.isSackAcked()) return null;
+
+        final int combinedLen = head.dataLen() + next.dataLen();
+        if (combinedLen > mssNow || combinedLen == 0) return null;
+
+        ByteBuf headBuf = head.payload();
+        ByteBuf nextBuf = next.payload();
+        ByteBuf merged = Unpooled.wrappedBuffer(
+                headBuf.retainedSlice(headBuf.readerIndex(), head.dataLen()),
+                nextBuf.retainedSlice(nextBuf.readerIndex(), next.dataLen()));
+
+        final byte mergedFlags  = (byte) (head.tcpFlags() | next.tcpFlags());
+        final int  mergedSacked = head.sacked()
+                | (next.sacked() & TcpConstants.TCPCB_EVER_RETRANS);
+        final long mergedSentUs = (head.sentTimeUs() == 0L) ? next.sentTimeUs()
+                : (next.sentTimeUs() == 0L ? head.sentTimeUs()
+                : Math.min(head.sentTimeUs(), next.sentTimeUs()));
+
+        TcpSkb collapsed = new TcpSkb(
+                merged, head.startSeq(), combinedLen,
+                mergedFlags, mergedSacked, mergedSentUs);
+        // 对齐 Linux tcp_collapse_retrans 保留 head 的 TCP_SKB_CB:merged 段的
+        // tx.delivered 取 head.txDelivered(较早发送快照),这样后续被 ACK 确认时
+        // priorDelivered 以更早坐标参与 1-RTT 门控,更保守。
+        collapsed.txDelivered(head.txDelivered());
+
+        final int droppedSacked = next.sacked();
+
+        rtxQueue.clear();
+        for (int i = 0; i < snap.length; i++) {
+            if (i == idx) {
+                rtxQueue.addLast(collapsed);
+            } else if (i == idx + 1) {
+                // skip next — 已合并入 collapsed
+            } else {
+                rtxQueue.addLast(snap[i]);
+            }
+        }
+        head.release();
+        next.release();
+        return new CollapseResult(collapsed, droppedSacked);
     }
 
     /** Release all buffers (called on connection close). */

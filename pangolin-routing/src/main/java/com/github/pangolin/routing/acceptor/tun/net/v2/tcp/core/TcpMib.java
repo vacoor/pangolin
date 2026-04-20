@@ -47,5 +47,30 @@ public enum TcpMib {
     TCPTIMEWAITKILLED,
     /** 对应 {@code LINUX_MIB_TCPTIMEWAITRECYCLED}:TW bucket 被复用(TW_SYN)的次数,v2 暂为 0。 */
     TCPTIMEWAITRECYCLED,
+    /** 对应 {@code LINUX_MIB_TCPDSACKRECV}:入站 SACK 首块被识别为 DSACK 的段数(发送端视角)。 */
+    TCPDSACKRECV,
+    /**
+     * 对应 {@code LINUX_MIB_TCPDSACKUNDO}:因 DSACK 触发 {@code tcp_try_undo_dsack}
+     * 的次数。当本 undo epoch 内所有重传副本都被 DSACK 抵消
+     * ({@code tp->undo_retrans} 经 {@code tcp_check_dsack} 递减至 0)时记账;
+     * 与 {@code TCPFULLUNDO} / {@code TCPLOSSUNDO} 互斥 — {@code TcpAck.tcpAck}
+     * 按 FULLUNDO → LOSSUNDO → DSACKUNDO 顺序 else-if 命中,对齐 Linux
+     * {@code tcp_packet_delayed}(TSECR)优先于 {@code !tp->undo_retrans} 兜底。
+     */
+    TCPDSACKUNDO,
+    /** 对应 {@code LINUX_MIB_TCPFULLUNDO}:{@code tcp_try_undo_recovery} TSECR 命中后完整 undo 的次数。 */
+    TCPFULLUNDO,
+    /** 对应 {@code LINUX_MIB_TCPLOSSUNDO}:{@code tcp_try_undo_loss} TSECR 命中后 CA_Loss undo 的次数。 */
+    TCPLOSSUNDO,
+    /** 对应 {@code LINUX_MIB_TCPLIMITEDTRANSMIT}:RFC 3042 Limited Transmit 触发发送的段数。 */
+    TCPLIMITEDTRANSMIT,
+    /**
+     * 对应 {@code LINUX_MIB_TCPSPURIOUSRTOS}:F-RTO(RFC 5682)判定 RTO 为伪触发并
+     * 回滚 {@code cwnd/ssthresh} 的次数。当 CA_Loss 期间首个 ACK 的 {@code snd_una}
+     * 追平或越过 RTO 瞬间的 {@code snd_nxt} 快照({@code frto_high_mark})时记账;
+     * 与 {@code TCPLOSSUNDO}(TSECR 通道)互补 — {@code TcpAck.tcpAck} 按
+     * FULLUNDO → LOSSUNDO → SPURIOUSRTOS → DSACKUNDO 顺序 else-if 命中。
+     */
+    TCPSPURIOUSRTOS,
     ;
 }

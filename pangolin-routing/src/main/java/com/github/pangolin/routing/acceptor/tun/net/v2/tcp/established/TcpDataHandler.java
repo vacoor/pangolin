@@ -44,6 +44,9 @@ public final class TcpDataHandler {
         TcpReceiveBuffer.OfferResult r = sock.receiveBuffer()
                 .offer(seq, endSeq, sock.rcvNxt(), segment, fin);
         sock.rcvNxt(r.rcvNxt);
+        if (r.hasDsack()) {
+            sock.setDsack(r.dsackStart, r.dsackEnd);
+        }
 
         if (sock.receiveBuffer().isReadable()) {
             return sock.receiveBuffer().readAll();
