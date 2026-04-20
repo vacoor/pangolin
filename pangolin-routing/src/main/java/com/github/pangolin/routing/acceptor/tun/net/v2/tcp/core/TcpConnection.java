@@ -1,0 +1,1017 @@
+package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
+
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.CongestionControl;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.RttEstimator;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.FourTuple;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionTimers;
+import io.netty.channel.Channel;
+import io.netty.channel.EventLoop;
+
+import java.util.function.Consumer;
+
+/**
+ * Rich domain model for a single TCP connection (RFC 9293).
+ * All state is private; accessed only through typed methods.
+ *
+ * <p>Threading: all field accesses must occur on the connection's assigned Worker EventLoop
+ * ({@link #eventLoop()}). No synchronisation is used.
+ *
+ * <p>Construction: use {@link Builder} to assemble extensions, then call {@link Builder#build()}.
+ */
+public final class TcpConnection {
+
+    // ── RFC 9293 core state ──────────────────────────────────────────────────
+    private TcpConnectionState state;
+    private int sndUna;    // SND.UNA — oldest unacknowledged sequence number
+    private int sndNxt;    // SND.NXT — next sequence number to send (advanced on transmit)
+    private int writeSeq;  // write_seq — next sequence number to be queued (advanced on enqueue, mirrors Linux tp->write_seq)
+    private int rcvNxt;    // RCV.NXT — next sequence number expected from peer
+    private int sndWnd;    // SND.WND — peer's receive window
+    private int maxWindow; // maximum SND.WND ever seen from peer (Linux: tp->max_window)
+    private int sndWl1;    // SND.WL1 (linux: tp->snd_wl1) — SEQ of last window-update segment
+    private int sndSml;    // linux: tp->snd_sml
+    private int rcvWnd;    // RCV.WND — our advertised receive window
+    private int rcvWup;    // RCV.WUP — receive-window update point (Linux-style)
+    private int rcvMss;    // RCV.MSS (linux: icsk_ack.rcv_mss) — effective receive MSS for delayed-ACK
+    private int mss;       // Maximum Segment Size (negotiated)
+    private int sndWscale; // peer's receive window scale factor
+    private int rcvWscale; // our receive window scale factor
+    private long bytesAcked;  // cumulative bytes acknowledged (Linux: tp->bytes_acked)
+    private int packetsOut;  // segments in flight awaiting ACK (Linux: tp->packets_out)
+    /**
+     * Linux-style shutdown mask: RCV_SHUTDOWN / SEND_SHUTDOWN
+     */
+    private int skShutdown;
+    /**
+     * ACK-pending bitmask — mirrors Linux {@code icsk_ack.pending}.
+     * Bits: {@code ACK_SCHED} | {@code ACK_TIMER} | {@code ACK_NOW}
+     * (see {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants}).
+     */
+    private int ackPending;
+    /**
+     * Pending socket error — mirrors Linux {@code sk->sk_err}.
+     * Set by {@code TcpInput.tcp_reset} before {@code sk_error_report}; inspectable
+     * in {@code channelInactive} handlers to determine why the connection was aborted.
+     */
+    private int skErr;
+    /**
+     * Last time we sent an out-of-window challenge/dupack (ms).
+     */
+    private long lastOowAckTimeMs;
+
+    /**
+     * IP Type-of-Service field (mirrors Linux {@code struct inet_sock.tos}).
+     * Used when emitting outbound IP headers (v2 does not yet consume it but the
+     * slot is required for v1 parity).
+     */
+    private int tos;
+
+    // ── RFC 5961 per-socket challenge-ACK rate limit ─────────────────────────
+    /**
+     * Timestamp (ms) of the current one-second challenge-ACK accounting window
+     * (mirrors Linux {@code tp->challenge_timestamp}).
+     */
+    private long ipv4TcpChallengeTimestamp;
+    /**
+     * Challenge ACKs emitted inside the current accounting window
+     * (mirrors Linux {@code tp->challenge_count}).
+     */
+    private int ipv4TcpChallengeCount;
+
+    // ── IcskAck bookkeeping (mirrors Linux struct inet_connection_sock::icsk_ack) ─
+    /**
+     * Number of consecutive delayed-ACK retries (mirrors Linux {@code icsk_ack.retry}).
+     */
+    private int icskAckRetry;
+    /**
+     * Length of the last data segment received, used for {@code icsk_ack.rcv_mss}
+     * tuning in {@code tcp_measure_rcv_mss} (mirrors Linux {@code icsk_ack.last_seg_size}).
+     */
+    private int icskAckLastSegSize;
+    /**
+     * Last data-segment arrival time (ms) used for ATO / delayed-ACK decisions
+     * (mirrors Linux {@code icsk_ack.lrcvtime}).  Note this is distinct from
+     * {@link #lastRecvTimeMs}, which tracks any-segment activity for keepalive.
+     */
+    private long icskAckLrcvtimeMs;
+
+    // ── Netty integration ───────────────────────────────────────────────────
+    private final Channel channel;
+    private final FourTuple fourTuple;
+
+    // ── RFC extension per-conn state storage ────────────────────────────────
+    // ── Buffers ─────────────────────────────────────────────────────────────
+    private final TcpSendBuffer sendBuffer;
+    private final TcpReceiveBuffer receiveBuffer;
+
+    // ── Pluggable extensions ─────────────────────────────────────────────────
+    private boolean timestampEnabled;
+    private int recentTimestamp;
+    /**
+     * 最近一次刷新 {@code recentTimestamp} 的本地接收秒级时戳,对应 Linux
+     * {@code tcp_options_received.ts_recent_stamp};用于 PAWS 24 天陈旧分支。
+     */
+    private int tsRecentStamp;
+    private int quickAckCount;
+    private long ackTimeoutMs;
+    private int pingpongCount;
+    private long lastRecvTimeMs;
+    private long lastSendTimeMs;
+    private long srttUs;
+    private long rttvarUs;
+    private int rtoBackoffShift;
+    /** 首段重传的发送微秒时戳 — 对应 Linux {@code tp->retrans_stamp}。 */
+    private long retransStamp;
+    /** 当前 recovery 阶段累计的未覆盖重传段数 — 对应 Linux {@code tp->undo_retrans}。 */
+    private int undoRetrans;
+    /** 缓存的发送侧当前有效 MSS — 对应 Linux {@code tp->mss_cache}。 */
+    private int mssCache;
+    /** 最近一次驱动 {@code mssCache} 的 PMTU — 对应 Linux {@code icsk->icsk_pmtu_cookie}。 */
+    private int pmtuCookie;
+    /** TCP 头 + 已协商 ESTABLISHED 选项总长度 — 对应 Linux {@code tp->tcp_header_len}。 */
+    private int tcpHeaderLen;
+    /** 当前路径 MTU(外部 ICMP PTB / PMTU 发现写入)— 对应 Linux {@code dst_mtu(sk->sk_dst_cache)}。 */
+    private int dstMtu;
+    /** SACK 已覆盖未累计 ACK 的段数 — 对应 Linux {@code tp->sacked_out}。 */
+    private int sackedOut;
+    private int cwnd = TcpConstants.TCP_INIT_CWND;
+    private int ssthresh = Integer.MAX_VALUE;
+    /**
+     * cwnd 最近一次被 {@code tcp_cwnd_validate} 确认可用的毫秒时戳 —
+     * 对应 Linux {@code tp->snd_cwnd_stamp}(单位 {@code tcp_jiffies32})。
+     * 用于 app-limited 场景下判定是否到了 {@code tcp_cwnd_application_limited} 收敛点。
+     */
+    private long sndCwndStampMs;
+    /**
+     * cwnd 当前窗口内的最高发包水位 — 对应 Linux {@code tp->snd_cwnd_used}。
+     * 只在 non-cwnd-limited 期间跟踪,用于 application-limited 时把 cwnd
+     * 回收到 {@code (cwnd + snd_cwnd_used) / 2}。
+     */
+    private int sndCwndUsed;
+    /**
+     * 当前窗口是否 cwnd 受限 — 对应 Linux {@code tp->is_cwnd_limited}。
+     * 置位后持续到下一次 {@code tcp_cwnd_application_limited} 清理;
+     * clear 后不主动 application-limit cwnd。
+     */
+    private boolean isCwndLimited;
+    private int dupacks;
+    private int caIncrCounter;
+    private String congestionState = "OPEN";
+    private int highSeq;
+    private int tlpHighSeq;
+    private CongestionControl congestionControl;
+    private Consumer<TcpConnection> fastRetransmitAction;
+    private RttEstimator rttEstimator;
+
+    // ── Timer slots ──────────────────────────────────────────────────────────
+    private final TcpConnectionTimers timers = new TcpConnectionTimers();
+
+    private TcpConnection(Builder b) {
+        this.channel = b.channel;
+        this.fourTuple = b.fourTuple;
+        this.state = TcpConnectionState.TCP_ESTABLISHED;
+        this.sndUna = b.sndUna;
+        this.sndNxt = b.sndNxt;
+        this.writeSeq = b.sndNxt;  // initially equal to sndNxt — no data queued yet
+        this.rcvNxt = b.rcvNxt;
+        this.sndWnd = b.sndWnd;
+        this.maxWindow = b.sndWnd;  // initialise to the first advertised window
+        this.sndWl1 = b.sndWl1;
+        this.sndSml = b.sndUna;
+        this.rcvWnd = b.rcvWnd;
+        this.rcvWup = b.rcvWup;
+        this.rcvMss = b.mss;    // tcp_initialize_rcv_mss will refine this in ESTABLISHED transition
+        this.mss = b.mss;
+        // PMTU / tcp_header_len 初始化(对齐 Linux tcp_create_openreq_child)
+        this.tcpHeaderLen = TcpConstants.TCP_MIN_HEADER_LEN
+                + (b.timestampEnabled ? TcpConstants.TCP_TSOPT_WIRE_LEN : 0);
+        this.mssCache = b.mss;
+        this.pmtuCookie = 0;
+        this.dstMtu = 0;
+        this.sndWscale = b.sndWscale;
+        this.rcvWscale = b.rcvWscale;
+        this.skShutdown = 0;
+        this.lastOowAckTimeMs = 0L;
+        this.tos = 0;
+        this.ipv4TcpChallengeTimestamp = 0L;
+        this.ipv4TcpChallengeCount = 0;
+        this.icskAckRetry = 0;
+        this.icskAckLastSegSize = 0;
+        this.icskAckLrcvtimeMs = 0L;
+        this.timestampEnabled = b.timestampEnabled;
+        this.recentTimestamp = b.recentTimestamp;
+        this.tsRecentStamp = b.timestampEnabled ? (int) (System.currentTimeMillis() / 1000L) : 0;
+        this.quickAckCount = 0;
+        this.ackTimeoutMs = TcpConstants.DELAYED_ACK_MS;
+        this.pingpongCount = 0;
+        this.lastRecvTimeMs = 0L;
+        this.lastSendTimeMs = 0L;
+        this.sndCwndStampMs = 0L;
+        this.sndCwndUsed = 0;
+        this.isCwndLimited = false;
+        this.sendBuffer = new TcpSendBuffer();
+        this.receiveBuffer = new TcpReceiveBuffer(channel.alloc());
+        this.congestionControl = b.congestionControl;
+        this.fastRetransmitAction = b.fastRetransmitAction;
+        this.rttEstimator = b.rttEstimator;
+    }
+
+    // ── Accessors ────────────────────────────────────────────────────────────
+
+    public Channel channel() {
+        return channel;
+    }
+
+    public EventLoop eventLoop() {
+        return channel.eventLoop();
+    }
+
+    public FourTuple fourTuple() {
+        return fourTuple;
+    }
+
+    public TcpConnectionState state() {
+        return state;
+    }
+
+    public int sndUna() {
+        return sndUna;
+    }
+
+    public int sndNxt() {
+        return sndNxt;
+    }
+
+    public int writeSeq() {
+        return writeSeq;
+    }
+
+    public int rcvNxt() {
+        return rcvNxt;
+    }
+
+    public int sndWnd() {
+        return sndWnd;
+    }
+
+    public int maxWindow() {
+        return maxWindow;
+    }
+
+    public long bytesAcked() {
+        return bytesAcked;
+    }
+
+    public int packetsOut() {
+        return packetsOut;
+    }
+
+    public int sndWl1() {
+        return sndWl1;
+    }
+
+    public int sndSml() {
+        return sndSml;
+    }
+
+    public int rcvWnd() {
+        return rcvWnd;
+    }
+
+    public int rcvWup() {
+        return rcvWup;
+    }
+
+    public int rcvMss() {
+        return rcvMss;
+    }
+
+    public int mss() {
+        return mss;
+    }
+
+    /** 对应 Linux {@code tp->mss_cache}。 */
+    public int mssCache() {
+        return mssCache;
+    }
+
+    /** 对应 Linux {@code icsk->icsk_pmtu_cookie}。 */
+    public int pmtuCookie() {
+        return pmtuCookie;
+    }
+
+    /** 对应 Linux {@code tp->tcp_header_len}。 */
+    public int tcpHeaderLen() {
+        return tcpHeaderLen;
+    }
+
+    /** 对应 Linux {@code dst_mtu(sk->sk_dst_cache)};外部 PMTU 发现路径写入。 */
+    public int dstMtu() {
+        return dstMtu;
+    }
+
+    /** 对应 Linux {@code tp->sacked_out}。 */
+    public int sackedOut() {
+        return sackedOut;
+    }
+
+    public int sndWscale() {
+        return sndWscale;
+    }
+
+    public int rcvWscale() {
+        return rcvWscale;
+    }
+
+    public int skShutdown() {
+        return skShutdown;
+    }
+
+    public int ackPending() {
+        return ackPending;
+    }
+
+    public int skErr() {
+        return skErr;
+    }
+
+    public long lastOowAckTimeMs() {
+        return lastOowAckTimeMs;
+    }
+
+    /**
+     * Available receive window size, mirroring Linux {@code tcp_receive_window()}:
+     * <pre>
+     *   max(0, rcv_wup + rcv_wnd - rcv_nxt)
+     * </pre>
+     * {@code rcv_wup} is the sequence number at which the window was last advertised;
+     * subtracting {@code rcv_nxt} gives the bytes still available since that advertisement.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_receive_window</a>
+     */
+    public int tcp_receive_window() {
+        return Math.max(0, rcvWup + rcvWnd - rcvNxt);
+    }
+
+    // ── State mutators ───────────────────────────────────────────────────────
+
+    public void state(TcpConnectionState s) {
+        this.state = s;
+    }
+
+    public void sndNxt(int v) {
+        this.sndNxt = v;
+    }
+
+    public void sndUna(int v) {
+        this.sndUna = v;
+    }
+
+    public void writeSeq(int v) {
+        this.writeSeq = v;
+    }
+
+    public void rcvNxt(int v) {
+        this.rcvNxt = v;
+    }
+
+    public void sndWnd(int v) {
+        this.sndWnd = v;
+        if (Integer.compareUnsigned(v, maxWindow) > 0) this.maxWindow = v;
+    }
+
+    public void maxWindow(int v) {
+        this.maxWindow = v;
+    }
+
+    public void sndWl1(int v) {
+        this.sndWl1 = v;
+    }
+
+    public void sndSml(int v) {
+        this.sndSml = v;
+    }
+
+    public void rcvWnd(int v) {
+        this.rcvWnd = v;
+    }
+
+    public void rcvWup(int v) {
+        this.rcvWup = v;
+    }
+
+    public void rcvMss(int v) {
+        this.rcvMss = v;
+    }
+
+    public void mss(int v) {
+        this.mss = v;
+    }
+
+    public void mssCache(int v) {
+        this.mssCache = Math.max(v, 0);
+    }
+
+    public void pmtuCookie(int v) {
+        this.pmtuCookie = Math.max(v, 0);
+    }
+
+    public void tcpHeaderLen(int v) {
+        this.tcpHeaderLen = Math.max(v, 0);
+    }
+
+    public void dstMtu(int v) {
+        this.dstMtu = Math.max(v, 0);
+    }
+
+    public void sackedOut(int v) {
+        this.sackedOut = Math.max(v, 0);
+    }
+
+    public void sndWscale(int v) {
+        this.sndWscale = v;
+    }
+
+    public void rcvWscale(int v) {
+        this.rcvWscale = v;
+    }
+
+    public void bytesAcked(long v) {
+        this.bytesAcked = v;
+    }
+
+    public void packetsOut(int v) {
+        this.packetsOut = v;
+    }
+
+    public void skShutdown(int mask) {
+        this.skShutdown = mask;
+    }
+
+    public void ackPending(int v) {
+        this.ackPending = v;
+    }
+
+    public void addShutdown(int how) {
+        this.skShutdown |= how;
+    }
+
+    public boolean hasShutdown(int how) {
+        return (this.skShutdown & how) != 0;
+    }
+
+    /**
+     * Set one or more {@code ACK_*} bits.
+     */
+    public void addAckPending(int bits) {
+        this.ackPending |= bits;
+    }
+
+    /**
+     * Clear one or more {@code ACK_*} bits.
+     */
+    public void clearAckPending(int bits) {
+        this.ackPending &= ~bits;
+    }
+
+    /**
+     * Test whether any of the given {@code ACK_*} bits are set.
+     */
+    public boolean hasAckPending(int bits) {
+        return (this.ackPending & bits) != 0;
+    }
+
+    public void skErr(int err) {
+        this.skErr = err;
+    }
+
+    public void lastOowAckTimeMs(long v) {
+        this.lastOowAckTimeMs = v;
+    }
+
+    public int tos() {
+        return tos;
+    }
+
+    public void tos(int v) {
+        this.tos = v;
+    }
+
+    public long ipv4TcpChallengeTimestamp() {
+        return ipv4TcpChallengeTimestamp;
+    }
+
+    public void ipv4TcpChallengeTimestamp(long v) {
+        this.ipv4TcpChallengeTimestamp = v;
+    }
+
+    public int ipv4TcpChallengeCount() {
+        return ipv4TcpChallengeCount;
+    }
+
+    public void ipv4TcpChallengeCount(int v) {
+        this.ipv4TcpChallengeCount = v;
+    }
+
+    public int icskAckRetry() {
+        return icskAckRetry;
+    }
+
+    public void icskAckRetry(int v) {
+        this.icskAckRetry = Math.max(v, 0);
+    }
+
+    public int icskAckLastSegSize() {
+        return icskAckLastSegSize;
+    }
+
+    public void icskAckLastSegSize(int v) {
+        this.icskAckLastSegSize = Math.max(v, 0);
+    }
+
+    public long icskAckLrcvtimeMs() {
+        return icskAckLrcvtimeMs;
+    }
+
+    public void icskAckLrcvtimeMs(long v) {
+        this.icskAckLrcvtimeMs = v;
+    }
+
+    /**
+     * Advance SND.UNA to {@code ackSeq} — does <b>not</b> drain the RTX queue.
+     * Mirrors Linux {@code tcp_snd_una_update}: updates only {@code snd_una} and
+     * {@code bytes_acked}.  RTX-queue cleanup must follow separately via
+     * {@link TcpSendBuffer#acknowledgeUpTo(int)}.
+     *
+     * @return number of bytes newly acknowledged (0 if ackSeq ≤ SND.UNA)
+     */
+    public int sndUnaUpdate(int ackSeq) {
+        if (!TcpSequence.after(ackSeq, sndUna)) {
+            return 0;
+        }
+        int delta = ackSeq - sndUna;
+        sndUna = ackSeq;
+        bytesAcked += delta;
+        return delta;
+    }
+
+    /**
+     * Advance SND.UNA to {@code ackSeq} and acknowledge RTX-queue entries.
+     * Combines {@link #sndUnaUpdate(int)} with {@link #cleanRtxQueue(int)}.
+     *
+     * @return number of bytes newly acknowledged
+     */
+    public int acknowledgeUpTo(int ackSeq) {
+        int delta = sndUnaUpdate(ackSeq);
+        if (delta > 0) {
+            cleanRtxQueue(ackSeq);
+        }
+        return delta;
+    }
+
+    /**
+     * Increment {@code packets_out} — called each time a segment is placed on the RTX queue
+     * (mirrors Linux {@code tp->packets_out++} in the send path).
+     */
+    public void incrementPacketsOut() {
+        packetsOut++;
+    }
+
+    /**
+     * Decrement {@code packets_out} — used by {@code tcp_clean_rtx_queue} for each SKB removed
+     * from the RTX queue (mirrors Linux {@code tp->packets_out -= acked_pcount}).
+     */
+    public void decrementPacketsOut(int count) {
+        packetsOut = Math.max(0, packetsOut - count);
+    }
+
+    /**
+     * Returns the first unsent entry in the write queue, or {@code null} if the queue is empty.
+     * Mirrors Linux {@code tcp_send_head(sk)} (include/net/tcp.h).
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h">tcp_send_head</a>
+     */
+    public TcpSkb tcpSendHead() {
+        return sendBuffer.peekWrite();
+    }
+
+    /**
+     * Append a pre-built SKB to the write queue and advance {@code write_seq}.
+     *
+     * <p>Mirrors Linux {@code tcp_queue_skb} (tcp_output.c) exactly:
+     * <pre>
+     *   WRITE_ONCE(tp->write_seq, TCP_SKB_CB(skb)->end_seq);
+     *   tcp_add_write_queue_tail(sk, skb);
+     * </pre>
+     *
+     * <p>The caller is responsible for constructing {@code skb} with the correct
+     * {@code startSeq} (= current {@link #writeSeq()}) and {@code tcpFlags} before
+     * calling this method — mirroring how Linux callers set {@code TCP_SKB_CB(skb)->seq},
+     * {@code ->end_seq}, and {@code ->tcp_flags} before invoking {@code tcp_queue_skb}.
+     * RST must never be passed here — RST bypasses the write queue entirely
+     * (see {@code tcp_send_reset} / {@code tcp_v4_send_reset} in the kernel).
+     *
+     * @param skb fully initialised segment entry; ownership transferred to the write queue
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498">tcp_queue_skb</a>
+     */
+    public void tcp_queue_skb(TcpSkb skb) {
+        // WRITE_ONCE(tp->write_seq, TCP_SKB_CB(skb)->end_seq)
+        writeSeq = skb.endSeq();
+        sendBuffer.enqueue(skb);
+    }
+
+    /**
+     * Drain acknowledged entries from the RTX queue and decrement {@code packets_out}
+     * accordingly — mirrors Linux {@code tcp_clean_rtx_queue}'s drain loop and its
+     * {@code tp->packets_out -= acked_pcount} bookkeeping.
+     *
+     * <p>Must be called <em>after</em> RTT sampling so that {@link TcpSendBuffer#peekRtx()}
+     * still sees the just-ACKed segment head.
+     */
+    public void cleanRtxQueue(int ackSeq) {
+        packetsOut -= sendBuffer.acknowledgeUpTo(ackSeq);
+    }
+
+    // ── Extension attributes ─────────────────────────────────────────────────
+
+    // ── Pluggable extensions ─────────────────────────────────────────────────
+
+    public boolean timestampEnabled() {
+        return timestampEnabled;
+    }
+
+    public void timestampEnabled(boolean timestampEnabled) {
+        this.timestampEnabled = timestampEnabled;
+    }
+
+    public int recentTimestamp() {
+        return recentTimestamp;
+    }
+
+    public void recentTimestamp(int recentTimestamp) {
+        this.recentTimestamp = recentTimestamp;
+    }
+
+    public int tsRecentStamp() {
+        return tsRecentStamp;
+    }
+
+    public void tsRecentStamp(int tsRecentStamp) {
+        this.tsRecentStamp = tsRecentStamp;
+    }
+
+    public void updateRecentTimestamp(int tsval) {
+        if (timestampEnabled) {
+            recentTimestamp = tsval;
+            tsRecentStamp = (int) (System.currentTimeMillis() / 1000L);
+        }
+    }
+
+    public int quickAckCount() {
+        return quickAckCount;
+    }
+
+    public void quickAckCount(int quickAckCount) {
+        this.quickAckCount = Math.max(quickAckCount, 0);
+    }
+
+    public long ackTimeoutMs() {
+        return ackTimeoutMs;
+    }
+
+    public void ackTimeoutMs(long ackTimeoutMs) {
+        this.ackTimeoutMs = Math.max(ackTimeoutMs, 1L);
+    }
+
+    public boolean inPingpongMode() {
+        return pingpongCount >= TcpConstants.TCP_PINGPONG_THRESH;
+    }
+
+    public int pingpongCount() {
+        return pingpongCount;
+    }
+
+    public long lastRecvTimeMs() {
+        return lastRecvTimeMs;
+    }
+
+    public long lastSendTimeMs() {
+        return lastSendTimeMs;
+    }
+
+    public void exitPingpongMode() {
+        pingpongCount = 0;
+    }
+
+    public void decQuickAckMode() {
+        if (quickAckCount > 0) {
+            quickAckCount--;
+            if (quickAckCount == 0) {
+                ackTimeoutMs = TcpConstants.DELAYED_ACK_MS;
+            }
+        }
+    }
+
+    public void onDataSent() {
+        long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+        lastSendTimeMs = now;
+        if (lastRecvTimeMs != 0L && now - lastRecvTimeMs < ackTimeoutMs) {
+            if (pingpongCount < 0xFF) {
+                pingpongCount++;
+            }
+        }
+    }
+
+    public void onSegmentReceived() {
+        lastRecvTimeMs = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+    }
+
+    public long srttUs() {
+        return srttUs;
+    }
+
+    public void srttUs(long srttUs) {
+        this.srttUs = srttUs;
+    }
+
+    public long rttvarUs() {
+        return rttvarUs;
+    }
+
+    public void rttvarUs(long rttvarUs) {
+        this.rttvarUs = rttvarUs;
+    }
+
+    public int rtoBackoffShift() {
+        return rtoBackoffShift;
+    }
+
+    public void rtoBackoffShift(int rtoBackoffShift) {
+        this.rtoBackoffShift = Math.max(rtoBackoffShift, 0);
+    }
+
+    public long retransStamp() {
+        return retransStamp;
+    }
+
+    public void retransStamp(long retransStamp) {
+        this.retransStamp = retransStamp;
+    }
+
+    public int undoRetrans() {
+        return undoRetrans;
+    }
+
+    public void undoRetrans(int undoRetrans) {
+        this.undoRetrans = Math.max(undoRetrans, 0);
+    }
+
+    public int cwnd() {
+        return cwnd;
+    }
+
+    public void cwnd(int cwnd) {
+        this.cwnd = Math.max(cwnd, 1);
+    }
+
+    public int ssthresh() {
+        return ssthresh;
+    }
+
+    public void ssthresh(int ssthresh) {
+        this.ssthresh = Math.max(ssthresh, 2);
+    }
+
+    /** 对应 Linux {@code tp->snd_cwnd_stamp}(单位 ms)。 */
+    public long sndCwndStampMs() {
+        return sndCwndStampMs;
+    }
+
+    public void sndCwndStampMs(long sndCwndStampMs) {
+        this.sndCwndStampMs = sndCwndStampMs;
+    }
+
+    /** 对应 Linux {@code tp->snd_cwnd_used}。 */
+    public int sndCwndUsed() {
+        return sndCwndUsed;
+    }
+
+    public void sndCwndUsed(int sndCwndUsed) {
+        this.sndCwndUsed = Math.max(sndCwndUsed, 0);
+    }
+
+    /** 对应 Linux {@code tp->is_cwnd_limited}。 */
+    public boolean isCwndLimited() {
+        return isCwndLimited;
+    }
+
+    public void isCwndLimited(boolean isCwndLimited) {
+        this.isCwndLimited = isCwndLimited;
+    }
+
+    public int dupacks() {
+        return dupacks;
+    }
+
+    public void dupacks(int dupacks) {
+        this.dupacks = Math.max(dupacks, 0);
+    }
+
+    public int caIncrCounter() {
+        return caIncrCounter;
+    }
+
+    public void caIncrCounter(int caIncrCounter) {
+        this.caIncrCounter = Math.max(caIncrCounter, 0);
+    }
+
+    public String congestionState() {
+        return congestionState;
+    }
+
+    public void congestionState(String congestionState) {
+        this.congestionState = congestionState;
+    }
+
+    public int highSeq() {
+        return highSeq;
+    }
+
+    public void highSeq(int highSeq) {
+        this.highSeq = highSeq;
+    }
+
+    public int tlpHighSeq() {
+        return tlpHighSeq;
+    }
+
+    public void tlpHighSeq(int tlpHighSeq) {
+        this.tlpHighSeq = tlpHighSeq;
+    }
+
+    public CongestionControl congestionControl() {
+        return congestionControl;
+    }
+
+    public Consumer<TcpConnection> fastRetransmitAction() {
+        return fastRetransmitAction;
+    }
+
+    public void fireFastRetransmit() {
+        if (fastRetransmitAction != null) {
+            fastRetransmitAction.accept(this);
+        }
+    }
+
+    public RttEstimator rttEstimator() {
+        return rttEstimator;
+    }
+
+    // ── Timers / buffers ─────────────────────────────────────────────────────
+
+    public TcpConnectionTimers timers() {
+        return timers;
+    }
+
+    public TcpSendBuffer sendBuffer() {
+        return sendBuffer;
+    }
+
+    public TcpReceiveBuffer receiveBuffer() {
+        return receiveBuffer;
+    }
+
+    /**
+     * Close this connection: cancel all timers and notify extensions.
+     * Must be called from the connection's EventLoop.
+     * Typically triggered by {@code channelInactive()} in the pipeline handler.
+     */
+    public void close() {
+        timers.cancelAll();
+        sendBuffer.releaseAll();
+        receiveBuffer.releaseAll();
+    }
+
+    // ── Builder ──────────────────────────────────────────────────────────────
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static final class Builder {
+        private Channel channel;
+        private FourTuple fourTuple;
+        private int sndUna;
+        private int sndNxt;
+        private int rcvNxt;
+        private int sndWnd;
+        private int sndWl1;
+        private int rcvWnd = 65535;
+        private int rcvWup;
+        private boolean rcvWupSet;
+        private int mss = 1460;
+        private int sndWscale;
+        private int rcvWscale;
+        private boolean timestampEnabled;
+        private int recentTimestamp;
+        private CongestionControl congestionControl;
+        private Consumer<TcpConnection> fastRetransmitAction;
+        private RttEstimator rttEstimator;
+
+        public Builder channel(Channel ch) {
+            this.channel = ch;
+            return this;
+        }
+
+        public Builder fourTuple(FourTuple ft) {
+            this.fourTuple = ft;
+            return this;
+        }
+
+        public Builder sndUna(int v) {
+            this.sndUna = v;
+            return this;
+        }
+
+        public Builder sndNxt(int v) {
+            this.sndNxt = v;
+            return this;
+        }
+
+        public Builder rcvNxt(int v) {
+            this.rcvNxt = v;
+            return this;
+        }
+
+        public Builder sndWnd(int v) {
+            this.sndWnd = v;
+            return this;
+        }
+
+        public Builder sndWl1(int v) {
+            this.sndWl1 = v;
+            return this;
+        }
+
+        public Builder rcvWnd(int v) {
+            this.rcvWnd = v;
+            return this;
+        }
+
+        public Builder rcvWup(int v) {
+            this.rcvWup = v;
+            this.rcvWupSet = true;
+            return this;
+        }
+
+        public Builder mss(int v) {
+            this.mss = v;
+            return this;
+        }
+
+        public Builder sndWscale(int v) {
+            this.sndWscale = v;
+            return this;
+        }
+
+        public Builder rcvWscale(int v) {
+            this.rcvWscale = v;
+            return this;
+        }
+
+        public Builder timestampEnabled(boolean v) {
+            this.timestampEnabled = v;
+            return this;
+        }
+
+        public Builder recentTimestamp(int v) {
+            this.recentTimestamp = v;
+            return this;
+        }
+
+        public Builder congestionControl(CongestionControl congestionControl,
+                                         Consumer<TcpConnection> fastRetransmitAction) {
+            this.congestionControl = congestionControl;
+            this.fastRetransmitAction = fastRetransmitAction;
+            return this;
+        }
+
+        public Builder rttEstimator(RttEstimator rttEstimator) {
+            this.rttEstimator = rttEstimator;
+            return this;
+        }
+
+        public TcpConnection build() {
+            if (channel == null) throw new IllegalStateException("channel must be set");
+            if (fourTuple == null) {
+                fourTuple = FourTuple.of(new byte[]{0, 0, 0, 0}, 0, new byte[]{0, 0, 0, 0}, 0);
+            }
+            if (!rcvWupSet) {
+                rcvWup = rcvNxt;
+            }
+            return new TcpConnection(this);
+        }
+    }
+}

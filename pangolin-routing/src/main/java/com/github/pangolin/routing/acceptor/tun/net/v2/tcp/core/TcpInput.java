@@ -1,9 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnection;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionState;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
+
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;

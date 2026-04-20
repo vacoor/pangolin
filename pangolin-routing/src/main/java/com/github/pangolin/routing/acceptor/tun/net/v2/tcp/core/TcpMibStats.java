@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicLongArray;
  * <p>计数来源:
  * <ul>
  *   <li>{@link TcpMib} 家族:由 {@link #inc(TcpMib)} 投递,ordinal 作为下标。</li>
- *   <li>{@link SkbDropReasonConstants} 家族:由 {@link #incDrop(int)} 投递,code 作为下标。</li>
+ *   <li>{@link SkbDropReason} 家族:由 {@link #incDrop(int)} 投递,code 作为下标。</li>
  * </ul>
  *
  * <p>当前 v2 不引入外部监控(Prometheus / micrometer)导出,{@link #snapshotMib()} /
@@ -23,7 +23,7 @@ public final class TcpMibStats {
     public static final TcpMibStats INSTANCE = new TcpMibStats();
 
     /**
-     * {@link SkbDropReasonConstants} 的 int code 上限;当前最大条目为
+     * {@link SkbDropReason} 的 int code 上限;当前最大条目为
      * {@code SKB_DROP_REASON_TCP_INVALID_SYN=46},保留余量到 128 便于未来追加。
      */
     private static final int DROP_REASON_SLOTS = 128;

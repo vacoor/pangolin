@@ -72,5 +72,16 @@ public enum TcpMib {
      * FULLUNDO → LOSSUNDO → SPURIOUSRTOS → DSACKUNDO 顺序 else-if 命中。
      */
     TCPSPURIOUSRTOS,
+    /**
+     * 对应 {@code LINUX_MIB_TCPACKSKIPPEDSYNRECV}:SYN_RECV 半开连接阶段因 OOW 限流
+     * 被跳过的 ACK / SYN-ACK 发送数(对齐 Linux {@code tcp_check_req} 中
+     * {@code tcp_oow_rate_limited(..., LINUX_MIB_TCPACKSKIPPEDSYNRECV, ...)})。
+     */
+    TCPACKSKIPPEDSYNRECV,
+    /**
+     * 对应 {@code LINUX_MIB_TSECRREJECTED}:{@code tcp_check_req} 阶段因 {@code rcv_tsecr}
+     * 越出 {@code [snt_tsval_first, snt_tsval_last]} 而被拒绝的段数。
+     */
+    TSECRREJECTED,
     ;
 }

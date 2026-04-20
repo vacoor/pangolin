@@ -2,22 +2,22 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSkb;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSkb;
+
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimerScheduler;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants.SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReasonConstants.SKB_DROP_REASON_TCP_TOO_OLD_ACK;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.after;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence.before;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason.SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason.SKB_DROP_REASON_TCP_TOO_OLD_ACK;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.after;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before;
 
 /**
  * 入站 ACK 处理静态入口 — 对齐 Linux {@code tcp_ack} 及 {@code tcp_sacktag_write_queue} /
  * {@code tcp_clean_rtx_queue} / {@code tcp_rack_detect_loss} 家族。
  *
  * <p>历史上本类曾以 netty {@code ChannelInboundHandler} 形式注册到 per-connection pipeline,
- * 随 v2 向 {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer}
+ * 随 v2 向 {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer}
  * 主循环集中分发演进后,handler 身份已移除,仅保留标志位常量与静态入口供主循环调用。
  */
 public final class TcpAck {
@@ -242,7 +242,7 @@ public final class TcpAck {
                 if (target == null) continue;
 
                 if (!target.isSackAcked()) {
-                    target.sacked(target.sacked() | com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.TCPCB_SACKED_ACKED);
+                    target.sacked(target.sacked() | com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCPCB_SACKED_ACKED);
                     sock.incrSackedOut();
                     newlyTagged++;
                     // 对齐 Linux tcp_sacktag_one:每有一个段被新 SACK 确认,tp->delivered++;
@@ -274,7 +274,7 @@ public final class TcpAck {
      * <p>reo_wnd 动态缩放 — 对齐 Linux {@code tcp_rack_reo_wnd}:
      * {@code reo_wnd = min((min_rtt * steps) >> 2, srtt_us >> 3)}。
      * {@code min_rtt} 由 {@link TcpSock#minRttUs()}(Windowed Filter,
-     * {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.WinMinMax})
+     * {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.WinMinMax})
      * 提供;尚未测量时(冷启动)退化为 {@code srtt/4} 作 base + {@code srtt>>3} 作 cap,
      * 保持 ACK 时钟稳态。DSACK 事件由 {@link TcpSock#tcpRackUpdateReoWnd(int)} 驱动
      * {@code steps} 升降,由本路径读回当前值。
@@ -290,7 +290,7 @@ public final class TcpAck {
         final int  steps   = Math.max(1, sock.rackReoWndSteps());
         final int  minRttUs = sock.minRttUs();
         final long baseUs;
-        if (minRttUs < com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.TCP_MIN_RTT_NO_SAMPLE) {
+        if (minRttUs < com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCP_MIN_RTT_NO_SAMPLE) {
             // Linux: (min_rtt * steps) >> 2 — 先乘后移,避免 steps≥2 时 min_rtt<4 被截 0
             baseUs = ((long) minRttUs * steps) >>> 2;
         } else {
@@ -306,7 +306,7 @@ public final class TcpAck {
             final long sentUs = skb.sentTimeUs();
             if (sentUs <= 0L) continue;
             if (sentUs < lossBoundary) {
-                skb.sacked(skb.sacked() | com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.TCPCB_LOST);
+                skb.sacked(skb.sacked() | com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCPCB_LOST);
                 sock.incrLostOut();
             }
         }
@@ -325,7 +325,7 @@ public final class TcpAck {
             if (skb.isSackAcked() || skb.isLost()) {
                 continue;
             }
-            skb.sacked(skb.sacked() | com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.TCPCB_LOST);
+            skb.sacked(skb.sacked() | com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCPCB_LOST);
             sock.incrLostOut();
             remaining--;
         }
@@ -473,7 +473,7 @@ public final class TcpAck {
         when = sock.tcpClampProbe0ToUserTimeout(when);
         TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
                 sock,
-                com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TimerType.ZERO_WINDOW_PROBE,
+                com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TimerType.ZERO_WINDOW_PROBE,
                 when,
                 () -> sock.probeTimerAction().run()
         );

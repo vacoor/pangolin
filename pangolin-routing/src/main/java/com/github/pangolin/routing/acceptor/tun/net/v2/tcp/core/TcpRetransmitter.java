@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TimerType;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
+
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TimerType;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimerScheduler;
 
 /**
  * RFC 9293 retransmission: re-sends the oldest unacknowledged segment.

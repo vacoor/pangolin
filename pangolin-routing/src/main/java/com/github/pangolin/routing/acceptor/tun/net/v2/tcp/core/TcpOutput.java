@@ -1,16 +1,16 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnection;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSkb;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.FourTuple;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.SysctlOptions;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpSequence;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpTimewaitSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ng.TcpMultiplexer.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TimerType;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.timer.TcpTimerScheduler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnection;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSkb;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.FourTuple;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SysctlOptions;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimewaitSock;
+
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TimerType;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimerScheduler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -19,7 +19,7 @@ import io.netty.buffer.Unpooled;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_clock_ms;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.*;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.*;
 
 /**
  * TCP output operations — the <b>single point</b> of all outbound packet writes.
@@ -48,6 +48,34 @@ public final class TcpOutput {
     public static final TcpOutput INSTANCE = new TcpOutput();
 
     private TcpOutput() {}
+
+    // ─── Host-wide Challenge ACK limiter (RFC 5961 §7) ─────────────────────
+    // 对齐 Linux sysctl_tcp_challenge_ack_limit(默认 1000/s),与 per-socket 半秒桶
+    // 互补 — per-socket 抑制单连接自 DoS,host 桶抑制跨 4 元组的 Challenge-ACK 放大。
+    private static final long CHALLENGE_ACK_WINDOW_MS = 1000L;
+    private static final int  CHALLENGE_ACK_LIMIT     = 1000;
+    private long challengeAckWindowStartMs = 0L;
+    private int  challengeAckCount         = 0;
+
+    /**
+     * Host-wide Challenge ACK token check. Mirrors Linux {@code tcp_ack_update_window}'s
+     * global counter path: refresh the window when it rolls over, then decide whether to
+     * grant a new token. Thread-safety: v2 绑定单 EventLoop,此状态无并发写入。
+     *
+     * @return {@code true} 允许发送;{@code false} 超限,丢弃
+     */
+    private boolean challengeAckHostAllow() {
+        long now = System.currentTimeMillis();
+        if (now - challengeAckWindowStartMs >= CHALLENGE_ACK_WINDOW_MS) {
+            challengeAckWindowStartMs = now;
+            challengeAckCount = 0;
+        }
+        if (challengeAckCount >= CHALLENGE_ACK_LIMIT) {
+            return false;
+        }
+        challengeAckCount++;
+        return true;
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // Established-state sends  (have TcpConnection)
@@ -149,8 +177,8 @@ public final class TcpOutput {
      *   <li><b>Per-socket rate limit</b> — mirrors {@code __tcp_oow_rate_limited}:
      *       if {@code last_oow_ack_time} is set and fewer than
      *       {@link TcpConstants#INVALID_ACK_RATELIMIT_MS} ms have elapsed, drop silently.</li>
-     *   <li><b>Host-wide rate limit</b> (sysctl {@code tcp_challenge_ack_limit}) — not
-     *       implemented; see TODO below.</li>
+     *   <li><b>Host-wide rate limit</b> — {@link #challengeAckHostAllow()} 对齐 Linux
+     *       {@code sysctl_tcp_challenge_ack_limit}(默认 1000/s),跨 4 元组的全局令牌桶。</li>
      *   <li>Send a pure ACK via {@link #tcp_send_ack}.</li>
      * </ol>
      *
@@ -169,6 +197,9 @@ public final class TcpOutput {
             if (elapsed >= 0 && elapsed < TcpConstants.INVALID_ACK_RATELIMIT_MS) {
                 return;
             }
+        }
+        if (!challengeAckHostAllow()) {
+            return;
         }
         sock.lastOowAckTimeMs(now);
         TcpMibStats.INSTANCE.inc(TcpMib.TCPCHALLENGEACK);
@@ -290,14 +321,14 @@ public final class TcpOutput {
         //       __tcp_retransmit_skb 中 tcp_collapse_retrans 的尝试点(in_flight 较小、
         //       段未被 SACK 时生效)。
         if (!oldest.isSackAcked() && oldest.dataLen() < sock.mss()) {
-            com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpSendBuffer.CollapseResult cr
+            com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSendBuffer.CollapseResult cr
                     = sock.sendBuffer().collapseRtx(oldest, sock.mss());
             if (cr != null) {
                 // 对齐 Linux tcp_adjust_pcount:合并吞掉 next 段,packetsOut/lostOut 按
                 // next 的 sacked 位集递减。未实现 retransOut 计数,LOST / 记账相关项
                 // 用现有字段兜底。
                 sock.decrementPacketsOut(1);
-                if ((cr.droppedSacked & com.github.pangolin.routing.acceptor.tun.net.v2.tcp.internal.TcpConstants.TCPCB_LOST) != 0) {
+                if ((cr.droppedSacked & com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCPCB_LOST) != 0) {
                     sock.decrLostOut(1);
                 }
                 oldest = cr.merged;
@@ -470,7 +501,7 @@ public final class TcpOutput {
     }
 
     public int tcp_write_wakeup(TcpSock sock, int mib) {
-        if (sock == null || !sock.hasConnection() || sock.state() == com.github.pangolin.routing.acceptor.tun.net.v2.tcp.connection.TcpConnectionState.TCP_CLOSED) {
+        if (sock == null || !sock.hasConnection() || sock.state() == com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionState.TCP_CLOSED) {
             return -1;
         }
 
@@ -552,11 +583,19 @@ public final class TcpOutput {
     /**
      * Send a challenge ACK during handshake (out-of-window segment, RFC 9293 §3.5).
      *
+     * <p>握手期无 {@link TcpSock},因此只受 host 全局令牌桶约束 — 对齐 Linux
+     * {@code sysctl_tcp_challenge_ack_limit} 对所有 Challenge-ACK 通路的统一约束,
+     * 避免跨 4 元组放大攻击。
+     *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L3649">tcp_send_challenge_ack</a>
      */
     public void tcp_send_challenge_ack_handshake(Channel ch,
             byte[] localIp, int localPort, byte[] remoteIp, int remotePort,
             int seq, int ack, int window) {
+        if (!challengeAckHostAllow()) {
+            return;
+        }
+        TcpMibStats.INSTANCE.inc(TcpMib.TCPCHALLENGEACK);
         ByteBuf buf = TcpPacketBuilder.buildRaw(
                 localIp, localPort, remoteIp, remotePort,
                 seq, ack, TCPHDR_ACK, window, null, null, 0);
@@ -818,21 +857,23 @@ public final class TcpOutput {
     /**
      * 返回本次 {@code tcp_write_xmit} 迭代允许吐出的段配额。
      *
-     * <p>基线逻辑与 Linux {@code tcp_cwnd_test} 一致:{@code cwnd - in_flight}(in_flight
-     * 取 RTX 队列长度)。在基线为 0 时追加 RFC 3042 Limited Transmit 分支 —
-     * {@code CA_Open} 且 {@code dupacks ∈ [1, 2]} 时,允许把 dupack 计数当作额外配额,
-     * 保证前两个 dupack 各带出 1 个新段,维持 ACK clock,减少 FR/RTO 概率。
+     * <p>基线逻辑与 Linux {@code tcp_cwnd_test} 一致:{@code cwnd - in_flight},其中
+     * {@code in_flight} 取 {@link TcpSock#packetsInFlight()}(对齐 Linux
+     * {@code tcp_packets_in_flight} = {@code packets_out - sacked_out - lost_out}
+     * + {@code retrans_out};v2 未维护 {@code retrans_out})。SACKed / LOST 段不占
+     * cwnd 配额,避免 Recovery 期间窗口被双倍扣减。
      *
-     * <p>Linux 通过 {@code tcp_add_reno_sack} 在 NewReno 下把 {@code sacked_out++}
-     * 来等价缩小 in_flight,v2 未维护 NewReno {@code sacked_out} 记账,因此改为在此
-     * 位置显式补回。
+     * <p>在基线为 0 时追加 RFC 3042 Limited Transmit 分支:{@code CA_Open} 且
+     * {@code dupacks ∈ [1, 2]} 时,把 dupack 计数当作额外配额,保证前两个 dupack
+     * 各带出 1 个新段,维持 ACK clock,减少 FR/RTO 概率。在 NewReno 无 SACK 场景下
+     * 这条分支等价 Linux {@code tcp_add_reno_sack} 的 {@code sacked_out++} 补偿。
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2303">tcp_cwnd_test</a>
      * @see <a href="https://datatracker.ietf.org/doc/html/rfc3042">RFC 3042 Limited Transmit</a>
      */
     private int tcp_cwnd_test(TcpSock sock) {
         final int cwnd = sock.cwnd();
-        final int in_flight = sock.sendBuffer().rtxQueueSize();
+        final int in_flight = sock.packetsInFlight();
         int bonus = 0;
         if (sock.isCaOpen()) {
             final int dupacks = sock.dupacks();
