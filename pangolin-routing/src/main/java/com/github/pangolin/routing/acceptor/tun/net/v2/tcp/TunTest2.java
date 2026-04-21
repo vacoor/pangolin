@@ -5,12 +5,15 @@ import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunAddress;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.backend.BackendProxyInitializer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannel;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannelFactory;
+import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.codec.http.*;
 
 import java.nio.charset.StandardCharsets;
@@ -47,7 +50,7 @@ public class TunTest2 {
                 }
             };
 
-            TcpChannelFactory factory = (sock, mux) -> {
+            TcpChannelFactory nettyChannelFactory = (sock, mux) -> {
                 TcpChannel ch = new TcpChannel(sock, mux);
                 ch.pipeline().addLast(
                         new HttpServerCodec(),
@@ -63,6 +66,12 @@ public class TunTest2 {
                 return ch;
             };
 
+            BackendProxyInitializer initializer = new BackendProxyInitializer(
+                    new StandardSocketChannelFactory(null),
+                    new NioEventLoopGroup(),
+                    10 * 1000
+            );
+
             final Bootstrap b = new Bootstrap()
                     .group(tunGroup)
                     .channel(TunChannel.class)
@@ -70,7 +79,7 @@ public class TunTest2 {
                         @Override
                         protected void initChannel(Channel ch) {
                             ch.pipeline().addLast(new IpPacketCodec());
-                            ch.pipeline().addLast(new TcpMultiplexHandler(dnsEngine, factory));
+                            ch.pipeline().addLast(new TcpMultiplexHandler(dnsEngine, nettyChannelFactory));
                         }
                     });
 

@@ -1,57 +1,65 @@
-# v2 TCP → Netty Channel 桥接改造方案(路径 B:自定义 `AbstractChannel`)
+# v2 TCP → Netty Channel 桥接(路径 B:自定义 `AbstractChannel`)
 
-> 目标:为 `com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock` 写一个
-> 继承 `io.netty.channel.AbstractChannel` 的宿主类型 `TcpChannel`,把每个 v2 TCP
-> 连接暴露为一个完整的 Netty `Channel`,从而允许应用层按 Netty 标准方式挂
-> `ChannelPipeline` / `ChannelHandler`(编解码、HTTP、WebSocket 等)而无需关心
-> 底层 TUN/IP 包路径。
+> 目标:把每条 v2 TCP 连接(`TcpSock`)暴露为一个完整的 Netty `Channel`,允许
+> 应用层按 Netty 标准方式挂 `ChannelPipeline` / `ChannelHandler`(HTTP、WebSocket、
+> 业务编解码等)而无需关心底层 TUN/IP 包路径。
 >
-> 本方案对应用户选型的"路径 B",相较 `EmbeddedChannel` 包装(路径 A),
-> 提供完整的 `EventLoop` / 背压 / writability / register 生命周期语义。
+> 本方案对应选型的"路径 B",相较 `EmbeddedChannel` 包装(路径 A),提供完整的
+> `EventLoop` / 背压 / writability / register 生命周期语义。
 >
-> v1(`com.github.pangolin.routing.acceptor.tun.net.handler.tcp`)与本方案
-> **完全独立**,本方案只触及 v2 代码。
+> 实现已落地:`com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.{TcpChannel,
+> TcpChannelConfig, TcpChannelFactory}`。v1(`handler/tcp`)完全独立,本方案只触及 v2。
 
 ---
 
-## 一、背景与现状盘点
+## 一、背景与现状
 
-### 1.1 v2 当前对外接口
+### 1.1 v2 扩展模型(P1/P2 后的最终形态)
 
-经源码复核(2026-04-21)确定以下 5 个关键对接面:
+v2 的协议栈核心(`core` 包)不感知 Netty,所有上层对接通过 **两个接口**:
+
+| 接口 | 角色 | 调用时机 |
+|------|------|----------|
+| `TcpSockInitializer` | 一次性**装配钩子** | SYN/握手/ESTABLISHED/req 销毁四个生命周期点 |
+| `TcpSockHandler` | 挂在 `sock.handler()` 的**长期事件回调** | 入站数据 / 对端 FIN / RST / writability / sock 销毁 |
+
+核心包对接面:
 
 | 面 | 入口 | 关键坐标 |
 |----|------|----------|
-| 入站 payload 交付 | `TcpMultiplexer.consume(sk, data)` | `TcpMultiplexer.java:966-972` — 若 `sk.hasBackendChannel()` 则 `childChannel.writeAndFlush`,否则回落到 `DataConsumer.onData` |
-| 出站 payload 入队 | `TcpMultiplexer.enqueueWrite(sk, data, flush)` | `TcpMultiplexer.java:974-997` — 自动跨 EL 跳转,MSS 分片由调用方负责,`flush=true` 触发 `tcp_push_pending_frames` |
-| 连接关闭 | `TcpSock.close()` + `sk.childCloseListener` | `TcpMultiplexer.java:773-778` — child channel 关闭时若 `tcp_close_state` 允许则 `tcp_send_fin` |
-| EventLoop 绑定 | `TcpSock.channel.eventLoop()` | `TcpSock.java:576`;所有入站处理(`tcp_rcv → tcp_v4_do_rcv → tcp_rcv_state_process`)与定时器(`TcpTimerScheduler`)均绑定该 EL |
-| 后端 childChannel | `TcpSock.childChannel` | `Tcp4Multiplexer.java:501-504` 建立,`TcpMultiplexer.java:784-812` 安装 pipeline 做"后端读→v2 写"透传 |
+| 一次性装配 | `TcpSockInitializer.onEstablished(sock, mux)` | `TcpMultiplexer.tcp_init_transfer` 内调用 — 实现方 **必须** 挂 `TcpSockHandler` |
+| 入站 payload 交付 | `TcpSockHandler.onInboundData(ByteBuf)` | `TcpMultiplexer.consume` 单一出口,`sk.handler()` 为空时防御性 release |
+| 出站 payload 入队 | `TcpMultiplexer.enqueueWrite(sk, data, flush)` | 自动跨 EL 跳转 + `tcp_push_pending_frames`,MSS 分片由调用方负责 |
+| 对端 FIN | `TcpSockHandler.onPeerFin()` | `TcpMultiplexer.tcp_fin` 状态机推进后 |
+| RST | `TcpSockHandler.onReset(Throwable)` | `tcp_reset` 路径(本端/对端 RST) |
+| Writability | `TcpSockHandler.onWritabilityChanged()` | ACK 推进或发送窗口松动后(钩子当前尚未全链路接入,见 §6.3) |
+| Sock 销毁 | `TcpSockHandler.onSocketDestroyed()` | `inet_csk_destroy_sock` 最末路径,用于 `pipeline.fireChannelInactive` |
+| EventLoop | `TcpSock.eventLoop()` | 由 `TcpSockInitializer.proposeEventLoop` 推荐,回退 `tcpGroup.next()`;所有入站处理与定时器均绑定该 EL |
 
-### 1.2 现 childChannel 的角色
+### 1.2 `TcpChannelFactory` 的定位
 
-当前 `childChannel` 是**出站到 backend 的真实 socket**(通过 `SocketChannelFactory.open()`
-在 SYN 到达时即建连),其作用有三:
+`TcpChannelFactory` **本身就是一种 `TcpSockInitializer`**(`extends TcpSockInitializer`):
 
-1. 作为 backend 载荷通路 — v2 收到的 payload 直接 `writeAndFlush` 给它;
-2. 承载 close 语义 — close 时反向触发 v2 `tcp_send_fin`;
-3. 暴露后端异常 — `exceptionCaught` 时 v2 发 RST 并 `tcp_done`。
+```java
+@FunctionalInterface
+public interface TcpChannelFactory extends TcpSockInitializer {
+    TcpChannel create(TcpSock sock, TcpMultiplexer multiplexer);
 
-**本方案不废除 `childChannel`**,而是在 `TcpSock` 上增加**平行的** `TcpChannel` 槽位
-(`sk.userChannel()`),用户可选:
+    @Override
+    default void onEstablished(TcpSock sock, TcpMultiplexer multiplexer) {
+        TcpChannel ch = create(sock, multiplexer);        // 用户工厂已在 pipeline 上挂 handler
+        sock.eventLoop().register(ch);                     // 失败则 closeForcibly
+    }
+}
+```
 
-- **模式 A**(现状):只有 `childChannel`,做 backend 透传;
-- **模式 B**(新增):只有 `userChannel`,挂用户 pipeline;
-- **模式 C**(进阶):两者并存 — `userChannel` 的 handler 处理完后仍可 `ctx.writeAndFlush(msg)` 到 backend。
-
-模式 C 由 `userChannel.pipeline()` 尾部接一个 `BackendForwardHandler` 实现,不在
-本方案骨架内强制。
+另一类 initializer 是 `ext.backend.BackendProxyInitializer`:覆盖 `onRequest` 先连
+backend 再发 SYN-ACK,`onEstablished` 挂 `BackendProxyHandler` 做透传。两者是
+**并列关系**,而不是像旧设计那样"userChannel vs childChannel 三向分流"。
 
 ---
 
-## 二、目标设计总览
-
-### 2.1 数据通路(模式 B)
+## 二、数据通路
 
 ```
     TUN 入站
@@ -59,28 +67,29 @@
       ▼
    Tcp4Multiplexer.tcp_v4_rcv
       │
-      ▼
-   tcp_rcv_state_process ── (ACK/数据/FIN 处理)
+      ▼  (根据 __inet_lookup_skb 结果派发到 sock EL)
+      │
+   tcp_v4_do_rcv → tcp_rcv_state_process → tcp_data_queue → queue_and_out
       │
       ▼
-   TcpReceiveBuffer.offer  ←─ rcv_nxt 推进
+   TcpReceiveBuffer.offer   (推进 rcv_nxt + OFO 消化)
       │
       ▼
-   TcpMultiplexer.consume(sk, data)           ← 分流点
+   TcpMultiplexer.consume(sk, data)        ← 单一出口
       │
       ▼
-   sk.userChannel().pipeline()                ← 本方案注入
-      │  .fireChannelRead(data)
+   sk.handler().onInboundData(data)        ← TcpSockHandler 契约
+      │
+      ▼  (TcpChannel$BridgeImpl)
+   TcpChannel.fireChannelReadFromTcp(data)  ← autoRead / pendingInbound 门控
+      │
       ▼
-   [用户的 ChannelHandler 链:HttpServerCodec / YourBizHandler / ...]
+   pipeline.fireChannelRead(data)           ← 用户 handler 链
       │
       │   ctx.writeAndFlush(out)
       ▼
    TcpChannel.doWrite(ChannelOutboundBuffer)
-      │
-      ▼
-   TcpMultiplexer.enqueueWrite(sk, slice, flush)
-      │
+      │  (按 MSS 分片,调 multiplexer.enqueueWrite)
       ▼
    TcpSock.tcp_queue_skb → tcp_push_pending_frames
       │
@@ -88,106 +97,113 @@
    tcp_write_xmit → TUN 出站
 ```
 
-### 2.2 生命周期
+---
+
+## 三、生命周期
 
 ```
-Tcp4Multiplexer.tcp_v4_syn_recv_sock
-      │
+Tcp4Multiplexer.tcp_v4_conn_request
+      │  (addToHalfQueue + req.synPacket retain + req.net(net))
       ▼
-   buildChildSock (TcpHandshaker:265)
-      │
+   initializer.onRequest(req, this)              ← 默认立发 SYN-ACK
+      │                                              (BackendProxyInitializer 覆盖为异步)
       ▼
-   init(TcpSock)                     ← 本方案切入点
-      │  └─ factory.createUserChannel(sk)  ← 若配置 TcpChannelFactory
-      │         ├─ new TcpChannel(sk, multiplexer)
-      │         ├─ initializer.initChannel(ch)    ← 用户装 handler
-      │         ├─ sk.eventLoop().register(ch)
-      │         └─ ch.pipeline().fireChannelActive()
+   tcp_check_req + syn_recv_sock (TUN EL)
+      │  ├─ initializer.proposeEventLoop(req, this) → child sock 的 EL
+      │  └─ buildChildSock (TcpHandshaker)
       ▼
-   moveToEstablished
+   moveToEstablished (TUN EL)
+      │  (synPacket release, synRegistry→establishedRegistry)
+      ▼
+   切 sock.eventLoop() 执行 tcp_v4_do_rcv
       │
+   tcp_try_establish → TCP_ESTABLISHED
+      │
+   tcp_init_transfer
+      │  └─ initializer.onEstablished(sock, this)  ← TcpChannelFactory 默认实现:
+      │       ├─ ch = factory.create(sock, mux)      · 用户在 pipeline 挂 handler
+      │       ├─ sock.handler(new BridgeImpl())      · TcpChannel 构造时内挂
+      │       └─ sock.eventLoop().register(ch)       · register + fireChannelActive
+      ▼
    [稳态,双向通信]
       │
       ▼
-   对端 FIN / 对端 RST / 本端 tcp_done
-      │
-      ▼
-   TcpSock.close()
-      │
-      └─ userChannel.unsafe().closeForcibly() / close()
-            └─ pipeline.fireChannelInactive + fireChannelUnregistered
+   对端 FIN → tcp_fin 分支 → sock.handler().onPeerFin()
+              → TcpChannel BridgeImpl 触发 ChannelInputShutdownEvent
+   对端 RST → tcp_reset → sock.handler().onReset(cause)
+              → fireExceptionCaught + unsafe().closeForcibly
+   主动关  → user channel.close() → doClose 发 FIN(若可写)+ sock.handler(null)
+   被动销毁 → inet_csk_destroy_sock → sock.close() → handler.onSocketDestroyed()
+              → closeForcibly(兜底)
 ```
 
 ---
 
-## 三、核心类清单
+## 四、核心类清单
 
-| 类 | 角色 | 文件 | 行数估算 |
-|----|------|------|---------|
-| `TcpChannel` | `AbstractChannel` 子类,代表已建立的 TCP 连接 | 新增 `v2/tcp/netty/TcpChannel.java` | ~350 |
-| `TcpChannel$TcpChannelUnsafe` | `AbstractUnsafe` 子类,内部类 | 同上 | ~120 |
-| `TcpChannelConfig` | `DefaultChannelConfig` 子类,承载 TCP options(TCP_NODELAY / SO_KEEPALIVE / write watermark) | 新增 `v2/tcp/netty/TcpChannelConfig.java` | ~80 |
-| `TcpChannelFactory` | 工厂接口:`TcpChannel create(TcpSock sk, ChannelInitializer<TcpChannel> init)` | 新增 `v2/tcp/netty/TcpChannelFactory.java` | ~30 |
-| `TcpServerChannel`(**P1**) | `AbstractServerChannel` 子类,包 `Tcp4Multiplexer`,让 `ServerBootstrap` 风格可用 | 后续阶段 | ~200 |
+| 类 | 角色 | 位置 | 状态 |
+|----|------|------|------|
+| `TcpChannel` | `AbstractChannel` 子类,代表已建立的 TCP 连接 | `v2/tcp/netty/TcpChannel.java` | ✅ 已落地 |
+| `TcpChannel$TcpChannelUnsafe` | `AbstractUnsafe` 子类 — 禁用 `connect`(passive-open 语义) | 同上 | ✅ 已落地 |
+| `TcpChannel$BridgeImpl` | `TcpSockHandler` 内联实现 — 把 core 事件转成 pipeline 事件 | 同上 | ✅ 已落地 |
+| `TcpChannelConfig` | `DefaultChannelConfig` 子类,映射 `SO_KEEPALIVE` / `TCP_NODELAY` 到 `TcpSock` | `v2/tcp/netty/TcpChannelConfig.java` | ✅ 已落地 |
+| `TcpChannelFactory` | `TcpSockInitializer` 的函数式派生,默认实现负责 register | `v2/tcp/netty/TcpChannelFactory.java` | ✅ 已落地 |
+| `TcpServerChannel`(P5) | `AbstractServerChannel` 子类,让 `ServerBootstrap` 风格可用 | 未来 | 🚧 见 §6.7 |
 
-> `localAddress0()/remoteAddress0()` 直接在 `TcpChannel` 里用 `FourTuple.dstInetAddress()/srcInetAddress()` 构造 `java.net.InetSocketAddress`,不再引入独立的 `TcpSocketAddress` 包装类 —— 地址语义是 Netty 层关注点,不应下沉到协议栈 core 层。
-
-总骨架约 580 行(不含 `TcpServerChannel`)。
+`localAddress0()/remoteAddress0()` 直接用 `FourTuple.{dstInetAddress,srcInetAddress}`
+构造 `InetSocketAddress`,不引入独立包装类 —— 地址语义是 Netty 层关注点,不应
+下沉到协议栈 core。
 
 ---
 
-## 四、关键实现约定
+## 五、关键实现约定
 
-### 4.1 EventLoop 绑定
+### 5.1 EventLoop 绑定
 
-**硬约束**:`TcpChannel.eventLoop() == sock.eventLoop() == TUN channel.eventLoop()`。
-所有 `TcpSock` 字段访问、定时器调度、`enqueueWrite` 都假定在这个 EL 上;任何跨
-线程写入必须通过 `owner.execute(task)` 跳转,这点 `enqueueWrite`
-(`TcpMultiplexer.java:991-996`)已实现,`TcpChannel.doWrite` 可直接复用。
+**硬约束**:`TcpChannel.eventLoop() == sock.eventLoop()`,由 `isCompatible` 守护:
 
 ```java
 @Override
 protected boolean isCompatible(EventLoop loop) {
     return loop == sock.eventLoop();
 }
-
-@Override
-protected AbstractUnsafe newUnsafe() {
-    return new TcpChannelUnsafe();
-}
 ```
 
-注册时直接用 `sock.eventLoop().register(tcpChannel)` 即可,不需要通过
-`Bootstrap`,因为 TCP 连接是被动接受的(SYN 到达触发)。
+`sock.eventLoop()` 在 `tcp_v4_syn_recv_sock` 阶段由
+`initializer.proposeEventLoop(req, this)` 推荐;`TcpChannelFactory` 默认不覆盖
+该钩子,回退到 `tcpGroup.next()`(`tcpGroup==null` 时再退回 TUN EL)。
 
-### 4.2 读路径(入站)
+所有 `TcpSock` 字段访问、定时器调度、`enqueueWrite` 都假定在这个 EL 上;跨线程
+写入由 `enqueueWrite` 内部 `owner.execute(task)` 跳转。`TcpChannel.doWrite` 直接
+复用这条路径,无需自己做 EL 切换。
 
-#### 4.2.1 交付点改造
+### 5.2 读路径(入站)
 
-`TcpMultiplexer.consume` 改造为三向分流(优先级:`userChannel` > `childChannel` > `DataConsumer`):
+#### 5.2.1 `consume` 单一出口
 
 ```java
 protected void consume(TcpSock sk, ByteBuf data) {
-    TcpChannel uc = sk.userChannel();
-    if (uc != null && uc.isActive()) {
-        uc.fireChannelReadFromTcp(data);
+    TcpSockHandler handler = sk == null ? null : sk.handler();
+    if (handler == null) {
+        data.release();   // destroy 途中 / 未装配 — 防御性 release,避免泄漏
         return;
     }
-    if (sk.hasBackendChannel()) {
-        sk.childChannel().writeAndFlush(data);
-        return;
-    }
-    dataConsumer.onData(sk.fourTuple(), data);
+    handler.onInboundData(data);
 }
 ```
 
-`fireChannelReadFromTcp` 是 `TcpChannel` 上的 package-private 辅助,内部:
+`TcpChannel.BridgeImpl.onInboundData` 直接转 `fireChannelReadFromTcp(data)`:
 
 ```java
 void fireChannelReadFromTcp(ByteBuf data) {
     assert eventLoop().inEventLoop();
-    if (!autoRead && !readRequested) {
+    if (closing || inputShutdown) {
+        data.release();
+        return;
+    }
+    if (!config.isAutoRead() && !readRequested) {
         pendingInbound.addLast(data);
+        sock.rcvPaused(true);   // 触发下一次 tcp_select_window 缩窗
         return;
     }
     readRequested = false;
@@ -196,41 +212,47 @@ void fireChannelReadFromTcp(ByteBuf data) {
 }
 ```
 
-#### 4.2.2 autoRead / 背压
+#### 5.2.2 autoRead / 背压
 
 - `autoRead=true`(默认):到数据立即 `fireChannelRead`,用户 handler 同步消费。
-- `autoRead=false`:数据暂存到 `pendingInbound: ArrayDeque<ByteBuf>`;**同时**设
-  `sk.rcvPaused(true)` 抑制 `TcpReceiveBuffer.readAll` 推进 `rcv_nxt`,从而使
+- `autoRead=false`:数据暂存到 `pendingInbound: ArrayDeque<ByteBuf>`;**同时**
+  `sock.rcvPaused(true)` 抑制 `TcpReceiveBuffer.readAll` 的排水,从而使
   `tcp_receive_window()` 缩窄,对端自然感知到反压。
-- `doBeginRead()`:drain `pendingInbound`,若为空且 `sk.receiveBuffer().isReadable()`
-  则主动触发一次 `consume`。
+- `doBeginRead()`:drain 积压,若为空且 `sock.receiveBuffer().isReadable()`
+  则放开 `rcvPaused` 让下一次 `tcp_data_queue` 驱动 `consume`。
 
-`sk.rcvPaused` 是 `TcpSock` 新增的布尔标志,`queue_and_out`
-(`Tcp4Multiplexer.java:440` 附近)在 `rcvPaused=true` 时:
+`sk.rcvPaused` 是 `TcpSock` 的布尔槽;`queue_and_out` 在 `rcvPaused=true` 时仍把
+skb 放进 `receiveBuffer`(保持 rcv_nxt 推进的前提 —— **否则违反 TCP 语义**),
+**但不**调用 `consume`,让数据滞留接收缓冲,体现为下次窗口通告的 `rcv_wnd` 收缩。
 
-- 仍把 skb 放进 `receiveBuffer`(保持 rcv_nxt 推进的前提 — **否则违反 TCP 语义**);
-- **但不**调用 `consume`,让数据滞留 socket 接收缓冲;
-- 在 `tcp_cleanup_rbuf` / `tcp_select_window` 时体现为 `rcv_wnd` 收缩。
+> TCP 反压语义是"接收方慢就缩窗",与 `autoRead=false` 的 Netty 语义一致,但
+> 实现要点在 `rcv_wnd` 而非直接停读 —— 简单的入站队列停读不足以通知对端。
 
-> **注意**:TCP 反压语义是"接收方慢就缩窗",与 `autoRead=false` 的 Netty 语义
-> 一致但实现要点在 `rcv_wnd` 而非直接停读;简单的"入站队列停读"不足以通知对端。
+#### 5.2.3 ByteBuf 生命周期
 
-#### 4.2.3 ByteBuf 生命周期
+`consume → onInboundData → fireChannelRead(data)` 之后 pipeline 的**末端** handler
+(或 `SimpleChannelInboundHandler`)负责 release。若用户 handler 忘记 release,
+Netty `ResourceLeakDetector` 会抓到 —— 这是标准 Netty 契约。
 
-现状(`TcpMultiplexer.java:968`):交付 buf 后由下游(`childChannel` / `DataConsumer`)
-负责 release。
+`pendingInbound` 队列里未被消费的 buf,在 `doClose` 通过
+`drainPendingInboundReleasing()` 统一 release;`closing` 或 `inputShutdown` 触发
+时,`fireChannelReadFromTcp` 直接 release 新到的段。
 
-新路径下,`fireChannelRead(data)` 之后 pipeline 的**末端** handler(或
-`SimpleChannelInboundHandler`)负责 release。若用户 handler 忘记 release,Netty
-`ResourceLeakDetector` 会抓到 — 这是标准 Netty 契约。
+### 5.3 写路径(出站)
 
-### 4.3 写路径(出站)
-
-#### 4.3.1 `doWrite` 实现
+#### 5.3.1 `doWrite`
 
 ```java
 @Override
 protected void doWrite(ChannelOutboundBuffer in) throws Exception {
+    if (outputShutdown || !sock.hasConnection() || !sock.state().canSend()) {
+        for (;;) {
+            Object msg = in.current();
+            if (msg == null) break;
+            in.remove(new ClosedChannelException());
+        }
+        return;
+    }
     for (;;) {
         Object msg = in.current();
         if (msg == null) break;
@@ -242,256 +264,125 @@ protected void doWrite(ChannelOutboundBuffer in) throws Exception {
         int remaining = buf.readableBytes();
         if (remaining == 0) { in.remove(); continue; }
 
-        int mss = TcpOutput.INSTANCE.tcp_current_mss(sock);
-        while (remaining > 0) {
-            int len = Math.min(remaining, mss);
-            boolean lastSliceOfMsg = (len == remaining);
-            boolean lastMsgOfBatch = lastSliceOfMsg && in.size() == 1;
-            boolean flush = lastMsgOfBatch;
+        int mss = Math.max(1, TcpOutput.INSTANCE.tcp_current_mss(sock));
+        int consumed = 0;
+        while (consumed < remaining) {
+            int len = Math.min(remaining - consumed, mss);
+            boolean lastSlice = (consumed + len == remaining);
+            boolean lastMsg   = in.size() == 1;
+            boolean flush     = lastSlice && lastMsg;
             multiplexer.enqueueWrite(
                     sock,
-                    buf.retainedSlice(buf.readerIndex() + (buf.readableBytes() - remaining), len),
+                    buf.retainedSlice(buf.readerIndex() + consumed, len),
                     flush);
-            remaining -= len;
+            consumed += len;
         }
-        in.remove();  // release 原 buf;retainedSlice 已持独立引用
+        in.remove();   // release 原 buf;retainedSlice 已持独立引用
     }
+    evaluateWritability();
 }
 ```
 
 要点:
 
 - `enqueueWrite` 已做 EL 跳转 + `tcp_push_pending_frames`,我们只负责 MSS 切片;
-- `retainedSlice` 的引用计数独立于 `in.remove` release 的原 buf,不会错 release;
-- 不支持非 `ByteBuf` 消息(未来如要支持 `FileRegion` 再扩展 — 无零拷贝内核路径,收益有限)。
+- `retainedSlice` 的引用计数独立于 `in.remove` 的原 buf release,不会错 release;
+- `enqueueWrite` 内部 `!canSend` 分支已 `data.release()`(见 `TcpMultiplexer.enqueueWrite`),
+  切片被提前释放时不会泄漏;
+- 不支持非 `ByteBuf` 消息(`FileRegion` 没有零拷贝内核路径,收益有限)。
 
-#### 4.3.2 Writability 水位
+#### 5.3.2 Writability 水位
 
-`TcpSendBuffer` 目前无界(调研报告 §2),`enqueueWrite` 不会 block。我们要在
-Netty 层加水位:
+`TcpChannel.evaluateWritability` 用 `TcpSendBuffer.pendingBytes()`(未发送 + 已发送
+未 ACK 合计字节)与 `config.getWriteBufferWaterMark()` 比对,超 high 调
+`setUserDefinedWritability(1, false)`,降 low 以下调 `(1, true)`:
 
-- 在 `TcpSock` 增 `pendingBytes()`(未发送 + 已发送未 ACK 合计,字节单位);
-- `TcpChannel` 在每次 `doWrite` 后比较 `sock.pendingBytes()` vs
-  `config.getWriteBufferWaterMark()`,超 high 则 `unsafe().outboundBuffer().setUserDefinedWritability(0, false)`;
-- `tcp_clean_rtx_queue`(v2 已有)ACK 推进后调 `sock.notifyWritability()` 回调,
-  该回调在 EL 上检查水位,降 low 以下则 `setUserDefinedWritability(0, true)`。
+```java
+long pending = sock.sendBuffer().pendingBytes();
+int high = config.getWriteBufferHighWaterMark();
+int low  = config.getWriteBufferLowWaterMark();
+ChannelOutboundBuffer cob = unsafe().outboundBuffer();
+if (lastWritable && pending >= high) {
+    cob.setUserDefinedWritability(1, false);
+    lastWritable = false;
+} else if (!lastWritable && pending <= low) {
+    cob.setUserDefinedWritability(1, true);
+    lastWritable = true;
+}
+```
 
-`notifyWritability` 是新增的一个 `Runnable` 槽,由 `TcpChannel` 在 register 时设,
-close 时清。
+入口两个:`doWrite` 末尾,和 `BridgeImpl.onWritabilityChanged`(ACK 推进后由核心
+回调,见 §6.3)。
 
-### 4.4 Close / Shutdown
+### 5.4 Close / Shutdown
 
-#### 4.4.1 主动关闭(用户调 `channel.close()`)
+#### 5.4.1 主动关闭(用户调 `channel.close()`)
 
 ```java
 @Override
 protected void doClose() throws Exception {
-    // 触发 FIN — 对齐 v2 现有 child channel 关闭语义
-    if (sock.hasConnection() && sock.state().canSend()) {
+    if (closing) return;
+    closing = true;
+    if (!abortive && sock.hasConnection() && sock.state().canSend()) {
         if (multiplexer.tcp_close_state(sock)) {
             TcpOutput.INSTANCE.tcp_send_fin(sock);
         }
     }
-    drainPendingInbound();
-    sock.userChannel(null);
-}
-```
-
-#### 4.4.2 半关闭
-
-- `shutdownOutput()` → 发 FIN,不销毁 channel(应用仍可读);pipeline 上
-  `fireUserEventTriggered(ChannelOutputShutdownEvent.INSTANCE)`。
-- `shutdownInput()` → 设 `sock.rcvPaused(true) + shutdownRead=true`,
-  之后 `consume` 丢弃数据但仍 ACK(避免对端卡窗);fire `ChannelInputShutdownEvent`。
-
-实现上 `AbstractChannel` 默认不支持半关,需在 `TcpChannel` 声明并覆写
-`Channel.shutdownOutput()`(参考 `NioSocketChannel`)。
-
-#### 4.4.3 被动关闭(对端 FIN / RST / 本端 tcp_done)
-
-**对端 FIN**:`tcp_fin` 状态机推进时加钩子 `sock.userChannel().fireInputShutdown()`
-→ pipeline `fireUserEventTriggered(ChannelInputShutdownEvent)`;channel 不立即关,
-应用可继续写直到自己 close。
-
-**对端 RST**:`tcp_reset` 路径加钩子
-`sock.userChannel().unsafe().closeForcibly()` + pipeline
-`fireExceptionCaught(new SocketException("Connection reset"))`。
-
-**本端 `tcp_done`**:`inet_csk_destroy_sock` 前先
-`userChannel.unsafe().close(unsafe.voidPromise())`。
-
-### 4.5 `isActive` / `isOpen` 契约
-
-```java
-@Override public boolean isOpen()   { return !closed; }
-@Override public boolean isActive() { return registered && sock.hasConnection()
-                                           && sock.state().isEstablishedPhase(); }
-```
-
-`isEstablishedPhase()` 需在 `TcpConnectionState` 上新增辅助(等价于 v1 的
-`ESTABLISHED | FIN_WAIT_1 | FIN_WAIT_2 | CLOSE_WAIT | CLOSING | LAST_ACK`),对齐
-Linux `(1 << state) & (TCPF_ESTABLISHED | TCPF_CLOSE_WAIT | ...)`。
-
----
-
-## 五、具体改动清单
-
-### 5.1 新增文件
-
-#### ① `pangolin-routing/src/main/java/com/github/pangolin/routing/acceptor/tun/net/v2/tcp/netty/TcpChannel.java`
-
-```java
-package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty;
-
-public class TcpChannel extends AbstractChannel {
-    private final TcpSock sock;
-    private final TcpMultiplexer multiplexer;
-    private final TcpChannelConfig config;
-    private final ArrayDeque<ByteBuf> pendingInbound = new ArrayDeque<>();
-    private volatile boolean closed;
-    private boolean readRequested;
-    private boolean shutdownRead;
-    private boolean shutdownWrite;
-
-    public TcpChannel(TcpSock sock, TcpMultiplexer multiplexer) {
-        super(null);  // no parent; acceptor 模式用 TcpServerChannel 时传
-        this.sock = sock;
-        this.multiplexer = multiplexer;
-        this.config = new TcpChannelConfig(this);
-    }
-
-    // --- AbstractChannel template methods ---
-    @Override protected AbstractUnsafe newUnsafe()         { return new TcpChannelUnsafe(); }
-    @Override protected boolean isCompatible(EventLoop l)  { return l == sock.eventLoop(); }
-    @Override protected SocketAddress localAddress0()      { FourTuple t = sock.fourTuple(); return new InetSocketAddress(t.dstInetAddress(), t.dstPort()); }
-    @Override protected SocketAddress remoteAddress0()     { FourTuple t = sock.fourTuple(); return new InetSocketAddress(t.srcInetAddress(), t.srcPort()); }
-    @Override protected void doRegister()                  { /* no-op: EL 已在构造时绑定 */ }
-    @Override protected void doBind(SocketAddress a)       { throw new UnsupportedOperationException(); }
-    @Override protected void doDisconnect()                { doClose(); }
-    @Override protected void doClose()                     { /* §4.4.1 */ }
-    @Override protected void doBeginRead()                 { /* §4.2.2 drain */ }
-    @Override protected void doWrite(ChannelOutboundBuffer in) { /* §4.3.1 */ }
-
-    @Override public ChannelConfig config()                { return config; }
-    @Override public boolean isOpen()                      { return !closed; }
-    @Override public boolean isActive()                    { /* §4.5 */ }
-    @Override public ChannelMetadata metadata()            { return METADATA; }
-    private static final ChannelMetadata METADATA = new ChannelMetadata(false);
-
-    // --- package-private bridges (由 TcpMultiplexer / TcpSock 回调) ---
-    void fireChannelReadFromTcp(ByteBuf data)              { /* §4.2.1 */ }
-    void fireInputShutdown()                               { /* §4.4.3 FIN */ }
-    void fireConnectionReset(Throwable cause)              { /* §4.4.3 RST */ }
-    void notifyWritability()                               { /* §4.3.2 */ }
-
-    TcpSock sock()                                         { return sock; }
-
-    private final class TcpChannelUnsafe extends AbstractUnsafe {
-        @Override public void connect(SocketAddress remote, SocketAddress local, ChannelPromise promise) {
-            promise.setFailure(new UnsupportedOperationException(
-                    "TcpChannel is passive; use listen path"));
-        }
+    drainPendingInboundReleasing();
+    if (sock.handler() != null) {
+        sock.handler(null);   // 解绑,让 inet_csk_destroy_sock 不再回调本 channel
     }
 }
 ```
 
-#### ② `TcpChannelConfig.java`
+`abortive=true` 时跳过 FIN(RST 接收路径或 `onSocketDestroyed` 已设此标志),避免
+在已被对端 RST 的连接上再次写入。
+
+#### 5.4.2 被动关闭
+
+- **对端 FIN**:`tcp_fin` 推进状态机后 `notifyPeerFin(sk)` → `handler.onPeerFin()`。
+  `BridgeImpl` 置 `inputShutdown=true` 并 `fireUserEventTriggered(ChannelInputShutdownEvent.INSTANCE)`;
+  channel 不立即关,应用仍可写(CLOSE_WAIT)。
+- **对端 RST / 本端发 RST**:`handler.onReset(cause)` → `BridgeImpl` 置
+  `abortive=true`、`fireExceptionCaught`、`unsafe().closeForcibly()`。
+- **`inet_csk_destroy_sock(sock)`**:最终 sock 销毁路径调 `handler.onSocketDestroyed()`
+  → `BridgeImpl` `closeForcibly()` 兜底,保证即使前面路径漏调也能回收 channel。
+
+#### 5.4.3 半关闭
+
+当前 `inputShutdown` / `outputShutdown` 两个布尔标志已经预留,但对外的
+`shutdownOutput()` / `shutdownInput()` 方法尚未声明(`AbstractChannel` 默认不
+暴露)。需要时参考 `NioSocketChannel` 实现 `ChannelShutdownSupport` 并映射到:
+
+- `shutdownOutput()` → `tcp_close_state + tcp_send_fin`,置 `outputShutdown=true`,
+  `fireUserEventTriggered(ChannelOutputShutdownEvent.INSTANCE)`;
+- `shutdownInput()` → 置 `inputShutdown=true + sock.rcvPaused(true)`,后续 inbound
+  段直接丢(但 ACK 仍发,避免对端卡窗),`fire ChannelInputShutdownReadComplete`。
+
+### 5.5 `isActive` / `isOpen` 契约
 
 ```java
-public class TcpChannelConfig extends DefaultChannelConfig {
-    public TcpChannelConfig(TcpChannel ch) {
-        super(ch);
-        // 复用 Netty 现成 WriteBufferWaterMark:默认 32k low / 64k high
-    }
+@Override public boolean isOpen()   { return !closing; }
 
-    @Override public <T> boolean setOption(ChannelOption<T> option, T value) {
-        if (option == ChannelOption.TCP_NODELAY) {
-            // 映射到 sock.nagleEnabled
-            boolean nagleOff = Boolean.TRUE.equals(value);
-            ((TcpChannel) channel()).sock().nagleEnabled(!nagleOff);
-            return true;
-        }
-        if (option == ChannelOption.SO_KEEPALIVE) {
-            ((TcpChannel) channel()).sock().keepaliveEnabled(Boolean.TRUE.equals(value));
-            return true;
-        }
-        return super.setOption(option, value);
+@Override public boolean isActive() {
+    if (closing || !isRegistered()) return false;
+    TcpConnectionState st = sock.state();
+    switch (st) {
+        case TCP_ESTABLISHED:
+        case FIN_WAIT_1:
+        case FIN_WAIT_2:
+        case CLOSE_WAIT:
+        case CLOSING:
+        case LAST_ACK:
+            return sock.hasConnection();
+        default:
+            return false;
     }
-    // getOption 对称
 }
 ```
 
-> **地址构造说明**:`localAddress0()/remoteAddress0()` 直接用 `FourTuple.dstInetAddress()/srcInetAddress()` 构造 `java.net.InetSocketAddress`。早期草案里设计过 `TcpSocketAddress` 包装类,最终判定为冗余 —— `InetSocketAddress` 本身就是 `SocketAddress` 子类,且 Netty pipeline 读取时只关心 `toString()/equals()` 语义。地址语义是 Netty 层关注点,不应在协议栈 core 层(`FourTuple`)挂 `InetSocketAddress` 依赖。
-
-#### ④ `TcpChannelFactory.java`
-
-```java
-@FunctionalInterface
-public interface TcpChannelFactory {
-    TcpChannel create(TcpSock sock, TcpMultiplexer multiplexer);
-}
-```
-
-用户侧典型用法:
-
-```java
-TcpChannelFactory factory = (sock, mux) -> {
-    TcpChannel ch = new TcpChannel(sock, mux);
-    ch.pipeline().addLast(new HttpServerCodec(), new HttpObjectAggregator(65536), new MyBizHandler());
-    return ch;
-};
-new Tcp4Multiplexer(config, factory);
-```
-
-### 5.2 修改的已有文件
-
-#### ① `TcpSock.java`
-
-| 改动 | 位置 |
-|------|------|
-| 新增字段 `private TcpChannel userChannel;` | 字段区 |
-| 新增 `public TcpChannel userChannel()` / `void userChannel(TcpChannel)` | getter/setter |
-| 新增字段 `private boolean rcvPaused;` + getter/setter | 字段区 |
-| 新增字段 `private Runnable writabilityObserver;` + setter | 字段区 |
-| `close()`:调用 `userChannel != null → userChannel.unsafe().close(voidPromise())`(仅当非 userChannel-initiated close) | `TcpSock.java:891` 附近 |
-| 新增 `pendingBytes()` — 返回 `sendBuffer.enqueuedBytes() + sendBuffer.unackedBytes()` | §5.2-② 一并增 |
-
-#### ② `TcpSendBuffer.java`
-
-| 改动 | 位置 |
-|------|------|
-| 新增 `long enqueuedBytes()` / `long unackedBytes()` | 类末尾 |
-| `tcp_clean_rtx_queue` 路径每次扣减后调 `sock.notifyWritability()` | 在 v2 `TcpAck.tcp_clean_rtx_queue` 找到扣减点插一行 |
-
-#### ③ `TcpMultiplexer.java`
-
-| 改动 | 位置 |
-|------|------|
-| `consume()` 增 userChannel 分支 | `TcpMultiplexer.java:966`(§4.2.1) |
-| `enqueueWrite` 改可见性为 package(或保持 protected,由 `Tcp4Multiplexer` 暴露 public 方法) | `TcpMultiplexer.java:974` |
-| `tcp_init_transfer` 增 userChannel 分支:有 userChannel 则 register + fireChannelActive,跳过 `childChannel.pipeline().addLast(...)` | `TcpMultiplexer.java:764` |
-| `inet_csk_destroy_sock(TcpSock)` 在销毁前 `if (sk.userChannel() != null) sk.userChannel().unsafe().close(voidPromise())` | `TcpMultiplexer.java:247-253` |
-| 新增 public `tcp_close_state(TcpSock)` 包装(供 `TcpChannel.doClose` 调) | 工具方法区 |
-
-#### ④ `Tcp4Multiplexer.java`
-
-| 改动 | 位置 |
-|------|------|
-| 新增构造重载:`Tcp4Multiplexer(TcpConfig, TcpChannelFactory)`;原 `DataConsumer` / `SocketChannelFactory` 构造保留 | `Tcp4Multiplexer.java:33-49` |
-| `tcp_v4_conn_request` 逻辑岔口:若 `tcpChannelFactory != null` 则**跳过** `socketChannelFactory.open` backend 连接,在 `syn_recv_sock` 成功后调 `factory.create(sock)` 并 register | `Tcp4Multiplexer.java:396-504` |
-| `tcp_reset` / RST 接收路径:若有 `userChannel` 则 `fireConnectionReset` | FIN/RST 处理函数 |
-| `tcp_fin` 状态推进后:若有 `userChannel` 则 `fireInputShutdown` | 状态迁移函数 |
-
-#### ⑤ `TcpConnectionState.java`
-
-新增 `boolean isEstablishedPhase()` 工具方法(§4.5)。
-
-### 5.3 不触碰的内容
-
-- `TcpReceiveBuffer` — 缓冲区本身无须改造,只加一个"消费者要不要拿"的外部门控。
-- 所有拥塞控制 / RACK / 重传 / OFO / PAWS / RFC5961 路径 — 本方案纯对外接口,
-  核心协议栈零改动。
-- v1 代码(`handler/tcp`)。
+对齐 Linux `TCPF_ESTABLISHED | TCPF_FIN_WAIT1 | TCPF_FIN_WAIT2 | TCPF_CLOSE_WAIT |
+TCPF_CLOSING | TCPF_LAST_ACK`。
 
 ---
 
@@ -500,76 +391,146 @@ new Tcp4Multiplexer(config, factory);
 ### 6.1 EventLoop 一致性(⚠️ 最高优)
 
 所有 `TcpSock` 字段访问都必须在 `sock.eventLoop()`。用户在 handler 里
-`ctx.writeAndFlush` 天然在 channel EL(= sock EL),安全;但若用户跨线程调
-`channel.writeAndFlush`,Netty `AbstractChannel` 会走 `eventLoop().execute` 跳转,
-这条路径在 `doWrite` 时已经在正确 EL,也安全。
+`ctx.writeAndFlush` 天然在 channel EL(= sock EL),安全;跨线程调
+`channel.writeAndFlush` 时 `AbstractChannel` 会走 `eventLoop().execute` 跳转,
+到 `doWrite` 时已经在正确 EL,也安全。
 
-**风险点**:用户在业务线程池里自己 `sock.sendBuffer().enqueue(...)`(绕过 Netty)
-— 这种反模式必须在文档里禁掉。
+**反模式**:用户在业务线程池里直接 `sock.sendBuffer().enqueue(...)` 绕过 Netty ——
+文档里必须禁掉。
 
-### 6.2 backend childChannel 与 userChannel 互斥
+### 6.2 `TcpChannelFactory` 与 `BackendProxyInitializer` 的互斥
 
-`consume` 分流优先级 `userChannel > childChannel > DataConsumer`。
-若构造 `Tcp4Multiplexer` 时**同时**传了 `TcpChannelFactory` 和 `SocketChannelFactory`:
+两者都是 `TcpSockInitializer` 的实现,一个 `TcpMultiplexer` 构造时只传一个。如
+需要"pipeline 处理完再透传 backend",应写一个新的 `TcpSockInitializer` 实现:
+`onEstablished` 里既建 `TcpChannel` 又连 backend,在 pipeline 末尾挂
+`BackendForwardHandler`。不在本方案骨架内强制。
 
-- 方案一(推荐):拒绝此组合,构造抛 `IllegalStateException`;
-- 方案二:`userChannel` 上默认挂一个 `BackendForwardHandler` 做二级转发 — 复杂且
-  容易引起资源泄漏,不建议默认开启。
+### 6.3 Writability 钩子的全链路接入(🚧 未完成)
 
-### 6.3 Writability 水位粒度
+`TcpSockHandler.onWritabilityChanged` 的触发点应在 `tcp_clean_rtx_queue` 推进
+`snd_una` 或 `tcp_data_snd_check` 释放发送窗口之后。当前 core 代码**尚未**在这
+两处调用 `handler.onWritabilityChanged()`,所以 `BridgeImpl.onWritabilityChanged`
+实际上只会被 `doWrite` 末尾的主动调用触发。
 
-`pendingBytes = enqueuedBytes + unackedBytes` 在拥塞窗口很小的场景会迅速打满,
-导致 writability 频繁翻转。建议:
+**需要补的钩子点**:
+- `TcpAck.tcp_clean_rtx_queue` 扣减 `sendBuffer.unackedBytes()` 后;
+- `TcpSendBuffer` 在 `acknowledge` / `snd_wnd` 松动后。
 
-- 默认 high=256KB / low=64KB(远高于 TCP 发送缓冲常见量级);
-- 允许用户 `config.setOption(ChannelOption.WRITE_BUFFER_WATER_MARK, ...)` 覆写。
+补钩子时注意:必须在 sock EL 上 / 必须防止递归(回调中再次写入可能再次触发)。
 
 ### 6.4 对端 RST 与 Netty 异常语义
 
-v2 的 `tcp_reset` 路径会直接 `tcp_done` 销毁 sock。必须**先** `fireConnectionReset`
-**再** destroy,否则用户 handler 的 `exceptionCaught` 会因 channel 已 inactive 而
-丢失 cause。改动点:`tcp_reset` 内调用顺序重排 — userChannel 通知 → tcp_done。
+`tcp_reset` 路径必须**先** `handler.onReset(cause)` **再** `tcp_done`/销毁,否则
+`BridgeImpl.onReset` 里的 `fireExceptionCaught` 会因 channel 已 inactive 而被
+pipeline 丢弃。当前 `tcp_reset` 调用顺序需要对齐这一约束 —— 等同于 §6.3 待补。
 
 ### 6.5 FIN 到达后的 writability
 
-对端 FIN 后本端进 CLOSE_WAIT,仍可写(对齐 Linux)。`isActive` 继续返回 true。
-`shutdownInput` 标志用来屏蔽 inbound 而非全关。
+对端 FIN 后本端进 `CLOSE_WAIT`,仍可写(对齐 Linux)。`isActive` 继续返回 true。
+`inputShutdown` 标志用来屏蔽 inbound 而非全关,出站 `doWrite` 继续走 `canSend()`
+路径。
 
 ### 6.6 Leak 风险
 
-- `pendingInbound` 队列里的 `ByteBuf` 在 `doClose` 时必须 drain-release;
-- `doWrite` 的 `retainedSlice` 失败(enqueueWrite 因 sock 已关闭提前 release)
-  不会泄漏,因为 `enqueueWrite` 内部 `!canSend` 分支已 `data.release()`
-  (`TcpMultiplexer.java:976-978`);
-- 构造 `TcpChannel` 后若 register 失败(EL 未启动等异常),factory 必须 release
-  factory-created pipeline 中可能已持有的引用 — 标准 `ReflectiveChannelFactory` 模式。
+- `pendingInbound` 队列里的 `ByteBuf` 在 `doClose` 通过
+  `drainPendingInboundReleasing()` 释放;`fireChannelReadFromTcp` 在
+  `closing || inputShutdown` 时也 release 新到的段。
+- `doWrite` 的 `retainedSlice` 失败(`enqueueWrite` 因 sock 已关闭提前 release)
+  不会泄漏,因为 `enqueueWrite` 内 `!canSend` 分支已 `data.release()`。
+- `TcpChannelFactory.onEstablished` 中 `register` 失败分支调
+  `ch.unsafe().closeForcibly()` 回收工厂已挂 pipeline 的资源(标准
+  `ReflectiveChannelFactory` 模式)。
+- `consume` 单一出口:`sk.handler()==null` 时 `data.release()` 防御泄漏。
 
-### 6.7 ServerBootstrap 集成(P1,不在本次范围)
+### 6.7 ServerBootstrap 集成(P5,新路线)
 
-后续要支持 `new ServerBootstrap().channel(TcpServerChannel.class).childHandler(...)` 风格,
-需额外实现 `TcpServerChannel extends AbstractServerChannel`:`doReadMessages` 从
-`Tcp4Multiplexer` 的 accept 队列取出 `TcpChannel`,通过 `pipeline.fireChannelRead(childCh)`
-走标准 `ServerBootstrapAcceptor` 流程。这条线会把 `TcpChannelFactory` 替换为
-`childHandler + childOptions`,改动面更大,建议作为 Phase 2。
+> **旧版方案作废**:旧 6.7 基于 `DataConsumer`/`childChannel` 双分支路线设计,
+> 现路线只基于 `TcpSockInitializer` 一个扩展点,大幅简化。
+
+**目标**:支持以下习惯用法:
+
+```java
+EventLoopGroup boss   = new NioEventLoopGroup(1);
+EventLoopGroup worker = new NioEventLoopGroup();
+new ServerBootstrap()
+        .group(boss, worker)
+        .channel(TcpServerChannel.class)
+        .childHandler(new ChannelInitializer<TcpChannel>() {
+            @Override protected void initChannel(TcpChannel ch) {
+                ch.pipeline().addLast(new HttpServerCodec(), new MyBizHandler());
+            }
+        })
+        .childOption(ChannelOption.SO_KEEPALIVE, true)
+        .bind(tunListenAddress).sync();
+```
+
+**实现骨架**:
+
+| 类 | 继承 | 职责 |
+|----|------|------|
+| `TcpServerChannel` | `AbstractServerChannel` | 绑定 `Tcp4Multiplexer`,作为 `ServerBootstrap.channel()` 的类型 |
+| `TcpServerChannel$AcceptorInitializer` | `TcpSockInitializer` | 内部 initializer,替代用户直接传 `TcpChannelFactory` |
+| `TcpServerChannelConfig` | `DefaultChannelConfig` | 承载 `childHandler` / `childOption` / `childAttr` |
+
+关键改造点(与当前核心**零耦合**):
+
+1. **新增 `TcpServerChannel`**(`v2/tcp/netty/TcpServerChannel.java`):
+   - `doBind(SocketAddress)`:创建 `Tcp4Multiplexer` 并把内部 `AcceptorInitializer`
+     传入,挂到 TUN pipeline。
+   - `doReadMessages(List<Object> buf)`:从内部 accept queue 取出已 register 的
+     `TcpChannel`,交给 `ServerBootstrapAcceptor` 走标准 `fireChannelRead` 流程。
+   - `doClose()`:摘 TUN pipeline,关闭 `Tcp4Multiplexer`。
+
+2. **`AcceptorInitializer`**:把 `TcpChannelFactory` 默认的 "create + register"
+   拆成两步:
+   - `onEstablished(sock, mux)`:用 `childHandler` 构建 `TcpChannel`、挂
+     `BridgeImpl`、**不** register;把 channel push 进 `acceptQueue`,触发
+     `TcpServerChannel.readIfIsAutoRead()`。
+   - `TcpServerChannel.doReadMessages` 拉出 channel → `pipeline.fireChannelRead(ch)` →
+     `ServerBootstrapAcceptor` 负责 register 到 worker EL + 应用
+     `childOption`/`childAttr`。
+
+3. **worker EL 约束的放松**:`TcpChannel.isCompatible(loop)` 当前要求
+   `loop == sock.eventLoop()`。`ServerBootstrap.childGroup` 的 worker EL 和 sock
+   EL 不同时,要么:
+   - **方案 A(推荐)**:让 `proposeEventLoop` 从 `ServerBootstrap.childGroup.next()`
+     取(初始化时由 `AcceptorInitializer` 持 childGroup 引用),保持
+     `TcpChannel.eventLoop()==sock.eventLoop()` 不变,这条约束就自然成立;
+   - **方案 B**:把 `isCompatible` 放松到 "同一 `EventLoopGroup`" 级别,跨 EL
+     调用都走 `execute` 跳转 —— 代价是所有 sock 字段访问都要加 EL 断言,风险高。
+
+4. **生命周期收尾**:`TcpServerChannel.doClose` 时遍历 `establishedRegistry`,
+   对每个 sock 调 `sock.handler().onSocketDestroyed()`,触发 `TcpChannel`
+   `closeForcibly`;worker EL 关闭由 `ServerBootstrap.childGroup()` 的生命周期
+   负责,与 server channel 解耦。
+
+**改动量估算**:`TcpServerChannel` + `Config` 约 250 行;`AcceptorInitializer` 约
+80 行;总计 ~330 行,**不触碰 core 任何一个类**。只需 `TcpChannelFactory` 从
+`TcpSockInitializer` 独立出来作为 P5 内部使用的 factory(或保留现状共存)。
+
+**验收**:
+
+- `new ServerBootstrap().channel(TcpServerChannel.class).childHandler(...)` 可跑
+  `HttpHelloWorldServer` demo;
+- `childOption(SO_KEEPALIVE, true)` 等配置透传到 `TcpSock`;
+- 并发 10k 连接 + `ResourceLeakDetector.Level=PARANOID` 跑 10 分钟无 leak。
 
 ---
 
 ## 七、实施分阶段
 
-| 阶段 | 产出 | 预估 | 验收 |
+| 阶段 | 产出 | 状态 | 验收 |
 |------|------|------|------|
-| **P0-骨架** | `TcpChannel` / `TcpChannelConfig` / `TcpChannelFactory` 空实现;`TcpSock.userChannel` 字段(`localAddress0/remoteAddress0` 直接构造 `InetSocketAddress`) | 0.5d | 单元测试:`new TcpChannel(mockSock, mockMux)` 可 register 到 EmbeddedEventLoop,`isOpen=true` |
-| **P1-读路径** | `consume` 分流 + `fireChannelReadFromTcp` + autoRead | 1d | 本地 TUN 回环:SYN 握手完成 → 用户 handler 的 `channelActive` / `channelRead` 触发;`autoRead=false` 时对端感知窗口收缩 |
-| **P2-写路径** | `doWrite` + MSS 分片 + writability 水位 | 1d | handler `ctx.writeAndFlush` 100MB,对端全量收到且顺序正确;`isWritable` 按水位翻转 |
-| **P3-close/shutdown** | 主动 close → FIN;对端 FIN → `ChannelInputShutdownEvent`;对端 RST → `exceptionCaught` | 1d | 四向 close 覆盖测试(主动半关、主动全关、对端 FIN、对端 RST)pipeline 事件齐全 |
-| **P4-压测 + leak** | 万连接并发 + `-Dio.netty.leakDetection.level=PARANOID` 跑 10 min | 1d | 无 leak,无 EL 抢占,GC 正常 |
-| **P5(可选)- ServerBootstrap** | `TcpServerChannel` + `ServerBootstrap.childHandler` 风格 | 1.5d | `new ServerBootstrap().channel(TcpServerChannel.class)` 可跑 `HttpHelloWorldServer` |
-
-合计 P0-P4 约 4.5 天;P5 再 1.5 天。
+| **P0-骨架** | `TcpChannel` / `TcpChannelConfig` / `TcpChannelFactory` + `BridgeImpl` | ✅ 已落地 | `new TcpChannel(sock, mux)` 可 register 到 sock.eventLoop() |
+| **P1-读路径** | `consume` 单出口 + `fireChannelReadFromTcp` + autoRead + `rcvPaused` | ✅ 已落地(autoRead 分支 + pendingInbound 背压已实现) | 本地 TUN:SYN 握手完成 → handler 收到 `channelActive` / `channelRead`;`autoRead=false` 时对端窗口收缩可观察 |
+| **P2-写路径** | `doWrite` MSS 分片 + writability 水位 | ✅ 骨架落地,🚧 writability 回调源未接入 | handler `ctx.writeAndFlush` 100MB 对端顺序收齐;`isWritable` 翻转待 §6.3 补钩子后可观测 |
+| **P3-close/shutdown** | doClose 发 FIN + 对端 FIN → `ChannelInputShutdownEvent` + 对端 RST → `exceptionCaught` | ✅ 主动 close / FIN / RST 三路径落地;🚧 shutdownInput/Output 显式 API 未暴露 | 四向 close 覆盖测试 pipeline 事件齐全 |
+| **P4-压测 + leak** | 万连接并发 + `-Dio.netty.leakDetection.level=PARANOID` 10 min | ⏳ 待做 | 无 leak,无 EL 抢占,GC 正常 |
+| **P5-ServerBootstrap** | `TcpServerChannel` + `childHandler` 风格(见 §6.7) | ⏳ 未开工 | `ServerBootstrap.channel(TcpServerChannel.class)` 跑 `HttpHelloWorldServer` |
 
 ---
 
-## 八、验收 / 使用示例
+## 八、使用示例
 
 ### 8.1 最小 Echo 服务
 
@@ -585,7 +546,7 @@ TcpChannelFactory factory = (sock, mux) -> {
     return ch;
 };
 Tcp4Multiplexer mux = new Tcp4Multiplexer(cfg, factory);
-// mux 挂到 TUN pipeline(与现状一致)
+// mux 挂到 TUN pipeline(TcpMultiplexHandler)
 ```
 
 ### 8.2 HTTP 服务
@@ -608,31 +569,56 @@ TcpChannelFactory factory = (sock, mux) -> {
 };
 ```
 
-### 8.3 验收清单
+### 8.3 Backend 透传(等价 v1 默认行为)
 
-- [ ] `ResourceLeakDetector.Level=PARANOID` 下 10 分钟压测 0 leak
+```java
+BackendProxyInitializer initializer =
+        new BackendProxyInitializer(socketChannelFactory, childGroup, connTimeoutMs);
+Tcp4Multiplexer mux = new Tcp4Multiplexer(cfg, initializer);
+```
+
+Backend 透传与 `TcpChannelFactory` 是**并列的** `TcpSockInitializer` 实现,
+构造 `Tcp4Multiplexer` 时**只能**传其一。
+
+### 8.4 显式拒绝(no listener → RST)
+
+```java
+Tcp4Multiplexer mux = new Tcp4Multiplexer(cfg, TcpSockInitializer.DENY);
+```
+
+对齐 Linux `__inet_lookup_listener` 返回 null 时的 RST 响应语义 —— SYN 到达即发
+RST 并销毁半连接 req。
+
+### 8.5 验收清单
+
+- [ ] `ResourceLeakDetector.Level=PARANOID` 10 分钟压测 0 leak
 - [ ] 10k 并发连接 + 每连接 1MB echo 成功,内存曲线平稳
 - [ ] `autoRead=false` 时 tcpdump 观察到对端 `Win=0` / 窗口收缩
-- [ ] `config.setOption(TCP_NODELAY, true)` 等价 `sock.nagleEnabled(false)`
-      (用 tcpdump 观察没有 200ms 延迟合批)
-- [ ] 主动 close / 对端 FIN / 对端 RST 三条线路 `pipeline` 事件顺序与
-      `NioSocketChannel` 一致
-- [ ] `HttpServerCodec` + `HttpObjectAggregator` 开箱直接跑通
+- [ ] `config.setOption(SO_KEEPALIVE, true)` 等价 `sock.keepaliveEnabled(true)`
+- [ ] 主动 close / 对端 FIN / 对端 RST 三路径 pipeline 事件顺序与 `NioSocketChannel` 一致
+- [ ] `HttpServerCodec` + `HttpObjectAggregator` 开箱跑通
 
 ---
 
 ## 九、与 Linux 内核的对齐性
 
-本方案纯属"应用接口层"改造,不触及协议栈逻辑,无 Linux 对齐议题。所有
-TCP 行为(PAWS / 拥塞控制 / OFO / FIN 半关 / RST 响应 / keepalive / probe0 / RACK 等)
-仍由 v2 核心模块承担,依旧严格对齐 Linux(见 `tcp.java.md`)。
+本方案是"应用接口层"改造,**不触及**协议栈逻辑,无 Linux 对齐议题。所有 TCP
+行为(PAWS / 拥塞控制 / OFO / FIN 半关 / RST 响应 / keepalive / probe0 / RACK 等)
+仍由 v2 核心模块承担,依旧严格对齐 Linux。
 
-唯一的间接影响:`rcvPaused` 机制在语义上对应 Linux 的**应用层 read 未及时**
-导致 `tp->rcv_wnd` 收缩,与 Linux `tcp_select_window` 行为一致,只是触发源从
-"应用 syscall 未读 socket" 变成 "Netty autoRead=false 未消费"。
+间接语义映射:
+
+- `rcvPaused` 机制在语义上对应 Linux "应用层 read 未及时 → `tp->rcv_wnd` 收缩",
+  与 `tcp_select_window` 行为一致,只是触发源从 "应用 syscall 未读 socket" 变成
+  "Netty autoRead=false 未消费"。
+- `TcpChannelFactory.onEstablished` 对应 Linux `accept()` 返回后应用对 fd 的
+  装配,只是我们提前在内核态挂好 pipeline,不经过 `accept()` 队列的同步等待。
+- `BackendProxyInitializer.onRequest` 异步 backend connect 对应 Linux 没有直接
+  语义(v1 遗留行为),是 v2 保留的扩展点而非 Linux 对齐项。
 
 ---
 
-**维护说明**:本方案如实施后,在 `tcp.java.md` §三(S-x 工程化简化)中追加一条
-`S-N`:v2 对外接口由 `TcpChannel` 替代原 `DataConsumer` + `childChannel` 双分支,
-并把原 `DataConsumer` / `SocketChannelFactory` 路径降级为 compat fallback。
+**维护说明**:本方案与 `ext.backend.BackendProxyInitializer` 共用同一个
+`TcpSockInitializer` 扩展点。二者并列、互斥,未来可能的 "pipeline + backend
+透传" 组合由应用自写第三个 initializer 实现,不在 core/netty/ext.backend 任何
+一个包内强制。
