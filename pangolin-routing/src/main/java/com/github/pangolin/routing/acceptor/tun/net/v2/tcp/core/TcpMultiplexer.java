@@ -85,6 +85,13 @@ public abstract class TcpMultiplexer {
     protected final TcpConfig config;
     protected final TcpHandshakerFactory handshakerFactory;
     protected final DataConsumer dataConsumer;
+    /**
+     * 用户 Channel 初始化钩子 — 为 {@code null} 时走原 backend 透传路径;
+     * 非 {@code null} 时 {@link #tcp_init_transfer} 跳过 backend pipeline 构建,改调
+     * {@link UserChannelInitializer#onEstablished} 由上层(通常是 netty 子包的
+     * {@code TcpChannelFactory})创建 {@code TcpChannel} 并挂 bridge。
+     */
+    protected UserChannelInitializer userChannelInitializer;
     protected final Map<FourTuple, TcpRequestSock> synRegistry;
     protected final Map<FourTuple, TcpSock> establishedRegistry;
     /**
@@ -600,7 +607,14 @@ public abstract class TcpMultiplexer {
             sk.addAckPending(TcpConstants.ACK_NOW);
         }
 
-        if (sk.receiveBuffer().isReadable()) {
+        /*
+         * rcvPaused(autoRead=false)时保留数据在 receiveBuffer,不 drain 给 userChannel;
+         * rcv_nxt 已随上面 offer 推进,但由于 receiveBuffer 不清空,
+         * tcp_receive_window() = max(0, rcv_wup + rcv_wnd - rcv_nxt) 会随 rcv_nxt 前进
+         * 而在下一次 tcp_select_window 触发窗口收缩,对端自然感知反压。对齐 Linux
+         * "应用未读 socket → tp->rcv_wnd 缩窗" 语义。
+         */
+        if (sk.receiveBuffer().isReadable() && !sk.rcvPaused()) {
             consume(sk, sk.receiveBuffer().readAll());
         }
 
@@ -647,12 +661,14 @@ public abstract class TcpMultiplexer {
      */
     protected void tcp_fin(ChannelHandlerContext ctx, TcpSock sk) {
         sk.addShutdown(TcpConstants.RCV_SHUTDOWN);
-        switch (sk.state()) {
+        final TcpConnectionState prevState = sk.state();
+        switch (prevState) {
             case TCP_SYN_RECV:
             case TCP_ESTABLISHED:
                 sk.state(TcpConnectionState.CLOSE_WAIT);
                 sk.enterPingpongMode();
                 TcpOutput.INSTANCE.tcp_send_ack(sk);
+                notifyPeerFin(sk);
                 return;
             case CLOSE_WAIT:
             case CLOSING:
@@ -662,14 +678,27 @@ public abstract class TcpMultiplexer {
             case FIN_WAIT_1:
                 TcpOutput.INSTANCE.tcp_send_ack(sk);
                 sk.state(TcpConnectionState.CLOSING);
+                notifyPeerFin(sk);
                 return;
             case FIN_WAIT_2:
                 TcpOutput.INSTANCE.tcp_send_ack(sk);
+                notifyPeerFin(sk);
                 tcp_time_wait(ctx, sk, TcpConnectionState.TIME_WAIT);
                 return;
             default:
                 // TCP_LISTEN / TCP_SYN_SENT / TCP_CLOSED / TIME_WAIT — 不应到达,防御性 no-op
                 return;
+        }
+    }
+
+    private static void notifyPeerFin(TcpSock sk) {
+        UserChannelBridge bridge = sk.userChannelBridge();
+        if (bridge != null) {
+            try {
+                bridge.onPeerFin();
+            } catch (Throwable ignore) {
+                // 保护:用户 handler 异常不影响状态机推进
+            }
         }
     }
 
@@ -762,11 +791,27 @@ public abstract class TcpMultiplexer {
     }
 
     protected void tcp_init_transfer(TcpSock sk) {
-        if (sk == null || !sk.hasBackendChannel()) {
+        if (sk == null) {
             return;
         }
         sk.probeTimerAction(() -> tcp_probe_timer(sk));
         sk.keepaliveTimerAction(() -> tcp_keepalive_timer(sk));
+
+        /*
+         * 分支 B:TcpChannelFactory 模式 — 上层用户 pipeline 接管 payload。
+         * 不挂 backend childChannel 的透传 handler,不装 childCloseListener;
+         * 由 userChannel 的 doClose 触发 FIN、onSocketDestroyed 触发 fireChannelInactive。
+         */
+        if (userChannelInitializer != null) {
+            userChannelInitializer.onEstablished(sk, this);
+            armKeepalive(sk, sk.keepaliveTimeMs());
+            return;
+        }
+
+        /* 分支 A:backend 透传模式 — 原 v2 行为。 */
+        if (!sk.hasBackendChannel()) {
+            return;
+        }
 
         final Channel childChannel = sk.childChannel();
         final ChannelFutureListener handshakeCloseListener = sk.childCloseListener();
@@ -964,14 +1009,24 @@ public abstract class TcpMultiplexer {
     }
 
     protected void consume(TcpSock sk, ByteBuf data) {
-        if (sk != null && sk.hasBackendChannel()) {
+        if (sk == null) {
+            data.release();
+            return;
+        }
+        // 优先级:userChannel > backendChannel > DataConsumer
+        UserChannelBridge bridge = sk.userChannelBridge();
+        if (bridge != null) {
+            bridge.onInboundData(data);
+            return;
+        }
+        if (sk.hasBackendChannel()) {
             sk.childChannel().writeAndFlush(data);
             return;
         }
         dataConsumer.onData(sk.fourTuple(), data);
     }
 
-    protected void enqueueWrite(TcpSock sk, ByteBuf data, boolean flush) {
+    public void enqueueWrite(TcpSock sk, ByteBuf data, boolean flush) {
         final Runnable task = () -> {
             if (!sk.hasConnection() || !sk.state().canSend()) {
                 data.release();

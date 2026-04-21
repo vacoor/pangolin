@@ -3,7 +3,6 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
 
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Objects;
@@ -52,16 +51,6 @@ public final class FourTuple {
     public InetAddress dstInetAddress() {
         try { return InetAddress.getByAddress(dstAddr); }
         catch (UnknownHostException e) { throw new IllegalStateException(e); }
-    }
-
-    /** Local socket address (our side = destination of the incoming packet). */
-    public InetSocketAddress local() {
-        return new InetSocketAddress(dstInetAddress(), dstPort);
-    }
-
-    /** Remote socket address (the client's side = source of the incoming packet). */
-    public InetSocketAddress remote() {
-        return new InetSocketAddress(srcInetAddress(), srcPort);
     }
 
     @Override

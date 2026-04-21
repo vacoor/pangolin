@@ -8,16 +8,27 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.Tcp4Multiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer.DataConsumer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannel;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannelFactory;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.handler.codec.http.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
+
+import static com.google.common.net.HttpHeaders.CONTENT_LENGTH;
+import static io.netty.handler.codec.http.HttpResponseStatus.OK;
+import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 
 /**
  * v2 TCP ingress now follows v1 architecture:
@@ -75,7 +86,23 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
     }
 
     protected TcpMultiplexer create() {
-        return new Tcp4Multiplexer(TcpConfig.builder().build(), socketChannelFactory, childGroup, dataConsumer);
+        TcpChannelFactory factory = (sock, mux) -> {
+            TcpChannel ch = new TcpChannel(sock, mux);
+            ch.pipeline().addLast(
+                    new HttpServerCodec(),
+                    new HttpObjectAggregator(65536),
+                    new SimpleChannelInboundHandler<FullHttpRequest>() {
+                        @Override protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest req) {
+                            ByteBuf body = Unpooled.copiedBuffer("Hello from v2 TCP over TUN!\n", StandardCharsets.UTF_8);
+                            FullHttpResponse resp = new DefaultFullHttpResponse(HTTP_1_1, OK, body);
+                            resp.headers().setInt(CONTENT_LENGTH, body.readableBytes());
+                            ctx.writeAndFlush(resp).addListener(ChannelFutureListener.CLOSE);
+                        }
+                    });
+            return ch;
+        };
+        // return new Tcp4Multiplexer(TcpConfig.builder().build(), socketChannelFactory, childGroup, dataConsumer);
+        return new Tcp4Multiplexer(TcpConfig.builder().build(), factory);
     }
 
     public boolean write(final FourTuple key, final ByteBuf data) {

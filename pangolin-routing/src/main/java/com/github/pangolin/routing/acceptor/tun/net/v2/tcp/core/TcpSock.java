@@ -53,6 +53,19 @@ public class TcpSock extends SockCommon {
     private Channel channel;
     private Channel childChannel;
     private ChannelFutureListener childCloseListener;
+    /**
+     * 外部 Netty {@code TcpChannel} 回调桥 — 由
+     * {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannel}
+     * 在构造/register 时注入。不为 {@code null} 表示这条连接由用户 pipeline 接管。
+     */
+    private UserChannelBridge userChannelBridge;
+    /**
+     * 应用层 autoRead 反压标志 — {@code true} 时 {@code queue_and_out} 仍把数据放入
+     * {@link TcpReceiveBuffer}(保持 rcv_nxt 推进 / ACK 正常),但不再 drain 到
+     * userChannel,从而 {@code tcp_receive_window()} 自然收缩,对端感知反压。
+     * 对齐 Linux "应用 syscall 未读 socket 导致 tp->rcv_wnd 缩窗" 语义。
+     */
+    private boolean rcvPaused;
     private TcpSendBuffer sendBuffer;
     private TcpReceiveBuffer receiveBuffer;
     private TcpConnectionTimers timers;
@@ -572,6 +585,26 @@ public class TcpSock extends SockCommon {
         this.childCloseListener = listener;
     }
 
+    public UserChannelBridge userChannelBridge() {
+        return userChannelBridge;
+    }
+
+    public void userChannelBridge(UserChannelBridge bridge) {
+        this.userChannelBridge = bridge;
+    }
+
+    public boolean hasUserChannel() {
+        return userChannelBridge != null;
+    }
+
+    public boolean rcvPaused() {
+        return rcvPaused;
+    }
+
+    public void rcvPaused(boolean v) {
+        this.rcvPaused = v;
+    }
+
     public EventLoop eventLoop() {
         return channel == null ? null : channel.eventLoop();
     }
@@ -884,6 +917,14 @@ public class TcpSock extends SockCommon {
         return sendBuffer;
     }
 
+    /**
+     * 写路径 pending 总量({@code writeQueue + rtxQueue} 应用字节)。供 {@code TcpChannel}
+     * writability 水位判定使用。
+     */
+    public long pendingBytes() {
+        return sendBuffer == null ? 0L : sendBuffer.pendingBytes();
+    }
+
     public TcpReceiveBuffer receiveBuffer() {
         return receiveBuffer;
     }
@@ -897,6 +938,22 @@ public class TcpSock extends SockCommon {
                 childChannel.closeFuture().removeListener(childCloseListener);
             }
             childChannel.close();
+        }
+        /*
+         * userChannelBridge 必须在 sendBuffer / receiveBuffer release 之前收到
+         * onSocketDestroyed 回调,保证 fireChannelInactive 之后用户 handler 调
+         * ctx.channel() 或 ctx.pipeline() 时底层状态仍可观测(仅用于诊断)。
+         * 实际 ByteBuf 引用计数由 pipeline 的 release-handler 负责,此处仅
+         * 释放缓冲区整体。
+         */
+        if (userChannelBridge != null) {
+            UserChannelBridge bridge = userChannelBridge;
+            userChannelBridge = null;
+            try {
+                bridge.onSocketDestroyed();
+            } catch (Throwable ignore) {
+                // 保护:用户 handler 异常不影响 sock 清理
+            }
         }
         if (sendBuffer != null) {
             sendBuffer.releaseAll();

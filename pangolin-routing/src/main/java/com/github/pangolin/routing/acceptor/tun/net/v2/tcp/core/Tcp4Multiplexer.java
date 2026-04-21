@@ -1,6 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionState;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpHandshaker;
@@ -14,6 +15,7 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoopGroup;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -25,6 +27,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpU
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before;
 
+@Slf4j
 public class Tcp4Multiplexer extends TcpMultiplexer {
     private final SocketChannelFactory socketChannelFactory;
     private final EventLoopGroup childGroup;
@@ -48,6 +51,19 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         this.connTimeoutMs = 5_000;
     }
 
+    /**
+     * 工厂模式构造:三次握手完成后不再连 backend,改由
+     * {@link UserChannelInitializer#onEstablished} 创建用户 Channel 接管 payload。
+     * 用户 pipeline 在 {@code fireChannelActive} 后可按 Netty 标准语义收发数据。
+     */
+    public Tcp4Multiplexer(TcpConfig config, UserChannelInitializer userChannelInitializer) {
+        super(config);
+        this.socketChannelFactory = null;
+        this.childGroup = null;
+        this.connTimeoutMs = 5_000;
+        this.userChannelInitializer = userChannelInitializer;
+    }
+
     @Override
     protected TcpSock init(TcpSock sk) {
         return sk;
@@ -55,6 +71,10 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
 
     @Override
     public void tcp_rcv(ChannelHandlerContext net, TcpPacketBuf pkt) {
+        log.info(TcpLogUtils.logify(pkt, 0));
+        if (pkt.tcpPayloadLength() >0) {
+            System.out.println();
+        }
         tcp_v4_rcv(net, pkt);
     }
 
@@ -362,7 +382,8 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
     protected TcpRequestSock tcp_v4_conn_request(ChannelHandlerContext net, TcpSock listenSock, TcpPacketBuf pkt) {
-        if (socketChannelFactory == null || childGroup == null) {
+        // backend 透传模式或工厂模式任一满足即可继续握手;两者都缺失时视为未配置,RST。
+        if ((socketChannelFactory == null || childGroup == null) && userChannelInitializer == null) {
             send_reset(net, pkt, -88);
             return null;
         }
@@ -482,6 +503,23 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
     }
 
     private void startHandshake(ChannelHandlerContext net, TcpRequestSock req, TcpPacketBuf pkt) {
+        /*
+         * 工厂模式:无 backend,SYN-ACK 立发;握手失败由 synAckFailureAction 收尾。
+         * 对齐 Linux 被动 open 路径:不需要等任何外部事件即可回 SYN-ACK。
+         */
+        if (userChannelInitializer != null) {
+            req.synPacket((TcpPacketBuf) pkt.retain());
+            req.request().synAckFailureAction(() -> inet_csk_destroy_sock(req));
+            req.handshakeCloseListener(future -> {
+                if (req.synPacket() != null) {
+                    TcpOutput.INSTANCE.tcp_v4_send_reset(net, req.synPacket());
+                }
+                inet_csk_destroy_sock(req);
+            });
+            req.request().sendSynAckAfterBackendConnected(net.channel());
+            return;
+        }
+
         if (socketChannelFactory == null || childGroup == null) {
             send_reset(net, pkt, -88);
             inet_csk_destroy_sock(req);

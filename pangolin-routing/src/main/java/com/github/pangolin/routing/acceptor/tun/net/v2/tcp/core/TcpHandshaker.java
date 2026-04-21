@@ -275,7 +275,7 @@ public final class TcpHandshaker {
         return TcpSock.createChild(
                 netChannel,
                 childChannel,
-                FourTuple.of(dstAddrBytes, dstPort, srcAddrBytes, srcPort),
+                FourTuple.of(srcAddrBytes, srcPort, dstAddrBytes, dstPort),
                 sndIsn,
                 sndIsn + 1,
                 rcvNxt,

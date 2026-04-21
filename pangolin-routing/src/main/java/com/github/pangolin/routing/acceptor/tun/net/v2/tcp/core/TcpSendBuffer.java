@@ -319,6 +319,38 @@ public final class TcpSendBuffer {
         return new CollapseResult(collapsed, droppedSacked);
     }
 
+    /**
+     * 已入队但尚未发送的应用字节数(累加 {@code writeQueue} 中所有 {@link TcpSkb#dataLen}。
+     * 对应 Linux {@code tp->write_seq - tp->snd_nxt} 中 "未离 pipeline 的应用数据"。
+     */
+    public long enqueuedBytes() {
+        long total = 0;
+        for (TcpSkb skb : writeQueue) {
+            total += skb.dataLen();
+        }
+        return total;
+    }
+
+    /**
+     * 在途未确认字节数 — 累加 {@code rtxQueue} 中所有 {@link TcpSkb#dataLen}。
+     * 对应 Linux {@code tp->snd_nxt - tp->snd_una} 去掉已 SACK 部分的近似值。
+     */
+    public long unackedBytes() {
+        long total = 0;
+        for (TcpSkb skb : rtxQueue) {
+            total += skb.dataLen();
+        }
+        return total;
+    }
+
+    /**
+     * {@link #enqueuedBytes} + {@link #unackedBytes} — 供 {@code TcpChannel} writability
+     * 水位判定用。O(n) 扫两队列;一般场景段数有限,不做缓存。
+     */
+    public long pendingBytes() {
+        return enqueuedBytes() + unackedBytes();
+    }
+
     /** Release all buffers (called on connection close). */
     public void releaseAll() {
         for (TcpSkb entry : writeQueue) {

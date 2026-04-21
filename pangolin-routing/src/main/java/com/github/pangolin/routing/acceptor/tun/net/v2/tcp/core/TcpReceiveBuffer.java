@@ -438,13 +438,19 @@ public final class TcpReceiveBuffer {
     /**
      * Consume all in-order data and return it as a single buffer.
      * Caller takes ownership and must release the returned buffer.
+     *
+     * <p>Copies into a fresh buffer rather than slicing the composite —
+     * a {@code readRetainedSlice} here would be invalidated by the
+     * subsequent {@code discardReadComponents}, which frees the pooled
+     * components backing the slice.
      */
     public ByteBuf readAll() {
         if (!readBuffer.isReadable()) {
             return Unpooled.EMPTY_BUFFER;
         }
         int taken = readBuffer.readableBytes();
-        ByteBuf result = readBuffer.readRetainedSlice(taken);
+        ByteBuf result = readBuffer.alloc().buffer(taken, taken);
+        result.writeBytes(readBuffer, taken);
         readBuffer.discardReadComponents();
         removeInorderBytes(taken);
         return result;
