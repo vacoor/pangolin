@@ -10,7 +10,7 @@ import io.netty.channel.Channel;
  *
  * <p>backend → sock 方向的反向通路不在本类实现,由
  * {@link BackendProxyInitializer#onEstablished} 在 backend pipeline 上挂入站适配器,
- * 按 MSS 切片后 {@code enqueueWrite} 到 TCP 发送缓冲。
+ * 直接交给 {@code TcpMultiplexer.tcp_sendmsg}(MSS 切片 / push 由栈内部处理)。
  *
  * <p>生命周期:由 {@link BackendProxyInitializer#onEstablished} 构造并挂到
  * {@code sock.handler}。连接销毁或对端 FIN/RST 时,TCP 栈回调 {@link #onSocketDestroyed}

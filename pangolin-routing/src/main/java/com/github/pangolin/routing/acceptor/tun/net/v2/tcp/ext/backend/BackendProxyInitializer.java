@@ -23,7 +23,7 @@ import java.util.Objects;
 /**
  * {@link TcpSockInitializer} 的 backend 透传实现 — 覆盖 {@code onRequest} 以在 SYN 阶段
  * 先连 backend 再发 SYN-ACK,覆盖 {@code onEstablished} 以装 {@link BackendProxyHandler}
- * 和反向适配器(MSS 切片 + {@link TcpMultiplexer#enqueueWrite}),实现双向透传。
+ * 和反向适配器({@link TcpMultiplexer#tcp_sendmsg} — MSS 切片由栈内部处理),实现双向透传。
  *
  * <p><b>生命周期</b>:
  * <ol>
@@ -116,23 +116,16 @@ public final class BackendProxyInitializer implements TcpSockInitializer {
             backend.closeFuture().removeListener(handshakeCloseListener);
         }
 
-        // 3. 挂反向适配器:backend payload → MSS 切片 → enqueueWrite 到 TCP 发送缓冲
+        // 3. 挂反向适配器:backend payload → tcp_sendmsg(MSS 切片 / push 由栈内部处理)
         backend.pipeline().addLast(new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRead(ChannelHandlerContext ctx, Object msg) {
-                try {
-                    final ByteBuf buf = (ByteBuf) msg;
-                    final int mss = TcpOutput.INSTANCE.tcp_current_mss(sock);
-                    final int total = buf.readableBytes();
-                    for (int offset = 0; offset < total; ) {
-                        final int len = Math.min(total - offset, mss);
-                        final boolean flush = offset + len >= total;
-                        multiplexer.enqueueWrite(sock, buf.retainedSlice(buf.readerIndex() + offset, len), flush);
-                        offset += len;
-                    }
-                } finally {
+                if (!(msg instanceof ByteBuf)) {
                     ReferenceCountUtil.release(msg);
+                    return;
                 }
+                // 引用权交给 tcp_sendmsg,其内部负责 release
+                multiplexer.tcp_sendmsg(sock, (ByteBuf) msg, true);
             }
 
             @Override

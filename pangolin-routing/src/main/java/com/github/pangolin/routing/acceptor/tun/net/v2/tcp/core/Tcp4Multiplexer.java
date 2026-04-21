@@ -51,9 +51,6 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
     @Override
     public void tcp_rcv(ChannelHandlerContext net, TcpPacketBuf pkt) {
         log.info(TcpLogUtils.logify(pkt, 0));
-        if (pkt.tcpPayloadLength() >0) {
-            System.out.println();
-        }
         tcp_v4_rcv(net, pkt);
     }
 

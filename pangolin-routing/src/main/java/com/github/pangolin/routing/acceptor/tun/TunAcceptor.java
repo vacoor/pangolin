@@ -15,11 +15,15 @@ import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelOption;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.handler.Tcp4MultiplexHandler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.TcpMultiplexHandler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.backend.BackendProxyInitializer;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.route.predicate.Subnet4RoutePredicate;
 import com.github.pangolin.routing.support.DatagramChannelFactory;
 import com.github.pangolin.routing.support.SocketChannelFactory;
+import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.upstream.DirectUpstream;
 import com.github.pangolin.routing.upstream.DynamicUpstream;
 import com.github.pangolin.routing.upstream.Upstream;
@@ -28,6 +32,7 @@ import com.google.common.collect.Sets;
 import freework.crypto.digest.Hash;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.codec.dns.DatagramDnsQuery;
 import io.netty.handler.codec.dns.DatagramDnsResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -119,6 +124,15 @@ public class TunAcceptor implements Acceptor {
                     protected void initChannel(final Channel ch) throws Exception {
                         ch.pipeline().addLast(new IpPacketCodec());
                         ch.pipeline().addLast(new Tcp4MultiplexHandler(dnsEngine, socketFactory));
+
+                        /*
+                        BackendProxyInitializer initializer = new BackendProxyInitializer(
+                                socketFactory,
+                                new NioEventLoopGroup(),
+                                10 * 1000
+                        );
+                        ch.pipeline().addLast(new TcpMultiplexHandler(dnsEngine, initializer));
+                        */
                     }
                 });
         return b.bind(new TunAddress(ifname, bindings)).addListener(new ChannelFutureListener() {

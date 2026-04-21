@@ -35,8 +35,8 @@ import java.util.Deque;
  *   <li>读路径:{@code TcpMultiplexer.consume} 分流到
  *       {@link TcpSockHandler#onInboundData},经本类内部 autoRead 门控后
  *       {@code fireChannelRead};</li>
- *   <li>写路径:用户 {@code ctx.writeAndFlush(ByteBuf)} → {@link #doWrite} 按 MSS 分片
- *       落到 {@code TcpMultiplexer.enqueueWrite};</li>
+ *   <li>写路径:用户 {@code ctx.writeAndFlush(ByteBuf)} → {@link #doWrite} 把 ByteBuf
+ *       交给 {@code TcpMultiplexer.tcp_sendmsg}(MSS 切片与 push 由栈内部处理);</li>
  *   <li>关闭:主动 {@code ch.close()} → {@link #doClose} 发 FIN;被动 FIN / RST
  *       由 bridge 回调,最终由 {@code inet_csk_destroy_sock → sock.close} 触发
  *       bridge.onSocketDestroyed → 本 channel unsafe().closeForcibly。</li>
@@ -194,27 +194,16 @@ public class TcpChannel extends AbstractChannel {
                 continue;
             }
             ByteBuf buf = (ByteBuf) msg;
-            int remaining = buf.readableBytes();
-            if (remaining == 0) {
+            if (buf.readableBytes() == 0) {
                 in.remove();
                 continue;
             }
-
-            final int mss = Math.max(1, TcpOutput.INSTANCE.tcp_current_mss(sock));
-            int consumed = 0;
-            while (consumed < remaining) {
-                final int len = Math.min(remaining - consumed, mss);
-                final boolean lastSlice   = (consumed + len == remaining);
-                final boolean lastMsg     = in.size() == 1;
-                final boolean flush       = lastSlice && lastMsg;
-                final ByteBuf slice = buf.retainedSlice(buf.readerIndex() + consumed, len);
-                multiplexer.enqueueWrite(sock, slice, flush);
-                consumed += len;
-            }
-            in.remove(); // release 原 buf(retainedSlice 各自独立引用)
+            final boolean flush = in.size() == 1;
+            // 引用权转给 tcp_sendmsg(其内部负责 release);in.remove 再释放 ChannelOutboundBuffer 持有的那份
+            multiplexer.tcp_sendmsg(sock, buf.retain(), flush);
+            in.remove();
         }
 
-        // 每次 doWrite 后检查水位
         evaluateWritability();
     }
 
