@@ -176,12 +176,12 @@
 
 ## 对照:当前 pangolin-routing/v2 的 RFC 覆盖(建议对齐时参考)
 
-> 用作开发"v2 TCP"时对齐 Linux 内核实现的 checklist,详见 `gap.md` / `gap-phase4.md`。
+> 用作开发"v2 TCP"时对齐 Linux 内核实现的 checklist,详见 `gap.md` / `tcp-gap-phase4.md`。
 
 - ✅ 基础 FSM、段格式、三次握手/挥手:RFC 9293
 - ✅ 累计 ACK / 接收窗口 / 重传:RFC 9293 + 6298
 - ⚠️ SACK / D-SACK / SACK-based 恢复:RFC 2018 / 2883 / 6675 — 与 Linux 对齐
-- ⚠️ NewReno / CUBIC:RFC 5681 / 6582 / 9438 — 详见 `gap-phase4.md`
+- ⚠️ NewReno / CUBIC:RFC 5681 / 6582 / 9438 — 详见 `tcp-gap-phase4.md`
 - ⚠️ 窗口扩展 / Timestamps / PAWS:RFC 7323
 - ⚠️ PMTU:RFC 1191 / 4821
 - ❌ RACK-TLP / ECN / TFO / MPTCP:视场景取舍

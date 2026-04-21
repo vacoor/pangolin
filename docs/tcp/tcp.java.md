@@ -2,7 +2,7 @@
 
 本文按 **模块 / 功能 / RFC 规范 / Linux 对齐点 / v2 落点 / 对齐状态 / 备注** 逐项
 枚举 `com.github.pangolin.routing.acceptor.tun.net.v2.tcp` 相对 Linux
-`net/ipv4/tcp_*.c` 主干的落地现状,作为 `gap.md` / `gap-phase4.md` 的代码级索引。
+`net/ipv4/tcp_*.c` 主干的落地现状,作为 `gap.md` / `tcp-gap-phase4.md` 的代码级索引。
 
 > 编写口径:
 > - **模块**分为 *核心*(协议正确性 / 基本吞吐 / 握手 / 状态机 / ACK / 重传 /
@@ -362,7 +362,7 @@ embryonic_reset → 非 ACK 丢弃 → ACK# 校验 → `syn_recv_sock` + `tcp_sy
 - 对比口径:逐行读 v2 源码 + 按章节查阅 Linux `net/ipv4/tcp_{input,output,recovery,minisocks}.c` master 分支(2026-04-20 抓取)。
 - 风险分级口径同文首:高=协议正确性/明显回归,中=特定场景偏差,低=微优化/架构/测试覆盖。
 - 未纳入本节:
-  - 已在 §四 🔴 清单的 ECN / PRR / F-RTO 外的未实现项(有 `gap-phase4.md` 触发条件归档);
+  - 已在 §四 🔴 清单的 ECN / PRR / F-RTO 外的未实现项(有 `tcp-gap-phase4.md` 触发条件归档);
   - 已在 §三 S-x 标注的工程化简化;
   - Phase E 刚建的 `TcpFeature` / `LossRecovery` SPI 骨架(未接通是**预期**,见 `tcp.java.packages.md` §7 提交 3)。
 
