@@ -28,11 +28,14 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
+import io.netty.channel.EventLoopGroup;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.SHUTDOWN_MASK;
@@ -48,13 +51,6 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps
 @Slf4j
 public abstract class TcpMultiplexer {
     public static final int DEFAULT_MAX_SYN_BACKLOG = 1024;
-
-    @FunctionalInterface
-    public interface DataConsumer {
-        void onData(FourTuple key, ByteBuf data);
-    }
-
-    private static final DataConsumer DROP_DATA = (key, data) -> data.release();
 
     /**
      * 返回墙钟秒数(对应 Linux {@code get_seconds()},用于 {@code ts_recent_stamp})。
@@ -84,36 +80,56 @@ public abstract class TcpMultiplexer {
 
     protected final TcpConfig config;
     protected final TcpHandshakerFactory handshakerFactory;
-    protected final DataConsumer dataConsumer;
     /**
-     * 用户 Channel 初始化钩子 — 为 {@code null} 时走原 backend 透传路径;
-     * 非 {@code null} 时 {@link #tcp_init_transfer} 跳过 backend pipeline 构建,改调
-     * {@link UserChannelInitializer#onEstablished} 由上层(通常是 netty 子包的
-     * {@code TcpChannelFactory})创建 {@code TcpChannel} 并挂 bridge。
+     * 每连接专属 EL 池 — 对齐 v1 里 backend {@code childGroup} 的角色。新建立的 child sock
+     * 在 {@code tcp_v4_syn_recv_sock} 中从 {@code tcpGroup.next()} 取一条 EL 绑定,整个
+     * 连接生命周期(状态机 / timer / user channel / backend channel)都跑在该 EL 上。
+     * 为 {@code null} 时所有 sock 回退到 TUN channel 的 EL(退化为单线程)。
      */
-    protected UserChannelInitializer userChannelInitializer;
+    protected final EventLoopGroup tcpGroup;
+    /**
+     * sock 装配钩子 — 必传,构造期 requireNonNull 。{@link #tcp_init_transfer} 调
+     * {@link TcpSockInitializer#onEstablished} 让上层(如 netty 子包的 {@code TcpChannelFactory}、
+     * ext.backend 子包的 {@code BackendProxyInitializer})创建并挂 {@link TcpSockHandler}。
+     * 显式关闭端口传 {@link TcpSockInitializer#DENY}。
+     */
+    protected final TcpSockInitializer initializer;
+    /**
+     * 半连接队列 — 读写均在 TUN EL(入站 SYN / SYN-ACK 重传 timer 回调 / 握手失败均
+     * 通过 TUN channel EL 调度),{@link java.util.HashMap} 足够。
+     */
     protected final Map<FourTuple, TcpRequestSock> synRegistry;
+    /**
+     * ESTABLISHED 槽位 — 跨 EL 并发:
+     * <ul>
+     *   <li>{@code moveToEstablished} 在 TUN EL 上 put(握手完成)</li>
+     *   <li>{@code __inet_lookup_skb} 在 TUN EL 上 get(每入站包查表)</li>
+     *   <li>{@code inet_csk_destroy_sock} 在 <b>sock EL</b> 上 remove(tcp_v4_do_rcv 路径
+     *       在 sock 专属 EL 上执行)</li>
+     * </ul>
+     * 因此必须使用 {@link ConcurrentHashMap}。对齐 v1 {@code Maps.newConcurrentMap()}。
+     */
     protected final Map<FourTuple, TcpSock> establishedRegistry;
     /**
      * TIME_WAIT 迷你 bucket 注册表 — 对齐 Linux {@code inet_timewait_sock} 加入的
      * {@code ehash} TW 槽位。键为进入 TIME_WAIT 时的四元组,值为快照后的
      * {@link TcpTimewaitSock};2MSL 到期或收到有效 RST 时由 {@link #inet_twsk_kill} 移除。
+     *
+     * <p>跨 EL 并发:{@code tcp_time_wait} 在 sock EL 上 put,{@code inet_twsk_kill} 也在
+     * sock EL 上 remove,但 {@code __inet_lookup_skb} 在 TUN EL 上 get,需 ConcurrentHashMap。
      */
     protected final Map<FourTuple, TcpTimewaitSock> timewaitRegistry;
     protected final int maxSynBacklog;
     protected TcpSock listenSock;
 
-    protected TcpMultiplexer(TcpConfig config) {
-        this(config, DROP_DATA);
-    }
-
-    protected TcpMultiplexer(TcpConfig config, DataConsumer dataConsumer) {
+    protected TcpMultiplexer(TcpConfig config, EventLoopGroup tcpGroup, TcpSockInitializer initializer) {
         this.config = config;
         this.handshakerFactory = new TcpHandshakerFactory(config);
-        this.dataConsumer = dataConsumer == null ? DROP_DATA : dataConsumer;
+        this.tcpGroup = tcpGroup;
+        this.initializer = Objects.requireNonNull(initializer, "initializer");
         this.synRegistry = new HashMap<>();
-        this.establishedRegistry = new HashMap<>();
-        this.timewaitRegistry = new HashMap<>();
+        this.establishedRegistry = new ConcurrentHashMap<>();
+        this.timewaitRegistry = new ConcurrentHashMap<>();
         this.maxSynBacklog = DEFAULT_MAX_SYN_BACKLOG;
         init();
     }
@@ -132,6 +148,17 @@ public abstract class TcpMultiplexer {
     public abstract void inet_rtx_syn_ack(ChannelHandlerContext net, TcpSock listenSock, TcpRequestSock req);
 
     protected abstract TcpRequestSock conn_request(ChannelHandlerContext net, TcpSock listenSock, TcpPacketBuf pkt);
+
+    /**
+     * 发 SYN-ACK 响应 — 由 {@link TcpSockInitializer#onRequest} 决定何时调用。实现方
+     * (如 {@code Tcp4Multiplexer})在此装 {@code synAckFailureAction} /
+     * {@code handshakeCloseListener} 并发送 SYN-ACK,启动 SYN-ACK 重传 timer。
+     * synPacket 已由 {@code tcp_v4_conn_request} retain 一次,本方法不再参与 retain。
+     *
+     * <p><b>契约</b>:本方法只应被调一次;{@code BackendProxyInitializer} 在 backend connect
+     * 成功后调用,工厂 / Raw initializer 在 onRequest 默认实现里立即调用,DENY 不调用。
+     */
+    public abstract void sendSynAck(TcpRequestSock req);
 
     protected abstract TcpSock syn_recv_sock(ChannelHandlerContext net, TcpSock listenSock, TcpPacketBuf pkt, TcpRequestSock req);
 
@@ -341,6 +368,12 @@ public abstract class TcpMultiplexer {
     }
 
     public void inet_csk_destroy_sock(TcpRequestSock req) {
+        // P2.1:销毁前让 initializer 释放 attachment 资源(如 backend state)
+        try {
+            initializer.onRequestDestroyed(req);
+        } catch (Throwable ignore) {
+            // 保护:用户 initializer 异常不阻塞 req 销毁
+        }
         req.request().cancelRetransmitTimer();
         if (req.connectFuture() != null && req.connectFuture().channel() != null) {
             if (req.handshakeCloseListener() != null) {
@@ -692,10 +725,10 @@ public abstract class TcpMultiplexer {
     }
 
     private static void notifyPeerFin(TcpSock sk) {
-        UserChannelBridge bridge = sk.userChannelBridge();
-        if (bridge != null) {
+        TcpSockHandler h = sk.handler();
+        if (h != null) {
             try {
-                bridge.onPeerFin();
+                h.onPeerFin();
             } catch (Throwable ignore) {
                 // 保护:用户 handler 异常不影响状态机推进
             }
@@ -798,63 +831,12 @@ public abstract class TcpMultiplexer {
         sk.keepaliveTimerAction(() -> tcp_keepalive_timer(sk));
 
         /*
-         * 分支 B:TcpChannelFactory 模式 — 上层用户 pipeline 接管 payload。
-         * 不挂 backend childChannel 的透传 handler,不装 childCloseListener;
-         * 由 userChannel 的 doClose 触发 FIN、onSocketDestroyed 触发 fireChannelInactive。
+         * 统一走 initializer.onEstablished(sk, this) — initializer 构造期已 requireNonNull:
+         * - TcpChannelFactory:创建 TcpChannel,用户 pipeline 接管 payload
+         * - BackendProxyInitializer (ext.backend):backend 透传,挂 BackendProxyHandler 并装反向适配器
+         * - TcpSockInitializer.DENY:onRequest 阶段已直接发 RST 销毁 req,此路径不会触发
          */
-        if (userChannelInitializer != null) {
-            userChannelInitializer.onEstablished(sk, this);
-            armKeepalive(sk, sk.keepaliveTimeMs());
-            return;
-        }
-
-        /* 分支 A:backend 透传模式 — 原 v2 行为。 */
-        if (!sk.hasBackendChannel()) {
-            return;
-        }
-
-        final Channel childChannel = sk.childChannel();
-        final ChannelFutureListener handshakeCloseListener = sk.childCloseListener();
-        sk.childCloseListener(future -> {
-            final TcpConnectionState state = sk.state();
-            if (tcp_close_state(sk)) {
-                TcpOutput.INSTANCE.tcp_send_fin(sk);
-            }
-        });
-
-        childChannel.closeFuture().addListener(sk.childCloseListener());
-        if (handshakeCloseListener != null) {
-            childChannel.closeFuture().removeListener(handshakeCloseListener);
-        }
-        childChannel.pipeline().addLast(new ChannelInboundHandlerAdapter() {
-            @Override
-            public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-                try {
-                    final ByteBuf buf = (ByteBuf) msg;
-                    final int mss = TcpOutput.INSTANCE.tcp_current_mss(sk);
-                    final int total = buf.readableBytes();
-
-                    for (int offset = 0; offset < total; ) {
-                        final int len = Math.min(total - offset, mss);
-                        final boolean flush = offset + len >= total;
-                        enqueueWrite(sk, buf.retainedSlice(buf.readerIndex() + offset, len), flush);
-                        offset += len;
-                    }
-                } finally {
-                    ReferenceCountUtil.release(msg);
-                }
-            }
-
-            @Override
-            public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-                TcpOutput.INSTANCE.tcp_send_reset(sk);
-                tcp_done(sk);
-                if (ctx.channel().isOpen()) {
-                    ctx.channel().close();
-                }
-            }
-        });
-        childChannel.config().setAutoRead(true);
+        initializer.onEstablished(sk, this);
         armKeepalive(sk, sk.keepaliveTimeMs());
     }
 
@@ -1009,21 +991,16 @@ public abstract class TcpMultiplexer {
     }
 
     protected void consume(TcpSock sk, ByteBuf data) {
-        if (sk == null) {
+        /*
+         * P1.3 单一出口:sink 统一走 sock.handler()。listenSock 不经本路径,
+         * 但 handler==null(destroy 途中、异常装配)时防御性 release,不泄露。
+         */
+        TcpSockHandler handler = sk == null ? null : sk.handler();
+        if (handler == null) {
             data.release();
             return;
         }
-        // 优先级:userChannel > backendChannel > DataConsumer
-        UserChannelBridge bridge = sk.userChannelBridge();
-        if (bridge != null) {
-            bridge.onInboundData(data);
-            return;
-        }
-        if (sk.hasBackendChannel()) {
-            sk.childChannel().writeAndFlush(data);
-            return;
-        }
-        dataConsumer.onData(sk.fourTuple(), data);
+        handler.onInboundData(data);
     }
 
     public void enqueueWrite(TcpSock sk, ByteBuf data, boolean flush) {

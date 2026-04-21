@@ -145,15 +145,15 @@ public class TcpIncomingPreValidator {
         sock.skErr(err);
 
         /*
-         * 在销毁 sock 之前先通知 userChannel —— 保证用户 pipeline 的
+         * 在销毁 sock 之前先通知 handler —— 保证用户 pipeline 的
          * exceptionCaught 能拿到 cause,避免 resetAction → tcp_done 导致
-         * channel 先 inactive 而丢失错误信息。bridge 实现会 closeForcibly
-         * 并清掉 userChannelBridge,后续 sock.close 不再二次回调。
+         * channel 先 inactive 而丢失错误信息。handler 实现会 closeForcibly
+         * 并清掉 sock.handler,后续 sock.close 不再二次回调。
          */
-        UserChannelBridge bridge = sock.userChannelBridge();
-        if (bridge != null) {
+        TcpSockHandler h = sock.handler();
+        if (h != null) {
             try {
-                bridge.onReset(errException(err));
+                h.onReset(errException(err));
             } catch (Throwable ignore) {
                 // 保护:用户 handler 异常不影响 reset 流程
             }

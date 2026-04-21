@@ -438,9 +438,9 @@ public final class TcpAck {
          * 本路径无论 ackedPcount 是否 > 0 都通知 — 即使段不完整吞掉,SACK/LOST 计数的
          * 变化也可能影响后续可写度判定(保守)。
          */
-        UserChannelBridge bridge = sock.userChannelBridge();
-        if (bridge != null) {
-            bridge.onWritabilityChanged();
+        TcpSockHandler h = sock.handler();
+        if (h != null) {
+            h.onWritabilityChanged();
         }
 
         // 对齐 Linux tcp_clean_rtx_queue 不对 tp->undo_retrans 做递减;该字段只由

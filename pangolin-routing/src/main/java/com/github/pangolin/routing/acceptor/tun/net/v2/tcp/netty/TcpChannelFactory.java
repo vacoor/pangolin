@@ -2,7 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty;
 
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.UserChannelInitializer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSockInitializer;
 import io.netty.channel.ChannelFuture;
 
 /**
@@ -22,11 +22,11 @@ import io.netty.channel.ChannelFuture;
  * <p>工厂必须返回**尚未 register** 的 channel;register 与 {@code fireChannelActive} 由
  * {@link #onEstablished} 的默认实现自动触发,保证事件顺序与 {@code NioSocketChannel} 一致。
  *
- * <p>本接口直接实现 {@link UserChannelInitializer},可以原样传入 {@code Tcp4Multiplexer}
+ * <p>本接口直接实现 {@link TcpSockInitializer},可以原样传入 {@code Tcp4Multiplexer}
  * 的工厂模式构造,无需手写 adapter。
  */
 @FunctionalInterface
-public interface TcpChannelFactory extends UserChannelInitializer {
+public interface TcpChannelFactory extends TcpSockInitializer {
 
     TcpChannel create(TcpSock sock, TcpMultiplexer multiplexer);
 

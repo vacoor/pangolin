@@ -6,7 +6,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSendBuffer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.UserChannelBridge;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSockHandler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.AbstractChannel;
 import io.netty.channel.ChannelConfig;
@@ -33,7 +33,7 @@ import java.util.Deque;
  *   <li>{@code TcpMultiplexer} 在 {@code sock.eventLoop()} 上调
  *       {@code eventLoop.register(ch)} → {@code pipeline.fireChannelActive()};</li>
  *   <li>读路径:{@code TcpMultiplexer.consume} 分流到
- *       {@link UserChannelBridge#onInboundData},经本类内部 autoRead 门控后
+ *       {@link TcpSockHandler#onInboundData},经本类内部 autoRead 门控后
  *       {@code fireChannelRead};</li>
  *   <li>写路径:用户 {@code ctx.writeAndFlush(ByteBuf)} → {@link #doWrite} 按 MSS 分片
  *       落到 {@code TcpMultiplexer.enqueueWrite};</li>
@@ -77,7 +77,7 @@ public class TcpChannel extends AbstractChannel {
         this.sock = sock;
         this.multiplexer = multiplexer;
         this.config = new TcpChannelConfig(this);
-        sock.userChannelBridge(new BridgeImpl());
+        sock.handler(new BridgeImpl());
     }
 
     public TcpSock sock() {
@@ -146,8 +146,8 @@ public class TcpChannel extends AbstractChannel {
         drainPendingInboundReleasing();
 
         // 与 sock 解绑,让后续 inet_csk_destroy_sock 不再回调本 channel
-        if (sock.userChannelBridge() != null) {
-            sock.userChannelBridge(null);
+        if (sock.handler() != null) {
+            sock.handler(null);
         }
     }
 
@@ -324,10 +324,10 @@ public class TcpChannel extends AbstractChannel {
     }
 
     /**
-     * {@link UserChannelBridge} 内联实现 — 把 core 层的协议栈事件转成 Netty pipeline 事件。
+     * {@link TcpSockHandler} 内联实现 — 把 core 层的协议栈事件转成 Netty pipeline 事件。
      * 所有方法均假定已在 {@code sock.eventLoop()} 上。
      */
-    private final class BridgeImpl implements UserChannelBridge {
+    private final class BridgeImpl implements TcpSockHandler {
         @Override
         public void onInboundData(ByteBuf data) {
             fireChannelReadFromTcp(data);

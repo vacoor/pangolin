@@ -48,6 +48,18 @@ public final class TcpRequestSock extends SockCommon {
     private Channel childChannel;
     private ChannelFutureListener handshakeCloseListener;
     private TcpPacketBuf synPacket;
+    /**
+     * 入站 SYN 的 Netty context — P2.1 起 {@link TcpSockInitializer#onRequest} 可能需要借它
+     * 发 RST(DENY 路径)或 fallback 写 SYN-ACK。由 {@code tcp_v4_conn_request} 在 SYN 到达时填入。
+     */
+    private ChannelHandlerContext net;
+    /**
+     * Initializer 私有 attachment 单槽 — P2.1 起 {@link TcpSockInitializer} 可以在此
+     * 挂一组自定义状态(Netty {@code AttributeMap} 风格)。core 不感知内容,只在
+     * {@link TcpMultiplexer#inet_csk_destroy_sock(TcpRequestSock)} 前回调
+     * {@link TcpSockInitializer#onRequestDestroyed} 让 initializer 清理。
+     */
+    private Object attachment;
 
     // ── request_sock (Linux include/net/request_sock.h) ────────────────
     /** Request 定时器槽 — 对应 {@code request_sock.rsk_timer}。 */
@@ -137,6 +149,22 @@ public final class TcpRequestSock extends SockCommon {
 
     public void synPacket(TcpPacketBuf synPacket) {
         this.synPacket = synPacket;
+    }
+
+    public ChannelHandlerContext net() {
+        return net;
+    }
+
+    public void net(ChannelHandlerContext net) {
+        this.net = net;
+    }
+
+    public Object attachment() {
+        return attachment;
+    }
+
+    public void attachment(Object attachment) {
+        this.attachment = attachment;
     }
 
     @Override

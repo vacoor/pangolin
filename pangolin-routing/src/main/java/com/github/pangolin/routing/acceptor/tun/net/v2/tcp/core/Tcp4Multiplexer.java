@@ -10,15 +10,10 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConfig;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimewaitSock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimerScheduler;
-import com.github.pangolin.routing.support.SocketChannelFactory;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
-
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
 
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpAck.FLAG_NO_CHALLENGE_ACK;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpAck.FLAG_SLOWPATH;
@@ -29,39 +24,23 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequen
 
 @Slf4j
 public class Tcp4Multiplexer extends TcpMultiplexer {
-    private final SocketChannelFactory socketChannelFactory;
-    private final EventLoopGroup childGroup;
-    private final int connTimeoutMs;
 
-    public Tcp4Multiplexer(TcpConfig config) {
-        this(config, null, null, null);
-    }
-
-    public Tcp4Multiplexer(TcpConfig config, DataConsumer dataConsumer) {
-        this(config, null, null, dataConsumer);
-    }
-
-    public Tcp4Multiplexer(TcpConfig config,
-                           SocketChannelFactory socketChannelFactory,
-                           EventLoopGroup childGroup,
-                           DataConsumer dataConsumer) {
-        super(config, dataConsumer);
-        this.socketChannelFactory = socketChannelFactory;
-        this.childGroup = childGroup;
-        this.connTimeoutMs = 5_000;
+    /**
+     * 工厂模式构造:三次握手完成后由 {@link TcpSockInitializer#onEstablished}
+     * 挂 {@link TcpSockHandler}(如 netty 子包的 {@code TcpChannelFactory} 创建
+     * {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannel},
+     * 或 ext.backend 子包的 {@code BackendProxyInitializer} 透传到 backend)。
+     */
+    public Tcp4Multiplexer(TcpConfig config, TcpSockInitializer initializer) {
+        this(config, initializer, null);
     }
 
     /**
-     * 工厂模式构造:三次握手完成后不再连 backend,改由
-     * {@link UserChannelInitializer#onEstablished} 创建用户 Channel 接管 payload。
-     * 用户 pipeline 在 {@code fireChannelActive} 后可按 Netty 标准语义收发数据。
+     * 工厂模式 + 独立 {@code tcpGroup}:为每条已建立连接从 {@code tcpGroup.next()}
+     * 绑定专属 EL,与 TUN EL 解耦,避免所有连接串在 TUN 单线程上。
      */
-    public Tcp4Multiplexer(TcpConfig config, UserChannelInitializer userChannelInitializer) {
-        super(config);
-        this.socketChannelFactory = null;
-        this.childGroup = null;
-        this.connTimeoutMs = 5_000;
-        this.userChannelInitializer = userChannelInitializer;
+    public Tcp4Multiplexer(TcpConfig config, TcpSockInitializer initializer, EventLoopGroup tcpGroup) {
+        super(config, tcpGroup, initializer);
     }
 
     @Override
@@ -86,6 +65,27 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
     @Override
     public void inet_rtx_syn_ack(ChannelHandlerContext net, TcpSock listenSock, TcpRequestSock req) {
         req.request().retransmitSynAck(net.channel());
+    }
+
+    /**
+     * P2.1:SYN-ACK 调度入口 — 由 {@link TcpSockInitializer#onRequest} 决定何时调用。
+     *
+     * <p><b>契约</b>:调用前 {@code tcp_v4_conn_request} 已完成
+     * {@code req.synPacket(pkt.retain()) / req.net(net)},本方法只装 failure / close listener
+     * 并触发 {@code sendSynAckAfterBackendConnected}。synPacket 的释放由 {@code moveToEstablished}
+     * 或 {@code inet_csk_destroy_sock(req)} 负责,balance 与 conn_request 的单次 retain 对齐。
+     */
+    @Override
+    public void sendSynAck(TcpRequestSock req) {
+        final ChannelHandlerContext net = req.net();
+        req.request().synAckFailureAction(() -> inet_csk_destroy_sock(req));
+        req.handshakeCloseListener(future -> {
+            if (req.synPacket() != null) {
+                TcpOutput.INSTANCE.tcp_v4_send_reset(net, req.synPacket());
+            }
+            inet_csk_destroy_sock(req);
+        });
+        req.request().sendSynAckAfterBackendConnected(net.channel());
     }
 
     @Override
@@ -122,7 +122,25 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
             sk = nsk;
         }
 
-        TcpSock sockToUse = (TcpSock) sk;
+        final TcpSock sockToUse = (TcpSock) sk;
+        // 对齐 v1:ESTABLISHED 连接的状态机处理跳到该 sock 绑定的 EL 执行,TUN EL 只负责派发。
+        // listenSock 无专属 EL,其 eventLoop() 回退到 TUN EL,本分支自然等价于原地执行。
+        final EventLoop loop = sockToUse.eventLoop();
+        if (loop == null || loop.inEventLoop()) {
+            tcp_v4_do_rcv_safely(net, sockToUse, pkt);
+        } else {
+            pkt.retain();
+            loop.execute(() -> {
+                try {
+                    tcp_v4_do_rcv_safely(net, sockToUse, pkt);
+                } finally {
+                    pkt.release();
+                }
+            });
+        }
+    }
+
+    private void tcp_v4_do_rcv_safely(ChannelHandlerContext net, TcpSock sockToUse, TcpPacketBuf pkt) {
         try {
             int err = tcp_v4_do_rcv(net, sockToUse, pkt);
             if (err != 0) {
@@ -382,12 +400,6 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7195">tcp_conn_request</a>
      */
     protected TcpRequestSock tcp_v4_conn_request(ChannelHandlerContext net, TcpSock listenSock, TcpPacketBuf pkt) {
-        // backend 透传模式或工厂模式任一满足即可继续握手;两者都缺失时视为未配置,RST。
-        if ((socketChannelFactory == null || childGroup == null) && userChannelInitializer == null) {
-            send_reset(net, pkt, -88);
-            return null;
-        }
-
         TcpHandshaker handshaker = handshakerFactory.newHandshaker(pkt);
         TcpRequestSock req = new TcpRequestSock(FourTuple.of(pkt), listenSock, handshaker);
         tcp_openreq_init(req, handshaker, pkt);
@@ -396,9 +408,19 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         req.rsk_timer = null;
         req.num_retrans = 0;
 
-        // 半连接入队 + 发起后端连接(对齐 v1 tcp_conn_request 内 addToHalfQueue + open backend)
+        /*
+         * 对齐 Linux {@code tcp_conn_request}:addToHalfQueue 先入队,再交给
+         * initializer 决定 SYN-ACK 发送时机:
+         *   - 默认实现立发(对应 listener 已就绪)
+         *   - BackendProxyInitializer 先连 backend 再发(保留 v1 "backend 连上再 SYN-ACK" 语义)
+         *   - DENY 立发 RST + 销毁 req(对齐 "无 listener → RST")
+         * synPacket / net 在此统一 retain + stash;lifetime 与 req 绑定,由
+         * moveToEstablished 或 inet_csk_destroy_sock(req) 负责释放。
+         */
         addToHalfQueue(listenSock, req);
-        startHandshake(net, req, pkt);
+        req.net(net);
+        req.synPacket((TcpPacketBuf) pkt.retain());
+        initializer.onRequest(req, this);
         return req;
     }
 
@@ -437,6 +459,15 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         TcpSock newsk = init(req.request().buildChildSock(net.channel(), req.childChannel(), pkt));
         newsk.childCloseListener(req.handshakeCloseListener());
         newsk.state(TcpConnectionState.TCP_SYN_RECV);
+        // 对齐 v1:每条 ESTABLISHED 连接绑定专属 EL,状态机 / 定时器 / sink 全部在该 EL 上串行。
+        // initializer.proposeEventLoop 优先(BackendProxyInitializer 会返回 backend EL,保留
+        // "状态机与 backend I/O 同线程"语义);返回 null 时回退到 tcpGroup.next()。
+        EventLoop proposed = initializer.proposeEventLoop(req, this);
+        if (proposed != null) {
+            newsk.tcpEventLoop(proposed);
+        } else if (tcpGroup != null) {
+            newsk.tcpEventLoop(tcpGroup.next());
+        }
         // B4: 子 sock MSS 同步(对齐 v1 tcp_create_openreq_child → output.tcp_sync_mss)
         TcpOutput.INSTANCE.tcp_sync_mss(newsk, 0);
         return newsk;
@@ -500,64 +531,6 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         int seq = pkt.tcpSeq();
         int endSeq = determineEndSeq(pkt);
         return endSeq != seq && after(endSeq - (pkt.isFin() ? 1 : 0), sk.rcvNxt());
-    }
-
-    private void startHandshake(ChannelHandlerContext net, TcpRequestSock req, TcpPacketBuf pkt) {
-        /*
-         * 工厂模式:无 backend,SYN-ACK 立发;握手失败由 synAckFailureAction 收尾。
-         * 对齐 Linux 被动 open 路径:不需要等任何外部事件即可回 SYN-ACK。
-         */
-        if (userChannelInitializer != null) {
-            req.synPacket((TcpPacketBuf) pkt.retain());
-            req.request().synAckFailureAction(() -> inet_csk_destroy_sock(req));
-            req.handshakeCloseListener(future -> {
-                if (req.synPacket() != null) {
-                    TcpOutput.INSTANCE.tcp_v4_send_reset(net, req.synPacket());
-                }
-                inet_csk_destroy_sock(req);
-            });
-            req.request().sendSynAckAfterBackendConnected(net.channel());
-            return;
-        }
-
-        if (socketChannelFactory == null || childGroup == null) {
-            send_reset(net, pkt, -88);
-            inet_csk_destroy_sock(req);
-            return;
-        }
-
-        final InetSocketAddress target = resolveTarget(pkt);
-        req.synPacket((TcpPacketBuf) pkt.retain());
-        req.request().synAckFailureAction(() -> inet_csk_destroy_sock(req));
-        req.handshakeCloseListener(future -> {
-            if (req.synPacket() != null) {
-                TcpOutput.INSTANCE.tcp_v4_send_reset(net, req.synPacket());
-            }
-            inet_csk_destroy_sock(req);
-        });
-
-        req.connectFuture(socketChannelFactory.open(target, connTimeoutMs, false, childGroup, new ChannelInboundHandlerAdapter() {
-        }).addListener((ChannelFutureListener) future -> {
-            if (future.isSuccess()) {
-                req.childChannel(future.channel());
-                req.request().sendSynAckAfterBackendConnected(net.channel());
-                future.channel().closeFuture().addListener(req.handshakeCloseListener());
-            } else {
-                if (req.synPacket() != null) {
-                    req.request().sendResetAndAbort(net.channel(), req.synPacket());
-                }
-                inet_csk_destroy_sock(req);
-            }
-        }));
-    }
-
-    private InetSocketAddress resolveTarget(TcpPacketBuf pkt) {
-        final InetAddress resolved = pkt.resolvedDstAddr() != null ? pkt.resolvedDstAddr() : pkt.dstAddr();
-        final String host = resolved.getHostName();
-        if (!resolved.getHostAddress().equals(host)) {
-            return InetSocketAddress.createUnresolved(host, pkt.tcpDstPort());
-        }
-        return new InetSocketAddress(resolved, pkt.tcpDstPort());
     }
 
     private void onFinWait2Keepalive(TcpSock sk) {

@@ -54,11 +54,11 @@ public class TcpSock extends SockCommon {
     private Channel childChannel;
     private ChannelFutureListener childCloseListener;
     /**
-     * 外部 Netty {@code TcpChannel} 回调桥 — 由
-     * {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannel}
-     * 在构造/register 时注入。不为 {@code null} 表示这条连接由用户 pipeline 接管。
+     * 挂在 sock 上的业务事件回调 — 由 {@link TcpSockInitializer#onEstablished} 注入。
+     * 典型实现是 netty 子包的 {@code TcpChannel},或 ext.backend 子包的
+     * {@code BackendProxyHandler}。不为 {@code null} 表示这条连接已装配业务层。
      */
-    private UserChannelBridge userChannelBridge;
+    private TcpSockHandler handler;
     /**
      * 应用层 autoRead 反压标志 — {@code true} 时 {@code queue_and_out} 仍把数据放入
      * {@link TcpReceiveBuffer}(保持 rcv_nxt 推进 / ACK 正常),但不再 drain 到
@@ -585,16 +585,16 @@ public class TcpSock extends SockCommon {
         this.childCloseListener = listener;
     }
 
-    public UserChannelBridge userChannelBridge() {
-        return userChannelBridge;
+    public TcpSockHandler handler() {
+        return handler;
     }
 
-    public void userChannelBridge(UserChannelBridge bridge) {
-        this.userChannelBridge = bridge;
+    public void handler(TcpSockHandler handler) {
+        this.handler = handler;
     }
 
-    public boolean hasUserChannel() {
-        return userChannelBridge != null;
+    public boolean hasHandler() {
+        return handler != null;
     }
 
     public boolean rcvPaused() {
@@ -605,8 +605,27 @@ public class TcpSock extends SockCommon {
         this.rcvPaused = v;
     }
 
+    /**
+     * 该连接的专属 EventLoop — 对齐 v1 里 {@code childChannel.eventLoop()} 的角色,
+     * 由 {@code Tcp4Multiplexer#tcp_v4_syn_recv_sock} 在建立 child sock 时从
+     * {@code tcpGroup.next()} 分配。为 {@code null} 时回退到 TUN {@code channel.eventLoop()}
+     * (保持 listenSock / 无专属 EL 场景的兼容)。
+     *
+     * <p>线程模型:一旦绑定,该 sock 的状态机、timer、user channel pipeline 及(可选的)
+     * backend channel 都跑在这条 EL 上,入站分发由 {@code tcp_v4_rcv} 负责在 TUN EL →
+     * sock EL 之间 {@code execute} 跳转。
+     */
+    private EventLoop tcpEventLoop;
+
     public EventLoop eventLoop() {
+        if (tcpEventLoop != null) {
+            return tcpEventLoop;
+        }
         return channel == null ? null : channel.eventLoop();
+    }
+
+    public void tcpEventLoop(EventLoop el) {
+        this.tcpEventLoop = el;
     }
 
     public int sndUna() {
@@ -940,17 +959,17 @@ public class TcpSock extends SockCommon {
             childChannel.close();
         }
         /*
-         * userChannelBridge 必须在 sendBuffer / receiveBuffer release 之前收到
+         * handler 必须在 sendBuffer / receiveBuffer release 之前收到
          * onSocketDestroyed 回调,保证 fireChannelInactive 之后用户 handler 调
          * ctx.channel() 或 ctx.pipeline() 时底层状态仍可观测(仅用于诊断)。
          * 实际 ByteBuf 引用计数由 pipeline 的 release-handler 负责,此处仅
          * 释放缓冲区整体。
          */
-        if (userChannelBridge != null) {
-            UserChannelBridge bridge = userChannelBridge;
-            userChannelBridge = null;
+        if (handler != null) {
+            TcpSockHandler h = handler;
+            handler = null;
             try {
-                bridge.onSocketDestroyed();
+                h.onSocketDestroyed();
             } catch (Throwable ignore) {
                 // 保护:用户 handler 异常不影响 sock 清理
             }
