@@ -86,7 +86,7 @@ public class WindowsTunAdapterV2 extends TunAdapterV2 {
                     packet.put(packetPointer.getByteBuffer(0, size));
                     packet.flip();
 
-                    final int ipVersion = packetPointer.getByte(0) >> 4;
+                    final int ipVersion = (packetPointer.getByte(0) & 0xF0) >>> 4;
                     log.trace("IPv{} packet read.", ipVersion);
                     return packet;
                 } finally {
@@ -209,13 +209,15 @@ public class WindowsTunAdapterV2 extends TunAdapterV2 {
                                            final String type,
                                            final GUID guid, final int mtu,
                                            final InterfaceAddressEx... bindings) throws IOException {
-        WINTUN_ADAPTER_HANDLE adapter = null;
-        WINTUN_SESSION_HANDLE session = null;
-        HANDLE shutdownEvent = null;
-        int i = 0;
+        int retry = 0;
         do {
+            WINTUN_ADAPTER_HANDLE adapter = null;
+            WINTUN_SESSION_HANDLE session = null;
+            HANDLE shutdownEvent = null;
+            boolean success = false;
             try {
-                if (null == (adapter = tryWintunOpenAdapter(name, guid))) {
+                adapter = tryWintunOpenAdapter(name, guid);
+                if (null == adapter) {
                     log.info("Try create WintunAdapter: {}", name);
                     adapter = WintunCreateAdapter(new WString(name), new WString(type), guid);
                 }
@@ -268,36 +270,29 @@ public class WindowsTunAdapterV2 extends TunAdapterV2 {
                     );
                 }
 
-                return new WindowsTunAdapterV2(luid, name, mtuToUse, adapter, session, shutdownEvent);
+                final WindowsTunAdapterV2 instance =
+                        new WindowsTunAdapterV2(luid, name, mtuToUse, adapter, session, shutdownEvent);
+                success = true;
+                return instance;
             } catch (final LastErrorException e) {
-                if (null != session) {
-                    WintunEndSession(session);
-                    session = null;
-                }
-                if (null != adapter) {
-                    WintunCloseAdapter(adapter);
-                    adapter = null;
-                }
-                if (null != shutdownEvent) {
-                    Kernel32.INSTANCE.CloseHandle(shutdownEvent);
-                    shutdownEvent = null;
-                }
-
-                if (WinError.ERROR_ALREADY_EXISTS == e.getErrorCode() && ++i < 3) {
+                // 只负责把 LastError 翻译为"是否 retry / 否则包成 IOException"；
+                // 资源清理由 finally 按 success flag 统一处理。
+                if (WinError.ERROR_ALREADY_EXISTS == e.getErrorCode() && ++retry < 3) {
                     continue;
                 }
                 throw new IOException(e);
-            } catch (final IOException e) {
-                if (null != session) {
-                    WintunEndSession(session);
+            } finally {
+                if (!success) {
+                    if (null != session) {
+                        WintunEndSession(session);
+                    }
+                    if (null != adapter) {
+                        WintunCloseAdapter(adapter);
+                    }
+                    if (null != shutdownEvent) {
+                        Kernel32.INSTANCE.CloseHandle(shutdownEvent);
+                    }
                 }
-                if (null != adapter) {
-                    WintunCloseAdapter(adapter);
-                }
-                if (null != shutdownEvent) {
-                    Kernel32.INSTANCE.CloseHandle(shutdownEvent);
-                }
-                throw e;
             }
         } while (true);
     }

@@ -12,27 +12,27 @@ import java.nio.ByteBuffer;
  * <p>只列 v2 需要的符号，不复用 v1 {@code unix/jna/LibC}，两条路径独立演进。
  *
  * <h3>epoll_event 处理</h3>
- * <p>glibc 在 x86_64 把 {@code struct epoll_event} 定义为 {@code __attribute__((packed))}
- * 的 12 字节布局，而 JNA {@code Structure} 默认按 8 字节对齐会排到 16 字节。为避免不同
- * JNA 版本对 {@code @Aligned(1)} / {@code getNativeAlignment()=1} 的行为差异，本实现
- * 直接用 {@link Pointer} + {@link com.sun.jna.Memory} 按字节偏移裸写：
+ * <p>glibc 在 x86 系（i386 / x86_64）把 {@code struct epoll_event} 定义为
+ * {@code __attribute__((packed))} 的 12 字节布局，而 JNA {@code Structure} 默认按 8 字节
+ * 对齐会排到 16 字节。为避免不同 JNA 版本对 {@code @Aligned(1)} /
+ * {@code getNativeAlignment()=1} 的行为差异，本实现直接用 {@link Pointer} +
+ * {@link com.sun.jna.Memory} 按字节偏移裸写：
  * <pre>
- *   offset 0, 4 bytes : uint32_t events
- *   offset 4, 8 bytes : uint64_t data   // 只存 fd
+ *   x86 系（packed, 12B）        其他架构（非 packed, 16B）
+ *   offset 0, 4 : uint32_t events  offset 0,  4 : uint32_t events
+ *   offset 4, 8 : uint64_t data    offset 4,  4 : padding
+ *                                  offset 8,  8 : uint64_t data
  * </pre>
- * 大小由 {@link #EPOLL_EVENT_SIZE} 给出。
- *
- * <p>⚠️ aarch64 上 {@code epoll_event} 非 packed（16 字节）；当前按 x86_64 取 12，
- * 若要支持 arm64 Linux，需根据 {@code System.getProperty("os.arch")} 切换。
+ * 尺寸与偏移由 {@link EpollEventLayout} 在类加载时根据 {@code os.arch} 一次性解析并固定。
  */
 public interface LibCEpoll extends Library {
 
     LibCEpoll INSTANCE = Native.load("c", LibCEpoll.class);
 
-    /** x86_64 glibc 下的 epoll_event 尺寸；arm64 需改为 16。 */
-    int EPOLL_EVENT_SIZE = 12;
-    int EPOLL_EVENT_EVENTS_OFFSET = 0;
-    int EPOLL_EVENT_DATA_OFFSET = 4;
+    /** epoll_event 尺寸：x86 系 12，其他架构 16（aarch64 / arm / ppc 等）。 */
+    int EPOLL_EVENT_SIZE = EpollEventLayout.SIZE;
+    int EPOLL_EVENT_EVENTS_OFFSET = EpollEventLayout.EVENTS_OFFSET;
+    int EPOLL_EVENT_DATA_OFFSET = EpollEventLayout.DATA_OFFSET;
 
     int EPOLL_CTL_ADD = 1;
     int EPOLL_CTL_DEL = 2;

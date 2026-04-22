@@ -1,21 +1,16 @@
 package com.github.pangolin.routing.acceptor.tun.adapter.windows.jna;
 
-import static com.sun.jna.platform.win32.WinDef.DWORD;
-import static com.sun.jna.platform.win32.WinNT.HANDLE;
-import static org.drasyl.channel.tun.jna.windows.loader.LibraryLoader.PREFER_SYSTEM;
-
+import com.github.pangolin.routing.acceptor.tun.adapter.windows.WintunLoader;
 import com.sun.jna.LastErrorException;
-import com.sun.jna.NativeLibrary;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.platform.win32.Guid.GUID;
 import com.sun.jna.platform.win32.WinDef;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.LongByReference;
-import io.netty.util.internal.SystemPropertyUtil;
-import org.drasyl.channel.tun.jna.windows.loader.LibraryLoader;
 
-import java.io.IOException;
+import static com.sun.jna.platform.win32.WinDef.DWORD;
+import static com.sun.jna.platform.win32.WinNT.HANDLE;
 
 /**
  * JNA mapping for the <a href="https://www.wintun.net/">Wintun Network Adapter</a>.
@@ -42,14 +37,15 @@ public final class WintunLib {
         // FIXME
         // Load wintun.dll via JNA system library search (replaces netty-tun LibraryLoader
         // which requires Java 11 and is incompatible with the project's Java 8 target).
-        try {
-            final String mode = SystemPropertyUtil.get("tun.native.mode", PREFER_SYSTEM);
-            new LibraryLoader(WintunLib.class).loadLibrary(mode, "wintun");
-        } catch (final IOException e) {
-            throw new RuntimeException(e); // NOSONAR
-        } catch (final UnsatisfiedLinkError e) {
-            throw new RuntimeException("Failed to load wintun native library", e); // NOSONAR
-        }
+//        try {
+            WintunLoader.loadLibrary(WintunLib.class, "wintun", WintunLoader.PREFER_SYSTEM);
+//            final String mode = SystemPropertyUtil.get("tun.native.mode", PREFER_SYSTEM);
+//            new LibraryLoader(WintunLib.class).loadLibrary(mode, "wintun");
+//        } catch (final IOException e) {
+//            throw new RuntimeException(e); // NOSONAR
+//        } catch (final UnsatisfiedLinkError e) {
+//            throw new RuntimeException("Failed to load wintun native library", e); // NOSONAR
+//        }
     }
 
     private WintunLib() {

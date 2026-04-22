@@ -60,6 +60,7 @@ public class TunChannelV2 extends AbstractChannel {
     private boolean readPending;
     private final EventLoop readLoop = new DefaultEventLoop();
     private TunAdapterV2 device;
+    private TunAddress localAddress;
     private boolean closed;
 
     public TunChannelV2() {
@@ -88,8 +89,7 @@ public class TunChannelV2 extends AbstractChannel {
 
     @Override
     protected SocketAddress localAddress0() {
-        // FIXME
-        return null;
+        return localAddress;
     }
 
     @Override
@@ -114,6 +114,7 @@ public class TunChannelV2 extends AbstractChannel {
         } else {
             device = LinuxTunAdapterV2.open(ifname, mtu, bindings);
         }
+        this.localAddress = new TunAddress(device.name(), bindings);
         log.info("TUN adapter v2 initialized: {}", device.name());
     }
 

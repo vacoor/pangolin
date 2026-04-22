@@ -35,10 +35,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <h3>线程契约</h3>
  * <ul>
- *   <li>{@link #read()} <b>仅允许单线程调用</b>（读线程）。</li>
- *   <li>{@link #wakeup()} <b>线程安全</b>，可从任意线程调。</li>
- *   <li>{@link #close()} 由调用方承诺：<b>读线程已退出或从未启动</b>。违反会 UAF。</li>
- *   <li>推荐在 read 循环的 {@code finally} 里调 {@code close()} —— 物理上不可能与 read 并发。</li>
+ *   <li>{@link #read()} 与 {@link #write(ByteBuffer[])} <b>各自单线程</b>——不允许两个线程
+ *       同时调 {@code read}，也不允许两个线程同时调 {@code write}；但 <b>读线程与写线程
+ *       可以是不同的两个线程并发跑</b>（全双工）。</li>
+ *   <li>{@link #wakeup()} <b>线程安全</b>，可从任意线程调；关 closed 后为 no-op，永远不会
+ *       碰 fd / handle。</li>
+ *   <li>{@link #close()} 由调用方承诺：<b>读/写线程已退出或从未启动</b>。违反会 UAF
+ *       （fd/handle 已被 OS 回收并可能重用给无关资源，然后读写继续调就会踩到别人的 fd）。</li>
+ *   <li>推荐在 read 循环的 {@code finally} 里调 {@code close()} —— 物理上不可能与 read 并发；
+ *       如果有独立写线程，需先让写线程退出再 close。</li>
  * </ul>
  */
 public abstract class TunAdapterV2 implements Closeable {

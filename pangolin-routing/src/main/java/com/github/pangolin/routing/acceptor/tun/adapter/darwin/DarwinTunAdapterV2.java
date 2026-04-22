@@ -159,7 +159,7 @@ public class DarwinTunAdapterV2 extends TunAdapterV2 {
                 throw new IOException("Unknown address family: " + addressFamily);
             }
 
-            final int ipVersion = buf.get(AF_BYTES) >> 4;
+            final int ipVersion = (buf.get(AF_BYTES) & 0xF0) >>> 4;
             log.trace("IPv{} packet read.", ipVersion);
 
             // skip 4-bytes address family
@@ -172,7 +172,7 @@ public class DarwinTunAdapterV2 extends TunAdapterV2 {
      */
     @Override
     protected void write0(final ByteBuffer[] packet) throws IOException {
-        final int ipVersion = packet[0].get(packet[0].position()) >> 4;
+        final int ipVersion = (packet[0].get(packet[0].position()) & 0xF0) >>> 4;
         final int addressFamily = addressFamily(ipVersion);
         final ByteBuffer addressFamilyBuf = ByteBuffer.allocateDirect(AF_BYTES);
         addressFamilyBuf.put(new byte[]{

@@ -61,6 +61,6 @@ public class DefaultTunChannelConfig extends DefaultChannelConfig implements Tun
             throw new IllegalArgumentException("mtu must be non-negative.");
         }
         this.mtu = mtu;
-        return null;
+        return this;
     }
 }

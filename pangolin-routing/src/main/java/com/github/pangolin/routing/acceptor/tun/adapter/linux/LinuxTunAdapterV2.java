@@ -123,7 +123,7 @@ public class LinuxTunAdapterV2 extends TunAdapterV2 {
             }
             buf.limit(bytesRead).position(0);
 
-            final int ipVersion = buf.get(0) >> 4;
+            final int ipVersion = (buf.get(0) & 0xF0) >>> 4;
             log.trace("IPv{} packet read.", ipVersion);
             return buf;
         }
