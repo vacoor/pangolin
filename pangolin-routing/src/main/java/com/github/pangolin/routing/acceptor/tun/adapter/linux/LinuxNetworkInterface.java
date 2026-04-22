@@ -597,7 +597,7 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
      * @param ifname the interface name
      * @return the value of the MTU for that interface.
      */
-    static int getMTU(final int fd, final String ifname) {
+    public static int getMTU(final int fd, final String ifname) {
         final ifreq ifr = new ifreq(ifname);
         return ioctl0(fd, SIOCGIFMTU, ifr).ifr_ifru.ifru_mtu;
     }
@@ -609,14 +609,14 @@ public class LinuxNetworkInterface extends UnixNetworkInterface implements Netwo
      * @param ifname the interface name
      * @param mtu    the value of the MTU for that interface.
      */
-    static void setMTU(final int fd, final String ifname, final int mtu) {
+    public static void setMTU(final int fd, final String ifname, final int mtu) {
         final ifreq ifr = new ifreq(ifname);
         ifr.ifr_ifru.setType("ifru_mtu");
         ifr.ifr_ifru.ifru_mtu = mtu;
         ioctl0(fd, SIOCSIFMTU, ifr);
     }
 
-    static ifaddrs getifaddrs0(final ifaddrs ifa) {
+    public static ifaddrs getifaddrs0(final ifaddrs ifa) {
         if (LIBC.getifaddrs(ifa) < 0) {
             throwLastErrorException(Native.getLastError());
         }

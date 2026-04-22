@@ -313,7 +313,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
      * @param ifname the interface name
      * @return the value of the MTU for that interface.
      */
-    static int getMTU0(final String ifname) {
+    public static int getMTU0(final String ifname) {
         final int fd = fd4();
         try {
             return getMTU(fd, ifname);
@@ -328,7 +328,7 @@ public class DarwinNetworkInterface extends UnixNetworkInterface implements Netw
      * @param ifname the interface name
      * @param mtu    the value of the MTU for that interface.
      */
-    static void setMTU0(final String ifname, final int mtu) {
+    public static void setMTU0(final String ifname, final int mtu) {
         final int fd = fd4();
         try {
             setMTU(fd, ifname, mtu);

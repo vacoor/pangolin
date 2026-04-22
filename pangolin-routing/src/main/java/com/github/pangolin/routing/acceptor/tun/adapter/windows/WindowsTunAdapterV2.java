@@ -1,7 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.adapter.windows;
 
 import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
-import com.github.pangolin.routing.acceptor.tun.adapter.TunAdapter;
+import com.github.pangolin.routing.acceptor.tun.adapter.ClosedByWakeupException;
+import com.github.pangolin.routing.acceptor.tun.adapter.TunAdapterV2;
 import com.github.pangolin.routing.acceptor.tun.adapter.windows.jna.IpHlpLib;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
@@ -26,24 +27,29 @@ import static com.sun.jna.platform.win32.IPHlpAPI.AF_INET;
  * Windows tun adapter based on <a href="https://www.wintun.net/">wintun</a>.
  */
 @Slf4j
-public class WindowsTunAdapter extends TunAdapter {
+public class WindowsTunAdapterV2 extends TunAdapterV2 {
     private static final int INFINITE = 0xFFFFFFFF;
+    private static final int WAIT_OBJECT_0 = 0x00000000;
+    private static final int WAIT_FAILED = 0xFFFFFFFF;
 
     private final long luid;
     private final String ifname;
     private final int mtu;
     private final WINTUN_ADAPTER_HANDLE adapter;
     private final WINTUN_SESSION_HANDLE session;
+    private final HANDLE shutdownEvent;
 
-    private WindowsTunAdapter(final long luid,
-                              final String ifname, final int mtu,
-                              final WINTUN_ADAPTER_HANDLE adapter,
-                              final WINTUN_SESSION_HANDLE session) {
+    private WindowsTunAdapterV2(final long luid,
+                                final String ifname, final int mtu,
+                                final WINTUN_ADAPTER_HANDLE adapter,
+                                final WINTUN_SESSION_HANDLE session,
+                                final HANDLE shutdownEvent) {
         this.luid = luid;
         this.ifname = ifname;
         this.mtu = mtu;
         this.adapter = adapter;
         this.session = session;
+        this.shutdownEvent = shutdownEvent;
     }
 
     /**
@@ -91,7 +97,15 @@ public class WindowsTunAdapter extends TunAdapter {
             } catch (final LastErrorException e) {
                 if (e.getErrorCode() == WinError.ERROR_NO_MORE_ITEMS) {
                     final HANDLE readEvent = WintunGetReadWaitEvent(session);
-                    Kernel32.INSTANCE.WaitForSingleObject(readEvent, INFINITE);
+                    final HANDLE[] events = new HANDLE[]{readEvent, shutdownEvent};
+                    final int r = Kernel32.INSTANCE.WaitForMultipleObjects(events.length, events, false, INFINITE);
+                    if (r == WAIT_OBJECT_0 + 1) {
+                        // shutdownEvent 被 SetEvent；manual-reset 保证后续 wait 也立即返回
+                        throw new ClosedByWakeupException();
+                    } else if (r == WAIT_FAILED) {
+                        throw new IOException("WaitForMultipleObjects failed, err=" + Native.getLastError());
+                    }
+                    // r == WAIT_OBJECT_0：tun 就绪，重试 WintunReceivePacket
                 } else if (e.getErrorCode() == WinError.ERROR_HANDLE_EOF) {
                     // disabled or remove.
                     throw e;
@@ -142,12 +156,25 @@ public class WindowsTunAdapter extends TunAdapter {
      * {@inheritDoc}
      */
     @Override
+    protected void wakeup0() throws IOException {
+        if (!Kernel32.INSTANCE.SetEvent(shutdownEvent)) {
+            throw new IOException("SetEvent(shutdownEvent) failed, err=" + Native.getLastError());
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
     protected void destroy0() {
         if (null != session) {
             WintunEndSession(session);
         }
         if (null != adapter) {
             WintunCloseAdapter(adapter);
+        }
+        if (null != shutdownEvent) {
+            Kernel32.INSTANCE.CloseHandle(shutdownEvent);
         }
     }
 
@@ -158,12 +185,14 @@ public class WindowsTunAdapter extends TunAdapter {
 
     /* ********************** */
 
-    public static WindowsTunAdapter open(final String name, final String type, final int mtu, final InterfaceAddressEx... bindings) throws IOException {
+    public static WindowsTunAdapterV2 open(final String name, final String type, final int mtu,
+                                           final InterfaceAddressEx... bindings) throws IOException {
         return open(name, type, (String) null, mtu, bindings);
     }
 
-    public static WindowsTunAdapter open(final String name, final String type,
-                                         final String guid, final int mtu, final InterfaceAddressEx... bindings) throws IOException {
+    public static WindowsTunAdapterV2 open(final String name, final String type,
+                                           final String guid, final int mtu,
+                                           final InterfaceAddressEx... bindings) throws IOException {
         final GUID guidToUse = null != guid ? GUID.fromString(guid) : GUID.newGuid();
         return open(name, type, guidToUse, mtu, bindings);
     }
@@ -176,12 +205,13 @@ public class WindowsTunAdapter extends TunAdapter {
      * @return the tun adapter
      * @throws IOException
      */
-    public static WindowsTunAdapter open(final String name,
-                                         final String type,
-                                         final GUID guid, final int mtu,
-                                         final InterfaceAddressEx... bindings) throws IOException {
+    public static WindowsTunAdapterV2 open(final String name,
+                                           final String type,
+                                           final GUID guid, final int mtu,
+                                           final InterfaceAddressEx... bindings) throws IOException {
         WINTUN_ADAPTER_HANDLE adapter = null;
         WINTUN_SESSION_HANDLE session = null;
+        HANDLE shutdownEvent = null;
         int i = 0;
         do {
             try {
@@ -190,6 +220,12 @@ public class WindowsTunAdapter extends TunAdapter {
                     adapter = WintunCreateAdapter(new WString(name), new WString(type), guid);
                 }
                 session = WintunStartSession(adapter, new WinDef.DWORD(0x400000));
+
+                // manual-reset=TRUE 很关键：让后续所有 WaitForMultipleObjects 都立即返回
+                shutdownEvent = Kernel32.INSTANCE.CreateEvent(null, true, false, null);
+                if (null == shutdownEvent) {
+                    throw new IOException("CreateEvent failed, err=" + Native.getLastError());
+                }
 
                 final long luid = getLuid(adapter);
 
@@ -232,7 +268,7 @@ public class WindowsTunAdapter extends TunAdapter {
                     );
                 }
 
-                return new WindowsTunAdapter(luid, name, mtuToUse, adapter, session);
+                return new WindowsTunAdapterV2(luid, name, mtuToUse, adapter, session, shutdownEvent);
             } catch (final LastErrorException e) {
                 if (null != session) {
                     WintunEndSession(session);
@@ -242,11 +278,26 @@ public class WindowsTunAdapter extends TunAdapter {
                     WintunCloseAdapter(adapter);
                     adapter = null;
                 }
+                if (null != shutdownEvent) {
+                    Kernel32.INSTANCE.CloseHandle(shutdownEvent);
+                    shutdownEvent = null;
+                }
 
                 if (WinError.ERROR_ALREADY_EXISTS == e.getErrorCode() && ++i < 3) {
                     continue;
                 }
                 throw new IOException(e);
+            } catch (final IOException e) {
+                if (null != session) {
+                    WintunEndSession(session);
+                }
+                if (null != adapter) {
+                    WintunCloseAdapter(adapter);
+                }
+                if (null != shutdownEvent) {
+                    Kernel32.INSTANCE.CloseHandle(shutdownEvent);
+                }
+                throw e;
             }
         } while (true);
     }

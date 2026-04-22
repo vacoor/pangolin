@@ -3,7 +3,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.channel.TunAddress;
-import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
+import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelV2;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.backend.BackendProxyInitializer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannel;
@@ -25,7 +25,7 @@ import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 /**
  *
  */
-public class TunTest2 {
+public class TunTestV2 {
 
     public static void main(String[] args) throws Exception {
         final String ifname = args.length > 0 ? args[0] : "TCP-0";
@@ -74,7 +74,7 @@ public class TunTest2 {
 
             final Bootstrap b = new Bootstrap()
                     .group(tunGroup)
-                    .channel(TunChannel.class)
+                    .channel(TunChannelV2.class)
                     .handler(new ChannelInitializer<Channel>() {
                         @Override
                         protected void initChannel(Channel ch) {

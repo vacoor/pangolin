@@ -110,7 +110,7 @@ public class DarwinNetworkRoutingTable extends NetworkRoutingTable {
      * @param gw     the gateway used for route packets, the specified gateway must be reachable first.
      * @param ifname the interface name to bound
      */
-    static void add0(final InetAddress dst, final int prefix,
+    public static void add0(final InetAddress dst, final int prefix,
                      final InetAddress gw, final String ifname) {
         final short ifindex = null != ifname ? (short) if_nametoindex0(ifname) : 0;
         add0(dst, prefix, gw, ifindex);

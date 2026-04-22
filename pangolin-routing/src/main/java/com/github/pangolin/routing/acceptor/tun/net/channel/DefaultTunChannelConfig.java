@@ -4,6 +4,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelOpt
 import static com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelOption.WINTUN_TYPE;
 import static com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelOption.WINTUN_UUID;
 
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.DefaultChannelConfig;
 
@@ -15,7 +16,7 @@ public class DefaultTunChannelConfig extends DefaultChannelConfig implements Tun
     private String wintunType;
     private String wintunUuid;
 
-    public DefaultTunChannelConfig(final TunChannel channel) {
+    public DefaultTunChannelConfig(final Channel channel) {
         super(channel);
     }
 

@@ -275,7 +275,7 @@ public class WindowsNetworkInterface implements NetworkInterfaceEx {
         return guidRef;
     }
 
-    static int interfaceLuidToIndex(final long interfaceLuid) {
+    public static int interfaceLuidToIndex(final long interfaceLuid) {
         final IntByReference indexRef = new IntByReference();
         final LongByReference luidRef = new LongByReference(interfaceLuid);
         final int err = IP_HLP_API.ConvertInterfaceLuidToIndex(luidRef, indexRef);
@@ -285,11 +285,11 @@ public class WindowsNetworkInterface implements NetworkInterfaceEx {
 
     // ------------------------ START Interface related ------------------------
 
-    static int getMTU0(final long interfaceLuid, final int family) {
+    public static int getMTU0(final long interfaceLuid, final int family) {
         return getInterfaceRow(interfaceLuid, family).NlMtu;
     }
 
-    static void setMTU0(final long interfaceLuid, final int family, final int mtu) {
+    public static void setMTU0(final long interfaceLuid, final int family, final int mtu) {
         final MIB_IPINTERFACE_ROW row = getInterfaceRow(interfaceLuid, family);
         row.NlMtu = mtu;
 
@@ -397,7 +397,7 @@ public class WindowsNetworkInterface implements NetworkInterfaceEx {
         }
     }
 
-    static void addInterfaceAddress0(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
+    public static void addInterfaceAddress0(final long interfaceLuid, final InetAddress address, final byte prefixLength) {
         final MIB_UNICASTIPADDRESS_ROW row = new MIB_UNICASTIPADDRESS_ROW();
         IP_HLP_API.InitializeUnicastIpAddressEntry(row);
 
