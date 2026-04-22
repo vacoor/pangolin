@@ -170,7 +170,13 @@ public class WebSocketProxyHandler extends AbstractProxyHandler {
                 buffer.writeBytes(address.getAddress());
             }
             buffer.writeShort(target.getPort());
-            return Base64.encode(buffer, Base64Dialect.URL_SAFE).toString(CharsetUtil.UTF_8);
+            // Base64.encode 返回新分配的 ByteBuf,toString 后必须 release,否则泄漏。
+            final ByteBuf encoded = Base64.encode(buffer, Base64Dialect.URL_SAFE);
+            try {
+                return encoded.toString(CharsetUtil.UTF_8);
+            } finally {
+                encoded.release();
+            }
         } finally {
             buffer.release();
         }
