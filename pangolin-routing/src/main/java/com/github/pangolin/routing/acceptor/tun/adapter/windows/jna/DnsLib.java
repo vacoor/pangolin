@@ -9,7 +9,7 @@ import com.sun.jna.Native;
 public final class DnsLib {
 
     static {
-        Native.register("DNSAPI");
+        Native.register(DnsLib.class, "DnsAPI");
     }
 
     /**

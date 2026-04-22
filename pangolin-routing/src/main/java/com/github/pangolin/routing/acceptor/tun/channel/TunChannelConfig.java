@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.channel;
+package com.github.pangolin.routing.acceptor.tun.channel;
 
 import io.netty.channel.ChannelConfig;
 

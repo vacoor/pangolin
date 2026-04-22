@@ -1,8 +1,8 @@
-package com.github.pangolin.routing.acceptor.tun.net.channel;
+package com.github.pangolin.routing.acceptor.tun.channel;
 
-import static com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelOption.TUN_MTU;
-import static com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelOption.WINTUN_TYPE;
-import static com.github.pangolin.routing.acceptor.tun.net.channel.TunChannelOption.WINTUN_UUID;
+import static com.github.pangolin.routing.acceptor.tun.channel.TunChannelOption.TUN_MTU;
+import static com.github.pangolin.routing.acceptor.tun.channel.TunChannelOption.WINTUN_TYPE;
+import static com.github.pangolin.routing.acceptor.tun.channel.TunChannelOption.WINTUN_UUID;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelOption;

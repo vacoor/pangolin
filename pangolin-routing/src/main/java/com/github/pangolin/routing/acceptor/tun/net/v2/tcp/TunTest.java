@@ -2,8 +2,8 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp;
 
 import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.channel.TunAddress;
-import com.github.pangolin.routing.acceptor.tun.net.channel.TunChannel;
+import com.github.pangolin.routing.acceptor.tun.channel.TunAddress;
+import com.github.pangolin.routing.acceptor.tun.channel.TunChannel;
 import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.backend.BackendProxyInitializer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannel;
