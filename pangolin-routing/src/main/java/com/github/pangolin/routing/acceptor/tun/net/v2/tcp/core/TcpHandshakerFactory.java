@@ -1,7 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConfig;
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 
 /**
  * Factory for {@link TcpHandshaker} instances, analogous to

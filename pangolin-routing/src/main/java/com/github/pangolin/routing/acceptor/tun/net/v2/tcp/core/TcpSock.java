@@ -1,43 +1,14 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnection;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.ConnectionKey;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpReceiveBuffer;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSendBuffer;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSkb;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpAck;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpRetransmitter;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpHandshaker;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpHandshakerFactory;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.FourTuple;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SysctlOptions;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConfig;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimewaitSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionTimers;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimerScheduler;
-import io.netty.buffer.ByteBuf;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockHandler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInitializer;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
-import io.netty.util.ReferenceCountUtil;
-import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.SHUTDOWN_MASK;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCP_INIT_CWND;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCP_MSS_DEFAULT;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCP_NAGLE_OFF;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before;
 
@@ -56,7 +27,7 @@ public class TcpSock extends SockCommon {
     /**
      * 挂在 sock 上的业务事件回调 — 由 {@link TcpSockInitializer#onEstablished} 注入。
      * 典型实现是 netty 子包的 {@code TcpChannel},或 ext.backend 子包的
-     * {@code BackendProxyHandler}。不为 {@code null} 表示这条连接已装配业务层。
+     * {@code TcpPassthroughHandler}。不为 {@code null} 表示这条连接已装配业务层。
      */
     private TcpSockHandler handler;
     /**

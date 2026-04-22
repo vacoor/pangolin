@@ -7,7 +7,7 @@
 > - **P1**:把三条 sink 统一到一个接口(重命名为 `TcpSockHandler`),消除 `TcpMultiplexer#consume`
 >   的多分支;同时接口 `UserChannelInitializer` 重命名为 `TcpSockInitializer`。
 > - **P2**:让 `core` 包脱离对 `SocketChannelFactory` / `TcpChannelFactory` 的直接依赖,
->   backend 透传模式沉到一个独立的 `BackendProxyInitializer` 实现中。
+>   backend 透传模式沉到一个独立的 `TcpPassthroughInitializer` 实现中。
 >
 > 两阶段独立、可分开合入;P1 不依赖 P2,但 P2 建议在 P1 之后做,避免二次搬动。
 >
@@ -109,12 +109,12 @@ P1 合入时同步重命名(本节及后文一律使用新名):
 |---|---|---|
 | `UserChannelInitializer` | **`TcpSockInitializer`** | 挂在 `TcpSock` 上的一次性建连装配钩子 |
 | `UserChannelBridge` | **`TcpSockHandler`** | 挂在 `TcpSock` 上的长期事件回调处理器(对齐 Linux `sk->sk_user_data` 思路) |
-| `UserChannelBridge` 的实现类 `*Bridge` | **`*Handler`** | 配套改名:`RawDataHandler` / `BackendProxyHandler` |
+| `UserChannelBridge` 的实现类 `*Bridge` | **`*Handler`** | 配套改名:`RawDataHandler` / `TcpPassthroughHandler` |
 | `TcpSock#userChannelBridge` 字段 | **`TcpSock#handler`** | 访问器 `handler()` / `handler(TcpSockHandler)` |
 
 **不取 `TcpChannel*` 命名的原因**:
 1. `TcpChannel` 是 `netty` 子包已存在的具体类,接口在 `core` 包却以下游具体类命名,暗示循环依赖。
-2. P1 后有三个实现(`TcpChannelFactory` / `RawDataInitializer` / `BackendProxyInitializer`),
+2. P1 后有三个实现(`TcpChannelFactory` / `RawDataInitializer` / `TcpPassthroughInitializer`),
    其中两个不创建 `TcpChannel`,名字会误导。
 3. `TcpChannelHandler` 容易与 Netty `ChannelHandler` 混淆,但接口不走 pipeline,是 sock 级 1:1 挂载。
 
@@ -125,8 +125,8 @@ P1 合入时同步重命名(本节及后文一律使用新名):
 - `TcpSock` 只保留 **一个** sink 字段:`TcpSockHandler handler`。
 - `DataConsumer` 降级为 `TcpSockHandler` 的一个平凡实现(`RawDataHandler`),由 initializer
   在建立连接时注入。
-- backend 透传也变成 `TcpSockHandler` 的一个实现(`BackendProxyHandler`),通过
-  `BackendProxyInitializer` 在 `tcp_init_transfer` 时挂入。
+- backend 透传也变成 `TcpSockHandler` 的一个实现(`TcpPassthroughHandler`),通过
+  `TcpPassthroughInitializer` 在 `tcp_init_transfer` 时挂入。
 - `TcpMultiplexer#consume` 退化为 `sk.handler().onInboundData(data)` 一行。
 
 ```mermaid
@@ -173,14 +173,14 @@ classDiagram
         }
     }
     namespace ext.backend {
-        class BackendProxyHandler {
+        class TcpPassthroughHandler {
             -Channel backend
             +onInboundData(ByteBuf) void
             +onPeerFin() void
             +onReset(Throwable) void
             +onSocketDestroyed() void
         }
-        class BackendProxyInitializer {
+        class TcpPassthroughInitializer {
             -SocketChannelFactory factory
             -EventLoopGroup group
             +onEstablished(TcpSock, TcpMultiplexer) void
@@ -192,12 +192,12 @@ classDiagram
     TcpMultiplexer ..> TcpSock : consume() 单调用
     TcpSock --> TcpSockHandler : 单 sink
     RawDataHandler ..|> TcpSockHandler
-    BackendProxyHandler ..|> TcpSockHandler
+    TcpPassthroughHandler ..|> TcpSockHandler
     TcpChannel ..|> TcpSockHandler
     RawDataInitializer ..|> TcpSockInitializer
     RawDataInitializer ..> RawDataHandler : 创建并挂载
-    BackendProxyInitializer ..|> TcpSockInitializer
-    BackendProxyInitializer ..> BackendProxyHandler : 创建并挂载
+    TcpPassthroughInitializer ..|> TcpSockInitializer
+    TcpPassthroughInitializer ..> TcpPassthroughHandler : 创建并挂载
     TcpChannelFactory ..|> TcpSockInitializer
     TcpChannelFactory ..> TcpChannel : 创建并挂载
 ```
@@ -210,11 +210,11 @@ classDiagram
 | 2 | 重命名字段 / 访问器 | `TcpSock` | `userChannelBridge` → `handler`;`userChannelBridge(x)` → `handler(x)`。 |
 | 3 | 新增 `RawDataHandler implements TcpSockHandler` | `core` 包 | 内部封装 `DataConsumer` + `FourTuple`,`onInboundData` 转发;其它回调 no-op。 |
 | 4 | 新增 `RawDataInitializer implements TcpSockInitializer` | `core` 包 | 在 `onEstablished` 里 `sk.handler(new RawDataHandler(consumer, sk.fourTuple()))`。 |
-| 5 | 把 `BackendProxyHandler` + `BackendProxyInitializer` 抽出 | `ext.backend` 包(新建) | 封装原 `Tcp4Multiplexer#startHandshake` 的 backend 连接 + 透传逻辑。 |
+| 5 | 把 `TcpPassthroughHandler` + `TcpPassthroughInitializer` 抽出 | `ext.backend` 包(新建) | 封装原 `Tcp4Multiplexer#startHandshake` 的 backend 连接 + 透传逻辑。 |
 | 6 | `TcpMultiplexer#consume` 简化 | `TcpMultiplexer` | 只保留 `sk.handler().onInboundData(data)`;`handler` 为 `null` 时 release(防御性)。 |
-| 7 | `TcpSock` 移除 `childChannel` / `hasBackendChannel` | `TcpSock` | 归属上移到 `BackendProxyHandler` 内部。保留 `handshakeCloseListener` 的语义即可。 |
+| 7 | `TcpSock` 移除 `childChannel` / `hasBackendChannel` | `TcpSock` | 归属上移到 `TcpPassthroughHandler` 内部。保留 `handshakeCloseListener` 的语义即可。 |
 | 8 | `TcpMultiplexer` 去掉 `DataConsumer dataConsumer` 字段 | `TcpMultiplexer` | 构造器改为只接 `TcpSockInitializer`(或列表)。 |
-| 9 | `TcpMultiplexHandler` 构造入口改造 | `TcpMultiplexHandler` | 根据入参选 `RawDataInitializer` / `BackendProxyInitializer` / `TcpChannelFactory`。 |
+| 9 | `TcpMultiplexHandler` 构造入口改造 | `TcpMultiplexHandler` | 根据入参选 `RawDataInitializer` / `TcpPassthroughInitializer` / `TcpChannelFactory`。 |
 
 ### P1 完成后 `consume` 的样子
 
@@ -270,8 +270,8 @@ classDiagram
         }
     }
     namespace ext.backend {
-        class BackendProxyHandler
-        class BackendProxyInitializer {
+        class TcpPassthroughHandler
+        class TcpPassthroughInitializer {
             +onRequest(TcpRequestSock, TcpMultiplexer) void
             +onEstablished(TcpSock, TcpMultiplexer) void
         }
@@ -289,12 +289,12 @@ classDiagram
     TcpMultiplexer --> TcpSockInitializer
     RawDataHandler ..|> TcpSockHandler
     RawDataInitializer ..|> TcpSockInitializer
-    BackendProxyHandler ..|> TcpSockHandler
-    BackendProxyInitializer ..|> TcpSockInitializer
+    TcpPassthroughHandler ..|> TcpSockHandler
+    TcpPassthroughInitializer ..|> TcpSockInitializer
     TcpChannelFactory ..|> TcpSockInitializer
     TcpChannel ..|> TcpSockHandler
-    BackendProxyInitializer --> SocketChannelFactory : 依赖
-    TcpMultiplexHandler --> BackendProxyInitializer : 组装
+    TcpPassthroughInitializer --> SocketChannelFactory : 依赖
+    TcpMultiplexHandler --> TcpPassthroughInitializer : 组装
     TcpMultiplexHandler --> Tcp4Multiplexer : 组装
 ```
 
@@ -312,9 +312,9 @@ ingress (TcpMultiplexHandler / acceptor 层) ──> 依赖 core + netty + ext.*
 | # | 动作 | 位置 | 说明 |
 |---|------|------|------|
 | 1 | `Tcp4Multiplexer` 删除 `SocketChannelFactory` / `EventLoopGroup childGroup` 字段 | `core.Tcp4Multiplexer` | 保留 `tcpGroup`(P0 已加,是纯 EL 池,不涉及业务 sink)。 |
-| 2 | `Tcp4Multiplexer#startHandshake` 的 backend 分支迁出 | `ext.backend.BackendProxyInitializer` | 在 `onEstablished` 前需要 "半连接期启动 backend" 的能力 → 见下方「握手钩子」节。 |
+| 2 | `Tcp4Multiplexer#startHandshake` 的 backend 分支迁出 | `ext.backend.TcpPassthroughInitializer` | 在 `onEstablished` 前需要 "半连接期启动 backend" 的能力 → 见下方「握手钩子」节。 |
 | 3 | 新增 `TcpSockInitializer#onRequest(TcpRequestSock, TcpMultiplexer)` 可选回调 | `core.TcpSockInitializer` | 让 backend 透传能在 SYN 阶段就发起连接(对齐 v1 行为),避免串到 SYN-ACK 之后再连。 |
-| 4 | `TcpMultiplexHandler` 组装 initializer | `ingress` | 根据配置选 `BackendProxyInitializer` / `RawDataInitializer` / `TcpChannelFactory`,注入 `Tcp4Multiplexer`。 |
+| 4 | `TcpMultiplexHandler` 组装 initializer | `ingress` | 根据配置选 `TcpPassthroughInitializer` / `RawDataInitializer` / `TcpChannelFactory`,注入 `Tcp4Multiplexer`。 |
 | 5 | `TcpRequestSock` 去掉 `childChannel` / `handshakeCloseListener` 的强约束 | `core` | 这些字段只对 backend 透传有意义,改为 initializer 自行管理(可通过 `TcpRequestSock#attachment()` 泛型 slot 承接)。 |
 
 ### `TcpSockInitializer` 最终接口定义
@@ -328,7 +328,7 @@ public interface TcpSockInitializer {
     void onEstablished(TcpSock sock, TcpMultiplexer mux);
 
     /** 可选:SYN 到达、SYN-ACK 发送前触发,默认 no-op。
-     *  BackendProxyInitializer 在此启动 backend 连接,connect 成功后 mux 才回 SYN-ACK。 */
+     *  TcpPassthroughInitializer 在此启动 backend 连接,connect 成功后 mux 才回 SYN-ACK。 */
     default void onRequest(TcpRequestSock req, TcpMultiplexer mux) { }
 
     /** 可选:为 child sock 推荐专属 EL(通常是 backend channel 的 EL)。
@@ -386,7 +386,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
 
 | 场景 | 传入 | SYN 到达 | 已 ESTABLISHED |
 |---|---|---|---|
-| backend 透传 | `BackendProxyInitializer` | onRequest 连 backend,成功后回 SYN-ACK | `BackendProxyHandler` 透传数据 |
+| backend 透传 | `TcpPassthroughInitializer` | onRequest 连 backend,成功后回 SYN-ACK | `TcpPassthroughHandler` 透传数据 |
 | 用户 pipeline | `TcpChannelFactory` | onRequest no-op,立即回 SYN-ACK | `TcpChannel` 接管 |
 | 丢弃数据 | `RawDataInitializer(DROP_DATA)` | 立即回 SYN-ACK | `RawDataHandler.onInboundData` → `buf.release()` |
 | 显式关闭端口 | `TcpSockInitializer.DENY` | RST + 销毁 req | 不可达 |
@@ -403,7 +403,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
    只改名,不动语义,单独一次 PR 便于 review。
 2. **P1.1** 落 `RawDataHandler` + `RawDataInitializer`,把 `DataConsumer` 改为 initializer 内部
    字段。`TcpMultiplexer#consume` 仍保留三路(向后兼容)。
-3. **P1.2** 抽 `BackendProxyHandler` + `BackendProxyInitializer`,`Tcp4Multiplexer#startHandshake`
+3. **P1.2** 抽 `TcpPassthroughHandler` + `TcpPassthroughInitializer`,`Tcp4Multiplexer#startHandshake`
    迁入 initializer 内部;`TcpSock.childChannel` 改用 initializer 的 attachment。
 4. **P1.3** `TcpMultiplexer#consume` 简化为单调用,删除 `DataConsumer` 字段;构造期
    `Objects.requireNonNull(initializer)` + 暴露 `TcpSockInitializer.DENY` 一并合入(避免
@@ -419,14 +419,14 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
 #### ① ✅ `TcpRequestSock` 上 backend-only 字段的归属
 
 - 在 `TcpRequestSock` 上加**单槽** `Object attachment()` / `attachment(Object)`(Netty `AttributeMap` 风格)。
-- `BackendProxyInitializer#onRequest` 创建 `BackendProxyState` 自管一组字段(backend Channel / future / close listener),塞进 attachment。
+- `TcpPassthroughInitializer#onRequest` 创建 `TcpPassthroughState` 自管一组字段(backend Channel / future / close listener),塞进 attachment。
 - core 不感知 backend 语义,只保证在 `inet_csk_destroy_sock(req)` 前回调 `initializer.onRequestDestroyed(req)`,initializer 在此释放 attachment 资源。
 - **拒绝方案**:WeakHashMap 方案(rehash / 跨线程锁不优雅)、泛型 `<T> T attachment(Class<T>)`(同一时刻只可能有一种 initializer)。
 
 #### ② ✅ backend-EL ↔ sock-EL 绑定
 
 - 新增 `TcpSockInitializer#proposeEventLoop(req, mux)` 钩子,默认返回 null。
-- `BackendProxyInitializer` 返回 `backendChannel.eventLoop()`;`RawDataInitializer` / `TcpChannelFactory` 返回 null。
+- `TcpPassthroughInitializer` 返回 `backendChannel.eventLoop()`;`RawDataInitializer` / `TcpChannelFactory` 返回 null。
 - `Tcp4Multiplexer#tcp_v4_syn_recv_sock` 优先用 `proposeEventLoop` 结果,null 时回退 `tcpGroup.next()`。对齐 v1 "状态机与 backend I/O 同 EL" 语义。
 
 #### ③ ✅ listenSock 的 handler 永远为 null
@@ -455,7 +455,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
 ### 后续(非 P1/P2 范围)
 
 - **线程切换的 pkt retain 泄露**:sock EL 转发 `tcp_v4_do_rcv` 时 pkt 已 retain,若 EL 队列在 shutdown 丢任务,retain 不释放。P0 已加 try/finally,P1 改造不影响,保持观察。
-- **backend 未连上时的 SYN-ACK 重传**:原 `startHandshake` 在 backend 连接前**不**发 SYN-ACK,依赖对端 SYN 重传拉长 RTT。`BackendProxyInitializer` 保持此语义,不改。
+- **backend 未连上时的 SYN-ACK 重传**:原 `startHandshake` 在 backend 连接前**不**发 SYN-ACK,依赖对端 SYN 重传拉长 RTT。`TcpPassthroughInitializer` 保持此语义,不改。
 
 ---
 

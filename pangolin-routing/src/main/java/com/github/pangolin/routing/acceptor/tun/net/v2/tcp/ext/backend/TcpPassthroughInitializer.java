@@ -1,11 +1,11 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.backend;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpRequestSock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSockInitializer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInitializer;
 import com.github.pangolin.routing.support.SocketChannelFactory;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
@@ -22,7 +22,7 @@ import java.util.Objects;
 
 /**
  * {@link TcpSockInitializer} 的 backend 透传实现 — 覆盖 {@code onRequest} 以在 SYN 阶段
- * 先连 backend 再发 SYN-ACK,覆盖 {@code onEstablished} 以装 {@link BackendProxyHandler}
+ * 先连 backend 再发 SYN-ACK,覆盖 {@code onEstablished} 以装 {@link TcpPassthroughHandler}
  * 和反向适配器({@link TcpMultiplexer#tcp_sendmsg} — MSS 切片由栈内部处理),实现双向透传。
  *
  * <p><b>生命周期</b>:
@@ -33,20 +33,20 @@ import java.util.Objects;
  *       {@code inet_csk_destroy_sock(req)}。</li>
  *   <li>{@link #proposeEventLoop} — 为 child sock 推荐 backend 的 EL,保留 v1
  *       "状态机与 backend I/O 同线程" 语义。</li>
- *   <li>{@link #onEstablished} — 3WHS 完成后装 {@link BackendProxyHandler} 接管
+ *   <li>{@link #onEstablished} — 3WHS 完成后装 {@link TcpPassthroughHandler} 接管
  *       sock → backend 方向,并在 backend pipeline 末尾挂反向适配器。</li>
  * </ol>
  *
  * <p><b>EventLoop</b>:backend Channel 的 EL 由构造传入的 {@code childGroup.next()} 分配;
  * {@code tcp_v4_syn_recv_sock} 取这同一个 EL 作为 child sock 的 EL,保证两者同线程。
  */
-public final class BackendProxyInitializer implements TcpSockInitializer {
+public final class TcpPassthroughInitializer implements TcpSockInitializer {
 
     private final SocketChannelFactory socketChannelFactory;
     private final EventLoopGroup childGroup;
     private final int connTimeoutMs;
 
-    public BackendProxyInitializer(SocketChannelFactory socketChannelFactory,
+    public TcpPassthroughInitializer(SocketChannelFactory socketChannelFactory,
                                    EventLoopGroup childGroup,
                                    int connTimeoutMs) {
         this.socketChannelFactory = Objects.requireNonNull(socketChannelFactory, "socketChannelFactory");
@@ -101,7 +101,7 @@ public final class BackendProxyInitializer implements TcpSockInitializer {
         final Channel backend = Objects.requireNonNull(sock.childChannel(), "backend channel");
 
         // 1. 装 sock 端 handler — consume 走这条路进 backend
-        sock.handler(new BackendProxyHandler(backend));
+        sock.handler(new TcpPassthroughHandler(backend));
 
         // 2. 替换 childCloseListener:握手阶段的 listener 已由 TcpSock 持有(handshake
         //    失败时 RST + destroy req),切入 ESTABLISHED 后换成"backend 关 → sock 推 FIN"。

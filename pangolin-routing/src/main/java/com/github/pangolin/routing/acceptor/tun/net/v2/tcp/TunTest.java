@@ -4,10 +4,10 @@ import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.channel.TunAddress;
 import com.github.pangolin.routing.acceptor.tun.channel.TunChannel;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.backend.BackendProxyInitializer;
+import com.github.pangolin.routing.acceptor.tun.net.codec.IpPacketCodec;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.backend.TcpPassthroughInitializer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannel;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannelFactory;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannelInitializer;
 import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
@@ -50,7 +50,7 @@ public class TunTest {
                 }
             };
 
-            TcpChannelFactory nettyChannelFactory = (sock, mux) -> {
+            TcpChannelInitializer nettyChannelFactory = (sock, mux) -> {
                 TcpChannel ch = new TcpChannel(sock, mux);
                 ch.pipeline().addLast(
                         new HttpServerCodec(),
@@ -66,7 +66,7 @@ public class TunTest {
                 return ch;
             };
 
-            BackendProxyInitializer initializer = new BackendProxyInitializer(
+            TcpPassthroughInitializer initializer = new TcpPassthroughInitializer(
                     new StandardSocketChannelFactory(null),
                     new NioEventLoopGroup(),
                     10 * 1000

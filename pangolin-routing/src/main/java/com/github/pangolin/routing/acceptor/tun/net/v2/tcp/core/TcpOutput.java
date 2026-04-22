@@ -1,16 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnection;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSkb;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.FourTuple;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SysctlOptions;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimewaitSock;
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TimerType;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimerScheduler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;

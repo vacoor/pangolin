@@ -1,5 +1,7 @@
-package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
+package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook;
 
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
 import io.netty.buffer.ByteBuf;
 
 /**
@@ -8,7 +10,7 @@ import io.netty.buffer.ByteBuf;
  *
  * <p>{@code core} 包不能直接依赖 {@code netty} 子包(会形成 core → netty → core 循环),
  * 本接口抽出 TCP 协议栈仅需调用的五个动作。实现类(如 netty 子包的 {@code TcpChannel}、
- * ext.backend 子包的 {@code BackendProxyHandler})在 {@link TcpSockInitializer#onEstablished}
+ * ext.backend 子包的 {@code TcpPassthroughHandler})在 {@link TcpSockInitializer#onEstablished}
  * 期间通过 {@link TcpSock#handler(TcpSockHandler)} 挂入。
  *
  * <p>所有方法<b>必须</b>在 {@code sock.eventLoop()} 内调用;handler 实现不负责跨线程跳转。

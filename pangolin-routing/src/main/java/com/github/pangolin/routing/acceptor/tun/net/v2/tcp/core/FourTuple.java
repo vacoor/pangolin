@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;

@@ -1,12 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.FourTuple;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConfig;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -19,9 +15,9 @@ import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.TimeUnit;
 
-import static com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf.TCP_FLAG_ACK;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf.TCP_FLAG_RST;
-import static com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf.TCP_FLAG_SYN;
+import static com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf.TCP_FLAG_ACK;
+import static com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf.TCP_FLAG_RST;
+import static com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf.TCP_FLAG_SYN;
 
 public final class TcpHandshaker {
 

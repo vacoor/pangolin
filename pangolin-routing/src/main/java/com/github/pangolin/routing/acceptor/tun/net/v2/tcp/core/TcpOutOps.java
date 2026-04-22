@@ -1,8 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnection;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32;

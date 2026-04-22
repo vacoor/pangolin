@@ -1,35 +1,14 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnection;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.ConnectionKey;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpReceiveBuffer;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSendBuffer;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSkb;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpAck;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpRetransmitter;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpHandshaker;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpHandshakerFactory;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.FourTuple;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SysctlOptions;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConfig;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimewaitSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionTimers;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimerScheduler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockHandler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInitializer;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
-import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
@@ -89,8 +68,8 @@ public abstract class TcpMultiplexer {
     protected final EventLoopGroup tcpGroup;
     /**
      * sock 装配钩子 — 必传,构造期 requireNonNull 。{@link #tcp_init_transfer} 调
-     * {@link TcpSockInitializer#onEstablished} 让上层(如 netty 子包的 {@code TcpChannelFactory}、
-     * ext.backend 子包的 {@code BackendProxyInitializer})创建并挂 {@link TcpSockHandler}。
+     * {@link TcpSockInitializer#onEstablished} 让上层(如 netty 子包的 {@code TcpChannelInitializer}、
+     * ext.backend 子包的 {@code TcpPassthroughInitializer})创建并挂 {@link TcpSockHandler}。
      * 显式关闭端口传 {@link TcpSockInitializer#DENY}。
      */
     protected final TcpSockInitializer initializer;
@@ -155,7 +134,7 @@ public abstract class TcpMultiplexer {
      * {@code handshakeCloseListener} 并发送 SYN-ACK,启动 SYN-ACK 重传 timer。
      * synPacket 已由 {@code tcp_v4_conn_request} retain 一次,本方法不再参与 retain。
      *
-     * <p><b>契约</b>:本方法只应被调一次;{@code BackendProxyInitializer} 在 backend connect
+     * <p><b>契约</b>:本方法只应被调一次;{@code TcpPassthroughInitializer} 在 backend connect
      * 成功后调用,工厂 / Raw initializer 在 onRequest 默认实现里立即调用,DENY 不调用。
      */
     public abstract void sendSynAck(TcpRequestSock req);
@@ -832,8 +811,8 @@ public abstract class TcpMultiplexer {
 
         /*
          * 统一走 initializer.onEstablished(sk, this) — initializer 构造期已 requireNonNull:
-         * - TcpChannelFactory:创建 TcpChannel,用户 pipeline 接管 payload
-         * - BackendProxyInitializer (ext.backend):backend 透传,挂 BackendProxyHandler 并装反向适配器
+         * - TcpChannelInitializer:创建 TcpChannel,用户 pipeline 接管 payload
+         * - TcpPassthroughInitializer (ext.backend):backend 透传,挂 TcpPassthroughHandler 并装反向适配器
          * - TcpSockInitializer.DENY:onRequest 阶段已直接发 RST 销毁 req,此路径不会触发
          */
         initializer.onEstablished(sk, this);

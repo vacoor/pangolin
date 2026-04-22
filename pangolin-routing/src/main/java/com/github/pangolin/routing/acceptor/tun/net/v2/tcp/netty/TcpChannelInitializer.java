@@ -2,7 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty;
 
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSockInitializer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInitializer;
 import io.netty.channel.ChannelFuture;
 
 /**
@@ -11,7 +11,7 @@ import io.netty.channel.ChannelFuture;
  *
  * <p>典型用法:
  * <pre>{@code
- * TcpChannelFactory factory = (sock, mux) -> {
+ * TcpChannelInitializer factory = (sock, mux) -> {
  *     TcpChannel ch = new TcpChannel(sock, mux);
  *     ch.pipeline().addLast(new HttpServerCodec(), new MyBizHandler());
  *     return ch;
@@ -26,7 +26,7 @@ import io.netty.channel.ChannelFuture;
  * 的工厂模式构造,无需手写 adapter。
  */
 @FunctionalInterface
-public interface TcpChannelFactory extends TcpSockInitializer {
+public interface TcpChannelInitializer extends TcpSockInitializer {
 
     TcpChannel create(TcpSock sock, TcpMultiplexer multiplexer);
 

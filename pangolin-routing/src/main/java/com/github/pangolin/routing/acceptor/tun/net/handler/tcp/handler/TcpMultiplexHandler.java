@@ -1,8 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.handler;
 
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketHandler;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.codec.IpPacketHandler;
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core.TcpMultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.tcp_request_sock;

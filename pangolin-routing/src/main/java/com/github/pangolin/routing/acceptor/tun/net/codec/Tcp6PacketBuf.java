@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.support;
+package com.github.pangolin.routing.acceptor.tun.net.codec;
 
 import io.netty.buffer.ByteBuf;
 
@@ -7,33 +7,29 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 
 /**
- * IPv6 specialization of {@link IpPacketBuf}.
+ * TCP-over-IPv6 packet buffer.
  *
+ * <p>IPv6 fixed header layout (offset from readerIndex, 40 bytes):
  * <pre>
- * IPv6 fixed header layout (offset from readerIndex, 40 bytes):
  *   Byte  0-3:  Version(4) + Traffic Class(8) + Flow Label(20)
- *   Byte  4-5:  Payload Length (not including 40B header)
- *   Byte  6:    Next Header (TCP=6)
+ *   Byte  4-5:  Payload Length
+ *   Byte  6:    Next Header (= 6 for TCP)
  *   Byte  7:    Hop Limit
  *   Byte  8-23: Source Address (16 bytes)
  *   Byte 24-39: Destination Address (16 bytes)
- *   Byte 40+:   TCP header (assuming no extension headers)
+ *   Byte 40+:   TCP header (extension headers not supported)
  * </pre>
- *
- * <p>Note: IPv6 extension headers are not currently supported. This implementation
- * assumes Next Header is directly TCP(6). Extension header support is a future work item.
  */
-public final class Ip6PacketBuf extends IpPacketBuf {
+public final class Tcp6PacketBuf extends TcpPacketBuf {
 
     private static final int IP6_HEADER_LEN = 40;
 
-    Ip6PacketBuf(ByteBuf buf) {
+    Tcp6PacketBuf(final ByteBuf buf) {
         super(buf);
     }
 
     @Override
     public int ipHeaderLen() {
-        // Fixed 40 bytes; extension headers not supported
         return IP6_HEADER_LEN;
     }
 
@@ -49,12 +45,16 @@ public final class Ip6PacketBuf extends IpPacketBuf {
 
     @Override
     public byte[] srcAddrBytes() {
-        return readBytes(buf.readerIndex() + 8, 16);
+        final byte[] addr = new byte[16];
+        buf.getBytes(buf.readerIndex() + 8, addr);
+        return addr;
     }
 
     @Override
     public byte[] dstAddrBytes() {
-        return readBytes(buf.readerIndex() + 24, 16);
+        final byte[] addr = new byte[16];
+        buf.getBytes(buf.readerIndex() + 24, addr);
+        return addr;
     }
 
     @Override
@@ -68,12 +68,16 @@ public final class Ip6PacketBuf extends IpPacketBuf {
         return resolved != null ? resolved : toInetAddress(null, dstAddrBytes());
     }
 
-    public int payloadLength() {
-        return buf.getUnsignedShort(buf.readerIndex() + 4);
+    public Inet6Address srcAddr6() {
+        return (Inet6Address) srcAddr();
+    }
+
+    public Inet6Address dstAddr6() {
+        return (Inet6Address) dstAddr();
     }
 
     @Override
-    protected InetAddress toInetAddress(String host, byte[] addr) {
+    protected InetAddress toInetAddress(final String host, final byte[] addr) {
         try {
             return host != null
                     ? InetAddress.getByAddress(host, addr)
@@ -81,13 +85,5 @@ public final class Ip6PacketBuf extends IpPacketBuf {
         } catch (UnknownHostException e) {
             throw new IllegalStateException("Failed to create Inet6Address", e);
         }
-    }
-
-    public Inet6Address srcAddr6() {
-        return (Inet6Address) srcAddr();
-    }
-
-    public Inet6Address dstAddr6() {
-        return (Inet6Address) dstAddr();
     }
 }

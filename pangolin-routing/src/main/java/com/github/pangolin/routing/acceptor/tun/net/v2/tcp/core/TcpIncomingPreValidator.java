@@ -1,13 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMib;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMibStats;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
 
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockHandler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
@@ -23,7 +19,6 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpU
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason.SKB_DROP_REASON_TCP_INVALID_SEQUENCE;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason.SKB_DROP_REASON_TCP_INVALID_SYN;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason.SKB_DROP_REASON_TCP_OLD_SEQUENCE;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason.SKB_DROP_REASON_TCP_RESET;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason.SKB_NOT_DROPPED_YET;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.tcp_oow_rate_limited;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.after;

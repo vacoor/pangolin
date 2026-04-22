@@ -53,8 +53,8 @@ public interface TcpChannelFactory extends TcpSockInitializer {
 }
 ```
 
-另一类 initializer 是 `ext.backend.BackendProxyInitializer`:覆盖 `onRequest` 先连
-backend 再发 SYN-ACK,`onEstablished` 挂 `BackendProxyHandler` 做透传。两者是
+另一类 initializer 是 `ext.backend.TcpPassthroughInitializer`:覆盖 `onRequest` 先连
+backend 再发 SYN-ACK,`onEstablished` 挂 `TcpPassthroughHandler` 做透传。两者是
 **并列关系**,而不是像旧设计那样"userChannel vs childChannel 三向分流"。
 
 ---
@@ -106,7 +106,7 @@ Tcp4Multiplexer.tcp_v4_conn_request
       │  (addToHalfQueue + req.synPacket retain + req.net(net))
       ▼
    initializer.onRequest(req, this)              ← 默认立发 SYN-ACK
-      │                                              (BackendProxyInitializer 覆盖为异步)
+      │                                              (TcpPassthroughInitializer 覆盖为异步)
       ▼
    tcp_check_req + syn_recv_sock (TUN EL)
       │  ├─ initializer.proposeEventLoop(req, this) → child sock 的 EL
@@ -387,7 +387,7 @@ TCPF_CLOSING | TCPF_LAST_ACK`。
 **反模式**:用户在业务线程池里直接 `sock.sendBuffer().enqueue(...)` 绕过 Netty ——
 文档里必须禁掉。
 
-### 6.2 `TcpChannelFactory` 与 `BackendProxyInitializer` 的互斥
+### 6.2 `TcpChannelFactory` 与 `TcpPassthroughInitializer` 的互斥
 
 两者都是 `TcpSockInitializer` 的实现,一个 `TcpMultiplexer` 构造时只传一个。如
 需要"pipeline 处理完再透传 backend",应写一个新的 `TcpSockInitializer` 实现:
@@ -561,8 +561,8 @@ TcpChannelFactory factory = (sock, mux) -> {
 ### 8.3 Backend 透传(等价 v1 默认行为)
 
 ```java
-BackendProxyInitializer initializer =
-        new BackendProxyInitializer(socketChannelFactory, childGroup, connTimeoutMs);
+TcpPassthroughInitializer initializer =
+        new TcpPassthroughInitializer(socketChannelFactory, childGroup, connTimeoutMs);
 Tcp4Multiplexer mux = new Tcp4Multiplexer(cfg, initializer);
 ```
 
@@ -602,12 +602,12 @@ RST 并销毁半连接 req。
   "Netty autoRead=false 未消费"。
 - `TcpChannelFactory.onEstablished` 对应 Linux `accept()` 返回后应用对 fd 的
   装配,只是我们提前在内核态挂好 pipeline,不经过 `accept()` 队列的同步等待。
-- `BackendProxyInitializer.onRequest` 异步 backend connect 对应 Linux 没有直接
+- `TcpPassthroughInitializer.onRequest` 异步 backend connect 对应 Linux 没有直接
   语义(v1 遗留行为),是 v2 保留的扩展点而非 Linux 对齐项。
 
 ---
 
-**维护说明**:本方案与 `ext.backend.BackendProxyInitializer` 共用同一个
+**维护说明**:本方案与 `ext.backend.TcpPassthroughInitializer` 共用同一个
 `TcpSockInitializer` 扩展点。二者并列、互斥,未来可能的 "pipeline + backend
 透传" 组合由应用自写第三个 initializer 实现,不在 core/netty/ext.backend 任何
 一个包内强制。

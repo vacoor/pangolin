@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.udp;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketHandler;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.UdpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.codec.IpPacketHandler;
+import com.github.pangolin.routing.acceptor.tun.net.codec.UdpPacketBuf;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.socket.DatagramPacket;

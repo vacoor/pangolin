@@ -13,7 +13,7 @@ import com.github.pangolin.routing.acceptor.tun.channel.TunAddress;
 import com.github.pangolin.routing.acceptor.tun.channel.TunChannelOption;
 import com.github.pangolin.routing.acceptor.tun.channel.TunChannelV2;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.IpPacketCodec;
+import com.github.pangolin.routing.acceptor.tun.net.codec.IpPacketCodec;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.handler.Tcp4MultiplexHandler;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.route.Route;
@@ -120,7 +120,7 @@ public class TunAcceptor2 implements Acceptor {
                         ch.pipeline().addLast(new Tcp4MultiplexHandler(dnsEngine, socketFactory));
 
                         /*
-                        BackendProxyInitializer initializer = new BackendProxyInitializer(
+                        TcpPassthroughInitializer initializer = new TcpPassthroughInitializer(
                                 socketFactory,
                                 new NioEventLoopGroup(),
                                 10 * 1000

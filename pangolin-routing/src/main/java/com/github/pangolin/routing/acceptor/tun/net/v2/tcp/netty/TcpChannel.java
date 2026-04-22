@@ -6,7 +6,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSendBuffer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSockHandler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockHandler;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.AbstractChannel;
 import io.netty.channel.ChannelConfig;
@@ -29,7 +29,7 @@ import java.util.Deque;
  * <ol>
  *   <li>{@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.Tcp4Multiplexer#tcp_v4_syn_recv_sock}
  *       建 child sock → {@code tcp_try_establish → tcp_init_transfer} 调
- *       {@link TcpChannelFactory#create} 生成本 channel;</li>
+ *       {@link TcpChannelInitializer#create} 生成本 channel;</li>
  *   <li>{@code TcpMultiplexer} 在 {@code sock.eventLoop()} 上调
  *       {@code eventLoop.register(ch)} → {@code pipeline.fireChannelActive()};</li>
  *   <li>读路径:{@code TcpMultiplexer.consume} 分流到

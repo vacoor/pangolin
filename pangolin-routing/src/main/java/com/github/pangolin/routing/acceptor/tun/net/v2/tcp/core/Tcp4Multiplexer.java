@@ -1,15 +1,9 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpLogUtils;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpHandshaker;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.FourTuple;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConfig;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimewaitSock;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimerScheduler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockHandler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInitializer;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
@@ -20,16 +14,15 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpAck.FL
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpAck.FLAG_UPDATE_TS_RECENT;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.after;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before;
 
 @Slf4j
 public class Tcp4Multiplexer extends TcpMultiplexer {
 
     /**
      * 工厂模式构造:三次握手完成后由 {@link TcpSockInitializer#onEstablished}
-     * 挂 {@link TcpSockHandler}(如 netty 子包的 {@code TcpChannelFactory} 创建
+     * 挂 {@link TcpSockHandler}(如 netty 子包的 {@code TcpChannelInitializer} 创建
      * {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannel},
-     * 或 ext.backend 子包的 {@code BackendProxyInitializer} 透传到 backend)。
+     * 或 ext.backend 子包的 {@code TcpPassthroughInitializer} 透传到 backend)。
      */
     public Tcp4Multiplexer(TcpConfig config, TcpSockInitializer initializer) {
         this(config, initializer, null);
@@ -409,7 +402,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
          * 对齐 Linux {@code tcp_conn_request}:addToHalfQueue 先入队,再交给
          * initializer 决定 SYN-ACK 发送时机:
          *   - 默认实现立发(对应 listener 已就绪)
-         *   - BackendProxyInitializer 先连 backend 再发(保留 v1 "backend 连上再 SYN-ACK" 语义)
+         *   - TcpPassthroughInitializer 先连 backend 再发(保留 v1 "backend 连上再 SYN-ACK" 语义)
          *   - DENY 立发 RST + 销毁 req(对齐 "无 listener → RST")
          * synPacket / net 在此统一 retain + stash;lifetime 与 req 绑定,由
          * moveToEstablished 或 inet_csk_destroy_sock(req) 负责释放。
@@ -457,7 +450,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         newsk.childCloseListener(req.handshakeCloseListener());
         newsk.state(TcpConnectionState.TCP_SYN_RECV);
         // 对齐 v1:每条 ESTABLISHED 连接绑定专属 EL,状态机 / 定时器 / sink 全部在该 EL 上串行。
-        // initializer.proposeEventLoop 优先(BackendProxyInitializer 会返回 backend EL,保留
+        // initializer.proposeEventLoop 优先(TcpPassthroughInitializer 会返回 backend EL,保留
         // "状态机与 backend I/O 同线程"语义);返回 null 时回退到 tcpGroup.next()。
         EventLoop proposed = initializer.proposeEventLoop(req, this);
         if (proposed != null) {

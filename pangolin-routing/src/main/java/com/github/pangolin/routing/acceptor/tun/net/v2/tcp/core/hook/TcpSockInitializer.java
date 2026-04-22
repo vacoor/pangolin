@@ -1,5 +1,8 @@
-package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
+package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook;
 
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpRequestSock;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
 import io.netty.channel.EventLoop;
 
 /**
@@ -31,7 +34,7 @@ public interface TcpSockInitializer {
 
     /**
      * SYN 到达、半连接入队后触发 — 默认立发 SYN-ACK。
-     * {@code BackendProxyInitializer}(ext.backend 子包)覆盖此方法,先发起 backend connect,
+     * {@code TcpPassthroughInitializer}(ext.backend 子包)覆盖此方法,先发起 backend connect,
      * 连上后再 sendSynAck;{@link #DENY} 覆盖此方法,立发 RST 并销毁 req,对齐 Linux
      * "无 listener" 语义。
      *
@@ -56,7 +59,7 @@ public interface TcpSockInitializer {
     /**
      * 为 child sock 推荐专属 {@link EventLoop} — 默认返回 null,让
      * {@code Tcp4Multiplexer#tcp_v4_syn_recv_sock} 回退 {@code tcpGroup.next()}。
-     * {@code BackendProxyInitializer}(ext.backend 子包)覆盖为 backend channel 的 EL,
+     * {@code TcpPassthroughInitializer}(ext.backend 子包)覆盖为 backend channel 的 EL,
      * 保留 v1 "状态机与 backend I/O 同线程" 语义。
      */
     default EventLoop proposeEventLoop(TcpRequestSock req, TcpMultiplexer multiplexer) {

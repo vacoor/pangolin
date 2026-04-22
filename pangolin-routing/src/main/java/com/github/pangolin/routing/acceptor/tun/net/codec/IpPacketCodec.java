@@ -1,4 +1,4 @@
-package com.github.pangolin.routing.acceptor.tun.net.handler.support;
+package com.github.pangolin.routing.acceptor.tun.net.codec;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;

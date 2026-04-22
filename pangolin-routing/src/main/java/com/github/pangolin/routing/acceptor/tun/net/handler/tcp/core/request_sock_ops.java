@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.handler.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.handler.support.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.sock.request_sock;
 import io.netty.channel.Channel;
