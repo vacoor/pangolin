@@ -2,6 +2,7 @@ package com.github.pangolin.routing.context.spi;
 
 import com.github.pangolin.routing.acceptor.mixin.MixinAcceptor;
 import com.github.pangolin.routing.acceptor.tun.TunAcceptor;
+import com.github.pangolin.routing.acceptor.tun.TunAcceptor2;
 import com.github.pangolin.routing.acceptor.tun.adapter.InterfaceAddressEx;
 import com.github.pangolin.routing.acceptor.tun.fakedns.FakeDnsAcceptor;
 import com.github.pangolin.routing.context.InheritableRouteContext;
@@ -130,7 +131,7 @@ public class DefaultRouteContextFactory extends AbstractRouteContextFactory {
             final InterfaceAddressEx bindingToUse = InterfaceAddressEx.of(addr, len);
 
             final String ifname = Platform.isWindows() ? "Pangolin" : null;
-            iniContext.addAcceptors(new TunAcceptor(ifname, new InterfaceAddressEx[]{bindingToUse}, entry.getValue()));
+            iniContext.addAcceptors(new TunAcceptor2(ifname, new InterfaceAddressEx[]{bindingToUse}, entry.getValue()));
         }
 
         final Ini.Section external = ini.getSection("External");
