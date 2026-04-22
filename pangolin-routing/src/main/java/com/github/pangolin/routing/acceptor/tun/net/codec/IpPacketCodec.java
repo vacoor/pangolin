@@ -29,12 +29,13 @@ public class IpPacketCodec extends ByteToMessageCodec<ByteBuf> {
      *
      * Incoming direction: wrap the received bytes in an {@link IpPacketBuf}
      * (zero-copy — no field parsing occurs here).
-     * {@link IpPacketBuf} retains one reference; the downstream handler is
-     * responsible for calling {@link IpPacketBuf#release()} when done.
+     * {@link IpPacketBuf} takes ownership of the slice's reference; the
+     * downstream handler is responsible for calling {@link IpPacketBuf#release()}
+     * when done.
      */
     @Override
     protected void decode(final ChannelHandlerContext ctx,
                           final ByteBuf packet, final List<Object> out) throws Exception {
-        out.add(IpPacketBuf.retainedWrap(packet.readRetainedSlice(packet.readableBytes())));
+        out.add(IpPacketBuf.wrap(packet.readRetainedSlice(packet.readableBytes())));
     }
 }
