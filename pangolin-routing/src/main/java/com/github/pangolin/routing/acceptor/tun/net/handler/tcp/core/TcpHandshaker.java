@@ -110,14 +110,19 @@ public class TcpHandshaker {
         req.childCloseListener = new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
-                // for TCP_NEW_SYN_RECV waiting SYN-ACK -> ACK
-                log.debug(logFormat("[TCP] [STATE]", pkt, "Connection to {}:{} has been disconnected"), resolved.getHostString(), resolved.getPort());
+                try {
+                    // for TCP_NEW_SYN_RECV waiting SYN-ACK -> ACK
+                    log.debug(logFormat("[TCP] [STATE]", pkt, "Connection to {}:{} has been disconnected"), resolved.getHostString(), resolved.getPort());
 
-                // FIXME RESET set reset.
-                rsk_ops.send_reset(net, parent, pkt, -100);
-                // output.tcp_send_active_reset(net, req, "Abort");
-                // FIXME clean queue
-                multiplexer.inet_csk_destroy_sock(req);
+                    // FIXME RESET set reset.
+                    rsk_ops.send_reset(net, parent, pkt, -100);
+                    // output.tcp_send_active_reset(net, req, "Abort");
+                    // FIXME clean queue
+                    multiplexer.inet_csk_destroy_sock(req);
+                } finally {
+                    // 对应 connect 成功分支内为 listener 额外持有的那份 retain。
+                    pkt.release();
+                }
             }
         };
 
@@ -139,6 +144,9 @@ public class TcpHandshaker {
                                 "Connection handshake 2/3: SYN-ACK"
                         ));
                         af_ops.send_synack(net, parent, req, pkt);
+                        // childCloseListener 会晚于本回调触发,届时 connect 链上的 retain 已释放,
+                        // 上游 handler 也早已归零 pkt。为 listener 独立 retain 一份,触发末尾 release。
+                        pkt.retain();
                         future.channel().closeFuture().addListener(req.childCloseListener);
                     } else {
                         // FIXME conflict and child close listener send two RESET.
