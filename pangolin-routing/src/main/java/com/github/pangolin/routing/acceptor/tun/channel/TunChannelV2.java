@@ -17,6 +17,7 @@ import io.netty.channel.ChannelPromise;
 import io.netty.channel.DefaultEventLoop;
 import io.netty.channel.EventLoop;
 import io.netty.channel.RecvByteBufAllocator;
+import io.netty.util.ReferenceCountUtil;
 import io.netty.util.internal.PlatformDependent;
 import io.netty.util.internal.StringUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -226,11 +227,20 @@ public class TunChannelV2 extends AbstractChannel {
         int size = readBuf.size();
         if (size > 0) {
             readData = true;
-            for (int i = 0; i < size; i++) {
-                readPending = false;
-                pipeline.fireChannelRead(readBuf.get(i));
+            int i = 0;
+            try {
+                for (; i < size; i++) {
+                    readPending = false;
+                    pipeline.fireChannelRead(readBuf.get(i));
+                }
+            } finally {
+                // fireChannelRead 抛异常时（如跨 loop 派发被拒、handler 抛出未捕获异常）,
+                // 当前及之后未送出的 msg 仍由我们持有,必须 release 以避免泄漏。
+                for (; i < size; i++) {
+                    ReferenceCountUtil.release(readBuf.get(i));
+                }
+                readBuf.clear();
             }
-            readBuf.clear();
             allocHandle.readComplete();
             pipeline.fireChannelReadComplete();
         }

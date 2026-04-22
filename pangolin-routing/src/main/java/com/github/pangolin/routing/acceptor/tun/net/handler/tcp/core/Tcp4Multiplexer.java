@@ -150,15 +150,23 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
             if (loop.inEventLoop()) {
                 tcp_v4_do_rcv(net, sockToUse, pkt);
             } else {
-                // 否则提交到 event loop 中执行，并同步处理可能的异常
+                // 否则提交到 event loop 中执行。
+                // retain/execute 必须对称：loop.execute 本身抛 RejectedExecutionException
+                // (例如 backend loop 已 shutdown) 时,lambda 不会运行,finally release 永远不来,
+                // 需要在 catch 里回滚这次 retain,否则 pkt 泄漏。
                 pkt.retain();
-                loop.execute(() -> {
-                    try {
-                        tcp_v4_do_rcv(net, sockToUse, pkt);
-                    } finally {
-                        pkt.release();
-                    }
-                });
+                try {
+                    loop.execute(() -> {
+                        try {
+                            tcp_v4_do_rcv(net, sockToUse, pkt);
+                        } finally {
+                            pkt.release();
+                        }
+                    });
+                } catch (final Throwable t) {
+                    pkt.release();
+                    throw t;
+                }
             }
         } else {
             tcp_v4_do_rcv(net, sockToUse, pkt);

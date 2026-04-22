@@ -1954,7 +1954,11 @@ public class TcpInput {
             public void operationComplete(ChannelFuture channelFuture) throws Exception {
                 String hostname = TcpLogUtils.getHostNameNoResolve(sk.ir_loc_addr);
                 hostname = null != hostname ? hostname : sk.ir_loc_addr.getHostAddress();
-                log.info(logFormat("[TCP] [STATE]", pkt, "Connection to {}:{} has been disconnected"), hostname, sk.ir_num);
+                log.info(logFormat("[TCP] [STATE]",
+                                sk.ir_rmt_addr, sk.ir_rmt_port,
+                                sk.ir_loc_addr, sk.ir_num,
+                                "Connection to {}:{} has been disconnected"),
+                        hostname, sk.ir_num);
                 TcpState state = sk.state();
                 if (multiplexer.tcp_close_state(sk)) {
                     if (TCP_CLOSE_WAIT.equals(state)) {
@@ -2010,7 +2014,11 @@ public class TcpInput {
                     @Override
                     public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) throws Exception {
                         // FIXME RESET
-                        log.info(logFormat("[TCP] [STATE]", pkt, "Connection aborted: {}"), cause.getMessage(), cause);
+                        log.info(logFormat("[TCP] [STATE]",
+                                        sk.ir_rmt_addr, sk.ir_rmt_port,
+                                        sk.ir_loc_addr, sk.ir_num,
+                                        "Connection aborted: {}"),
+                                cause.getMessage(), cause);
                         output.tcp_send_active_reset(net, sk, cause.getMessage());
                         multiplexer.tcp_done(sk);
                         if (ctx.channel().isOpen()) {

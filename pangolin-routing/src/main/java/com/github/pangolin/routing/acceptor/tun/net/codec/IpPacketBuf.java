@@ -15,8 +15,8 @@ import java.net.UnknownHostException;
  * and leak detector to work correctly when {@code IpPacketBuf} flows through a pipeline
  * as a channel message.
  *
- * <p>The factory ({@link #wrap}/{@link #retainedWrap}) dispatches to the most-specific
- * subclass based on IP version and next-protocol:
+ * <p>The factory ({@link #wrap}) dispatches to the most-specific subclass based on
+ * IP version and next-protocol:
  * <ul>
  *   <li>IPv4 + TCP=6  → {@link Tcp4PacketBuf}</li>
  *   <li>IPv4 + UDP=17 → {@link Udp4PacketBuf}</li>
@@ -61,27 +61,6 @@ public abstract class IpPacketBuf implements ReferenceCounted {
             final byte proto = buf.getByte(base + 6);
             if (proto == PROTO_TCP) return new Tcp6PacketBuf(buf);
             return new Ip6PacketBuf(buf);
-        }
-        throw new IllegalArgumentException("Unsupported IP version: " + version);
-    }
-
-    /**
-     * Retain buf once internally and create wrapper. Caller still owns their reference.
-     * Dispatches to the most-specific subclass based on IP version and next-protocol.
-     */
-    public static IpPacketBuf retainedWrap(ByteBuf buf) {
-        final int base = buf.readerIndex();
-        final int version = (buf.getByte(base) >> 4) & 0xF;
-        if (version == 4) {
-            final byte proto = buf.getByte(base + 9);
-            if (proto == PROTO_TCP) return new Tcp4PacketBuf(buf.retain());
-            if (proto == PROTO_UDP) return new Udp4PacketBuf(buf.retain());
-            return new Ip4PacketBuf(buf.retain());
-        }
-        if (version == 6) {
-            final byte proto = buf.getByte(base + 6);
-            if (proto == PROTO_TCP) return new Tcp6PacketBuf(buf.retain());
-            return new Ip6PacketBuf(buf.retain());
         }
         throw new IllegalArgumentException("Unsupported IP version: " + version);
     }
