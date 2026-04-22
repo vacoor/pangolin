@@ -454,7 +454,13 @@ public abstract class TcpMultiplexer {
 
         // Release OFO queue ByteBufs for established connections
         if (sk instanceof TcpSock) {
-            tcp_ofo_queue_release((TcpSock) sk);
+            final TcpSock tp = (TcpSock) sk;
+            tcp_ofo_queue_release(tp);
+            // Linux: tcp_write_queue_purge —— 异常销毁路径(RESET、超时等)不会走
+            // tcp_clean_rtx_queue 的正常 ACK 回收,残留 skb 的 rawPayload 必须在此释放,
+            // 否则造成 ByteBuf 泄漏。
+            tcp_queue_purge(tp.sk_write_queue);
+            tcp_queue_purge(tp.tcp_rtx_queue);
         }
 
         if (null != sk.child) {
@@ -633,6 +639,21 @@ public abstract class TcpMultiplexer {
         }
         tp.out_of_order_queue.clear();
         tp.ofo_queue_bytes = 0;
+    }
+
+    /**
+     * Release every {@link TcpBuffer} still held in the given queue and clear it.
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c#L2957">tcp_write_queue_purge</a>
+     */
+    private void tcp_queue_purge(final java.util.Queue<TcpBuffer> queue) {
+        if (queue.isEmpty()) {
+            return;
+        }
+        TcpBuffer skb;
+        while (null != (skb = queue.poll())) {
+            skb.release();
+        }
     }
 
     private void tcp_sendmsg(TcpSock sk) {

@@ -864,6 +864,10 @@ public class TcpInput {
 
 
             tp.tcp_rtx_queue.remove(skb);
+            // Linux: tcp_rtx_queue_unlink_and_free -> sk_wmem_free_skb。
+            // skb 在 entail 时接管了 rawPayload 的一份 refCnt,ACK 后从 rtx 队列移除就是
+            // 释放该份引用的时机,不 release 会造成 payload ByteBuf 永久泄漏。
+            skb.release();
 
             tp.tcp_ack_tstamp();
         }
