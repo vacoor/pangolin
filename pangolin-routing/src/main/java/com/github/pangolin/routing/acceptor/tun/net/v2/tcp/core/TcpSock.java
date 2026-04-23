@@ -101,8 +101,7 @@ public class TcpSock extends SockCommon {
     private int pingpongCount;
     private long lastRecvTimeMs;
     private long lastSendTimeMs;
-    private long srttUs;
-    private long rttvarUs;
+    // R2.3: srttUs / rttvarUs 已物理迁到 Sender
     // R2.3: rtoBackoffShift 已物理迁到 Sender
     // R2.3: retransStamp 已物理迁到 Sender(对应 Linux tp->retrans_stamp)
     /**
@@ -414,8 +413,7 @@ public class TcpSock extends SockCommon {
         pingpongCount = 0;
         lastRecvTimeMs = 0L;
         lastSendTimeMs = 0L;
-        srttUs = 0L;
-        rttvarUs = 0L;
+        // R2.3: srttUs / rttvarUs 默认 0L 由 Sender 字段声明初始化
         // R2.3: rtoBackoffShift / retransStamp 默认值 0/0L 由 Sender 字段声明初始化
         undoRetrans = 0;
         rcvBuf = TcpConstants.TCP_DEFAULT_RCV_BUF;
@@ -505,8 +503,7 @@ public class TcpSock extends SockCommon {
         this.pingpongCount = conn.pingpongCount();
         this.lastRecvTimeMs = conn.lastRecvTimeMs();
         this.lastSendTimeMs = conn.lastSendTimeMs();
-        this.srttUs = conn.srttUs();
-        this.rttvarUs = conn.rttvarUs();
+        // R2.3: srttUs / rttvarUs 已在 Sender(dead code path)
         // R2.3: rtoBackoffShift / retransStamp 已在 Sender,此路径为 dead code 保留
         //       (from(conn)/view(conn) 无外部调用者);configure 后由外部重置
         this.undoRetrans = conn.undoRetrans();
@@ -1116,13 +1113,15 @@ public class TcpSock extends SockCommon {
         if (rttUs < 0) {
             return;
         }
-        if (srttUs == 0) {
-            srttUs = rttUs;
-            rttvarUs = rttUs / 2;
+        long s = sender.srttUs();
+        if (s == 0) {
+            sender.srttUs(rttUs);
+            sender.rttvarUs(rttUs / 2);
         } else {
-            long diff = Math.abs(srttUs - rttUs);
-            rttvarUs = (3 * rttvarUs + diff) / 4;
-            srttUs = (7 * srttUs + rttUs) / 8;
+            long rv = sender.rttvarUs();
+            long diff = Math.abs(s - rttUs);
+            sender.rttvarUs((3 * rv + diff) / 4);
+            sender.srttUs((7 * s + rttUs) / 8);
         }
         sender.resetBackoff();
 
@@ -1154,11 +1153,12 @@ public class TcpSock extends SockCommon {
      */
     public long rtoMs() {
         long baseMs;
-        if (srttUs <= 0L) {
+        long s = sender.srttUs();
+        if (s <= 0L) {
             baseMs = TcpConstants.RTO_INIT_MS;
         } else {
-            long varianceUs = Math.max(4L * rttvarUs, 0L);
-            long baseUs = srttUs + varianceUs;
+            long varianceUs = Math.max(4L * sender.rttvarUs(), 0L);
+            long baseUs = s + varianceUs;
             baseMs = Math.max((baseUs + 999L) / 1_000L, TcpConstants.RTO_MIN_MS);
         }
         long rtoMs = baseMs;
@@ -1175,7 +1175,7 @@ public class TcpSock extends SockCommon {
     }
 
     public long srttUs() {
-        return srttUs;
+        return sender.srttUs();
     }
 
     public void backoffRto() {

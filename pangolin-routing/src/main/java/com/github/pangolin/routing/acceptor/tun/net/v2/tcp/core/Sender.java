@@ -64,6 +64,10 @@ public final class Sender {
     private int cwnd = TcpConstants.TCP_INIT_CWND;
     /** 慢启动阈值(段数);默认 {@code Integer.MAX_VALUE} 表示仍在 slow start。Mirrors Linux {@code tp->snd_ssthresh}。 */
     private int ssthresh = Integer.MAX_VALUE;
+    /** 平滑 RTT(us)。Mirrors Linux {@code tp->srtt_us}。 */
+    private long srttUs;
+    /** RTT 方差(us)。Mirrors Linux {@code tp->rttvar_us}。 */
+    private long rttvarUs;
 
     /**
      * RTO 指数退避 shift(R2.3 物理迁移到 Sender)。Mirrors Linux
@@ -408,5 +412,23 @@ public final class Sender {
 
     public void ssthresh(int v) {
         this.ssthresh = v;
+    }
+
+    /** 平滑 RTT (us)。Mirrors Linux {@code tp->srtt_us}。 */
+    public long srttUs() {
+        return srttUs;
+    }
+
+    public void srttUs(long v) {
+        this.srttUs = v;
+    }
+
+    /** RTT 方差 (us)。Mirrors Linux {@code tp->rttvar_us}。 */
+    public long rttvarUs() {
+        return rttvarUs;
+    }
+
+    public void rttvarUs(long v) {
+        this.rttvarUs = v;
     }
 }
