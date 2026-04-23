@@ -280,6 +280,21 @@ public final class Receiver {
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
+     * 初始化接收 MSS 提示 — 对齐 Linux {@code tcp_initialize_rcv_mss}。
+     * R4.2b-i:从 {@code SegmentDispatcher.initializeRcvMss} 迁入;
+     * 调用方在 3WH 收到最后 ACK 后 {@code sk.rcvMss(sk.receiver().initializeRcvMss())}。
+     */
+    public int initializeRcvMss() {
+        if (!sock.hasConnection()) {
+            return TcpConstants.TCP_MSS_DEFAULT;
+        }
+        int mss = sock.mss();
+        int hint = Math.min(mss, sock.rcvWnd() / 2);
+        hint = Math.min(hint, TcpConstants.TCP_INIT_CWND * mss);
+        return Math.max(hint, TcpConstants.TCP_MSS_DEFAULT);
+    }
+
+    /**
      * 段是否在可接受窗口内 — 对齐 Linux {@code tcp_sequence}。
      * R4.2b-4f:从 {@code SegmentDispatcher} 迁入的静态工具。
      */

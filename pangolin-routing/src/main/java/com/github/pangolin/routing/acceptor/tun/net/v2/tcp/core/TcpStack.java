@@ -46,10 +46,13 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConsta
  *       内部通过 registry 的 CHM 和 sock.eventLoop() 调度完成线程归属。</li>
  * </ul>
  *
- * <p><b>R4.2 前后</b>:R4.2b-2 后 {@link SegmentDispatcher} 变为 {@code extends TcpStack};
- * R4.2b-3 重命名完成({@code TcpMultiplexer} → {@code SegmentDispatcher})。
- * R4.2b-4 把 FSM 方法下沉到 Sender / Receiver / Listener 后,{@code SegmentDispatcher}
- * 将改为 has-a 组合 {@link TcpStack} 而非继承。
+ * <p><b>R4.2 进度</b>:
+ * <ul>
+ *   <li>R4.2b-2 后 {@link SegmentDispatcher} 已 {@code extends TcpStack},生命周期字段/方法上移至此 ✅</li>
+ *   <li>R4.2b-3 重命名完成({@code TcpMultiplexer} → {@code SegmentDispatcher})✅</li>
+ *   <li>R4.2b-4 FSM 方法下沉到 Sender / Receiver / Listener / TcpTimewaitSock ✅</li>
+ *   <li>未来(可选):{@code SegmentDispatcher} 改 has-a 组合 {@link TcpStack},目前仍继承。</li>
+ * </ul>
  */
 public class TcpStack {
 

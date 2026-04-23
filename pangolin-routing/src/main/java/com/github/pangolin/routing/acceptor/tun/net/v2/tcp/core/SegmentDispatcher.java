@@ -114,18 +114,6 @@ public abstract class SegmentDispatcher extends TcpStack {
     protected abstract TcpSock syn_recv_sock(ChannelHandlerContext net, TcpSock listenSock, TcpPacketBuf pkt, TcpRequestSock req);
 
     /**
-     * 对齐 Linux {@code __inet_lookup_skb}(net/ipv4/inet_hashtables.c):先查 ESTABLISHED 槽,
-     * miss 再查 TIME_WAIT 槽,最后回退到半连接 / LISTEN。返回 {@link TcpTimewaitSock}
-     * 时由 {@code tcp_v4_rcv} 派发到 {@code timewaitStateProcess}。
-     *
-     * <p>R4.2b-1:实现下沉到 {@link SockLookup},本方法仅作 delegate 保留兼容。
-     * 后续 R4.2b-3 随 {@code SegmentDispatcher} 抽出一并删除。
-     */
-    protected SockCommon __inet_lookup_skb(final TcpPacketBuf pkt) {
-        return lookup.lookup(pkt);
-    }
-
-    /**
      * SYN_RECV 阶段的逐段校验 — 严格对齐 Linux
      * <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c">checkReq</a>
      * (net/ipv4/tcp_minisocks.c)。
@@ -264,12 +252,6 @@ public abstract class SegmentDispatcher extends TcpStack {
     }
 
 
-    protected static void initWl(TcpSock sk, int seq) {
-        if (sk.hasConnection()) {
-            sk.sndWl1(seq);
-        }
-    }
-
     protected void initTransfer(TcpSock sk) {
         if (sk == null) {
             return;
@@ -286,17 +268,6 @@ public abstract class SegmentDispatcher extends TcpStack {
         initializer.onEstablished(sk, this);
         sk.sender().armKeepalive(sk.keepaliveTimeMs());
     }
-
-    protected static int initializeRcvMss(TcpSock sk) {
-        if (!sk.hasConnection()) {
-            return TCP_MSS_DEFAULT;
-        }
-        int mss = sk.mss();
-        int hint = Math.min(mss, sk.rcvWnd() / 2);
-        hint = Math.min(hint, TCP_INIT_CWND * mss);
-        return Math.max(hint, TCP_MSS_DEFAULT);
-    }
-
 
     /**
      * 应用层 payload 入发送队列入口 — delegate 到 {@link Sender#sendmsg}(R4.2b-4e 下沉)。

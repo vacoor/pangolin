@@ -16,7 +16,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequen
  *
  * <p>v2 因 A10/A11 保留组织差异,将 {@code inet_timewait_sock} 与 {@code tcp_timewait_sock}
  * 合并为单类,字段命名与 Linux 源码保持一致,便于逐行对照;同时继承
- * {@link SockCommon},使 {@code __inet_lookup_skb} 在 ESTABLISHED miss 时能
+ * {@link SockCommon},使 {@link SockLookup#lookup} 在 ESTABLISHED miss 时能
  * 返回 {@code TcpTimewaitSock} 进入 {@code timewaitStateProcess} 路径。
  *
  * <p>仅保留 TIME_WAIT 阶段所必须的上下文:

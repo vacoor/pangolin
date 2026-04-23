@@ -206,6 +206,17 @@ public final class Sender {
     }
 
     /**
+     * 初始化 SND.WL1 — 对齐 Linux {@code tcp_init_wl}。
+     * 3WH 收到最后 ACK 推进 ESTABLISHED 时调用,用 ACK 段的 SEQ 初始化 WL1,
+     * 后续窗口更新要求 SEQ &ge; WL1。R4.2b-i:从 {@code SegmentDispatcher.initWl} 迁入。
+     */
+    public void initWl(int seq) {
+        if (sock.hasConnection()) {
+            sock.sndWl1(seq);
+        }
+    }
+
+    /**
      * 入站 ACK 处理入口 — 对齐 Linux {@code tcp_ack}(net/ipv4/tcp_input.c)。
      * R4.2b-4f:从 {@code SegmentDispatcher} 物理迁入。
      *

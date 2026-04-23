@@ -86,7 +86,7 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
     }
 
     protected void tcp_v4_rcv(ChannelHandlerContext net, TcpPacketBuf pkt) {
-        SockCommon sk = __inet_lookup_skb(pkt);
+        SockCommon sk = lookup.lookup(pkt);
         if (sk == null) {
             if (!pkt.isRst()) {
                 send_reset(net, pkt, -3);
@@ -364,12 +364,12 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
         if (!sk.hasConnection()) {
             return;
         }
-        initWl(sk, pkt.tcpSeq());
+        sk.sender().initWl(pkt.tcpSeq());
         sk.state(TcpConnectionState.TCP_ESTABLISHED);
         sk.sndUna(pkt.tcpAckNum());
         sk.sndWnd(pkt.tcpWindow() << sk.sndWscale());
         initTransfer(sk);
-        sk.rcvMss(initializeRcvMss(sk));
+        sk.rcvMss(sk.receiver().initializeRcvMss());
         if (sk.hasShutdown(TcpConstants.SEND_SHUTDOWN)) {
             sk.sender().shutdown(TcpConstants.SEND_SHUTDOWN);
         }
