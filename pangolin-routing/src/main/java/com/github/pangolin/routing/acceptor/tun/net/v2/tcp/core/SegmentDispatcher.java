@@ -544,7 +544,7 @@ public abstract class SegmentDispatcher extends TcpStack {
         if (sk.hasConnection() && sk.tcpSendHead() != null) {
             boolean needProbe = output.writeXmit(sk, sk.mss(), TCP_NAGLE_OFF, 0);
             if (needProbe) {
-                armProbe0(sk);
+                sk.sender().armProbe0();
             }
         }
     }
@@ -575,8 +575,8 @@ public abstract class SegmentDispatcher extends TcpStack {
         if (sk == null) {
             return;
         }
-        sk.probeTimerAction(() -> probeTimer(sk));
-        sk.keepaliveTimerAction(() -> keepaliveTimer(sk));
+        sk.probeTimerAction(sk.sender()::probeTimer);
+        sk.keepaliveTimerAction(sk.sender()::keepaliveTimer);
 
         /*
          * 统一走 initializer.onEstablished(sk, this) — initializer 构造期已 requireNonNull:
@@ -585,7 +585,7 @@ public abstract class SegmentDispatcher extends TcpStack {
          * - TcpSockInitializer.DENY:onRequest 阶段已直接发 RST 销毁 req,此路径不会触发
          */
         initializer.onEstablished(sk, this);
-        armKeepalive(sk, sk.keepaliveTimeMs());
+        sk.sender().armKeepalive(sk.keepaliveTimeMs());
     }
 
     protected static int initializeRcvMss(TcpSock sk) {
@@ -598,106 +598,6 @@ public abstract class SegmentDispatcher extends TcpStack {
         return Math.max(hint, TCP_MSS_DEFAULT);
     }
 
-    protected void armProbe0(TcpSock sk) {
-        if (!sk.hasConnection() || sk.packetsOut() != 0 || sk.tcpSendHead() == null) {
-            return;
-        }
-        TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
-                sk,
-                com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TimerType.ZERO_WINDOW_PROBE,
-                sk.tcpProbe0BaseMs(),
-                () -> probeTimer(sk)
-        );
-    }
-
-    protected void probeTimer(TcpSock sk) {
-        if (!sk.hasConnection()) {
-            return;
-        }
-        if (sk.packetsOut() > 0 || sk.tcpSendHead() == null) {
-            sk.resetProbeState();
-            return;
-        }
-
-        long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
-        if (sk.probesTstampMs() == 0L) {
-            sk.probesTstampMs(now);
-        } else if (sk.userTimeoutMs() > 0 && now - sk.probesTstampMs() >= sk.userTimeoutMs()) {
-            sk.skErr(110);
-            output.sendReset(sk);
-            tcpDone(sk);
-            return;
-        }
-
-        if (sk.probesOut() >= TcpConstants.TCP_RETRIES2) {
-            sk.skErr(110);
-            output.sendReset(sk);
-            tcpDone(sk);
-            return;
-        }
-
-        long timeout = output.sendProbe0(sk);
-        if (timeout > 0L) {
-            TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
-                    sk,
-                    com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TimerType.ZERO_WINDOW_PROBE,
-                    timeout,
-                    () -> probeTimer(sk)
-            );
-        }
-    }
-
-    protected void armKeepalive(TcpSock sk, long delayMs) {
-        if (!sk.hasConnection()
-                || !sk.keepaliveEnabled()
-                || sk.state() == TcpConnectionState.TIME_WAIT
-                || sk.state() == TcpConnectionState.TCP_CLOSED
-                || sk.state() == TcpConnectionState.TCP_LISTEN
-                || sk.state() == TcpConnectionState.TCP_SYN_RECV) {
-            return;
-        }
-        TcpTimerScheduler.INSTANCE.scheduleKeepalive(sk, Math.max(delayMs, 1L), () -> keepaliveTimer(sk));
-    }
-
-    protected void keepaliveTimer(TcpSock sk) {
-        if (!sk.hasConnection() || !sk.keepaliveEnabled()) {
-            return;
-        }
-
-        if (sk.state() == TcpConnectionState.FIN_WAIT_2) {
-            return;
-        }
-
-        if (sk.packetsOut() > 0 || sk.tcpSendHead() != null) {
-            armKeepalive(sk, sk.keepaliveTimeMs());
-            return;
-        }
-
-        long elapsed = sk.keepaliveElapsedMs();
-        if (elapsed < sk.keepaliveTimeMs()) {
-            armKeepalive(sk, sk.keepaliveTimeMs() - elapsed);
-            return;
-        }
-
-        long userTimeout = sk.userTimeoutMs();
-        if ((userTimeout > 0L && elapsed >= userTimeout && sk.probesOut() > 0)
-                || (userTimeout == 0L && sk.probesOut() >= sk.keepaliveProbes())) {
-            sk.skErr(110);
-            output.sendReset(sk);
-            tcpDone(sk);
-            return;
-        }
-
-        int err = output.writeWakeup(sk, 1);
-        long next;
-        if (err <= 0) {
-            sk.probesOut(sk.probesOut() + 1);
-            next = sk.keepaliveIntvlMs();
-        } else {
-            next = TcpConstants.TCP_RESOURCE_PROBE_INTERVAL_MS;
-        }
-        armKeepalive(sk, next);
-    }
 
     protected void consume(TcpSock sk, ByteBuf data) {
         /*

@@ -598,4 +598,125 @@ public final class Sender {
     /** 上次发送时戳(毫秒 jiffies)。 */
     public long lastSendTimeMs() { return lastSendTimeMs; }
     public void lastSendTimeMs(long v) { this.lastSendTimeMs = v; }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 发送侧 Timer 行为(R4.2b-4d 从 SegmentDispatcher 迁入)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 零窗探测 timer 武装 — 对齐 Linux {@code tcp_reset_xmit_timer(..., ICSK_TIME_PROBE0)}。
+     * 在没有在途包且队列有待发数据时安排。
+     */
+    public void armProbe0() {
+        if (!sock.hasConnection() || packetsOut() != 0 || sock.tcpSendHead() == null) {
+            return;
+        }
+        TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
+                sock,
+                TimerType.ZERO_WINDOW_PROBE,
+                sock.tcpProbe0BaseMs(),
+                this::probeTimer
+        );
+    }
+
+    /**
+     * 零窗探测到期回调 — 对齐 Linux {@code tcp_probe_timer}。处理 USER_TIMEOUT、
+     * TCP_RETRIES2 重试上限,成功发出探测后按指数退避重新武装。
+     */
+    public void probeTimer() {
+        if (!sock.hasConnection()) {
+            return;
+        }
+        if (packetsOut() > 0 || sock.tcpSendHead() == null) {
+            sock.resetProbeState();
+            return;
+        }
+
+        long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+        if (sock.probesTstampMs() == 0L) {
+            sock.probesTstampMs(now);
+        } else if (sock.userTimeoutMs() > 0 && now - sock.probesTstampMs() >= sock.userTimeoutMs()) {
+            sock.skErr(110);
+            sock.multiplexer().output().sendReset(sock);
+            sock.multiplexer().tcpDone(sock);
+            return;
+        }
+
+        if (sock.probesOut() >= TcpConstants.TCP_RETRIES2) {
+            sock.skErr(110);
+            sock.multiplexer().output().sendReset(sock);
+            sock.multiplexer().tcpDone(sock);
+            return;
+        }
+
+        long timeout = sock.multiplexer().output().sendProbe0(sock);
+        if (timeout > 0L) {
+            TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
+                    sock,
+                    TimerType.ZERO_WINDOW_PROBE,
+                    timeout,
+                    this::probeTimer
+            );
+        }
+    }
+
+    /**
+     * Keepalive timer 武装 — 对齐 Linux {@code inet_csk_reset_keepalive_timer}。
+     * LISTEN / SYN_RECV / CLOSED / TIME_WAIT 不武装。
+     */
+    public void armKeepalive(long delayMs) {
+        if (!sock.hasConnection()
+                || !sock.keepaliveEnabled()
+                || sock.state() == TcpConnectionState.TIME_WAIT
+                || sock.state() == TcpConnectionState.TCP_CLOSED
+                || sock.state() == TcpConnectionState.TCP_LISTEN
+                || sock.state() == TcpConnectionState.TCP_SYN_RECV) {
+            return;
+        }
+        TcpTimerScheduler.INSTANCE.scheduleKeepalive(sock, Math.max(delayMs, 1L), this::keepaliveTimer);
+    }
+
+    /**
+     * Keepalive timer 到期回调 — 对齐 Linux {@code tcp_keepalive_timer}。
+     * FIN_WAIT_2 不做 keepalive;有在途包时续期;idle 超过 keepaliveTime 后发 probe。
+     */
+    public void keepaliveTimer() {
+        if (!sock.hasConnection() || !sock.keepaliveEnabled()) {
+            return;
+        }
+
+        if (sock.state() == TcpConnectionState.FIN_WAIT_2) {
+            return;
+        }
+
+        if (packetsOut() > 0 || sock.tcpSendHead() != null) {
+            armKeepalive(sock.keepaliveTimeMs());
+            return;
+        }
+
+        long elapsed = sock.keepaliveElapsedMs();
+        if (elapsed < sock.keepaliveTimeMs()) {
+            armKeepalive(sock.keepaliveTimeMs() - elapsed);
+            return;
+        }
+
+        long userTimeout = sock.userTimeoutMs();
+        if ((userTimeout > 0L && elapsed >= userTimeout && sock.probesOut() > 0)
+                || (userTimeout == 0L && sock.probesOut() >= sock.keepaliveProbes())) {
+            sock.skErr(110);
+            sock.multiplexer().output().sendReset(sock);
+            sock.multiplexer().tcpDone(sock);
+            return;
+        }
+
+        int err = sock.multiplexer().output().writeWakeup(sock, 1);
+        long next;
+        if (err <= 0) {
+            sock.probesOut(sock.probesOut() + 1);
+            next = sock.keepaliveIntvlMs();
+        } else {
+            next = TcpConstants.TCP_RESOURCE_PROBE_INTERVAL_MS;
+        }
+        armKeepalive(next);
+    }
 }
