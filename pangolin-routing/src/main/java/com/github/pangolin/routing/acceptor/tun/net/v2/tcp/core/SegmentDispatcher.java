@@ -298,19 +298,6 @@ public abstract class SegmentDispatcher extends TcpStack {
     }
 
 
-    protected void consume(TcpSock sk, ByteBuf data) {
-        /*
-         * P1.3 单一出口:sink 统一走 sock.handler()。listener.listenSock 不经本路径,
-         * 但 handler==null(destroy 途中、异常装配)时防御性 release,不泄露。
-         */
-        TcpSockHandler handler = sk == null ? null : sk.handler();
-        if (handler == null) {
-            data.release();
-            return;
-        }
-        handler.onInboundData(data);
-    }
-
     /**
      * 应用层 payload 入发送队列入口 — delegate 到 {@link Sender#sendmsg}(R4.2b-4e 下沉)。
      * 保留 Dispatcher 层入口给 user API({@link #write})和测试 harness 用。
