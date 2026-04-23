@@ -82,5 +82,37 @@ public final class Listener {
     public boolean removeRequest(TcpRequestSock req) {
         return synRegistry.remove(req.fourTuple(), req);
     }
+
+    /**
+     * 三次握手完成时用 SYN-ACK 首发到 ACK 的时间差作为首个 RTT 样本。
+     * Karn's rule:若 SYN-ACK 曾重传({@code num_retrans > 0}),不取样
+     * (无法区分 ACK 确认的是哪一次)。
+     *
+     * <p>R4.2b-4a:从 {@code SegmentDispatcher} 迁入;静态方法,纯操作
+     * {@code child} 与 {@code req},无 listener 实例依赖。
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">synackRttMeas</a>
+     */
+    public static void synackRttMeas(TcpSock child, TcpRequestSock req) {
+        if (req.num_retrans > 0) {
+            return;
+        }
+        long sntSynackUs = req.request().synAckSentUs();
+        if (sntSynackUs == 0L) {
+            return;
+        }
+        long rttUs = (System.nanoTime() / 1_000L) - sntSynackUs;
+        if (rttUs <= 0L) {
+            return;
+        }
+        if (!child.hasConnection()) {
+            return;
+        }
+        TcpConnection conn = child.connection();
+        if (conn == null || conn.rttEstimator() == null) {
+            return;
+        }
+        conn.rttEstimator().addSample(conn, rttUs);
+    }
 }
 

@@ -244,51 +244,9 @@ public abstract class SegmentDispatcher extends TcpStack {
         // (11) syn_recv_sock + synackRttMeas(Karn's rule:num_retrans == 0 才取样)。
         TcpSock child = syn_recv_sock(net, listener.listenSock, pkt, req);
         if (child != null) {
-            synackRttMeas(child, req);
+            Listener.synackRttMeas(child, req);
         }
         return child;
-    }
-
-    /**
-     * 三次握手完成时用 SYN-ACK 首发到 ACK 的时间差作为首个 RTT 样本。
-     * Karn's rule:若 SYN-ACK 曾重传(num_retrans > 0),不取样(无法区分 ACK 确认的是哪一次)。
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">synackRttMeas</a>
-     */
-    private static void synackRttMeas(TcpSock child, TcpRequestSock req) {
-        if (req.num_retrans > 0) {
-            return;
-        }
-        long sntSynackUs = req.request().synAckSentUs();
-        if (sntSynackUs == 0L) {
-            return;
-        }
-        long rttUs = (System.nanoTime() / 1_000L) - sntSynackUs;
-        if (rttUs <= 0L) {
-            return;
-        }
-        if (!child.hasConnection()) {
-            return;
-        }
-        TcpConnection conn = child.connection();
-        if (conn == null || conn.rttEstimator() == null) {
-            return;
-        }
-        conn.rttEstimator().addSample(conn, rttUs);
-    }
-
-    protected void addToHalfQueue(final TcpSock listenSock, final TcpRequestSock req) {
-        listener.addRequest(req);
-    }
-
-    protected void moveToEstablished(final TcpRequestSock req, final TcpSock sock) {
-        if (req.synPacket() != null) {
-            req.synPacket().release();
-            req.synPacket(null);
-        }
-        // sender/receiver/multiplexer 已经在 tcp_v4_syn_recv_sock 的 init(newsk) 里 configure
-        listener.removeRequest(req);
-        establishedRegistry.put(sock.fourTuple(), sock);
     }
 
     protected void shutdownStack(TcpSock sk, int how) {
@@ -305,10 +263,6 @@ public abstract class SegmentDispatcher extends TcpStack {
 
     public void consume(final ChannelHandlerContext ctx, final TcpPacketBuf pkt) {
         rcv(ctx, pkt);
-    }
-
-    public boolean sk_acceptq_is_full() {
-        return listener.synRegistry.size() >= listener.maxSynBacklog;
     }
 
     public boolean write(final FourTuple key, final ByteBuf data) {

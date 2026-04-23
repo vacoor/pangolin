@@ -160,10 +160,10 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
                     return 0;
                 }
                 if (pkt.isSyn() && !pkt.isFin()) {
-                    if (sk_acceptq_is_full()) {
+                    if (listener.synQueueFull()) {
                         return -1;
                     }
-                    // conn_request 内部完成 addToHalfQueue + 后端连接启动(对齐 v1 tcp_conn_request)
+                    // conn_request 内部完成 listener.addRequest + 后端连接启动(对齐 v1 tcp_conn_request)
                     TcpRequestSock req = conn_request(net, sk, pkt);
                     if (req == null) {
                         return -1;
@@ -404,7 +404,7 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
          * synPacket / net 在此统一 retain + stash;lifetime 与 req 绑定,由
          * moveToEstablished 或 inet_csk_destroy_sock(req) 负责释放。
          */
-        addToHalfQueue(listener.listenSock, req);
+        listener.addRequest(req);
         req.net(net);
         req.synPacket((TcpPacketBuf) pkt.retain());
         initializer.onRequest(req, this);

@@ -133,6 +133,22 @@ public class TcpStack {
     // 生命周期 API
     // ═══════════════════════════════════════════════════════════════════════
 
+    /**
+     * 半连接 → ESTABLISHED 的注册表迁移(R4.2b-4a 从 {@code SegmentDispatcher} 迁入)。
+     * 对齐 Linux {@code inet_csk_complete_hashdance}:从 request_sock 哈希摘出、
+     * 释放 SYN 包 retain,插入 established 哈希(v2 的 {@link #establishedRegistry})。
+     * sender/receiver/multiplexer 已在 {@code tcp_v4_syn_recv_sock} 的 {@code init(newsk)}
+     * 里 configure。
+     */
+    public void moveToEstablished(TcpRequestSock req, TcpSock sock) {
+        if (req.synPacket() != null) {
+            req.synPacket().release();
+            req.synPacket(null);
+        }
+        listener.removeRequest(req);
+        establishedRegistry.put(sock.fourTuple(), sock);
+    }
+
     public void tcpDone(TcpSock tp) {
         if (!tp.hasConnection()) {
             return;
