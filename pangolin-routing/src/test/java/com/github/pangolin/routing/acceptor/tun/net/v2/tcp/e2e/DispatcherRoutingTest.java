@@ -17,8 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * E2E:入站段分派路由 —— 对齐 Linux {@code tcp_v4_rcv} 在四元组未命中 / TIME_WAIT bucket
- * 命中情形下的分支行为。为后续 R4.2 将 {@code SegmentDispatcher} 拆分为 {@code TcpStack} +
- * {@code SegmentDispatcher} 提供行为回归网。
+ * 命中情形下的分支行为。R4.2a 建立(为 R4.2b 重构提供护栏),R4.2 完成后作为永久回归网
+ * 保留:任何对 {@code Ipv4SegmentDispatcher.tcp_v4_rcv} 分派拓扑的修改必须通过本组断言。
  *
  * <p>覆盖:
  * <ul>

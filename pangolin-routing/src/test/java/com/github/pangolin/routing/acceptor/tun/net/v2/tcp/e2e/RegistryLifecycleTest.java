@@ -27,16 +27,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * E2E:sock / timewait 注册表生命周期可观测性 —— 对齐 Linux
  * {@code establishedRegistry} / {@code timewaitRegistry} 的 register / unregister
- * 动作。为后续 R4.2 把 registries 从 {@code SegmentDispatcher} 抽到 {@code TcpStack}
- * 提供行为回归网。
+ * 动作。R4.2a 建立(为 R4.2b-2 把 registries 从 TcpMultiplexer 抽到 {@link TcpStack}
+ * 提供护栏),R4.2 完成后作为永久回归网保留。
  *
  * <p>观测手段:
  * <ul>
  *   <li><b>行为探针</b>:对同一 4-tuple 发段,根据栈响应(数据交付 / RST / TW ACK 重放)
  *       推断 registry 命中的是哪条槽位;</li>
- *   <li><b>结构探针</b>:通过反射读 {@code establishedRegistry} / {@code timewaitRegistry}
- *       的 size,直接断言注册表形态。R4.2 之后这些字段可能搬到 {@code TcpStack},
- *       反射路径需同步更新 —— 正是本测试要"钉住"的形态。</li>
+ *   <li><b>结构探针</b>:通过反射读 {@link TcpStack} 上的 {@code establishedRegistry} /
+ *       {@code timewaitRegistry} size,直接断言注册表形态。任何把 registries 再次搬家
+ *       的重构必须更新反射路径 —— 正是本测试要"钉住"的形态。</li>
  * </ul>
  */
 class RegistryLifecycleTest {
