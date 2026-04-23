@@ -28,11 +28,11 @@ public class TcpSock extends SockCommon {
      * 所属协议栈实例 — 由 {@link SegmentDispatcher#configure(TcpSock)} 注入,
      * 承载 per-stack 服务(retransmitter / MIB / policy 等)的入口。
      */
-    private SegmentDispatcher multiplexer;
+    private SegmentDispatcher stack;
     /**
      * 发送侧聚合对象 — R2 抽 Sender 的目标。R2.0(骨架)期间只是 facade,
      * 状态仍存在 TcpSock 自身;R2.3 起字段下沉到本对象。由
-     * {@link SegmentDispatcher#configure(TcpSock)} 与 {@code multiplexer} 同时注入。
+     * {@link SegmentDispatcher#configure(TcpSock)} 与 {@code stack} 同时注入。
      */
     private Sender sender;
     /**
@@ -494,12 +494,12 @@ public class TcpSock extends SockCommon {
         return channel;
     }
 
-    public SegmentDispatcher multiplexer() {
-        return multiplexer;
+    public SegmentDispatcher stack() {
+        return stack;
     }
 
-    public void multiplexer(SegmentDispatcher multiplexer) {
-        this.multiplexer = multiplexer;
+    public void stack(SegmentDispatcher stack) {
+        this.stack = stack;
     }
 
     public Sender sender() {
@@ -1718,7 +1718,7 @@ public class TcpSock extends SockCommon {
                 // 信息驱动 LOST 标记,进入 Fast Retransmit 前先把队首段记为 LOST,
                 // 这样 retransmitSkb 的 LOST 优先路径能与 RACK 场景保持一致。
                 TcpAck.markHeadLost(this, 1);
-                this.multiplexer.retransmitter().retransmit(this);
+                this.stack.retransmitter().retransmit(this);
             } else if (sender.congestionState() == CongestionState.RECOVERY) {
                 sender.incrementCwnd();
             }

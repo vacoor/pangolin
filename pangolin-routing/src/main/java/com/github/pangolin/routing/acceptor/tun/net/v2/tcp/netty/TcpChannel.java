@@ -50,7 +50,7 @@ public class TcpChannel extends AbstractChannel {
     private static final ChannelMetadata METADATA = new ChannelMetadata(false);
 
     private final TcpSock sock;
-    private final SegmentDispatcher multiplexer;
+    private final SegmentDispatcher stack;
     private final TcpChannelConfig config;
 
     /** autoRead=false 时暂存待 fire 的 inbound buf。 */
@@ -72,10 +72,10 @@ public class TcpChannel extends AbstractChannel {
     /** writability 最近一次推上 pipeline 的 low/high 状态。 */
     private boolean lastWritable = true;
 
-    public TcpChannel(TcpSock sock, SegmentDispatcher multiplexer) {
+    public TcpChannel(TcpSock sock, SegmentDispatcher stack) {
         super(null);
         this.sock = sock;
-        this.multiplexer = multiplexer;
+        this.stack = stack;
         this.config = new TcpChannelConfig(this);
         sock.handler(new BridgeImpl());
     }
@@ -84,8 +84,8 @@ public class TcpChannel extends AbstractChannel {
         return sock;
     }
 
-    public SegmentDispatcher multiplexer() {
-        return multiplexer;
+    public SegmentDispatcher stack() {
+        return stack;
     }
 
     // ---- AbstractChannel template methods ----
@@ -137,7 +137,7 @@ public class TcpChannel extends AbstractChannel {
         // 主动关闭 → 发 FIN(对齐 v1 childCloseListener 的 closeState + sendFin);
         // abortive 关闭(RST / sock 已销毁)跳过 FIN,避免在已被对端 RST 的连接上再次写入。
         if (!abortive && sock.hasConnection() && sock.state().canSend()) {
-            if (multiplexer.closeState(sock)) {
+            if (stack.closeState(sock)) {
                 sock.sender().sendFin();
             }
         }

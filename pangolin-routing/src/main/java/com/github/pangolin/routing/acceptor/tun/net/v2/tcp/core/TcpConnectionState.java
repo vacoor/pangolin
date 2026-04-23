@@ -14,7 +14,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
  * <p>{@link TcpConnection} is created from the v2 {@code ng} open-request path after the
  * final ACK passes sequence validation, analogous to Linux {@code tcp_create_openreq_child()}.
  * The connection starts in {@link #TCP_SYN_RECV} and transitions to {@link #TCP_ESTABLISHED}
- * inside the multiplexer state machine, mirroring the {@code TCP_SYN_RECV} case in Linux
+ * inside the stack state machine, mirroring the {@code TCP_SYN_RECV} case in Linux
  * {@code rcvStateProcess()}.
  */
 public enum TcpConnectionState {

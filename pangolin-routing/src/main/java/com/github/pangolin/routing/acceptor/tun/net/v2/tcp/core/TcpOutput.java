@@ -39,7 +39,7 @@ public final class TcpOutput {
     /**
      * 进程级 fallback 单例。R1.4(2026-04-23):TcpOutput 已经降为 SegmentDispatcher
      * 持有的 per-stack 实例(见 {@link SegmentDispatcher#output()}),本 INSTANCE 仅为
-     * 过渡期保留,供还不能拿到 multiplexer 引用的外部 adapter(TcpMultiplexHandler
+     * 过渡期保留,供还不能拿到 stack 引用的外部 adapter(TcpMultiplexHandler
      * 的 fallback ingress reset 等)暂时使用。后续所有主干路径都应走 per-stack 实例。
      */
     public static final TcpOutput INSTANCE = new TcpOutput();
@@ -199,7 +199,7 @@ public final class TcpOutput {
             return;
         }
         sock.lastOowAckTimeMs(now);
-        sock.multiplexer().mib().inc(TcpMib.TCPCHALLENGEACK);
+        sock.stack().mib().inc(TcpMib.TCPCHALLENGEACK);
         sendAck(sock);
     }
 
@@ -349,7 +349,7 @@ public final class TcpOutput {
         // 对齐 Linux tcp_rate_skb_sent:重传时同样重置 tx.delivered 为当前 tp->delivered,
         // 让本次重传在被 ACK 时参与最新 rs->prior_delivered 评估(而非沿用原始发送快照)。
         oldest.txDelivered(sock.delivered());
-        sock.multiplexer().mib().inc(TcpMib.TCPRETRANSSEGS);
+        sock.stack().mib().inc(TcpMib.TCPRETRANSSEGS);
         __tcp_transmit_skb(sock, oldest, sock.receiver().rcvNxt());
     }
 
@@ -883,7 +883,7 @@ public final class TcpOutput {
         final int quota = Math.max(0, cwnd + bonus - in_flight);
         if (bonus > 0 && in_flight >= cwnd && quota > 0) {
             // 真正用到 Limited Transmit 额度(基线 cwnd - in_flight 已耗尽),才计入 MIB。
-            sock.multiplexer().mib().inc(TcpMib.TCPLIMITEDTRANSMIT);
+            sock.stack().mib().inc(TcpMib.TCPLIMITEDTRANSMIT);
         }
         return quota;
     }

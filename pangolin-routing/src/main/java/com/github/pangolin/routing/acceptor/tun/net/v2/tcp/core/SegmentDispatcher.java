@@ -30,7 +30,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps
  *       {@link #syn_recv_sock},由 {@link Ipv4SegmentDispatcher} 实现;</li>
  *   <li>FSM 处理(concrete,R4.2b-4 下沉):{@code checkReq} / {@code ackIncoming} /
  *       {@code dataQueue} / {@code finIncoming} / {@code outOfWindow} 等;</li>
- *   <li>per-sock 装配:{@link #configure} 建立 {@link TcpSock#multiplexer()} 反向引用
+ *   <li>per-sock 装配:{@link #configure} 建立 {@link TcpSock#stack()} 反向引用
  *       + 创建 {@link Sender} / {@link Receiver}。</li>
  * </ul>
  *
@@ -63,7 +63,7 @@ public abstract class SegmentDispatcher extends TcpStack {
 
     /**
      * Sock 装配钩子 — 所有 sock(listen / child / established)创建后必须经过本方法。
-     * 默认实现:调 {@link #configure(TcpSock)} 注入 multiplexer / sender / receiver
+     * 默认实现:调 {@link #configure(TcpSock)} 注入 stack / sender / receiver
      * 反向引用。子类若需要额外装配(如 IPv4 / IPv6 特定字段),应 {@code super.init(sk)}
      * 后再补自身逻辑。
      */
@@ -72,18 +72,18 @@ public abstract class SegmentDispatcher extends TcpStack {
     }
 
     /**
-     * Per-sock 注入 per-stack 服务。建立 {@link TcpSock#multiplexer()} 反向引用,
+     * Per-sock 注入 per-stack 服务。建立 {@link TcpSock#stack()} 反向引用,
      * 创建 {@link Sender} / {@link Receiver} 并挂入 sock。本方法由 {@link #init(TcpSock)}
      * 调用,外部代码通常不需要直接调。幂等 — 多次调用会覆盖 sender/receiver,但实际
      * 调用路径(listen sock / tcp_v4_syn_recv_sock)保证只经过一次。
      *
      * <p>R4.2b-2:configure 留在 SegmentDispatcher 而非 TcpStack,因为依赖
-     * {@code sk.multiplexer(this)} 的 'this' 是 SegmentDispatcher 类型。R4.2b-3 重命名
-     * {@code sk.multiplexer} → {@code sk.stack} 后可上移。
+     * {@code sk.stack(this)} 的 'this' 是 SegmentDispatcher 类型。若未来把
+     * {@link TcpSock#stack} 字段类型从 SegmentDispatcher 放宽到 TcpStack,可上移。
      */
     public TcpSock configure(TcpSock sk) {
         if (sk != null) {
-            sk.multiplexer(this);
+            sk.stack(this);
             // 幂等:createChild 可能已装配 sender/receiver 用于预填充字段(R2.3/R3.2),
             // 本方法不重建,避免覆盖已填好的状态。
             if (sk.sender() == null) sk.sender(new Sender(sk));

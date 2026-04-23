@@ -29,7 +29,7 @@ import java.util.function.IntConsumer;
  *       ({@link #OFO_MAX_BYTES}) is enforced against the OFO-only slice via
  *       {@link #ofoBytes()}, mirroring Linux {@code tcp_prune_ofo_queue}.</li>
  *   <li>Each delta is also forwarded to an external {@link IntConsumer} so the
- *       multiplexer can aggregate a global {@code tcp_memory_allocated} counter
+ *       stack can aggregate a global {@code tcp_memory_allocated} counter
  *       for {@code tcp_under_memory_pressure} decisions.</li>
  * </ul>
  *

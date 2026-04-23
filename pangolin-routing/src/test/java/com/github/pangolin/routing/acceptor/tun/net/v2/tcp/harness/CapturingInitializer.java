@@ -21,8 +21,8 @@ public final class CapturingInitializer implements TcpSockInitializer {
     private final List<CapturingHandler> handlers = new ArrayList<>();
 
     @Override
-    public void onEstablished(TcpSock sock, SegmentDispatcher multiplexer) {
-        CapturingHandler h = new CapturingHandler(sock, multiplexer);
+    public void onEstablished(TcpSock sock, SegmentDispatcher stack) {
+        CapturingHandler h = new CapturingHandler(sock, stack);
         sock.handler(h);
         handlers.add(h);
     }
@@ -43,20 +43,20 @@ public final class CapturingInitializer implements TcpSockInitializer {
      */
     public static final class CapturingHandler implements TcpSockHandler {
         private final TcpSock sock;
-        private final SegmentDispatcher multiplexer;
+        private final SegmentDispatcher stack;
         private final List<byte[]> inboundPayloads = new ArrayList<>();
         private int peerFinCount;
         private Throwable lastResetCause;
         private int writabilityChangedCount;
         private boolean destroyed;
 
-        CapturingHandler(TcpSock sock, SegmentDispatcher multiplexer) {
+        CapturingHandler(TcpSock sock, SegmentDispatcher stack) {
             this.sock = sock;
-            this.multiplexer = multiplexer;
+            this.stack = stack;
         }
 
         public TcpSock sock() { return sock; }
-        public SegmentDispatcher multiplexer() { return multiplexer; }
+        public SegmentDispatcher stack() { return stack; }
         public List<byte[]> inboundPayloads() { return inboundPayloads; }
         public int peerFinCount() { return peerFinCount; }
         public Throwable lastResetCause() { return lastResetCause; }
@@ -71,7 +71,7 @@ public final class CapturingInitializer implements TcpSockInitializer {
         public void send(byte[] payload) {
             io.netty.buffer.ByteBuf buf = io.netty.buffer.Unpooled.buffer(payload.length);
             buf.writeBytes(payload);
-            multiplexer.sendmsg(sock, buf, true);
+            stack.sendmsg(sock, buf, true);
         }
 
         @Override

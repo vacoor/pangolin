@@ -22,25 +22,25 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
     private static final byte PROTO_TCP = 6;
 
     private final DnsEngine dnsEngine;
-    private final SegmentDispatcher multiplexer;
+    private final SegmentDispatcher stack;
 
 
     public TcpMultiplexHandler(final DnsEngine dnsEngine,
                                final TcpSockInitializer initializer) {
         super(PROTO_TCP);
         this.dnsEngine = dnsEngine;
-        this.multiplexer = create(initializer);
+        this.stack = create(initializer);
     }
 
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final TcpPacketBuf rawPkt) {
         try {
             final TcpPacketBuf pkt = prepare(rawPkt);
-            multiplexer.consume(ctx, pkt);
+            stack.consume(ctx, pkt);
         } catch (final Exception ex) {
             log.error("Failed to process TCP packet", ex);
             // fallback reset in ingress layer
-            multiplexer.output().v4SendReset(ctx, rawPkt);
+            stack.output().v4SendReset(ctx, rawPkt);
         }
     }
 
@@ -54,11 +54,11 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
     }
 
     public boolean write(final FourTuple key, final ByteBuf data) {
-        return multiplexer.write(key, data);
+        return stack.write(key, data);
     }
 
-    public SegmentDispatcher multiplexer() {
-        return multiplexer;
+    public SegmentDispatcher stack() {
+        return stack;
     }
 
     protected java.net.InetAddress resolveDstAddress(final byte[] addr) throws UnknownHostException {

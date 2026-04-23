@@ -235,7 +235,7 @@ public final class Receiver {
                 && sock.rcvWnd() >= sock.receiveWindow())
                 || sock.inQuickAckMode()
                 || sock.hasAckPending(TcpConstants.ACK_NOW)) {
-            sock.multiplexer().output().sendAck(sock);
+            sock.stack().output().sendAck(sock);
             return;
         }
         sendDelayedAck();
@@ -248,7 +248,7 @@ public final class Receiver {
     public void sendDelayedAck() {
         long ato = Math.max(1L, sock.ackTimeoutMs());
         if (sock.inPingpongMode()) {
-            ato = Math.max(ato, sock.multiplexer().config.delayedAckMs());
+            ato = Math.max(ato, sock.stack().config.delayedAckMs());
         }
         sock.addAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER);
         TcpTimerScheduler.INSTANCE.scheduleDelayedAck(sock, ato, this::delackTimer);
@@ -272,7 +272,7 @@ public final class Receiver {
             sock.exitPingpongMode();
             sock.ackTimeoutMs(TcpConstants.TCP_ATO_MIN_MS);
         }
-        sock.multiplexer().output().sendAck(sock);
+        sock.stack().output().sendAck(sock);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -425,7 +425,7 @@ public final class Receiver {
     public void finIncoming(ChannelHandlerContext ctx) {
         sock.addShutdown(TcpConstants.RCV_SHUTDOWN);
         final TcpConnectionState prevState = sock.state();
-        final TcpOutput output = sock.multiplexer().output();
+        final TcpOutput output = sock.stack().output();
         switch (prevState) {
             case TCP_SYN_RECV:
             case TCP_ESTABLISHED:
@@ -447,7 +447,7 @@ public final class Receiver {
             case FIN_WAIT_2:
                 output.sendAck(sock);
                 notifyPeerFin(sock);
-                sock.multiplexer().timeWait(ctx, sock, TcpConnectionState.TIME_WAIT);
+                sock.stack().timeWait(ctx, sock, TcpConnectionState.TIME_WAIT);
                 return;
             default:
                 return;
@@ -472,7 +472,7 @@ public final class Receiver {
     public void outOfWindow(int reason) {
         sock.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
         sock.addAckPending(TcpConstants.ACK_SCHED);
-        TcpMibStats mib = sock.multiplexer().mib();
+        TcpMibStats mib = sock.stack().mib();
         mib.inc(TcpMib.OUTOFWINDOWICMPS);
         mib.incDrop(reason);
     }

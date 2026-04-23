@@ -30,7 +30,7 @@ public interface TcpSockInitializer {
      * {@link TcpSockHandler},否则 {@link SegmentDispatcher#consume} 会走"无 handler"
      * 防御分支 release inbound buf。
      */
-    void onEstablished(TcpSock sock, SegmentDispatcher multiplexer);
+    void onEstablished(TcpSock sock, SegmentDispatcher stack);
 
     /**
      * SYN 到达、半连接入队后触发 — 默认立发 SYN-ACK。
@@ -52,8 +52,8 @@ public interface TcpSockInitializer {
      *       {@code mux.inet_csk_destroy_sock(req)},后者统一释放 synPacket。</li>
      * </ul>
      */
-    default void onRequest(TcpRequestSock req, SegmentDispatcher multiplexer) {
-        multiplexer.sendSynAck(req);
+    default void onRequest(TcpRequestSock req, SegmentDispatcher stack) {
+        stack.sendSynAck(req);
     }
 
     /**
@@ -62,7 +62,7 @@ public interface TcpSockInitializer {
      * {@code TcpPassthroughInitializer}(ext.backend 子包)覆盖为 backend channel 的 EL,
      * 保留 v1 "状态机与 backend I/O 同线程" 语义。
      */
-    default EventLoop proposeEventLoop(TcpRequestSock req, SegmentDispatcher multiplexer) {
+    default EventLoop proposeEventLoop(TcpRequestSock req, SegmentDispatcher stack) {
         return null;
     }
 
@@ -83,13 +83,13 @@ public interface TcpSockInitializer {
      */
     TcpSockInitializer DENY = new TcpSockInitializer() {
         @Override
-        public void onRequest(TcpRequestSock req, SegmentDispatcher multiplexer) {
-            multiplexer.send_reset(req.net(), req.synPacket(), -88);
-            multiplexer.inet_csk_destroy_sock(req);
+        public void onRequest(TcpRequestSock req, SegmentDispatcher stack) {
+            stack.send_reset(req.net(), req.synPacket(), -88);
+            stack.inet_csk_destroy_sock(req);
         }
 
         @Override
-        public void onEstablished(TcpSock sock, SegmentDispatcher multiplexer) {
+        public void onEstablished(TcpSock sock, SegmentDispatcher stack) {
             // unreachable:onRequest 已销毁 req,永不进入 ESTABLISHED
         }
     };

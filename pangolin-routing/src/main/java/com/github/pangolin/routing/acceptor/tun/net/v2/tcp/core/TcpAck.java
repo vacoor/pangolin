@@ -50,14 +50,14 @@ public final class TcpAck {
                 if ((flags & FLAG_NO_CHALLENGE_ACK) == 0) {
                     sock.sender().sendChallengeAck(false);
                 }
-                sock.multiplexer().mib().incDrop(SKB_DROP_REASON_TCP_TOO_OLD_ACK);
+                sock.stack().mib().incDrop(SKB_DROP_REASON_TCP_TOO_OLD_ACK);
                 return -SKB_DROP_REASON_TCP_TOO_OLD_ACK;
             }
             return 0;
         }
 
         if (after(ack, sock.sndNxt())) {
-            sock.multiplexer().mib().incDrop(SKB_DROP_REASON_TCP_ACK_UNSENT_DATA);
+            sock.stack().mib().incDrop(SKB_DROP_REASON_TCP_ACK_UNSENT_DATA);
             return -SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
         }
 
@@ -103,22 +103,22 @@ public final class TcpAck {
         // 已迁至 CA_Open,后续 onAckedByCc 的自然出口分支不再触发 cwnd=ssthresh deflate。
         final int tsecr = parseTimestampEcho(pkt);
         if (sock.tcpTryUndoRecovery(tsecr)) {
-            sock.multiplexer().mib().inc(TcpMib.TCPFULLUNDO);
+            sock.stack().mib().inc(TcpMib.TCPFULLUNDO);
         } else if (sock.tcpTryUndoLoss(tsecr)) {
             // 对齐 Linux tcp_fastretrans_alert → tcp_try_undo_loss:CA_Loss 期间若收到对
             // 原始段(非 RTO 重传副本)的 ACK,TSECR 早于 retrans_stamp,判定为伪 RTO 并回滚。
-            sock.multiplexer().mib().inc(TcpMib.TCPLOSSUNDO);
+            sock.stack().mib().inc(TcpMib.TCPLOSSUNDO);
         } else if (sock.tcpProcessFrto()) {
             // 对齐 Linux tcp_process_loss 中 F-RTO 分支(RFC 5682):CA_Loss 首 ACK
             // 的 sndUna 追平/越过 RTO 瞬间的 sndNxt 快照 — 原始在飞段全部被吸收,
             // RTO 属伪触发;不依赖 TSECR,与 LOSSUNDO 互补。
-            sock.multiplexer().mib().inc(TcpMib.TCPSPURIOUSRTOS);
+            sock.stack().mib().inc(TcpMib.TCPSPURIOUSRTOS);
         } else if (sock.tcpTryUndoDsack()) {
             // 对齐 Linux tcp_try_undo_dsack:当前 epoch 内所有重传副本都被 DSACK 抵消
             // (tp->undo_retrans 经 tcp_check_dsack 递减至 0),说明是伪触发,回滚 cwnd
             // 并迁 CA_Open。与 FULLUNDO/LOSSUNDO 互斥 — Linux 在 TSECR 分支命中后直接
             // 返回,此处走 else 分支保持同样语义。
-            sock.multiplexer().mib().inc(TcpMib.TCPDSACKUNDO);
+            sock.stack().mib().inc(TcpMib.TCPDSACKUNDO);
         }
 
         if (after(sock.sndUna(), priorSndUna)) {
@@ -189,7 +189,7 @@ public final class TcpAck {
                 }
             }
             if (dupSack) {
-                sock.multiplexer().mib().inc(TcpMib.TCPDSACKRECV);
+                sock.stack().mib().inc(TcpMib.TCPDSACKRECV);
                 // 对齐 Linux tcp_check_dsack → tp->rack.dsack_seen = 1,供
                 // tcp_rack_update_reo_wnd 下次步进 reo_wnd_steps 使用。
                 sock.setRackDsackSeen(true);

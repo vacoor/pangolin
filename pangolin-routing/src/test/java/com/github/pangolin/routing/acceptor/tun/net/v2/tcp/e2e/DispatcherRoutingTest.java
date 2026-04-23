@@ -207,7 +207,7 @@ class DispatcherRoutingTest {
         assertThat(h).as("handshake must have completed before TW staging").isNotNull();
         assertThat(h.sock().state()).isEqualTo(TcpConnectionState.TCP_ESTABLISHED);
 
-        h.multiplexer().timeWait(h.sock(), substate, /*timeoutMs=*/ 60_000L);
+        h.stack().timeWait(h.sock(), substate, /*timeoutMs=*/ 60_000L);
         harness.channel().runPendingTasks();
 
         assertThat(h.destroyed()).as("original sock should be destroyed after TW staging").isTrue();

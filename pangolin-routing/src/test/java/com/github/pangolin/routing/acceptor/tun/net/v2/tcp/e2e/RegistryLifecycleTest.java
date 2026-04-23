@@ -67,7 +67,7 @@ class RegistryLifecycleTest {
     @DisplayName("握手完成 → establishedRegistry 含一条;tcpDone 后摘除")
     void tcpDoneRemovesSockFromEstablishedRegistry() {
         int serverIsn = completeHandshakeAndDrain();
-        SegmentDispatcher mx = initializer.handler().multiplexer();
+        SegmentDispatcher mx = initializer.handler().stack();
 
         assertThat(established(mx)).as("handshake should populate established registry").hasSize(1);
         assertThat(timewait(mx)).as("no TW bucket yet").isEmpty();
@@ -106,7 +106,7 @@ class RegistryLifecycleTest {
     @DisplayName("timeWait 迁移:established 摘除 + timewait 新增(同 4-tuple)")
     void timeWaitMigratesBetweenRegistries() {
         completeHandshakeAndDrain();
-        SegmentDispatcher mx = initializer.handler().multiplexer();
+        SegmentDispatcher mx = initializer.handler().stack();
         TcpSock sock = initializer.handler().sock();
 
         mx.timeWait(sock, TcpConnectionState.TIME_WAIT, /*timeoutMs=*/ 60_000L);
@@ -124,7 +124,7 @@ class RegistryLifecycleTest {
     @DisplayName("inet_twsk_kill → timewait 摘除")
     void inetTwskKillRemovesBucket() {
         completeHandshakeAndDrain();
-        SegmentDispatcher mx = initializer.handler().multiplexer();
+        SegmentDispatcher mx = initializer.handler().stack();
         TcpSock sock = initializer.handler().sock();
 
         mx.timeWait(sock, TcpConnectionState.TIME_WAIT, /*timeoutMs=*/ 60_000L);
@@ -142,7 +142,7 @@ class RegistryLifecycleTest {
     @DisplayName("TW 2MSL 定时器到期 → bucket 自动摘除")
     void twBucketTimerExpiryRemovesBucket() {
         completeHandshakeAndDrain();
-        SegmentDispatcher mx = initializer.handler().multiplexer();
+        SegmentDispatcher mx = initializer.handler().stack();
         TcpSock sock = initializer.handler().sock();
 
         // 用短超时 staging,通过 advanceTimeBy 推进定时器
@@ -163,7 +163,7 @@ class RegistryLifecycleTest {
     @DisplayName("多 TW bucket 按 4-tuple 独立隔离(kill 一个不影响另一个)")
     void twBucketIsolatedByFourTuple() {
         int serverIsnA = completeHandshakeAndDrain(CLIENT_PORT);
-        SegmentDispatcher mx = initializer.handler().multiplexer();
+        SegmentDispatcher mx = initializer.handler().stack();
         TcpSock sockA = initializer.handler().sock();
 
         // 第二条连接:不同 client port,保证 4-tuple 不同

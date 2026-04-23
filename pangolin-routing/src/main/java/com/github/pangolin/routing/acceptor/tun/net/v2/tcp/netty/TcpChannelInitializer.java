@@ -28,11 +28,11 @@ import io.netty.channel.ChannelFuture;
 @FunctionalInterface
 public interface TcpChannelInitializer extends TcpSockInitializer {
 
-    TcpChannel create(TcpSock sock, SegmentDispatcher multiplexer);
+    TcpChannel create(TcpSock sock, SegmentDispatcher stack);
 
     @Override
-    default void onEstablished(TcpSock sock, SegmentDispatcher multiplexer) {
-        final TcpChannel ch = create(sock, multiplexer);
+    default void onEstablished(TcpSock sock, SegmentDispatcher stack) {
+        final TcpChannel ch = create(sock, stack);
         /*
          * register 必须在 sock.eventLoop() 上执行;本方法由 initTransfer 在 EL
          * 内同步调用,直接 register 即可。Netty 会在 register 完成后自动

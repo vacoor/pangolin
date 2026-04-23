@@ -166,7 +166,7 @@ public final class Sender {
             if (total == 0) {
                 return;
             }
-            final int mss = Math.max(1, sock.multiplexer().output().currentMss(sock));
+            final int mss = Math.max(1, sock.stack().output().currentMss(sock));
             int offset = 0;
             while (offset < total) {
                 final int len = Math.min(total - offset, mss);
@@ -189,7 +189,7 @@ public final class Sender {
 
     /** Mirrors Linux {@code tcp_current_mss} (tcp_output.c). */
     public int currentMss() {
-        return sock.multiplexer().output().currentMss(sock);
+        return sock.stack().output().currentMss(sock);
     }
 
     /**
@@ -198,7 +198,7 @@ public final class Sender {
      */
     public void pushPending() {
         if (sock.hasConnection() && sock.tcpSendHead() != null) {
-            boolean needProbe = sock.multiplexer().output().writeXmit(sock, sock.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
+            boolean needProbe = sock.stack().output().writeXmit(sock, sock.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
             if (needProbe) {
                 armProbe0();
             }
@@ -241,70 +241,70 @@ public final class Sender {
         }
         if (sock.state() == TcpConnectionState.TCP_ESTABLISHED
                 || sock.state() == TcpConnectionState.CLOSE_WAIT) {
-            if (sock.multiplexer().closeState(sock)) {
-                sock.multiplexer().output().sendFin(sock);
+            if (sock.stack().closeState(sock)) {
+                sock.stack().output().sendFin(sock);
             }
         }
     }
 
     /** Mirrors Linux {@code tcp_send_fin} — 本端主动发 FIN。 */
     public void sendFin() {
-        sock.multiplexer().output().sendFin(sock);
+        sock.stack().output().sendFin(sock);
     }
 
     /** Mirrors Linux {@code tcp_send_active_reset} — 本端主动发 RST。 */
     public void sendReset() {
-        sock.multiplexer().output().sendReset(sock);
+        sock.stack().output().sendReset(sock);
     }
 
     /** Mirrors Linux {@code __tcp_send_ack} — 立即发一个纯 ACK。 */
     public void sendAck() {
-        sock.multiplexer().output().sendAck(sock);
+        sock.stack().output().sendAck(sock);
     }
 
     /** Mirrors Linux {@code tcp_retransmit_skb} — 重传 RTX 队首段。 */
     public void retransmit() {
-        sock.multiplexer().retransmitter().retransmit(sock);
+        sock.stack().retransmitter().retransmit(sock);
     }
 
     /** Mirrors Linux {@code tcp_rearm_rto} — ACK 推进后重置 / 取消 RTO 定时器。 */
     public void rearmRto() {
-        sock.multiplexer().retransmitter().rearmRto(sock);
+        sock.stack().retransmitter().rearmRto(sock);
     }
 
     /** Mirrors Linux {@code tcp_event_retransmit_timer} — RTO 到期入口。 */
     public void onRtoTimeout() {
-        sock.multiplexer().retransmitter().onTimeout(sock);
+        sock.stack().retransmitter().onTimeout(sock);
     }
 
     /** Mirrors Linux {@code tcp_send_challenge_ack} — RFC 5961 挑战 ACK。 */
     public void sendChallengeAck(boolean accecnReflector) {
-        sock.multiplexer().output().sendChallengeAck(sock, accecnReflector);
+        sock.stack().output().sendChallengeAck(sock, accecnReflector);
     }
 
     /** Mirrors Linux {@code tcp_sync_mss} — MSS 刷新(PMTU/ICMP 驱动)。 */
     public int syncMss(int pmtu) {
-        return sock.multiplexer().output().syncMss(sock, pmtu);
+        return sock.stack().output().syncMss(sock, pmtu);
     }
 
     /** Mirrors Linux {@code tcp_retransmit_skb} — 重传 RTX 队首段(不经 RTO timer)。 */
     public void retransmitSkb() {
-        sock.multiplexer().output().retransmitSkb(sock);
+        sock.stack().output().retransmitSkb(sock);
     }
 
     /** Mirrors Linux {@code tcp_send_loss_probe} — TLP 探测包。 */
     public void sendLossProbe() {
-        sock.multiplexer().output().sendLossProbe(sock);
+        sock.stack().output().sendLossProbe(sock);
     }
 
     /** Mirrors Linux {@code tcp_rearm_rto} variant — 按当前 RTO 装重传定时器。 */
     public void scheduleRetransmit() {
-        sock.multiplexer().retransmitter().scheduleRetransmit(sock);
+        sock.stack().retransmitter().scheduleRetransmit(sock);
     }
 
     /** Mirrors Linux {@code tcp_schedule_loss_probe} — 装 TLP 定时器。 */
     public void scheduleLossProbe(long delayMs) {
-        sock.multiplexer().retransmitter().scheduleLossProbe(sock, delayMs);
+        sock.stack().retransmitter().scheduleLossProbe(sock, delayMs);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -729,19 +729,19 @@ public final class Sender {
             sock.probesTstampMs(now);
         } else if (sock.userTimeoutMs() > 0 && now - sock.probesTstampMs() >= sock.userTimeoutMs()) {
             sock.skErr(110);
-            sock.multiplexer().output().sendReset(sock);
-            sock.multiplexer().tcpDone(sock);
+            sock.stack().output().sendReset(sock);
+            sock.stack().tcpDone(sock);
             return;
         }
 
         if (sock.probesOut() >= TcpConstants.TCP_RETRIES2) {
             sock.skErr(110);
-            sock.multiplexer().output().sendReset(sock);
-            sock.multiplexer().tcpDone(sock);
+            sock.stack().output().sendReset(sock);
+            sock.stack().tcpDone(sock);
             return;
         }
 
-        long timeout = sock.multiplexer().output().sendProbe0(sock);
+        long timeout = sock.stack().output().sendProbe0(sock);
         if (timeout > 0L) {
             TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
                     sock,
@@ -796,12 +796,12 @@ public final class Sender {
         if ((userTimeout > 0L && elapsed >= userTimeout && sock.probesOut() > 0)
                 || (userTimeout == 0L && sock.probesOut() >= sock.keepaliveProbes())) {
             sock.skErr(110);
-            sock.multiplexer().output().sendReset(sock);
-            sock.multiplexer().tcpDone(sock);
+            sock.stack().output().sendReset(sock);
+            sock.stack().tcpDone(sock);
             return;
         }
 
-        int err = sock.multiplexer().output().writeWakeup(sock, 1);
+        int err = sock.stack().output().writeWakeup(sock, 1);
         long next;
         if (err <= 0) {
             sock.probesOut(sock.probesOut() + 1);

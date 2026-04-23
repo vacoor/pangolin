@@ -64,7 +64,7 @@ public class TcpIncomingPreValidator {
             long[] ts = TcpOptionCodec.parseTimestamp(opts);
             if (ts != null && sock.pawsRejected((int) ts[0])) {
                 if (!pkt.isRst()) {
-                    sock.multiplexer().mib().inc(TcpMib.PAWSESTABREJECTED);
+                    sock.stack().mib().inc(TcpMib.PAWSESTABREJECTED);
                     sock.sender().sendAck();
                     return false;
                 }
@@ -73,12 +73,12 @@ public class TcpIncomingPreValidator {
 
         int reason = sequenceCheck(sock, pkt);
         if (reason != SKB_NOT_DROPPED_YET) {
-            sock.multiplexer().mib().incDrop(reason);
+            sock.stack().mib().incDrop(reason);
             if (!pkt.isRst()) {
                 sock.receiver().enterQuickAck(TcpConstants.TCP_MAX_QUICKACKS);
                 sock.receiver().addAckPending(TcpConstants.ACK_SCHED);
                 if (pkt.isSyn()) {
-                    sock.multiplexer().mib().inc(TcpMib.TCPSYNCHALLENGE);
+                    sock.stack().mib().inc(TcpMib.TCPSYNCHALLENGE);
                     sock.sender().sendChallengeAck(accecnReflector);
                     return false;
                 }
@@ -113,8 +113,8 @@ public class TcpIncomingPreValidator {
 
             sock.receiver().enterQuickAck(TcpConstants.TCP_MAX_QUICKACKS);
             sock.receiver().addAckPending(TcpConstants.ACK_SCHED);
-            sock.multiplexer().mib().inc(TcpMib.TCPSYNCHALLENGE);
-            sock.multiplexer().mib().incDrop(SKB_DROP_REASON_TCP_INVALID_SYN);
+            sock.stack().mib().inc(TcpMib.TCPSYNCHALLENGE);
+            sock.stack().mib().incDrop(SKB_DROP_REASON_TCP_INVALID_SYN);
             sock.sender().sendChallengeAck(accecnReflector);
             return false;
         }

@@ -34,7 +34,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConsta
  *
  * <p><b>不含</b>:入站包路由(由 {@code SegmentDispatcher} 承担,R4.2b-3)、FSM
  * 逻辑(由 {@code Sender / Receiver / Listener / TcpTimewaitSock} 承担,R4.2b-4)、
- * per-sock 装配({@code configure} 留在 {@link SegmentDispatcher},依赖 {@code sk.multiplexer(this)}
+ * per-sock 装配({@code configure} 留在 {@link SegmentDispatcher},依赖 {@code sk.stack(this)}
  * 的 SegmentDispatcher 类型)。
  *
  * <p><b>线程模型</b>:
@@ -140,7 +140,7 @@ public class TcpStack {
      * 半连接 → ESTABLISHED 的注册表迁移(R4.2b-4a 从 {@code SegmentDispatcher} 迁入)。
      * 对齐 Linux {@code inet_csk_complete_hashdance}:从 request_sock 哈希摘出、
      * 释放 SYN 包 retain,插入 established 哈希(v2 的 {@link #establishedRegistry})。
-     * sender/receiver/multiplexer 已在 {@code tcp_v4_syn_recv_sock} 的 {@code init(newsk)}
+     * sender/receiver/stack 已在 {@code tcp_v4_syn_recv_sock} 的 {@code init(newsk)}
      * 里 configure。
      */
     public void moveToEstablished(TcpRequestSock req, TcpSock sock) {

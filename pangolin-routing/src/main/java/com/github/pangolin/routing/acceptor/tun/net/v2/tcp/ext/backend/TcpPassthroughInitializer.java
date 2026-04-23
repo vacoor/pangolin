@@ -62,7 +62,7 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
      * (lifetime 由 tcp_v4_conn_request / moveToEstablished / inet_csk_destroy_sock 托管)。
      */
     @Override
-    public void onRequest(final TcpRequestSock req, final SegmentDispatcher multiplexer) {
+    public void onRequest(final TcpRequestSock req, final SegmentDispatcher stack) {
         final ChannelHandlerContext net = req.net();
         final TcpPacketBuf synPkt = req.synPacket();
         final InetSocketAddress target = resolveTarget(synPkt);
@@ -73,7 +73,7 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
             if (future.isSuccess()) {
                 req.childChannel(future.channel());
                 // 由 SegmentDispatcher 装 synAckFailureAction / handshakeCloseListener 并触发 SYN-ACK。
-                multiplexer.sendSynAck(req);
+                stack.sendSynAck(req);
                 // sendSynAck 装完 handshakeCloseListener 后,绑到 backend 关闭事件上,
                 // 对齐 v1 "backend close → RST + destroy req" 的 handshake 期语义。
                 future.channel().closeFuture().addListener(req.handshakeCloseListener());
@@ -81,7 +81,7 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
                 if (req.synPacket() != null) {
                     req.request().sendResetAndAbort(net.channel(), req.synPacket());
                 }
-                multiplexer.inet_csk_destroy_sock(req);
+                stack.inet_csk_destroy_sock(req);
             }
         }));
     }
@@ -91,13 +91,13 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
      * 防御性返回 null)或已连通时返回其 EL,让 child sock 与 backend I/O 同线程。
      */
     @Override
-    public EventLoop proposeEventLoop(TcpRequestSock req, SegmentDispatcher multiplexer) {
+    public EventLoop proposeEventLoop(TcpRequestSock req, SegmentDispatcher stack) {
         final Channel backend = req.childChannel();
         return backend == null ? null : backend.eventLoop();
     }
 
     @Override
-    public void onEstablished(final TcpSock sock, final SegmentDispatcher multiplexer) {
+    public void onEstablished(final TcpSock sock, final SegmentDispatcher stack) {
         final Channel backend = Objects.requireNonNull(sock.childChannel(), "backend channel");
 
         // 1. 装 sock 端 handler — consume 走这条路进 backend
@@ -107,8 +107,8 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
         //    失败时 RST + destroy req),切入 ESTABLISHED 后换成"backend 关 → sock 推 FIN"。
         final ChannelFutureListener handshakeCloseListener = sock.childCloseListener();
         sock.childCloseListener(future -> {
-            if (multiplexer.closeState(sock)) {
-                multiplexer.output().sendFin(sock);
+            if (stack.closeState(sock)) {
+                stack.output().sendFin(sock);
             }
         });
         backend.closeFuture().addListener(sock.childCloseListener());
@@ -130,8 +130,8 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
 
             @Override
             public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-                multiplexer.output().sendReset(sock);
-                multiplexer.tcpDone(sock);
+                stack.output().sendReset(sock);
+                stack.tcpDone(sock);
                 if (ctx.channel().isOpen()) {
                     ctx.channel().close();
                 }
