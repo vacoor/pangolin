@@ -15,7 +15,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequen
  * {@code tcp_clean_rtx_queue} / {@code tcp_rack_detect_loss} 家族。
  *
  * <p>历史上本类曾以 netty {@code ChannelInboundHandler} 形式注册到 per-connection pipeline,
- * 随 v2 向 {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer}
+ * 随 v2 向 {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SegmentDispatcher}
  * 主循环集中分发演进后,handler 身份已移除,仅保留标志位常量与静态入口供主循环调用。
  */
 public final class TcpAck {

@@ -95,7 +95,7 @@ public final class TcpHandshaker {
         this.sndIsn = TcpUtils.secureSeq(srcAddrBytes, srcPort, dstAddrBytes, dstPort);
         // 对齐 Linux openreqInit(tcp_input.c:7010):PAWS 基线从首个合法 SYN 的 TSval 继承。
         this.tsRecent = this.clientTsVal;
-        this.tsRecentStamp = this.clientTimestamp ? TcpMultiplexer.nowSeconds() : 0;
+        this.tsRecentStamp = this.clientTimestamp ? SegmentDispatcher.nowSeconds() : 0;
     }
 
     public int rcvIsn() {
@@ -154,14 +154,14 @@ public final class TcpHandshaker {
     /**
      * 推进 PAWS 基线 — 对齐 Linux {@code checkReq} 中的
      * {@code WRITE_ONCE(tcp_rsk(req)->ts_recent, tmp_opt.rcv_tsval)}。
-     * 调用方:{@link TcpMultiplexer#checkReq} 在 {@code saw_tstamp && !after(seq, rcv_nxt)} 时。
+     * 调用方:{@link SegmentDispatcher#checkReq} 在 {@code saw_tstamp && !after(seq, rcv_nxt)} 时。
      */
     public void updateTsRecent(int tsval) {
         if (!clientTimestamp) {
             return;
         }
         this.tsRecent = tsval;
-        this.tsRecentStamp = TcpMultiplexer.nowSeconds();
+        this.tsRecentStamp = SegmentDispatcher.nowSeconds();
     }
 
     /** {@link #tsRecent} 刷新时的秒级时戳(对齐 Linux {@code tcp_rsk(req)->ts_recent_stamp})。 */
@@ -191,7 +191,7 @@ public final class TcpHandshaker {
             return false;
         }
         if (tsRecentStamp != 0) {
-            long ageSec = (long) (TcpMultiplexer.nowSeconds() - tsRecentStamp);
+            long ageSec = (long) (SegmentDispatcher.nowSeconds() - tsRecentStamp);
             if (ageSec >= TcpConstants.TCP_PAWS_24DAYS_SEC) {
                 return false;
             }
@@ -387,7 +387,7 @@ public final class TcpHandshaker {
      * {@code req->rsk_ops->send_ack}({@code tcp_request_sock_ipv4_ops::send_ack} →
      * {@code tcp_v4_reqsk_send_ack})。
      *
-     * <p>调用方:{@link TcpMultiplexer#checkReq} 中 PAWS / TSECR / OOW 分支。
+     * <p>调用方:{@link SegmentDispatcher#checkReq} 中 PAWS / TSECR / OOW 分支。
      */
     public void sendChallengeAck(Channel connChannel) {
         int window = config.initialRcvWnd() >> (clientWscale >= 0 ? config.windowScale() : 0);

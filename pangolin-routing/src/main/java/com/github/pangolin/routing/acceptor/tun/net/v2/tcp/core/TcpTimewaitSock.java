@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SegmentDispatcher;
 import io.netty.channel.Channel;
 
 import java.util.concurrent.ScheduledFuture;
@@ -84,7 +84,7 @@ public final class TcpTimewaitSock extends SockCommon {
      *   <li>{@link TcpConnectionState#TIME_WAIT} — 2MSL 静默等待,重放 ACK。</li>
      * </ul>
      *
-     * <p>二者到期行为均为 {@link TcpMultiplexer#inet_twsk_kill(TcpTimewaitSock)},区别在
+     * <p>二者到期行为均为 {@link SegmentDispatcher#inet_twsk_kill(TcpTimewaitSock)},区别在
      * {@code timewaitStateProcess} 内的分支行为(FIN_WAIT_2 收到 FIN 需要推进 rcv_nxt
      * 并刷新 2MSL;TIME_WAIT 收到任何迟到段都仅重放 ACK)。
      */

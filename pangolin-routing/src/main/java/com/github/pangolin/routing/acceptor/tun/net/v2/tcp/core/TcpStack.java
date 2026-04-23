@@ -34,8 +34,8 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConsta
  *
  * <p><b>不含</b>:入站包路由(由 {@code SegmentDispatcher} 承担,R4.2b-3)、FSM
  * 逻辑(由 {@code Sender / Receiver / Listener / TcpTimewaitSock} 承担,R4.2b-4)、
- * per-sock 装配({@code configure} 留在 {@link TcpMultiplexer},依赖 {@code sk.multiplexer(this)}
- * 的 TcpMultiplexer 类型)。
+ * per-sock 装配({@code configure} 留在 {@link SegmentDispatcher},依赖 {@code sk.multiplexer(this)}
+ * 的 SegmentDispatcher 类型)。
  *
  * <p><b>线程模型</b>:
  * <ul>
@@ -46,9 +46,10 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConsta
  *       内部通过 registry 的 CHM 和 sock.eventLoop() 调度完成线程归属。</li>
  * </ul>
  *
- * <p><b>R4.2 前后</b>:R4.2b-2 后 {@link TcpMultiplexer} 变为 {@code extends TcpStack},
- * FSM + 抽象路由方法留在子类;R4.2b-3 抽出 {@code SegmentDispatcher} 后,
- * {@code TcpMultiplexer} 会被删除,{@code TcpStack} 成为 concrete 顶层。
+ * <p><b>R4.2 前后</b>:R4.2b-2 后 {@link SegmentDispatcher} 变为 {@code extends TcpStack};
+ * R4.2b-3 重命名完成({@code TcpMultiplexer} → {@code SegmentDispatcher})。
+ * R4.2b-4 把 FSM 方法下沉到 Sender / Receiver / Listener 后,{@code SegmentDispatcher}
+ * 将改为 has-a 组合 {@link TcpStack} 而非继承。
  */
 public class TcpStack {
 
@@ -89,7 +90,7 @@ public class TcpStack {
 
     /**
      * LISTEN 端聚合(R4.1):holds listenSock + synRegistry + maxSynBacklog。
-     * 创建在子类 {@code TcpMultiplexer.init()} 里(listenSock 先创建并 configure),非 final。
+     * 创建在子类 {@code SegmentDispatcher.init()} 里(listenSock 先创建并 configure),非 final。
      */
     protected Listener listener;
 

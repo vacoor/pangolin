@@ -8,7 +8,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
  * 把 SACK / Timestamps / WScale / PMTUD / ECN / TFO / 等可选特性从 {@code core}
  * 主路径解耦,通过该接口在 {@code ext/<feature>/} 下注册接入。
  *
- * <p>本接口仅定义契约,<b>本提交不接通主路径</b> — {@link TcpMultiplexer} 暂不新增
+ * <p>本接口仅定义契约,<b>本提交不接通主路径</b> — {@link SegmentDispatcher} 暂不新增
  * {@code List<TcpFeature>} 装配链,现有 TS / WS / SACK 仍走常量分支;装配链与回调
  * 插桩留到后续专项 phase。
  *

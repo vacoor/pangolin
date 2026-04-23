@@ -3,7 +3,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 /**
  * 接收侧关注点的聚合对象,对齐 gVisor netstack 的 {@code receiver}
  * (pkg/tcpip/transport/tcp/rcv.go)。每条 {@link TcpSock} 对应一个 {@code Receiver},
- * 由 {@link TcpMultiplexer#configure(TcpSock)} 创建并挂入 {@link TcpSock#receiver()}。
+ * 由 {@link SegmentDispatcher#configure(TcpSock)} 创建并挂入 {@link TcpSock#receiver()}。
  *
  * <p><b>职责</b>:rcvNxt / rcvWnd / rcvWup / 背压 / OFO / ACK 调度;
  * 不含发送侧(cwnd / retransmit / RTO),后者由 {@link Sender}。

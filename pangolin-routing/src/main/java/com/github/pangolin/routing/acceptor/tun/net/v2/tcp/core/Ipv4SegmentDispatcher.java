@@ -16,7 +16,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpU
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.after;
 
 @Slf4j
-public class Tcp4Multiplexer extends TcpMultiplexer {
+public class Ipv4SegmentDispatcher extends SegmentDispatcher {
 
     /**
      * 工厂模式构造:三次握手完成后由 {@link TcpSockInitializer#onEstablished}
@@ -24,7 +24,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
      * {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty.TcpChannel},
      * 或 ext.backend 子包的 {@code TcpPassthroughInitializer} 透传到 backend)。
      */
-    public Tcp4Multiplexer(TcpConfig config, TcpSockInitializer initializer) {
+    public Ipv4SegmentDispatcher(TcpConfig config, TcpSockInitializer initializer) {
         this(config, initializer, null);
     }
 
@@ -32,7 +32,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
      * 工厂模式 + 独立 {@code tcpGroup}:为每条已建立连接从 {@code tcpGroup.next()}
      * 绑定专属 EL,与 TUN EL 解耦,避免所有连接串在 TUN 单线程上。
      */
-    public Tcp4Multiplexer(TcpConfig config, TcpSockInitializer initializer, EventLoopGroup tcpGroup) {
+    public Ipv4SegmentDispatcher(TcpConfig config, TcpSockInitializer initializer, EventLoopGroup tcpGroup) {
         super(config, tcpGroup, initializer);
     }
 
@@ -270,7 +270,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
                 return 0;
             case TIME_WAIT:
                 // 正常情况下 TcpSock 在进入 TIME_WAIT 时已被 timeWait 销毁 →
-                // 后续段由 TW bucket({@link TcpMultiplexer#timewaitRegistry})接管,
+                // 后续段由 TW bucket({@link SegmentDispatcher#timewaitRegistry})接管,
                 // 走 timewaitStateProcess 路径。此分支仅作防御性 no-op。
                 return 0;
             default:

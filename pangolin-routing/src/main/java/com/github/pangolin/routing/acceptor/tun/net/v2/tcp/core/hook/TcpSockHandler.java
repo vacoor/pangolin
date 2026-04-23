@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook;
 
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SegmentDispatcher;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
 import io.netty.buffer.ByteBuf;
 
@@ -20,7 +20,7 @@ public interface TcpSockHandler {
     /**
      * 有新 payload 可交付应用层。被调用方负责 release 入参 buf。
      *
-     * <p>对应 {@link TcpMultiplexer#consume} 的入站数据派发分支。
+     * <p>对应 {@link SegmentDispatcher#consume} 的入站数据派发分支。
      */
     void onInboundData(ByteBuf data);
 
@@ -43,7 +43,7 @@ public interface TcpSockHandler {
     void onWritabilityChanged();
 
     /**
-     * {@link TcpMultiplexer#inet_csk_destroy_sock(TcpSock)} 将要销毁 sock,
+     * {@link SegmentDispatcher#inet_csk_destroy_sock(TcpSock)} 将要销毁 sock,
      * handler 在此完成最终 {@code closeForcibly} / pipeline.fireChannelInactive,
      * 保证 channel 事件顺序与 {@code NioSocketChannel} 一致。
      */

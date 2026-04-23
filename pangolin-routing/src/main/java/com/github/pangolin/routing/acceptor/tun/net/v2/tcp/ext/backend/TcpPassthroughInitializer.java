@@ -1,7 +1,7 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.backend;
 
 import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SegmentDispatcher;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpRequestSock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
@@ -23,13 +23,13 @@ import java.util.Objects;
 /**
  * {@link TcpSockInitializer} 的 backend 透传实现 — 覆盖 {@code onRequest} 以在 SYN 阶段
  * 先连 backend 再发 SYN-ACK,覆盖 {@code onEstablished} 以装 {@link TcpPassthroughHandler}
- * 和反向适配器({@link TcpMultiplexer#sendmsg} — MSS 切片由栈内部处理),实现双向透传。
+ * 和反向适配器({@link SegmentDispatcher#sendmsg} — MSS 切片由栈内部处理),实现双向透传。
  *
  * <p><b>生命周期</b>:
  * <ol>
  *   <li>{@link #onRequest} — 半连接入队后,从 SYN pkt 解析目标地址,异步发起 backend connect。
  *       连上后把 backend Channel 写到 {@link TcpRequestSock#childChannel(Channel)} 并
- *       调 {@link TcpMultiplexer#sendSynAck(TcpRequestSock)};连接失败发 RST 并
+ *       调 {@link SegmentDispatcher#sendSynAck(TcpRequestSock)};连接失败发 RST 并
  *       {@code inet_csk_destroy_sock(req)}。</li>
  *   <li>{@link #proposeEventLoop} — 为 child sock 推荐 backend 的 EL,保留 v1
  *       "状态机与 backend I/O 同线程" 语义。</li>
@@ -62,7 +62,7 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
      * (lifetime 由 tcp_v4_conn_request / moveToEstablished / inet_csk_destroy_sock 托管)。
      */
     @Override
-    public void onRequest(final TcpRequestSock req, final TcpMultiplexer multiplexer) {
+    public void onRequest(final TcpRequestSock req, final SegmentDispatcher multiplexer) {
         final ChannelHandlerContext net = req.net();
         final TcpPacketBuf synPkt = req.synPacket();
         final InetSocketAddress target = resolveTarget(synPkt);
@@ -72,7 +72,7 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
                 }).addListener((ChannelFutureListener) future -> {
             if (future.isSuccess()) {
                 req.childChannel(future.channel());
-                // 由 TcpMultiplexer 装 synAckFailureAction / handshakeCloseListener 并触发 SYN-ACK。
+                // 由 SegmentDispatcher 装 synAckFailureAction / handshakeCloseListener 并触发 SYN-ACK。
                 multiplexer.sendSynAck(req);
                 // sendSynAck 装完 handshakeCloseListener 后,绑到 backend 关闭事件上,
                 // 对齐 v1 "backend close → RST + destroy req" 的 handshake 期语义。
@@ -91,13 +91,13 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
      * 防御性返回 null)或已连通时返回其 EL,让 child sock 与 backend I/O 同线程。
      */
     @Override
-    public EventLoop proposeEventLoop(TcpRequestSock req, TcpMultiplexer multiplexer) {
+    public EventLoop proposeEventLoop(TcpRequestSock req, SegmentDispatcher multiplexer) {
         final Channel backend = req.childChannel();
         return backend == null ? null : backend.eventLoop();
     }
 
     @Override
-    public void onEstablished(final TcpSock sock, final TcpMultiplexer multiplexer) {
+    public void onEstablished(final TcpSock sock, final SegmentDispatcher multiplexer) {
         final Channel backend = Objects.requireNonNull(sock.childChannel(), "backend channel");
 
         // 1. 装 sock 端 handler — consume 走这条路进 backend

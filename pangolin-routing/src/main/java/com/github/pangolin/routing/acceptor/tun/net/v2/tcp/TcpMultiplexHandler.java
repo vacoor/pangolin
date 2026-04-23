@@ -14,7 +14,7 @@ import java.net.UnknownHostException;
 
 /**
  * v2 TCP ingress now follows v1 architecture:
- * TCP logic is handled by {@link TcpMultiplexer}, not Netty pipeline handlers.
+ * TCP logic is handled by {@link SegmentDispatcher}, not Netty pipeline handlers.
  */
 public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
 
@@ -22,7 +22,7 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
     private static final byte PROTO_TCP = 6;
 
     private final DnsEngine dnsEngine;
-    private final TcpMultiplexer multiplexer;
+    private final SegmentDispatcher multiplexer;
 
 
     public TcpMultiplexHandler(final DnsEngine dnsEngine,
@@ -49,15 +49,15 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
         return pkt;
     }
 
-    protected TcpMultiplexer create(final TcpSockInitializer initializer) {
-        return new Tcp4Multiplexer(TcpConfig.builder().build(), initializer);
+    protected SegmentDispatcher create(final TcpSockInitializer initializer) {
+        return new Ipv4SegmentDispatcher(TcpConfig.builder().build(), initializer);
     }
 
     public boolean write(final FourTuple key, final ByteBuf data) {
         return multiplexer.write(key, data);
     }
 
-    public TcpMultiplexer multiplexer() {
+    public SegmentDispatcher multiplexer() {
         return multiplexer;
     }
 

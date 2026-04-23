@@ -1,12 +1,12 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty;
 
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SegmentDispatcher;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInitializer;
 import io.netty.channel.ChannelFuture;
 
 /**
- * 用户 Channel 工厂 — 在 v2 三次握手完成后 (initTransfer 阶段) 由 {@link TcpMultiplexer}
+ * 用户 Channel 工厂 — 在 v2 三次握手完成后 (initTransfer 阶段) 由 {@link SegmentDispatcher}
  * 调用,生产一个已挂 pipeline 的 {@link TcpChannel}。
  *
  * <p>典型用法:
@@ -16,22 +16,22 @@ import io.netty.channel.ChannelFuture;
  *     ch.pipeline().addLast(new HttpServerCodec(), new MyBizHandler());
  *     return ch;
  * };
- * new Tcp4Multiplexer(config, factory);
+ * new Ipv4SegmentDispatcher(config, factory);
  * }</pre>
  *
  * <p>工厂必须返回**尚未 register** 的 channel;register 与 {@code fireChannelActive} 由
  * {@link #onEstablished} 的默认实现自动触发,保证事件顺序与 {@code NioSocketChannel} 一致。
  *
- * <p>本接口直接实现 {@link TcpSockInitializer},可以原样传入 {@code Tcp4Multiplexer}
+ * <p>本接口直接实现 {@link TcpSockInitializer},可以原样传入 {@code Ipv4SegmentDispatcher}
  * 的工厂模式构造,无需手写 adapter。
  */
 @FunctionalInterface
 public interface TcpChannelInitializer extends TcpSockInitializer {
 
-    TcpChannel create(TcpSock sock, TcpMultiplexer multiplexer);
+    TcpChannel create(TcpSock sock, SegmentDispatcher multiplexer);
 
     @Override
-    default void onEstablished(TcpSock sock, TcpMultiplexer multiplexer) {
+    default void onEstablished(TcpSock sock, SegmentDispatcher multiplexer) {
         final TcpChannel ch = create(sock, multiplexer);
         /*
          * register 必须在 sock.eventLoop() 上执行;本方法由 initTransfer 在 EL

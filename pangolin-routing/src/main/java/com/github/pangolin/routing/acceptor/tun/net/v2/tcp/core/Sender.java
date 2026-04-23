@@ -5,13 +5,13 @@ import io.netty.buffer.ByteBuf;
 /**
  * 发送侧关注点的聚合对象,对齐 gVisor netstack 的 {@code sender}
  * (pkg/tcpip/transport/tcp/snd.go)。每条 {@link TcpSock} 对应一个 {@code Sender},
- * 由 {@link TcpMultiplexer#configure(TcpSock)} 创建并挂入 {@link TcpSock#sender()}。
+ * 由 {@link SegmentDispatcher#configure(TcpSock)} 创建并挂入 {@link TcpSock#sender()}。
  *
  * <p><b>职责</b>:cwnd / ssthresh / nagle / push / fragment / 重传调度 / RTO 状态;
  * 不含接收侧(OFO / reassembly / rcvWnd),后者由 {@link Receiver}。
  *
  * <p><b>当前实现形态</b>:Sender 是 facade — 方法 delegate 到
- * {@link TcpOutput} / {@link TcpRetransmitter} / {@link TcpMultiplexer} 的底层实现,
+ * {@link TcpOutput} / {@link TcpRetransmitter} / {@link SegmentDispatcher} 的底层实现,
  * 发送侧 mutable state(writeSeq / sndUna / cwnd / ssthresh / packetsOut / sendBuffer 等)
  * 仍存在 TcpSock。未来若要物理下沉,替换本类方法实现即可,调用方零感知。
  *

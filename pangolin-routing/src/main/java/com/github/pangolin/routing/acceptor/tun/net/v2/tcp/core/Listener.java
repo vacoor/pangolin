@@ -5,11 +5,11 @@ import java.util.Map;
 
 /**
  * LISTEN 端聚合对象 — 把 LISTEN 状态 sock、半连接队列、syn backlog 阈值从
- * {@link TcpMultiplexer} 中独立出来。对齐 gVisor {@code listenEndpoint} 的
+ * {@link SegmentDispatcher} 中独立出来。对齐 gVisor {@code listenEndpoint} 的
  * 职责范围(syn / accept queue),不含 ESTABLISHED 连接管理。
  *
- * <p><b>当前实现形态</b>:Listener 持有 LISTEN 端独有状态。{@link TcpMultiplexer}
- * 通过 {@link TcpMultiplexer#listener()} 访问本对象,所有涉及 syn queue 的方法
+ * <p><b>当前实现形态</b>:Listener 持有 LISTEN 端独有状态。{@link SegmentDispatcher}
+ * 通过 {@link SegmentDispatcher#listener()} 访问本对象,所有涉及 syn queue 的方法
  * 路径经过本类或读取本类字段。
  *
  * <p><b>职责</b>:
@@ -27,7 +27,7 @@ import java.util.Map;
  */
 public final class Listener {
 
-    /** 半连接队列容量默认值 — 对齐 {@link TcpMultiplexer#DEFAULT_MAX_SYN_BACKLOG}。 */
+    /** 半连接队列容量默认值 — 对齐 {@link SegmentDispatcher#DEFAULT_MAX_SYN_BACKLOG}。 */
     public static final int DEFAULT_MAX_SYN_BACKLOG = 1024;
 
     final TcpSock listenSock;

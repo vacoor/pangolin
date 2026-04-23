@@ -21,20 +21,21 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequen
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.oowRateLimited;
 
 /**
- * v2 TCP 栈顶层容器。持有 per-stack 的全部栈级资源:
+ * v2 TCP 栈入站段分派器 + FSM 主入口。R4.2b-3 重命名自 {@code TcpMultiplexer}。
+ *
+ * <p><b>职责</b>:
  * <ul>
- *   <li>{@link #retransmitter} — 重传 / TLP / RTO 调度(per-stack 独立)</li>
- *   <li>{@link #output} — 出包器(per-stack 独立 Challenge ACK 桶)</li>
- *   <li>{@link #mib} — MIB 计数器(per-stack 独立)</li>
- *   <li>{@link #handshakerFactory} — 握手器工厂</li>
- *   <li>{@link #initializer} — 装配钩子({@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInitializer})</li>
- *   <li>注册表三件套:{@link #listener.synRegistry} / {@link #establishedRegistry} / {@link #timewaitRegistry}</li>
+ *   <li>入站路由(abstract):{@link #rcv} / {@link #send_reset} /
+ *       {@link #inet_rtx_syn_ack} / {@link #conn_request} / {@link #sendSynAck} /
+ *       {@link #syn_recv_sock},由 {@link Ipv4SegmentDispatcher} 实现;</li>
+ *   <li>FSM 处理(concrete,R4.2b-4 下沉):{@code checkReq} / {@code ackIncoming} /
+ *       {@code dataQueue} / {@code finIncoming} / {@code outOfWindow} 等;</li>
+ *   <li>per-sock 装配:{@link #configure} 建立 {@link TcpSock#multiplexer()} 反向引用
+ *       + 创建 {@link Sender} / {@link Receiver}。</li>
  * </ul>
  *
- * <p><b>Sock 装配</b>:所有 sock(listen / child / established)创建后经
- * {@link #configure(TcpSock)} 统一注入 {@link TcpSock#multiplexer} +
- * {@link TcpSock#sender} + {@link TcpSock#receiver},使调用方能通过
- * {@code sock.sender().xxx()} / {@code sock.receiver().xxx()} 访问发送 / 接收行为。
+ * <p><b>继承关系</b>:{@code extends} {@link TcpStack}(R4.2b-3 暂留,R4.2b-4 改组合)。
+ * registries / 全局组件 / 生命周期 API 均从 {@link TcpStack} 继承。
  *
  * <p><b>架构三元</b>(对齐 gVisor endpoint + sender + receiver):
  * <pre>
@@ -43,16 +44,12 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps
  *     └── receiver (Receiver: rcvWnd/OFO/quickack 的统一入口)
  * </pre>
  *
- * <p><b>子类</b>:当前只有 {@link Tcp4Multiplexer}(IPv4);{@code Tcp6Multiplexer} 未实现。
- *
- * <p><b>线程模型</b>:读写 {@link #establishedRegistry} / {@link #timewaitRegistry}
- * 跨 EL(TUN EL + sock EL),用 ConcurrentHashMap;{@link #listener.synRegistry} 只在 TUN EL
- * 访问,用 HashMap。
+ * <p><b>子类</b>:当前只有 {@link Ipv4SegmentDispatcher}(IPv4);IPv6 未实现。
  */
 @Slf4j
-public abstract class TcpMultiplexer extends TcpStack {
+public abstract class SegmentDispatcher extends TcpStack {
 
-    protected TcpMultiplexer(TcpConfig config, EventLoopGroup tcpGroup, TcpSockInitializer initializer) {
+    protected SegmentDispatcher(TcpConfig config, EventLoopGroup tcpGroup, TcpSockInitializer initializer) {
         super(config, tcpGroup, initializer);
         init();
     }
@@ -80,8 +77,8 @@ public abstract class TcpMultiplexer extends TcpStack {
      * 调用,外部代码通常不需要直接调。幂等 — 多次调用会覆盖 sender/receiver,但实际
      * 调用路径(listen sock / tcp_v4_syn_recv_sock)保证只经过一次。
      *
-     * <p>R4.2b-2:configure 留在 TcpMultiplexer 而非 TcpStack,因为依赖
-     * {@code sk.multiplexer(this)} 的 'this' 是 TcpMultiplexer 类型。R4.2b-3 重命名
+     * <p>R4.2b-2:configure 留在 SegmentDispatcher 而非 TcpStack,因为依赖
+     * {@code sk.multiplexer(this)} 的 'this' 是 SegmentDispatcher 类型。R4.2b-3 重命名
      * {@code sk.multiplexer} → {@code sk.stack} 后可上移。
      */
     public TcpSock configure(TcpSock sk) {
@@ -105,7 +102,7 @@ public abstract class TcpMultiplexer extends TcpStack {
 
     /**
      * 发 SYN-ACK 响应 — 由 {@link TcpSockInitializer#onRequest} 决定何时调用。实现方
-     * (如 {@code Tcp4Multiplexer})在此装 {@code synAckFailureAction} /
+     * (如 {@code Ipv4SegmentDispatcher})在此装 {@code synAckFailureAction} /
      * {@code handshakeCloseListener} 并发送 SYN-ACK,启动 SYN-ACK 重传 timer。
      * synPacket 已由 {@code tcp_v4_conn_request} retain 一次,本方法不再参与 retain。
      *

@@ -1,6 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.harness;
 
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SegmentDispatcher;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInitializer;
@@ -21,7 +21,7 @@ public final class CapturingInitializer implements TcpSockInitializer {
     private final List<CapturingHandler> handlers = new ArrayList<>();
 
     @Override
-    public void onEstablished(TcpSock sock, TcpMultiplexer multiplexer) {
+    public void onEstablished(TcpSock sock, SegmentDispatcher multiplexer) {
         CapturingHandler h = new CapturingHandler(sock, multiplexer);
         sock.handler(h);
         handlers.add(h);
@@ -43,20 +43,20 @@ public final class CapturingInitializer implements TcpSockInitializer {
      */
     public static final class CapturingHandler implements TcpSockHandler {
         private final TcpSock sock;
-        private final TcpMultiplexer multiplexer;
+        private final SegmentDispatcher multiplexer;
         private final List<byte[]> inboundPayloads = new ArrayList<>();
         private int peerFinCount;
         private Throwable lastResetCause;
         private int writabilityChangedCount;
         private boolean destroyed;
 
-        CapturingHandler(TcpSock sock, TcpMultiplexer multiplexer) {
+        CapturingHandler(TcpSock sock, SegmentDispatcher multiplexer) {
             this.sock = sock;
             this.multiplexer = multiplexer;
         }
 
         public TcpSock sock() { return sock; }
-        public TcpMultiplexer multiplexer() { return multiplexer; }
+        public SegmentDispatcher multiplexer() { return multiplexer; }
         public List<byte[]> inboundPayloads() { return inboundPayloads; }
         public int peerFinCount() { return peerFinCount; }
         public Throwable lastResetCause() { return lastResetCause; }
@@ -65,7 +65,7 @@ public final class CapturingInitializer implements TcpSockInitializer {
 
         /**
          * 从栈侧主动发一段 payload — 等价于应用层调 {@code ctx.writeAndFlush(buf)},
-         * 但直接走 {@link TcpMultiplexer#sendmsg} 入口,跳过 {@code TcpChannel}。
+         * 但直接走 {@link SegmentDispatcher#sendmsg} 入口,跳过 {@code TcpChannel}。
          * 入参 bytes 被复制到一个新的 ByteBuf 里(所有权归 sendmsg 管理)。
          */
         public void send(byte[] payload) {

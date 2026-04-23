@@ -25,14 +25,14 @@ public class TcpSock extends SockCommon {
     private Channel childChannel;
     private ChannelFutureListener childCloseListener;
     /**
-     * 所属协议栈实例 — 由 {@link TcpMultiplexer#configure(TcpSock)} 注入,
+     * 所属协议栈实例 — 由 {@link SegmentDispatcher#configure(TcpSock)} 注入,
      * 承载 per-stack 服务(retransmitter / MIB / policy 等)的入口。
      */
-    private TcpMultiplexer multiplexer;
+    private SegmentDispatcher multiplexer;
     /**
      * 发送侧聚合对象 — R2 抽 Sender 的目标。R2.0(骨架)期间只是 facade,
      * 状态仍存在 TcpSock 自身;R2.3 起字段下沉到本对象。由
-     * {@link TcpMultiplexer#configure(TcpSock)} 与 {@code multiplexer} 同时注入。
+     * {@link SegmentDispatcher#configure(TcpSock)} 与 {@code multiplexer} 同时注入。
      */
     private Sender sender;
     /**
@@ -310,7 +310,7 @@ public class TcpSock extends SockCommon {
                                       int recentTimestamp) {
         TcpSock sock = new TcpSock(fourTuple);
         // R2.3/R3.2/R4.1 前置装配:先 new Sender/Receiver 让后续字段 setter 能写进去。
-        // TcpMultiplexer.configure 将检测 sender/receiver 非空后幂等跳过,不会覆盖。
+        // SegmentDispatcher.configure 将检测 sender/receiver 非空后幂等跳过,不会覆盖。
         sock.sender(new Sender(sock));
         sock.receiver(new Receiver(sock));
         sock.channel = channel;
@@ -337,7 +337,7 @@ public class TcpSock extends SockCommon {
         sock.timestampEnabled = timestampEnabled;
         sock.recentTimestamp = recentTimestamp;
         // 子 sock 由 SYN 中 TSval 初始化 ts_recent,刷新时戳也在此点建立
-        sock.tsRecentStamp = timestampEnabled ? TcpMultiplexer.nowSeconds() : 0;
+        sock.tsRecentStamp = timestampEnabled ? SegmentDispatcher.nowSeconds() : 0;
         // 接收侧窗口预算初始化(对齐 Linux tcp_init_buffer_space):
         // rcvBuf / windowClamp 取当前通告窗口,rcvSsthresh 同步(无缩放时退化为 rcvWnd)
         sock.receiver().rcvBuf(Math.max(rcvWnd, TcpConstants.TCP_DEFAULT_RCV_BUF));
@@ -494,11 +494,11 @@ public class TcpSock extends SockCommon {
         return channel;
     }
 
-    public TcpMultiplexer multiplexer() {
+    public SegmentDispatcher multiplexer() {
         return multiplexer;
     }
 
-    public void multiplexer(TcpMultiplexer multiplexer) {
+    public void multiplexer(SegmentDispatcher multiplexer) {
         this.multiplexer = multiplexer;
     }
 
@@ -556,7 +556,7 @@ public class TcpSock extends SockCommon {
 
     /**
      * 该连接的专属 EventLoop — 对齐 v1 里 {@code childChannel.eventLoop()} 的角色,
-     * 由 {@code Tcp4Multiplexer#tcp_v4_syn_recv_sock} 在建立 child sock 时从
+     * 由 {@code Ipv4SegmentDispatcher#tcp_v4_syn_recv_sock} 在建立 child sock 时从
      * {@code tcpGroup.next()} 分配。为 {@code null} 时回退到 TUN {@code channel.eventLoop()}
      * (保持 listenSock / 无专属 EL 场景的兼容)。
      *
@@ -963,7 +963,7 @@ public class TcpSock extends SockCommon {
         }
         // 24 天陈旧分支:基线过老,允许任意 TSval 覆盖
         if (tsRecentStamp != 0) {
-            long ageSec = (long) (TcpMultiplexer.nowSeconds() - tsRecentStamp);
+            long ageSec = (long) (SegmentDispatcher.nowSeconds() - tsRecentStamp);
             if (ageSec >= com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCP_PAWS_24DAYS_SEC) {
                 return false;
             }
@@ -982,7 +982,7 @@ public class TcpSock extends SockCommon {
     public void updateRecentTimestamp(int tsval) {
         if (timestampEnabled) {
             recentTimestamp = tsval;
-            tsRecentStamp = TcpMultiplexer.nowSeconds();
+            tsRecentStamp = SegmentDispatcher.nowSeconds();
         }
     }
 

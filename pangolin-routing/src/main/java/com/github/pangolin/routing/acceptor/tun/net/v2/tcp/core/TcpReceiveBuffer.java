@@ -62,7 +62,7 @@ public final class TcpReceiveBuffer {
 
     /**
      * External notifier invoked with {@code delta} (bytes) whenever the combined
-     * footprint changes. Used by {@code TcpMultiplexer} to maintain a global
+     * footprint changes. Used by {@code SegmentDispatcher} to maintain a global
      * {@code tcp_memory_allocated} accumulator. {@code null} / no-op means the
      * socket is not plugged into pressure tracking.
      */

@@ -2,7 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.e2e;
 
 import com.github.pangolin.routing.acceptor.tun.net.codec.Tcp4PacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SegmentDispatcher;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimewaitSock;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.harness.CapturingInitializer;
@@ -27,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * E2E:sock / timewait 注册表生命周期可观测性 —— 对齐 Linux
  * {@code establishedRegistry} / {@code timewaitRegistry} 的 register / unregister
- * 动作。为后续 R4.2 把 registries 从 {@code TcpMultiplexer} 抽到 {@code TcpStack}
+ * 动作。为后续 R4.2 把 registries 从 {@code SegmentDispatcher} 抽到 {@code TcpStack}
  * 提供行为回归网。
  *
  * <p>观测手段:
@@ -67,7 +67,7 @@ class RegistryLifecycleTest {
     @DisplayName("握手完成 → establishedRegistry 含一条;tcpDone 后摘除")
     void tcpDoneRemovesSockFromEstablishedRegistry() {
         int serverIsn = completeHandshakeAndDrain();
-        TcpMultiplexer mx = initializer.handler().multiplexer();
+        SegmentDispatcher mx = initializer.handler().multiplexer();
 
         assertThat(established(mx)).as("handshake should populate established registry").hasSize(1);
         assertThat(timewait(mx)).as("no TW bucket yet").isEmpty();
@@ -106,7 +106,7 @@ class RegistryLifecycleTest {
     @DisplayName("timeWait 迁移:established 摘除 + timewait 新增(同 4-tuple)")
     void timeWaitMigratesBetweenRegistries() {
         completeHandshakeAndDrain();
-        TcpMultiplexer mx = initializer.handler().multiplexer();
+        SegmentDispatcher mx = initializer.handler().multiplexer();
         TcpSock sock = initializer.handler().sock();
 
         mx.timeWait(sock, TcpConnectionState.TIME_WAIT, /*timeoutMs=*/ 60_000L);
@@ -124,7 +124,7 @@ class RegistryLifecycleTest {
     @DisplayName("inet_twsk_kill → timewait 摘除")
     void inetTwskKillRemovesBucket() {
         completeHandshakeAndDrain();
-        TcpMultiplexer mx = initializer.handler().multiplexer();
+        SegmentDispatcher mx = initializer.handler().multiplexer();
         TcpSock sock = initializer.handler().sock();
 
         mx.timeWait(sock, TcpConnectionState.TIME_WAIT, /*timeoutMs=*/ 60_000L);
@@ -142,7 +142,7 @@ class RegistryLifecycleTest {
     @DisplayName("TW 2MSL 定时器到期 → bucket 自动摘除")
     void twBucketTimerExpiryRemovesBucket() {
         completeHandshakeAndDrain();
-        TcpMultiplexer mx = initializer.handler().multiplexer();
+        SegmentDispatcher mx = initializer.handler().multiplexer();
         TcpSock sock = initializer.handler().sock();
 
         // 用短超时 staging,通过 advanceTimeBy 推进定时器
@@ -163,7 +163,7 @@ class RegistryLifecycleTest {
     @DisplayName("多 TW bucket 按 4-tuple 独立隔离(kill 一个不影响另一个)")
     void twBucketIsolatedByFourTuple() {
         int serverIsnA = completeHandshakeAndDrain(CLIENT_PORT);
-        TcpMultiplexer mx = initializer.handler().multiplexer();
+        SegmentDispatcher mx = initializer.handler().multiplexer();
         TcpSock sockA = initializer.handler().sock();
 
         // 第二条连接:不同 client port,保证 4-tuple 不同
@@ -219,7 +219,7 @@ class RegistryLifecycleTest {
      * 测试跟随迁移 —— 这恰是本测试要"钉住"的结构观测点。
      */
     @SuppressWarnings("unchecked")
-    private static Map<Object, TcpSock> established(TcpMultiplexer mx) {
+    private static Map<Object, TcpSock> established(SegmentDispatcher mx) {
         try {
             Field f = com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpStack.class
                     .getDeclaredField("establishedRegistry");
@@ -231,7 +231,7 @@ class RegistryLifecycleTest {
     }
 
     @SuppressWarnings("unchecked")
-    private static Map<Object, TcpTimewaitSock> timewait(TcpMultiplexer mx) {
+    private static Map<Object, TcpTimewaitSock> timewait(SegmentDispatcher mx) {
         try {
             Field f = com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpStack.class
                     .getDeclaredField("timewaitRegistry");

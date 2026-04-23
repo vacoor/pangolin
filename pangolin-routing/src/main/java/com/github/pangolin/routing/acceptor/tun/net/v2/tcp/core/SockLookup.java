@@ -10,8 +10,8 @@ import java.util.Objects;
  * <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/inet_hashtables.c">
  * {@code __inet_lookup_skb}</a>(net/ipv4/inet_hashtables.c)。
  *
- * <p>R4.2b-1:从 {@link TcpMultiplexer} 中剥离,独立为无副作用的查表组件。
- * 后续 R4.2b-3 由 {@code SegmentDispatcher} 调用,{@code TcpMultiplexer} /
+ * <p>R4.2b-1:从 {@link SegmentDispatcher} 中剥离,独立为无副作用的查表组件。
+ * 后续 R4.2b-3 由 {@code SegmentDispatcher} 调用,{@code SegmentDispatcher} /
  * {@code TcpStack} 不再直接暴露 lookup。
  *
  * <p><b>查找顺序</b>:

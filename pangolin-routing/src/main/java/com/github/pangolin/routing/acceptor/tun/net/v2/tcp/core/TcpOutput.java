@@ -37,8 +37,8 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConsta
 public final class TcpOutput {
 
     /**
-     * 进程级 fallback 单例。R1.4(2026-04-23):TcpOutput 已经降为 TcpMultiplexer
-     * 持有的 per-stack 实例(见 {@link TcpMultiplexer#output()}),本 INSTANCE 仅为
+     * 进程级 fallback 单例。R1.4(2026-04-23):TcpOutput 已经降为 SegmentDispatcher
+     * 持有的 per-stack 实例(见 {@link SegmentDispatcher#output()}),本 INSTANCE 仅为
      * 过渡期保留,供还不能拿到 multiplexer 引用的外部 adapter(TcpMultiplexHandler
      * 的 fallback ingress reset 等)暂时使用。后续所有主干路径都应走 per-stack 实例。
      */
@@ -593,7 +593,7 @@ public final class TcpOutput {
             return;
         }
         // handshake 期路径无 sock 引用,沿用 INSTANCE 全局 MIB — R1.4(TcpOutput
-        // 降为 TcpMultiplexer 实例字段)将统一到 per-stack mib。
+        // 降为 SegmentDispatcher 实例字段)将统一到 per-stack mib。
         TcpMibStats.INSTANCE.inc(TcpMib.TCPCHALLENGEACK);
         ByteBuf buf = TcpPacketBuilder.buildRaw(
                 localIp, localPort, remoteIp, remotePort,

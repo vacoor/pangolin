@@ -2,7 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.netty;
 
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMultiplexer;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SegmentDispatcher;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSendBuffer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSock;
@@ -27,16 +27,16 @@ import java.util.Deque;
  *
  * <p>生命周期:
  * <ol>
- *   <li>{@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.Tcp4Multiplexer#tcp_v4_syn_recv_sock}
+ *   <li>{@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.Ipv4SegmentDispatcher#tcp_v4_syn_recv_sock}
  *       建 child sock → {@code tryEstablish → initTransfer} 调
  *       {@link TcpChannelInitializer#create} 生成本 channel;</li>
- *   <li>{@code TcpMultiplexer} 在 {@code sock.eventLoop()} 上调
+ *   <li>{@code SegmentDispatcher} 在 {@code sock.eventLoop()} 上调
  *       {@code eventLoop.register(ch)} → {@code pipeline.fireChannelActive()};</li>
- *   <li>读路径:{@code TcpMultiplexer.consume} 分流到
+ *   <li>读路径:{@code SegmentDispatcher.consume} 分流到
  *       {@link TcpSockHandler#onInboundData},经本类内部 autoRead 门控后
  *       {@code fireChannelRead};</li>
  *   <li>写路径:用户 {@code ctx.writeAndFlush(ByteBuf)} → {@link #doWrite} 把 ByteBuf
- *       交给 {@code TcpMultiplexer.sendmsg}(MSS 切片与 push 由栈内部处理);</li>
+ *       交给 {@code SegmentDispatcher.sendmsg}(MSS 切片与 push 由栈内部处理);</li>
  *   <li>关闭:主动 {@code ch.close()} → {@link #doClose} 发 FIN;被动 FIN / RST
  *       由 bridge 回调,最终由 {@code inet_csk_destroy_sock → sock.close} 触发
  *       bridge.onSocketDestroyed → 本 channel unsafe().closeForcibly。</li>
@@ -50,7 +50,7 @@ public class TcpChannel extends AbstractChannel {
     private static final ChannelMetadata METADATA = new ChannelMetadata(false);
 
     private final TcpSock sock;
-    private final TcpMultiplexer multiplexer;
+    private final SegmentDispatcher multiplexer;
     private final TcpChannelConfig config;
 
     /** autoRead=false 时暂存待 fire 的 inbound buf。 */
@@ -72,7 +72,7 @@ public class TcpChannel extends AbstractChannel {
     /** writability 最近一次推上 pipeline 的 low/high 状态。 */
     private boolean lastWritable = true;
 
-    public TcpChannel(TcpSock sock, TcpMultiplexer multiplexer) {
+    public TcpChannel(TcpSock sock, SegmentDispatcher multiplexer) {
         super(null);
         this.sock = sock;
         this.multiplexer = multiplexer;
@@ -84,7 +84,7 @@ public class TcpChannel extends AbstractChannel {
         return sock;
     }
 
-    public TcpMultiplexer multiplexer() {
+    public SegmentDispatcher multiplexer() {
         return multiplexer;
     }
 

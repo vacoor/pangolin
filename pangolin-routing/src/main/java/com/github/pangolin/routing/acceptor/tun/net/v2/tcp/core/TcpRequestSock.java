@@ -22,7 +22,7 @@ public final class TcpRequestSock extends SockCommon {
     /**
      * Initializer 私有 attachment 单槽 — P2.1 起 {@link TcpSockInitializer} 可以在此
      * 挂一组自定义状态(Netty {@code AttributeMap} 风格)。core 不感知内容,只在
-     * {@link TcpMultiplexer#inet_csk_destroy_sock(TcpRequestSock)} 前回调
+     * {@link SegmentDispatcher#inet_csk_destroy_sock(TcpRequestSock)} 前回调
      * {@link TcpSockInitializer#onRequestDestroyed} 让 initializer 清理。
      */
     private Object attachment;
