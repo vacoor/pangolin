@@ -236,10 +236,7 @@ public class TcpSock extends SockCommon {
      * 置位后持续到下一次 {@code tcp_cwnd_application_limited} 执行才清理。
      */
     // R2.3: isCwndLimited 已物理迁到 Sender
-    private int dupacks;
-    private int caIncrCounter;
-    private CongestionState congestionState = CongestionState.OPEN;
-    private int highSeq;
+    // R2.3: dupacks / caIncrCounter / congestionState / highSeq 已物理迁到 Sender
     // R2.3: tlpHighSeq 已物理迁到 Sender(对应 Linux tp->tlp_high_seq)
     /**
      * 下一次发 ACK 需要通告的 DSACK 块 {@code [dsackStart, dsackEnd)}
@@ -444,10 +441,7 @@ public class TcpSock extends SockCommon {
         keepaliveEnabled = false;
         // R2.3: cwnd / ssthresh 初值由 Sender 字段声明初始化 (TCP_INIT_CWND / Integer.MAX_VALUE)
         // R2.3: sndCwndStampMs / sndCwndUsed / isCwndLimited 默认值由 Sender 字段声明初始化
-        dupacks = 0;
-        caIncrCounter = 0;
-        congestionState = CongestionState.OPEN;
-        highSeq = 0;
+        // R2.3: dupacks / caIncrCounter / congestionState / highSeq 初值由 Sender 字段声明初始化
         // R2.3: tlpHighSeq 默认值 0 由 Sender 字段声明初始化
         dsackStart = 0;
         dsackEnd = 0;
@@ -514,12 +508,7 @@ public class TcpSock extends SockCommon {
         // R2.3: sackedOut 已在 Sender(dead code path)
         // R2.3: cwnd / ssthresh 已在 Sender(dead code path)
         // R2.3: sndCwndStampMs / sndCwndUsed / isCwndLimited 已在 Sender(dead code path)
-        this.dupacks = conn.dupacks();
-        this.caIncrCounter = conn.caIncrCounter();
-        this.congestionState = conn.congestionState() == null
-                ? CongestionState.OPEN
-                : CongestionState.valueOf(conn.congestionState());
-        this.highSeq = conn.highSeq();
+        // R2.3: dupacks / caIncrCounter / congestionState / highSeq 已在 Sender(dead code path)
         // R2.3: tlpHighSeq 已在 Sender(dead code path)
     }
 
@@ -1384,7 +1373,7 @@ public class TcpSock extends SockCommon {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_try_undo_recovery</a>
      */
     public boolean tcpTryUndoRecovery(int tsecr) {
-        if (congestionState != CongestionState.RECOVERY) return false;
+        if (sender.congestionState() != CongestionState.RECOVERY) return false;
         if (undoMarker == 0 || sender.retransStamp() == 0L) return false;
         if (tsecr == -1) return false;
         final int retransStampMs = (int) (sender.retransStamp() / 1000L);
@@ -1392,9 +1381,9 @@ public class TcpSock extends SockCommon {
             return false;
         }
         tcpUndoCwndReduction(false);
-        congestionState = CongestionState.OPEN;
-        caIncrCounter = 0;
-        dupacks = 0;
+        sender.congestionState(CongestionState.OPEN);
+        sender.caIncrCounter(0);
+        sender.dupacks(0);
         return true;
     }
 
@@ -1417,7 +1406,7 @@ public class TcpSock extends SockCommon {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_try_undo_loss</a>
      */
     public boolean tcpTryUndoLoss(int tsecr) {
-        if (congestionState != CongestionState.LOSS) return false;
+        if (sender.congestionState() != CongestionState.LOSS) return false;
         if (undoMarker == 0 || sender.retransStamp() == 0L) return false;
         if (tsecr == -1) return false;
         final int retransStampMs = (int) (sender.retransStamp() / 1000L);
@@ -1425,9 +1414,9 @@ public class TcpSock extends SockCommon {
             return false;
         }
         tcpUndoCwndReduction(false);
-        congestionState = CongestionState.OPEN;
-        caIncrCounter = 0;
-        dupacks = 0;
+        sender.congestionState(CongestionState.OPEN);
+        sender.caIncrCounter(0);
+        sender.dupacks(0);
         return true;
     }
 
@@ -1457,16 +1446,16 @@ public class TcpSock extends SockCommon {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_process_loss</a>
      */
     public boolean tcpProcessFrto() {
-        if (congestionState != CongestionState.LOSS) return false;
+        if (sender.congestionState() != CongestionState.LOSS) return false;
         if (frtoCounter == 0) return false;
         if (undoMarker == 0) return false;
         if (com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before(sender.sndUna(), frtoHighmark)) {
             return false;
         }
         tcpUndoCwndReduction(true);
-        congestionState = CongestionState.OPEN;
-        caIncrCounter = 0;
-        dupacks = 0;
+        sender.congestionState(CongestionState.OPEN);
+        sender.caIncrCounter(0);
+        sender.dupacks(0);
         return true;
     }
 
@@ -1494,15 +1483,15 @@ public class TcpSock extends SockCommon {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_try_undo_dsack</a>
      */
     public boolean tcpTryUndoDsack() {
-        if (congestionState != CongestionState.RECOVERY && congestionState != CongestionState.LOSS) {
+        if (sender.congestionState() != CongestionState.RECOVERY && sender.congestionState() != CongestionState.LOSS) {
             return false;
         }
         if (undoMarker == 0 || sender.retransStamp() == 0L) return false;
         if (undoRetrans != 0) return false;
         tcpUndoCwndReduction(false);
-        congestionState = CongestionState.OPEN;
-        caIncrCounter = 0;
-        dupacks = 0;
+        sender.congestionState(CongestionState.OPEN);
+        sender.caIncrCounter(0);
+        sender.dupacks(0);
         return true;
     }
 
@@ -1511,14 +1500,14 @@ public class TcpSock extends SockCommon {
      * Limited Transmit 在 {@code TcpOutput.cwndTest} 读取该值,在
      * {@code dupacks ∈ [1, 2]} 且 {@link #isCaOpen()} 时放宽 cwnd 预算。
      */
-    public int dupacks() { return dupacks; }
+    public int dupacks() { return sender.dupacks(); }
 
     /**
      * 当前 CA 状态是否为 {@code CA_Open} — {@code CongestionState} 枚举对 ng 包外不可见,
      * 暴露此谓词供 {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput}
      * 判定 RFC 3042 Limited Transmit 是否生效。
      */
-    public boolean isCaOpen() { return congestionState == CongestionState.OPEN; }
+    public boolean isCaOpen() { return sender.congestionState() == CongestionState.OPEN; }
 
     /** RACK 最新 SACKed 段 {@code sentTimeUs};单调更新。 */
     public long rackMstamp() { return rackMstamp; }
@@ -1737,50 +1726,50 @@ public class TcpSock extends SockCommon {
 
     public void onAckedByCc(int newlyAcked, boolean advanced) {
         if (!advanced) {
-            if (++dupacks == 3 && congestionState == CongestionState.OPEN) {
+            if (sender.incrementDupacks() == 3 && sender.congestionState() == CongestionState.OPEN) {
                 // 对齐 Linux tcp_init_undo:进 Recovery 前快照 cwnd/ssthresh/snd_una,
                 // 为后续 tcp_try_undo_recovery 提供回滚基线。
                 tcpInitUndo();
                 int newSs = Math.max(sender.cwnd() / 2, 2);
                 sender.ssthresh(newSs);
                 sender.cwnd(newSs + 3);
-                highSeq = sender.sndNxt();
+                sender.highSeq(sender.sndNxt());
                 sender.tlpHighSeq(0);
-                congestionState = CongestionState.RECOVERY;
-                caIncrCounter = 0;
+                sender.congestionState(CongestionState.RECOVERY);
+                sender.caIncrCounter(0);
                 // 对齐 Linux tcp_enter_recovery → markHeadLost:NewReno 无 SACK
                 // 信息驱动 LOST 标记,进入 Fast Retransmit 前先把队首段记为 LOST,
                 // 这样 retransmitSkb 的 LOST 优先路径能与 RACK 场景保持一致。
                 TcpAck.markHeadLost(this, 1);
                 this.multiplexer.retransmitter().retransmit(this);
-            } else if (congestionState == CongestionState.RECOVERY) {
+            } else if (sender.congestionState() == CongestionState.RECOVERY) {
                 sender.incrementCwnd();
             }
             return;
         }
 
-        if (congestionState == CongestionState.RECOVERY && after(sender.sndUna(), highSeq)) {
+        if (sender.congestionState() == CongestionState.RECOVERY && after(sender.sndUna(), sender.highSeq())) {
             sender.cwnd(sender.ssthresh());
-            congestionState = CongestionState.OPEN;
-            caIncrCounter = 0;
-        } else if (congestionState == CongestionState.LOSS) {
-            congestionState = CongestionState.OPEN;
-            caIncrCounter = 0;
+            sender.congestionState(CongestionState.OPEN);
+            sender.caIncrCounter(0);
+        } else if (sender.congestionState() == CongestionState.LOSS) {
+            sender.congestionState(CongestionState.OPEN);
+            sender.caIncrCounter(0);
             // 自然退出 CA_Loss(非 F-RTO / TSECR undo 路径)时一并清 F-RTO 武装,
             // 避免 high_mark 悬挂影响下一轮 RTO 判定。
             clearFrto();
         }
 
-        dupacks = 0;
+        sender.dupacks(0);
         int c = sender.cwnd();
         int s = sender.ssthresh();
         if (c < s) {
             sender.cwnd(c + newlyAcked);
         } else {
-            caIncrCounter += newlyAcked;
-            if (caIncrCounter >= c) {
+            sender.addCaIncrCounter(newlyAcked);
+            if (sender.caIncrCounter() >= c) {
                 sender.incrementCwnd();
-                caIncrCounter = 0;
+                sender.caIncrCounter(0);
             }
         }
     }
@@ -1801,10 +1790,10 @@ public class TcpSock extends SockCommon {
         }
         sender.ssthresh(Math.max(sender.cwnd() / 2, 2));
         sender.cwnd(1);
-        dupacks = 0;
-        caIncrCounter = 0;
+        sender.dupacks(0);
+        sender.caIncrCounter(0);
         sender.tlpHighSeq(0);
-        congestionState = CongestionState.LOSS;
+        sender.congestionState(CongestionState.LOSS);
     }
 
     public int tlpHighSeq() {
@@ -1832,7 +1821,7 @@ public class TcpSock extends SockCommon {
     }
 
     public CongestionState congestionState() {
-        return congestionState;
+        return sender.congestionState();
     }
 
     public long sndCwndStampMs() {
@@ -1906,7 +1895,7 @@ public class TcpSock extends SockCommon {
         int restartCwnd = TcpConstants.TCP_INIT_CWND;
         int curCwnd = sender.cwnd();
         // 近似 Linux tcp_current_ssthresh():CA_Open 下 max(ssthresh, 3*cwnd/4 + 1)
-        if (congestionState == CongestionState.OPEN) {
+        if (sender.congestionState() == CongestionState.OPEN) {
             int conservative = (curCwnd * 3 / 4) + 1;
             if (sender.ssthresh() < conservative) {
                 sender.ssthresh(conservative);
@@ -1960,7 +1949,7 @@ public class TcpSock extends SockCommon {
      * 检查(buffer 非满才回收),v2 无对应字段,按 CA_Open 即回收。
      */
     private void tcpCwndApplicationLimited() {
-        if (congestionState == CongestionState.OPEN) {
+        if (sender.congestionState() == CongestionState.OPEN) {
             int initWin = TcpConstants.TCP_INIT_CWND;
             int winUsed = Math.max(sender.sndCwndUsed(), initWin);
             int c = sender.cwnd();

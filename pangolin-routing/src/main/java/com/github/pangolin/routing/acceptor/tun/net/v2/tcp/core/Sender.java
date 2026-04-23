@@ -68,6 +68,14 @@ public final class Sender {
     private long srttUs;
     /** RTT 方差(us)。Mirrors Linux {@code tp->rttvar_us}。 */
     private long rttvarUs;
+    /** dupack 计数器。Mirrors Linux {@code tp->dup_ack}(经由 {@code icsk_ca_state} 触发)。 */
+    private int dupacks;
+    /** 拥塞控制阶段。Mirrors Linux {@code icsk->icsk_ca_state}。 */
+    private TcpSock.CongestionState congestionState = TcpSock.CongestionState.OPEN;
+    /** Recovery 入口的 sndNxt 快照。Mirrors Linux {@code tp->high_seq}。 */
+    private int highSeq;
+    /** Congestion Avoidance 增量累计器。Mirrors Linux {@code tp->snd_cwnd_cnt}。 */
+    private int caIncrCounter;
 
     /**
      * RTO 指数退避 shift(R2.3 物理迁移到 Sender)。Mirrors Linux
@@ -430,5 +438,50 @@ public final class Sender {
 
     public void rttvarUs(long v) {
         this.rttvarUs = v;
+    }
+
+    /** dupack 计数器。Mirrors Linux {@code tp->dup_ack}。 */
+    public int dupacks() {
+        return dupacks;
+    }
+
+    public void dupacks(int v) {
+        this.dupacks = v;
+    }
+
+    /** dupacks++,返回自增后的值。 */
+    public int incrementDupacks() {
+        return ++dupacks;
+    }
+
+    /** 拥塞控制阶段。Mirrors Linux {@code icsk->icsk_ca_state}。 */
+    public TcpSock.CongestionState congestionState() {
+        return congestionState;
+    }
+
+    public void congestionState(TcpSock.CongestionState v) {
+        this.congestionState = v;
+    }
+
+    /** Recovery 入口的 sndNxt 快照。Mirrors Linux {@code tp->high_seq}。 */
+    public int highSeq() {
+        return highSeq;
+    }
+
+    public void highSeq(int v) {
+        this.highSeq = v;
+    }
+
+    /** CA 增量累计器。Mirrors Linux {@code tp->snd_cwnd_cnt}。 */
+    public int caIncrCounter() {
+        return caIncrCounter;
+    }
+
+    public void caIncrCounter(int v) {
+        this.caIncrCounter = v;
+    }
+
+    public void addCaIncrCounter(int v) {
+        this.caIncrCounter += v;
     }
 }
