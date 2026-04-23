@@ -2,7 +2,6 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.e2e;
 
 import com.github.pangolin.routing.acceptor.tun.net.codec.Tcp4PacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionState;
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SegmentDispatcher;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.harness.CapturingInitializer;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.harness.PacketFactory;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.harness.TcpStackHarness;
@@ -29,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>TIME_WAIT bucket 命中 + SYN with advanced seq → 重建新连接(TW_SYN 重用端口)。</li>
  * </ul>
  *
- * <p>TW bucket 通过 {@link SegmentDispatcher#timeWait} 程序化构造,不走真实 4-way close
+ * <p>TW bucket 通过 {@code TcpStack.timeWait} 程序化构造,不走真实 4-way close
  * —— 测试的是 <b>分派行为</b>,不是闭合路径。
  */
 class DispatcherRoutingTest {
@@ -199,7 +198,7 @@ class DispatcherRoutingTest {
 
     /**
      * 程序化把当前 ESTABLISHED sock 迁入 TIME_WAIT bucket —— 绕过 4-way close 直接
-     * 触发 {@code SegmentDispatcher.timeWait},把 sock 快照拷进 timewaitRegistry 并
+     * 触发 {@code TcpStack.timeWait},把 sock 快照拷进 timewaitRegistry 并
      * 销毁原 TcpSock。测试只关心分派行为,staging 走最短路径即可。
      */
     private void stageTimeWait(TcpConnectionState substate) {
