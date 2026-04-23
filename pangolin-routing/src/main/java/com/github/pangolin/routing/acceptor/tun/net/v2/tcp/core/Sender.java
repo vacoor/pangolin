@@ -30,6 +30,37 @@ public final class Sender {
 
     private final TcpSock sock;
 
+    /** SND.UNA — 最早未 ACK 字节的 seq(R2.3)。Mirrors Linux {@code tp->snd_una}。 */
+    private int sndUna;
+    /** SND.NXT — 下一个待发字节的 seq(R2.3)。Mirrors Linux {@code tp->snd_nxt}。 */
+    private int sndNxt;
+    /** tail 分配时的 seq 游标,≥ sndNxt(R2.3)。Mirrors Linux {@code tp->write_seq}。 */
+    private int writeSeq;
+    /** 对端通告的发送窗口(字节,已 scale)。Mirrors Linux {@code tp->snd_wnd}。 */
+    private int sndWnd;
+    /** 历史最大 sndWnd(PAWS 校验基线)。Mirrors Linux {@code tp->max_window}。 */
+    private int maxWindow;
+    /** 上次 window 更新时的 ACK seq。Mirrors Linux {@code tp->snd_wl1}。 */
+    private int sndWl1;
+    /** 上次 Nagle/Minshall 检查的 sent seq。Mirrors Linux {@code tp->snd_sml}。 */
+    private int sndSml;
+    /** 飞行中段数(出队但未 ACK)。Mirrors Linux {@code tp->packets_out}。 */
+    private int packetsOut;
+    /** 已被 SACK 标记的段数。Mirrors Linux {@code tp->sacked_out}。 */
+    private int sackedOut;
+    /** 已被 LOST 标记的段数(RACK / NewReno tag)。Mirrors Linux {@code tp->lost_out}。 */
+    private int lostOut;
+    /** cwnd 使用高水位时戳。Mirrors Linux {@code tp->snd_cwnd_stamp}。 */
+    private long sndCwndStampMs;
+    /** cwnd 使用高水位。Mirrors Linux {@code tp->snd_cwnd_used}。 */
+    private int sndCwndUsed;
+    /** cwnd 是否成为发送瓶颈。Mirrors Linux {@code tp->is_cwnd_limited}。 */
+    private boolean isCwndLimited;
+    /** undo 前 cwnd 快照。Mirrors Linux {@code tp->prior_cwnd}。 */
+    private int priorCwnd;
+    /** undo 前 ssthresh 快照。Mirrors Linux {@code tp->prior_ssthresh}。 */
+    private int priorSsthresh;
+
     /**
      * RTO 指数退避 shift(R2.3 物理迁移到 Sender)。Mirrors Linux
      * {@code inet_csk(sk)->icsk_backoff}。默认 0,每次 RTO timer 触发递增(上限 6)。
@@ -187,5 +218,168 @@ public final class Sender {
 
     public void tlpHighSeq(int seq) {
         this.tlpHighSeq = seq;
+    }
+
+    /** 最早未 ACK 字节的 seq。Mirrors Linux {@code tp->snd_una}。 */
+    public int sndUna() {
+        return sndUna;
+    }
+
+    public void sndUna(int v) {
+        this.sndUna = v;
+    }
+
+    /** 下一个待发字节的 seq。Mirrors Linux {@code tp->snd_nxt}。 */
+    public int sndNxt() {
+        return sndNxt;
+    }
+
+    public void sndNxt(int v) {
+        this.sndNxt = v;
+    }
+
+    /** tail 分配时的 seq 游标。Mirrors Linux {@code tp->write_seq}。 */
+    public int writeSeq() {
+        return writeSeq;
+    }
+
+    public void writeSeq(int v) {
+        this.writeSeq = v;
+    }
+
+    /** 对端通告的发送窗口(字节)。Mirrors Linux {@code tp->snd_wnd}。 */
+    public int sndWnd() {
+        return sndWnd;
+    }
+
+    /** 更新 sndWnd,同时刷新 maxWindow(单调增)。 */
+    public void sndWnd(int v) {
+        this.sndWnd = v;
+        if (Integer.compareUnsigned(v, maxWindow) > 0) {
+            this.maxWindow = v;
+        }
+    }
+
+    /** 历史最大 sndWnd。Mirrors Linux {@code tp->max_window}。 */
+    public int maxWindow() {
+        return maxWindow;
+    }
+
+    public void maxWindow(int v) {
+        this.maxWindow = v;
+    }
+
+    /** 上次 window 更新时的 ACK seq。Mirrors Linux {@code tp->snd_wl1}。 */
+    public int sndWl1() {
+        return sndWl1;
+    }
+
+    public void sndWl1(int v) {
+        this.sndWl1 = v;
+    }
+
+    /** 上次 Nagle/Minshall 检查的 sent seq。Mirrors Linux {@code tp->snd_sml}。 */
+    public int sndSml() {
+        return sndSml;
+    }
+
+    public void sndSml(int v) {
+        this.sndSml = v;
+    }
+
+    /** 飞行中段数。Mirrors Linux {@code tp->packets_out}。 */
+    public int packetsOut() {
+        return packetsOut;
+    }
+
+    public void packetsOut(int v) {
+        this.packetsOut = Math.max(v, 0);
+    }
+
+    public void incrementPacketsOut() {
+        packetsOut++;
+    }
+
+    public void decrementPacketsOut(int n) {
+        packetsOut = Math.max(0, packetsOut - n);
+    }
+
+    /** SACK 标记的段数。Mirrors Linux {@code tp->sacked_out}。 */
+    public int sackedOut() {
+        return sackedOut;
+    }
+
+    public void sackedOut(int v) {
+        this.sackedOut = Math.max(v, 0);
+    }
+
+    public void incrementSackedOut() {
+        sackedOut++;
+    }
+
+    public void decrementSackedOut(int n) {
+        sackedOut = Math.max(0, sackedOut - n);
+    }
+
+    /** LOST 标记的段数。Mirrors Linux {@code tp->lost_out}。 */
+    public int lostOut() {
+        return lostOut;
+    }
+
+    public void lostOut(int v) {
+        this.lostOut = Math.max(v, 0);
+    }
+
+    public void incrementLostOut() {
+        lostOut++;
+    }
+
+    public void decrementLostOut(int n) {
+        lostOut = Math.max(0, lostOut - n);
+    }
+
+    /** cwnd 使用高水位时戳。Mirrors Linux {@code tp->snd_cwnd_stamp}。 */
+    public long sndCwndStampMs() {
+        return sndCwndStampMs;
+    }
+
+    public void sndCwndStampMs(long v) {
+        this.sndCwndStampMs = v;
+    }
+
+    /** cwnd 使用高水位。Mirrors Linux {@code tp->snd_cwnd_used}。 */
+    public int sndCwndUsed() {
+        return sndCwndUsed;
+    }
+
+    public void sndCwndUsed(int v) {
+        this.sndCwndUsed = Math.max(v, 0);
+    }
+
+    /** cwnd 是否成为发送瓶颈。Mirrors Linux {@code tp->is_cwnd_limited}。 */
+    public boolean isCwndLimited() {
+        return isCwndLimited;
+    }
+
+    public void isCwndLimited(boolean v) {
+        this.isCwndLimited = v;
+    }
+
+    /** undo 前 cwnd 快照。Mirrors Linux {@code tp->prior_cwnd}。 */
+    public int priorCwnd() {
+        return priorCwnd;
+    }
+
+    public void priorCwnd(int v) {
+        this.priorCwnd = v;
+    }
+
+    /** undo 前 ssthresh 快照。Mirrors Linux {@code tp->prior_ssthresh}。 */
+    public int priorSsthresh() {
+        return priorSsthresh;
+    }
+
+    public void priorSsthresh(int v) {
+        this.priorSsthresh = v;
     }
 }
