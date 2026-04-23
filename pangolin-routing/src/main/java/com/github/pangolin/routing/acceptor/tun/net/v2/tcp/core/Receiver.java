@@ -12,13 +12,18 @@ import io.netty.channel.ChannelHandlerContext;
  * (pkg/tcpip/transport/tcp/rcv.go)。每条 {@link TcpSock} 对应一个 {@code Receiver},
  * 由 {@link SegmentDispatcher#configure(TcpSock)} 创建并挂入 {@link TcpSock#receiver()}。
  *
- * <p><b>职责</b>:rcvNxt / rcvWnd / rcvWup / 背压 / OFO / ACK 调度;
- * 不含发送侧(cwnd / retransmit / RTO),后者由 {@link Sender}。
+ * <p><b>职责</b>:
+ * <ul>
+ *   <li>接收侧状态字段(R3.2 物理下沉):rcvNxt / rcvWnd / rcvWup / rcvPaused /
+ *       ackPending / quickAckCount / ackTimeoutMs / pingpongCount 等</li>
+ *   <li>ACK 调度(R4.2b-4c 从 Dispatcher 迁入):{@link #ackSndCheck} /
+ *       {@link #sendDelayedAck} / {@link #delackTimer}</li>
+ *   <li>入站数据 FSM(R4.2b-4f 从 Dispatcher 迁入):{@link #handleDataQueue} /
+ *       {@link #finIncoming} / {@link #outOfWindow}(+ 私有 queueAndOut / handleOfo)</li>
+ *   <li>初始化(R4.2b-i):{@link #initializeRcvMss}</li>
+ * </ul>
  *
- * <p><b>当前实现形态</b>:Receiver 是 facade — 方法 delegate 到 {@link TcpSock} /
- * {@link TcpReceiveBuffer} 的底层实现,接收侧 mutable state
- * (rcvNxt / rcvWnd / rcvWup / rcvPaused / receiveBuffer)仍存在 TcpSock。
- * 未来若要物理下沉,替换本类方法实现即可,调用方零感知。
+ * <p>不含发送侧(cwnd / retransmit / RTO),后者由 {@link Sender}。
  *
  * <p><b>线程模型</b>:所有方法必须在 {@code sock.eventLoop()} 上调用。
  *
@@ -26,10 +31,8 @@ import io.netty.channel.ChannelHandlerContext;
  * <pre>
  *   int next = sock.receiver().rcvNxt();              // 下一个期望序号
  *   sock.receiver().rcvWnd(0);                        // zero-window advertise
- *   sock.receiver().paused(true);                     // 背压
- *   sock.receiver().enterQuickAck(MAX_QUICKACKS);     // 进 quickack 模式
- *   sock.receiver().addAckPending(ACK_SCHED);         // 调度 ACK
- *   TcpReceiveBuffer buf = sock.receiver().buffer();  // OFO + in-order 缓冲
+ *   sock.receiver().ackSndCheck();                    // 触发 ACK 调度
+ *   sock.receiver().handleDataQueue(ctx, pkt);        // 数据段入队
  * </pre>
  */
 public final class Receiver {

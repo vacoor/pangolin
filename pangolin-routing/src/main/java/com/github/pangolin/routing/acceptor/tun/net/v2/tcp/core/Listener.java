@@ -14,13 +14,10 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequen
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.between;
 
 /**
- * LISTEN 端聚合对象 — 把 LISTEN 状态 sock、半连接队列、syn backlog 阈值从
- * {@link SegmentDispatcher} 中独立出来。对齐 gVisor {@code listenEndpoint} 的
- * 职责范围(syn / accept queue),不含 ESTABLISHED 连接管理。
- *
- * <p><b>当前实现形态</b>:Listener 持有 LISTEN 端独有状态。{@link SegmentDispatcher}
- * 通过 {@link SegmentDispatcher#listener()} 访问本对象,所有涉及 syn queue 的方法
- * 路径经过本类或读取本类字段。
+ * LISTEN 端聚合对象 — 把 LISTEN 状态 sock、半连接队列、syn backlog 阈值以及
+ * SYN_RECV 校验从 {@link TcpStack} / {@link SegmentDispatcher} 中独立出来。
+ * 对齐 gVisor {@code listenEndpoint} 的职责范围(syn / accept queue),
+ * 不含 ESTABLISHED 连接管理。
  *
  * <p><b>职责</b>:
  * <ul>
@@ -28,16 +25,22 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequen
  *       的 "parent sock"(Linux {@code struct request_sock_queue} 的 owner)</li>
  *   <li>{@link #synRegistry} — 半连接队列 ({@code FourTuple → TcpRequestSock}),
  *       对齐 Linux {@code inet_csk(sk)->icsk_accept_queue.listen_opt} + ehash<br>
- *       **并发**:读写均在 TUN EL,不需要 ConcurrentHashMap</li>
+ *       <b>并发</b>:读写均在 TUN EL,不需要 ConcurrentHashMap</li>
  *   <li>{@link #maxSynBacklog} — 半连接容量上限,对齐 Linux
  *       {@code inet_csk(sk)->icsk_accept_queue.listen_opt.max_qlen_log}</li>
+ *   <li>{@link #checkReq} — SYN_RECV 阶段逐段校验(R4.2c 从 SegmentDispatcher 迁入,
+ *       需要 {@link SegmentDispatcher} 参数访问 abstract 路由方法)</li>
+ *   <li>{@link #synackRttMeas} — 3WH 完成时首个 RTT 样本采样(Karn's rule)</li>
  * </ul>
+ *
+ * <p><b>访问路径</b>:{@link TcpStack#listener()} 返回本对象;
+ * {@link SegmentDispatcher} 子类调 {@link #checkReq} 时自传 {@code this}。
  *
  * <p><b>线程模型</b>:所有访问必须在 TUN EL 上。
  */
 public final class Listener {
 
-    /** 半连接队列容量默认值 — 对齐 {@link SegmentDispatcher#DEFAULT_MAX_SYN_BACKLOG}。 */
+    /** 半连接队列容量默认值 — 与 {@link TcpStack#DEFAULT_MAX_SYN_BACKLOG} 一致。 */
     public static final int DEFAULT_MAX_SYN_BACKLOG = 1024;
 
     final TcpSock listenSock;

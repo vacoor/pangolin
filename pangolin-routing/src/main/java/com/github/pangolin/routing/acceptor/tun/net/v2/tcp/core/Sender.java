@@ -8,13 +8,20 @@ import io.netty.buffer.ByteBuf;
  * (pkg/tcpip/transport/tcp/snd.go)。每条 {@link TcpSock} 对应一个 {@code Sender},
  * 由 {@link SegmentDispatcher#configure(TcpSock)} 创建并挂入 {@link TcpSock#sender()}。
  *
- * <p><b>职责</b>:cwnd / ssthresh / nagle / push / fragment / 重传调度 / RTO 状态;
- * 不含接收侧(OFO / reassembly / rcvWnd),后者由 {@link Receiver}。
+ * <p><b>职责</b>:
+ * <ul>
+ *   <li>发送侧状态字段(R2.3 物理下沉):sndUna / sndNxt / writeSeq / cwnd / ssthresh /
+ *       srttUs / rttvarUs / packetsOut / congestionState / RACK / F-RTO 等 38 字段</li>
+ *   <li>应用层写入(R4.2b-4e):{@link #sendmsg} / {@link #pushPending} / {@link #shutdown}</li>
+ *   <li>ACK 处理(R4.2b-4g):{@link #ackIncoming}(内部走 TcpAck)</li>
+ *   <li>发送侧 timer(R4.2b-4d):{@link #armProbe0} / {@link #probeTimer} /
+ *       {@link #armKeepalive} / {@link #keepaliveTimer}</li>
+ *   <li>初始化(R4.2b-i):{@link #initWl}</li>
+ *   <li>Facade API(R2):sendFin / sendReset / sendAck / retransmit / backoff /
+ *       rearmRto / rtoMs / currentMss 等(delegate 到 TcpOutput / TcpRetransmitter)</li>
+ * </ul>
  *
- * <p><b>当前实现形态</b>:Sender 是 facade — 方法 delegate 到
- * {@link TcpOutput} / {@link TcpRetransmitter} / {@link SegmentDispatcher} 的底层实现,
- * 发送侧 mutable state(writeSeq / sndUna / cwnd / ssthresh / packetsOut / sendBuffer 等)
- * 仍存在 TcpSock。未来若要物理下沉,替换本类方法实现即可,调用方零感知。
+ * <p>不含接收侧(OFO / reassembly / rcvWnd),后者由 {@link Receiver}。
  *
  * <p><b>线程模型</b>:所有方法必须在 {@code sock.eventLoop()} 上调用。
  *
