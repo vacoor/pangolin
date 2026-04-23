@@ -60,6 +60,10 @@ public final class Sender {
     private int priorCwnd;
     /** undo 前 ssthresh 快照。Mirrors Linux {@code tp->prior_ssthresh}。 */
     private int priorSsthresh;
+    /** 拥塞窗口(段数)。Mirrors Linux {@code tp->snd_cwnd}。 */
+    private int cwnd = TcpConstants.TCP_INIT_CWND;
+    /** 慢启动阈值(段数);默认 {@code Integer.MAX_VALUE} 表示仍在 slow start。Mirrors Linux {@code tp->snd_ssthresh}。 */
+    private int ssthresh = Integer.MAX_VALUE;
 
     /**
      * RTO 指数退避 shift(R2.3 物理迁移到 Sender)。Mirrors Linux
@@ -381,5 +385,28 @@ public final class Sender {
 
     public void priorSsthresh(int v) {
         this.priorSsthresh = v;
+    }
+
+    /** 拥塞窗口(段数)。Mirrors Linux {@code tp->snd_cwnd}。 */
+    public int cwnd() {
+        return cwnd;
+    }
+
+    public void cwnd(int v) {
+        this.cwnd = Math.max(v, 2);
+    }
+
+    /** cwnd++ 原子操作。 */
+    public void incrementCwnd() {
+        this.cwnd++;
+    }
+
+    /** 慢启动阈值。Mirrors Linux {@code tp->snd_ssthresh}。 */
+    public int ssthresh() {
+        return ssthresh;
+    }
+
+    public void ssthresh(int v) {
+        this.ssthresh = v;
     }
 }

@@ -219,8 +219,7 @@ public class TcpSock extends SockCommon {
     private boolean keepaliveEnabled;
     private Runnable probeTimerAction = () -> {};
     private Runnable keepaliveTimerAction = () -> {};
-    private int cwnd = TcpConstants.TCP_INIT_CWND;
-    private int ssthresh = Integer.MAX_VALUE;
+    // R2.3: cwnd / ssthresh 已物理迁到 Sender
     /**
      * cwnd 最近一次被 {@code tcp_cwnd_validate} 确认的毫秒时戳 —
      * 对应 Linux {@code tp->snd_cwnd_stamp}(单位 {@code tcp_jiffies32})。
@@ -445,8 +444,7 @@ public class TcpSock extends SockCommon {
         keepaliveIntvlMs = TcpConstants.TCP_KEEPALIVE_INTVL_MS;
         keepaliveProbes = TcpConstants.TCP_KEEPALIVE_PROBES;
         keepaliveEnabled = false;
-        cwnd = TcpConstants.TCP_INIT_CWND;
-        ssthresh = Integer.MAX_VALUE;
+        // R2.3: cwnd / ssthresh 初值由 Sender 字段声明初始化 (TCP_INIT_CWND / Integer.MAX_VALUE)
         // R2.3: sndCwndStampMs / sndCwndUsed / isCwndLimited 默认值由 Sender 字段声明初始化
         dupacks = 0;
         caIncrCounter = 0;
@@ -517,8 +515,7 @@ public class TcpSock extends SockCommon {
         this.tcpHeaderLen = conn.tcpHeaderLen();
         this.dstMtu = conn.dstMtu();
         // R2.3: sackedOut 已在 Sender(dead code path)
-        this.cwnd = conn.cwnd();
-        this.ssthresh = conn.ssthresh();
+        // R2.3: cwnd / ssthresh 已在 Sender(dead code path)
         // R2.3: sndCwndStampMs / sndCwndUsed / isCwndLimited 已在 Sender(dead code path)
         this.dupacks = conn.dupacks();
         this.caIncrCounter = conn.caIncrCounter();
@@ -1329,8 +1326,10 @@ public class TcpSock extends SockCommon {
      * 兜底,统一在此处重置)。
      */
     public void tcpInitUndo() {
-        sender.priorCwnd(cwnd);
-        sender.priorSsthresh((ssthresh == Integer.MAX_VALUE) ? 0 : ssthresh);
+        int c = sender.cwnd();
+        int s = sender.ssthresh();
+        sender.priorCwnd(c);
+        sender.priorSsthresh((s == Integer.MAX_VALUE) ? 0 : s);
         undoMarker = sender.sndUna();
         undoRetrans = 0;
         sender.retransStamp(0L);
@@ -1348,11 +1347,11 @@ public class TcpSock extends SockCommon {
     public void tcpUndoCwndReduction(boolean unmarkLoss) {
         int pc = sender.priorCwnd();
         if (pc > 0) {
-            cwnd = Math.max(cwnd, pc);
+            sender.cwnd(Math.max(sender.cwnd(), pc));
         }
         int ps = sender.priorSsthresh();
         if (ps > 0) {
-            ssthresh = Math.max(ssthresh, ps);
+            sender.ssthresh(Math.max(sender.ssthresh(), ps));
         }
         undoMarker = 0;
         sender.retransStamp(0L);
@@ -1742,8 +1741,9 @@ public class TcpSock extends SockCommon {
                 // 对齐 Linux tcp_init_undo:进 Recovery 前快照 cwnd/ssthresh/snd_una,
                 // 为后续 tcp_try_undo_recovery 提供回滚基线。
                 tcpInitUndo();
-                ssthresh = Math.max(cwnd / 2, 2);
-                cwnd = ssthresh + 3;
+                int newSs = Math.max(sender.cwnd() / 2, 2);
+                sender.ssthresh(newSs);
+                sender.cwnd(newSs + 3);
                 highSeq = sender.sndNxt();
                 sender.tlpHighSeq(0);
                 congestionState = CongestionState.RECOVERY;
@@ -1754,13 +1754,13 @@ public class TcpSock extends SockCommon {
                 TcpAck.markHeadLost(this, 1);
                 this.multiplexer.retransmitter().retransmit(this);
             } else if (congestionState == CongestionState.RECOVERY) {
-                cwnd++;
+                sender.incrementCwnd();
             }
             return;
         }
 
         if (congestionState == CongestionState.RECOVERY && after(sender.sndUna(), highSeq)) {
-            cwnd = ssthresh;
+            sender.cwnd(sender.ssthresh());
             congestionState = CongestionState.OPEN;
             caIncrCounter = 0;
         } else if (congestionState == CongestionState.LOSS) {
@@ -1772,12 +1772,14 @@ public class TcpSock extends SockCommon {
         }
 
         dupacks = 0;
-        if (cwnd < ssthresh) {
-            cwnd += newlyAcked;
+        int c = sender.cwnd();
+        int s = sender.ssthresh();
+        if (c < s) {
+            sender.cwnd(c + newlyAcked);
         } else {
             caIncrCounter += newlyAcked;
-            if (caIncrCounter >= cwnd) {
-                cwnd++;
+            if (caIncrCounter >= c) {
+                sender.incrementCwnd();
                 caIncrCounter = 0;
             }
         }
@@ -1797,8 +1799,8 @@ public class TcpSock extends SockCommon {
         } else {
             clearFrto();
         }
-        ssthresh = Math.max(cwnd / 2, 2);
-        cwnd = 1;
+        sender.ssthresh(Math.max(sender.cwnd() / 2, 2));
+        sender.cwnd(1);
         dupacks = 0;
         caIncrCounter = 0;
         sender.tlpHighSeq(0);
@@ -1814,19 +1816,19 @@ public class TcpSock extends SockCommon {
     }
 
     public int cwnd() {
-        return cwnd;
+        return sender.cwnd();
     }
 
     public void cwnd(int cwnd) {
-        this.cwnd = Math.max(cwnd, 1);
+        sender.cwnd(cwnd);
     }
 
     public int ssthresh() {
-        return ssthresh;
+        return sender.ssthresh();
     }
 
     public void ssthresh(int ssthresh) {
-        this.ssthresh = Math.max(ssthresh, 2);
+        sender.ssthresh(ssthresh);
     }
 
     public CongestionState congestionState() {
@@ -1902,12 +1904,12 @@ public class TcpSock extends SockCommon {
      */
     private void tcpCwndRestart(long delta, long rtoMs) {
         int restartCwnd = TcpConstants.TCP_INIT_CWND;
-        int curCwnd = cwnd;
+        int curCwnd = sender.cwnd();
         // 近似 Linux tcp_current_ssthresh():CA_Open 下 max(ssthresh, 3*cwnd/4 + 1)
         if (congestionState == CongestionState.OPEN) {
             int conservative = (curCwnd * 3 / 4) + 1;
-            if (ssthresh < conservative) {
-                ssthresh = conservative;
+            if (sender.ssthresh() < conservative) {
+                sender.ssthresh(conservative);
             }
         }
         restartCwnd = Math.min(restartCwnd, curCwnd);
@@ -1915,7 +1917,7 @@ public class TcpSock extends SockCommon {
         while ((remain -= rtoMs) > 0 && curCwnd > restartCwnd) {
             curCwnd >>= 1;
         }
-        cwnd = Math.max(curCwnd, restartCwnd);
+        sender.cwnd(Math.max(curCwnd, restartCwnd));
         sender.sndCwndStampMs(com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32());
         sender.sndCwndUsed(0);
     }
@@ -1961,13 +1963,14 @@ public class TcpSock extends SockCommon {
         if (congestionState == CongestionState.OPEN) {
             int initWin = TcpConstants.TCP_INIT_CWND;
             int winUsed = Math.max(sender.sndCwndUsed(), initWin);
-            if (winUsed < cwnd) {
+            int c = sender.cwnd();
+            if (winUsed < c) {
                 // ssthresh = tcp_current_ssthresh() — CA_Open 时为 max(ssthresh, 3*cwnd/4+1)
-                int conservative = (cwnd * 3 / 4) + 1;
-                if (ssthresh < conservative) {
-                    ssthresh = conservative;
+                int conservative = (c * 3 / 4) + 1;
+                if (sender.ssthresh() < conservative) {
+                    sender.ssthresh(conservative);
                 }
-                cwnd = (cwnd + winUsed) >> 1;
+                sender.cwnd((c + winUsed) >> 1);
             }
             sender.sndCwndUsed(0);
         }
