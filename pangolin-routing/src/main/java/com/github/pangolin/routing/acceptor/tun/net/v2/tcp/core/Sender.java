@@ -102,6 +102,8 @@ public final class Sender {
     private int rackLastDelivered;
     /** 每 ACK scratchpad:本 ACK 内已投递段 tx.delivered 最大值。Mirrors Linux {@code rs->prior_delivered}。 */
     private int rackAckPriorDelivered;
+    /** 上次发送时戳(毫秒 jiffies)。 */
+    private long lastSendTimeMs;
 
     /**
      * RTO 指数退避 shift(R2.3 物理迁移到 Sender)。Mirrors Linux
@@ -592,4 +594,8 @@ public final class Sender {
     /** 每 ACK scratchpad:本 ACK 内已投递段 tx.delivered 最大值。 */
     public int rackAckPriorDelivered() { return rackAckPriorDelivered; }
     public void rackAckPriorDelivered(int v) { this.rackAckPriorDelivered = v; }
+
+    /** 上次发送时戳(毫秒 jiffies)。 */
+    public long lastSendTimeMs() { return lastSendTimeMs; }
+    public void lastSendTimeMs(long v) { this.lastSendTimeMs = v; }
 }

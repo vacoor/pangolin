@@ -99,8 +99,8 @@ public class TcpSock extends SockCommon {
     // R3.2: quickAckCount 已物理迁到 Receiver
     // R3.2: ackTimeoutMs 已物理迁到 Receiver
     // R3.2: pingpongCount 已物理迁到 Receiver
-    private long lastRecvTimeMs;
-    private long lastSendTimeMs;
+    // R3.2: lastRecvTimeMs 已物理迁到 Receiver
+    // R2.3: lastSendTimeMs 已物理迁到 Sender
     // R2.3: srttUs / rttvarUs 已物理迁到 Sender
     // R2.3: rtoBackoffShift 已物理迁到 Sender
     // R2.3: retransStamp 已物理迁到 Sender(对应 Linux tp->retrans_stamp)
@@ -402,8 +402,7 @@ public class TcpSock extends SockCommon {
         recentTimestamp = 0;
         tsRecentStamp = 0;
         // R3.2: quickAckCount / ackTimeoutMs / pingpongCount 默认值由 Receiver 字段声明初始化
-        lastRecvTimeMs = 0L;
-        lastSendTimeMs = 0L;
+        // R2.3/R3.2: lastRecvTimeMs / lastSendTimeMs 默认 0L 由 Receiver/Sender 字段初始化
         // R2.3: srttUs / rttvarUs 默认 0L 由 Sender 字段声明初始化
         // R2.3: rtoBackoffShift / retransStamp / undoRetrans 默认值 0/0L 由 Sender 字段声明初始化
         // R3.2: rcvBuf / windowClamp / rcvSsthresh 默认值由 Receiver 字段声明初始化
@@ -475,8 +474,7 @@ public class TcpSock extends SockCommon {
         this.recentTimestamp = conn.recentTimestamp();
         this.tsRecentStamp = conn.tsRecentStamp();
         // R3.2: quickAckCount / ackTimeoutMs / pingpongCount 已在 Receiver(dead code path)
-        this.lastRecvTimeMs = conn.lastRecvTimeMs();
-        this.lastSendTimeMs = conn.lastSendTimeMs();
+        // R2.3/R3.2: lastRecvTimeMs / lastSendTimeMs 已在 Receiver/Sender(dead code path)
         // R2.3: srttUs / rttvarUs 已在 Sender(dead code path)
         // R2.3: rtoBackoffShift / retransStamp 已在 Sender,此路径为 dead code 保留
         //       (from(conn)/view(conn) 无外部调用者);configure 后由外部重置
@@ -1048,11 +1046,11 @@ public class TcpSock extends SockCommon {
             rcvMss = Math.min(len, mss);
         }
         long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
-        if (lastRecvTimeMs == 0L) {
+        if (receiver.lastRecvTimeMs() == 0L) {
             incrQuickAckCount(TcpConstants.TCP_MAX_QUICKACKS);
             receiver.ackTimeoutMs(TcpConstants.TCP_ATO_MIN_MS);
         } else {
-            long m = now - lastRecvTimeMs;
+            long m = now - receiver.lastRecvTimeMs();
             long ato = receiver.ackTimeoutMs();
             if (m <= TcpConstants.TCP_ATO_MIN_MS / 2) {
                 receiver.ackTimeoutMs((ato >> 1) + TcpConstants.TCP_ATO_MIN_MS / 2);
@@ -1062,17 +1060,17 @@ public class TcpSock extends SockCommon {
                 incrQuickAckCount(TcpConstants.TCP_MAX_QUICKACKS);
             }
         }
-        lastRecvTimeMs = now;
+        receiver.lastRecvTimeMs(now);
     }
 
     public void onSegmentReceived() {
-        lastRecvTimeMs = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+        receiver.lastRecvTimeMs(com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32());
     }
 
     public void onDataSent() {
         long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
-        lastSendTimeMs = now;
-        if (lastRecvTimeMs != 0 && now - lastRecvTimeMs < receiver.ackTimeoutMs()) {
+        sender.lastSendTimeMs(now);
+        if (receiver.lastRecvTimeMs() != 0 && now - receiver.lastRecvTimeMs() < receiver.ackTimeoutMs()) {
             incPingpongCount();
         }
     }
@@ -1648,7 +1646,7 @@ public class TcpSock extends SockCommon {
 
     public long keepaliveElapsedMs() {
         long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
-        long lastActivity = lastRecvTimeMs != 0L ? lastRecvTimeMs : lastSendTimeMs;
+        long lastActivity = receiver.lastRecvTimeMs() != 0L ? receiver.lastRecvTimeMs() : sender.lastSendTimeMs();
         if (lastActivity == 0L) {
             return 0L;
         }
@@ -1846,11 +1844,11 @@ public class TcpSock extends SockCommon {
             return;
         }
         // lsndtime 尚未建立(从未发送过)— Linux 同样跳过。
-        if (lastSendTimeMs == 0L) {
+        if (sender.lastSendTimeMs() == 0L) {
             return;
         }
         long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
-        long delta = now - lastSendTimeMs;
+        long delta = now - sender.lastSendTimeMs();
         long rtoMs = rtoMs();
         if (delta > rtoMs) {
             tcpCwndRestart(delta, rtoMs);

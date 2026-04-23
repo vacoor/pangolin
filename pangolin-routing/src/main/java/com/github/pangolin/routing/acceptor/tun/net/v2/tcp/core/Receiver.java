@@ -54,6 +54,8 @@ public final class Receiver {
     /** 下一次 ACK 要通告的 DSACK 块 [start,end)。Mirrors Linux {@code tp->duplicate_sack[0]}。 */
     private int dsackStart;
     private int dsackEnd;
+    /** 上次收到对端包的时戳(毫秒 jiffies)。Mirrors Linux {@code tp->lrcv_time}。 */
+    private long lastRecvTimeMs;
 
     Receiver(TcpSock sock) {
         this.sock = sock;
@@ -197,5 +199,14 @@ public final class Receiver {
     public void setDsackRange(int start, int end) {
         this.dsackStart = start;
         this.dsackEnd = end;
+    }
+
+    /** 上次收到对端包的时戳。 */
+    public long lastRecvTimeMs() {
+        return lastRecvTimeMs;
+    }
+
+    public void lastRecvTimeMs(long v) {
+        this.lastRecvTimeMs = v;
     }
 }
