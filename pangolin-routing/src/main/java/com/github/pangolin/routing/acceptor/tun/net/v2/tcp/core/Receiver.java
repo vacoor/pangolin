@@ -37,6 +37,14 @@ public final class Receiver {
     private int rcvWup;
     /** 背压标志(R3.2);true 时栈暂停向 handler 交付数据。 */
     private boolean rcvPaused;
+    /** ACK 调度位图(R3.2 续)。ACK_SCHED / ACK_TIMER / ACK_NOW 的位或集合。 */
+    private int ackPending;
+    /** quickack 模式剩余配额。Mirrors Linux {@code icsk->icsk_ack.quick}。 */
+    private int quickAckCount;
+    /** 延迟 ACK 超时。Mirrors Linux {@code icsk->icsk_ack.ato}。 */
+    private long ackTimeoutMs = TcpConstants.DELAYED_ACK_MS;
+    /** Pingpong 检测计数器。Mirrors Linux {@code icsk->icsk_ack.pingpong}。 */
+    private int pingpongCount;
 
     Receiver(TcpSock sock) {
         this.sock = sock;
@@ -109,5 +117,54 @@ public final class Receiver {
     /** 清除 ACK pending 位。 */
     public void clearAckPending(int flags) {
         sock.clearAckPending(flags);
+    }
+
+    /** ACK 调度位图。 */
+    public int ackPending() {
+        return ackPending;
+    }
+
+    public void addAckPendingBits(int bits) {
+        this.ackPending |= bits;
+    }
+
+    public void clearAckPendingBits(int bits) {
+        this.ackPending &= ~bits;
+    }
+
+    public boolean isAckPending(int bits) {
+        return (this.ackPending & bits) != 0;
+    }
+
+    /** quickack 配额。 */
+    public int quickAckCount() {
+        return quickAckCount;
+    }
+
+    public void quickAckCount(int v) {
+        quickAckCount = Math.max(v, 0);
+    }
+
+    public int decrementQuickAckCount() {
+        if (quickAckCount > 0) quickAckCount--;
+        return quickAckCount;
+    }
+
+    /** 延迟 ACK 超时。 */
+    public long ackTimeoutMs() {
+        return ackTimeoutMs;
+    }
+
+    public void ackTimeoutMs(long v) {
+        ackTimeoutMs = Math.max(v, 1L);
+    }
+
+    /** Pingpong 计数器。 */
+    public int pingpongCount() {
+        return pingpongCount;
+    }
+
+    public void pingpongCount(int v) {
+        pingpongCount = Math.max(v, 0);
     }
 }

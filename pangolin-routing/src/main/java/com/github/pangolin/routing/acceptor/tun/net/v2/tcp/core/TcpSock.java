@@ -69,7 +69,7 @@ public class TcpSock extends SockCommon {
     // R2.3: bytesAcked 已物理迁到 Sender
     // R2.3: packetsOut 已物理迁到 Sender
     private int skShutdown;
-    private int ackPending;
+    // R3.2: ackPending 已物理迁到 Receiver
     private int skErr;
     private long lastOowAckTimeMs;
     /** Mirrors {@code inet_sock.tos}. */
@@ -96,9 +96,9 @@ public class TcpSock extends SockCommon {
      * 用于 PAWS 24 天陈旧分支 ({@code tcp_paws_check})。{@code 0} 表示尚未建立基线。
      */
     private int tsRecentStamp;
-    private int quickAckCount;
-    private long ackTimeoutMs;
-    private int pingpongCount;
+    // R3.2: quickAckCount 已物理迁到 Receiver
+    // R3.2: ackTimeoutMs 已物理迁到 Receiver
+    // R3.2: pingpongCount 已物理迁到 Receiver
     private long lastRecvTimeMs;
     private long lastSendTimeMs;
     // R2.3: srttUs / rttvarUs 已物理迁到 Sender
@@ -401,9 +401,7 @@ public class TcpSock extends SockCommon {
         timestampEnabled = false;
         recentTimestamp = 0;
         tsRecentStamp = 0;
-        quickAckCount = 0;
-        ackTimeoutMs = TcpConstants.DELAYED_ACK_MS;
-        pingpongCount = 0;
+        // R3.2: quickAckCount / ackTimeoutMs / pingpongCount 默认值由 Receiver 字段声明初始化
         lastRecvTimeMs = 0L;
         lastSendTimeMs = 0L;
         // R2.3: srttUs / rttvarUs 默认 0L 由 Sender 字段声明初始化
@@ -467,7 +465,7 @@ public class TcpSock extends SockCommon {
         // R2.3: bytesAcked 已在 Sender(dead code path)
         // R2.3: packetsOut 已在 Sender(dead code path)
         this.skShutdown = conn.skShutdown();
-        this.ackPending = conn.ackPending();
+        // R3.2: ackPending 已在 Receiver(dead code path)
         this.skErr = conn.skErr();
         this.lastOowAckTimeMs = conn.lastOowAckTimeMs();
         this.tos = conn.tos();
@@ -479,9 +477,7 @@ public class TcpSock extends SockCommon {
         this.timestampEnabled = conn.timestampEnabled();
         this.recentTimestamp = conn.recentTimestamp();
         this.tsRecentStamp = conn.tsRecentStamp();
-        this.quickAckCount = conn.quickAckCount();
-        this.ackTimeoutMs = conn.ackTimeoutMs();
-        this.pingpongCount = conn.pingpongCount();
+        // R3.2: quickAckCount / ackTimeoutMs / pingpongCount 已在 Receiver(dead code path)
         this.lastRecvTimeMs = conn.lastRecvTimeMs();
         this.lastSendTimeMs = conn.lastSendTimeMs();
         // R2.3: srttUs / rttvarUs 已在 Sender(dead code path)
@@ -744,19 +740,19 @@ public class TcpSock extends SockCommon {
     }
 
     public int ackPending() {
-        return ackPending;
+        return receiver.ackPending();
     }
 
     public void addAckPending(int bits) {
-        this.ackPending |= bits;
+        receiver.addAckPendingBits(bits);
     }
 
     public void clearAckPending(int bits) {
-        this.ackPending &= ~bits;
+        receiver.clearAckPendingBits(bits);
     }
 
     public boolean hasAckPending(int bits) {
-        return (this.ackPending & bits) != 0;
+        return receiver.isAckPending(bits);
     }
 
     public int skErr() {
@@ -996,55 +992,53 @@ public class TcpSock extends SockCommon {
     }
 
     public int quickAckCount() {
-        return quickAckCount;
+        return receiver.quickAckCount();
     }
 
     public void quickAckCount(int v) {
-        quickAckCount = Math.max(v, 0);
+        receiver.quickAckCount(v);
     }
 
     public long ackTimeoutMs() {
-        return ackTimeoutMs;
+        return receiver.ackTimeoutMs();
     }
 
     public void ackTimeoutMs(long v) {
-        ackTimeoutMs = Math.max(v, 1L);
+        receiver.ackTimeoutMs(v);
     }
 
     public boolean inQuickAckMode() {
-        return quickAckCount > 0 && !inPingpongMode();
+        return receiver.quickAckCount() > 0 && !inPingpongMode();
     }
 
     public void enterQuickAckMode(int maxQuickAcks) {
         incrQuickAckCount(maxQuickAcks);
         exitPingpongMode();
-        ackTimeoutMs = TcpConstants.TCP_ATO_MIN_MS;
+        receiver.ackTimeoutMs(TcpConstants.TCP_ATO_MIN_MS);
     }
 
     public void decQuickAckMode() {
-        if (quickAckCount > 0) {
-            quickAckCount--;
-            if (quickAckCount == 0) {
-                ackTimeoutMs = TcpConstants.DELAYED_ACK_MS;
-            }
+        if (receiver.decrementQuickAckCount() == 0) {
+            receiver.ackTimeoutMs(TcpConstants.DELAYED_ACK_MS);
         }
     }
 
     public void enterPingpongMode() {
-        pingpongCount = 1;
+        receiver.pingpongCount(1);
     }
 
     public void exitPingpongMode() {
-        pingpongCount = 0;
+        receiver.pingpongCount(0);
     }
 
     public boolean inPingpongMode() {
-        return pingpongCount >= TcpConstants.TCP_PINGPONG_THRESH;
+        return receiver.pingpongCount() >= TcpConstants.TCP_PINGPONG_THRESH;
     }
 
     public void incPingpongCount() {
-        if (pingpongCount < 0xFF) {
-            pingpongCount++;
+        int p = receiver.pingpongCount();
+        if (p < 0xFF) {
+            receiver.pingpongCount(p + 1);
         }
     }
 
@@ -1059,14 +1053,15 @@ public class TcpSock extends SockCommon {
         long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
         if (lastRecvTimeMs == 0L) {
             incrQuickAckCount(TcpConstants.TCP_MAX_QUICKACKS);
-            ackTimeoutMs = TcpConstants.TCP_ATO_MIN_MS;
+            receiver.ackTimeoutMs(TcpConstants.TCP_ATO_MIN_MS);
         } else {
             long m = now - lastRecvTimeMs;
+            long ato = receiver.ackTimeoutMs();
             if (m <= TcpConstants.TCP_ATO_MIN_MS / 2) {
-                ackTimeoutMs = (ackTimeoutMs >> 1) + TcpConstants.TCP_ATO_MIN_MS / 2;
-            } else if (m < ackTimeoutMs) {
-                ackTimeoutMs = Math.min((ackTimeoutMs >> 1) + m, rtoMs());
-            } else if (m > ackTimeoutMs) {
+                receiver.ackTimeoutMs((ato >> 1) + TcpConstants.TCP_ATO_MIN_MS / 2);
+            } else if (m < ato) {
+                receiver.ackTimeoutMs(Math.min((ato >> 1) + m, rtoMs()));
+            } else if (m > ato) {
                 incrQuickAckCount(TcpConstants.TCP_MAX_QUICKACKS);
             }
         }
@@ -1080,7 +1075,7 @@ public class TcpSock extends SockCommon {
     public void onDataSent() {
         long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
         lastSendTimeMs = now;
-        if (lastRecvTimeMs != 0 && now - lastRecvTimeMs < ackTimeoutMs) {
+        if (lastRecvTimeMs != 0 && now - lastRecvTimeMs < receiver.ackTimeoutMs()) {
             incPingpongCount();
         }
     }
@@ -1583,7 +1578,7 @@ public class TcpSock extends SockCommon {
         if (quickacks == 0) {
             quickacks = 2;
         }
-        quickAckCount = Math.max(quickAckCount, Math.min(quickacks, maxQuickAcks));
+        receiver.quickAckCount(Math.max(receiver.quickAckCount(), Math.min(quickacks, maxQuickAcks)));
     }
 
     public int tcpFinTimeMs() {
