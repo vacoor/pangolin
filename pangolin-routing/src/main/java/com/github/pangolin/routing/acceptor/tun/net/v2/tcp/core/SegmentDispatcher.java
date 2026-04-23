@@ -249,16 +249,10 @@ public abstract class SegmentDispatcher extends TcpStack {
         return child;
     }
 
+    /** @deprecated R4.2b-4e 下沉到 {@link Sender#shutdown}。 */
+    @Deprecated
     protected void shutdownStack(TcpSock sk, int how) {
-        if (!sk.hasConnection() || (how & TcpConstants.SEND_SHUTDOWN) == 0) {
-            return;
-        }
-        if (sk.state() == TcpConnectionState.TCP_ESTABLISHED
-                || sk.state() == TcpConnectionState.CLOSE_WAIT) {
-            if (closeState(sk)) {
-                output.sendFin(sk);
-            }
-        }
+        sk.sender().shutdown(how);
     }
 
     public void consume(final ChannelHandlerContext ctx, final TcpPacketBuf pkt) {
@@ -536,17 +530,16 @@ public abstract class SegmentDispatcher extends TcpStack {
         sk.addAckPending(TcpConstants.ACK_NOW);
     }
 
+    /** @deprecated R4.2b-4e 下沉到 {@link Sender#pushPending}。 */
+    @Deprecated
     protected void dataSndCheck(TcpSock sk) {
-        pushPendingFrames(sk);
+        sk.sender().pushPending();
     }
 
+    /** @deprecated R4.2b-4e 下沉到 {@link Sender#pushPending}。 */
+    @Deprecated
     protected void pushPendingFrames(TcpSock sk) {
-        if (sk.hasConnection() && sk.tcpSendHead() != null) {
-            boolean needProbe = output.writeXmit(sk, sk.mss(), TCP_NAGLE_OFF, 0);
-            if (needProbe) {
-                sk.sender().armProbe0();
-            }
-        }
+        sk.sender().pushPending();
     }
 
     protected static boolean sequenceAcceptable(TcpSock sk, TcpPacketBuf pkt) {
@@ -613,73 +606,11 @@ public abstract class SegmentDispatcher extends TcpStack {
     }
 
     /**
-     * 应用层 payload 入发送队列 — 对齐 Linux {@code sendmsg}(net/ipv4/tcp.c)。
-     *
-     * <p>Linux 用 {@code lock_sock / release_sock} 把对 sk 的操作序列化到单线程上下文,
-     * 再调 {@link #sendmsgLocked}。v2 用 sock 的 {@link EventLoop} 归属达成同样语义 —
-     * 当前线程 == sock.eventLoop() 时直接同步执行,否则 {@code execute} 跳转到该 EL。
-     *
-     * <p>调用方**只需传一个 ByteBuf + flush 标志**,不关心 MSS / 分片 / cwnd / Nagle — 这些
-     * 由 {@link #sendmsgLocked} 内部处理。所有权:传入的 {@code data} 引用计数由本方法
-     * 负责 release(无论成功失败),调用方 **retain 一次后交给本方法即可**,不要再自己 release。
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c">sendmsg</a>
+     * 应用层 payload 入发送队列入口 — delegate 到 {@link Sender#sendmsg}(R4.2b-4e 下沉)。
+     * 保留 Dispatcher 层入口给 user API({@link #write})和测试 harness 用。
      */
     public void sendmsg(TcpSock sk, ByteBuf data, boolean flush) {
-        final EventLoop owner = sk.eventLoop();
-        if (owner != null && !owner.inEventLoop()) {
-            owner.execute(() -> sendmsgLocked(sk, data, flush));
-        } else {
-            sendmsgLocked(sk, data, flush);
-        }
-    }
-
-    /**
-     * 已持锁(== 已在 sock.eventLoop())路径上的 send — 对齐 Linux {@code sendmsgLocked}
-     * (net/ipv4/tcp.c)。
-     *
-     * <p>v2 简化:
-     * <ul>
-     *   <li>入参是一个 ByteBuf(非 msghdr iov),不做 iov 循环;</li>
-     *   <li>入队前按 {@code currentMss(sk)} 切片,每个 skb = 1 个 MSS 段 —
-     *       偏离 Linux 的 "size_goal 大 skb + 出口 fragment 切分" 模型,但对端线上
-     *       字节流一致(详见 tcp.java.md);</li>
-     *   <li>不做 tail skb 合并(Linux {@code skb_add_data_nocache});</li>
-     *   <li>不支持 MSG_MORE / TCP_CORK 持续累积,flush 为二元开关。</li>
-     * </ul>
-     *
-     * <p>对 {@code data} 的引用计数负责 release(无论状态检查失败、total==0、还是成功切片后)。
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c">sendmsgLocked</a>
-     */
-    protected void sendmsgLocked(TcpSock sk, ByteBuf data, boolean flush) {
-        try {
-            if (!sk.hasConnection() || !sk.state().canSend()) {
-                return;
-            }
-            final int total = data.readableBytes();
-            if (total == 0) {
-                return;
-            }
-            final int mss = Math.max(1, output.currentMss(sk));
-            int offset = 0;
-            while (offset < total) {
-                final int len = Math.min(total - offset, mss);
-                final ByteBuf slice = data.retainedSlice(data.readerIndex() + offset, len);
-                sk.queueSkb(new TcpSegment(
-                        slice,
-                        sk.writeSeq(),
-                        len,
-                        (byte) TcpConstants.TCPHDR_ACK,
-                        0L));
-                offset += len;
-            }
-            if (flush) {
-                pushPendingFrames(sk);
-            }
-        } finally {
-            data.release();
-        }
+        sk.sender().sendmsg(data, flush);
     }
 
 }

@@ -140,9 +140,50 @@ public final class Sender {
      *
      * <p>{@code TcpChannel.doWrite} 和 {@code TcpPassthroughInitializer} 反向适配器
      * 都走这里,是发送数据的统一入口。
+     *
+     * <p>R4.2b-4e:实现从 {@code SegmentDispatcher} 物理迁入。
      */
     public void sendmsg(ByteBuf data, boolean flush) {
-        sock.multiplexer().sendmsg(sock, data, flush);
+        final io.netty.channel.EventLoop owner = sock.eventLoop();
+        if (owner != null && !owner.inEventLoop()) {
+            owner.execute(() -> sendmsgLocked(data, flush));
+        } else {
+            sendmsgLocked(data, flush);
+        }
+    }
+
+    /**
+     * 已持锁(== 已在 sock.eventLoop())路径上的 send — 对齐 Linux {@code sendmsgLocked}
+     * (net/ipv4/tcp.c)。对 {@code data} 引用计数负责 release。
+     */
+    private void sendmsgLocked(ByteBuf data, boolean flush) {
+        try {
+            if (!sock.hasConnection() || !sock.state().canSend()) {
+                return;
+            }
+            final int total = data.readableBytes();
+            if (total == 0) {
+                return;
+            }
+            final int mss = Math.max(1, sock.multiplexer().output().currentMss(sock));
+            int offset = 0;
+            while (offset < total) {
+                final int len = Math.min(total - offset, mss);
+                final ByteBuf slice = data.retainedSlice(data.readerIndex() + offset, len);
+                sock.queueSkb(new TcpSegment(
+                        slice,
+                        sock.writeSeq(),
+                        len,
+                        (byte) TcpConstants.TCPHDR_ACK,
+                        0L));
+                offset += len;
+            }
+            if (flush) {
+                pushPending();
+            }
+        } finally {
+            data.release();
+        }
     }
 
     /** Mirrors Linux {@code tcp_current_mss} (tcp_output.c). */
@@ -150,9 +191,33 @@ public final class Sender {
         return sock.multiplexer().output().currentMss(sock);
     }
 
-    /** Mirrors Linux {@code tcp_push_pending_frames} (tcp_output.c) — push 本轮待发段。 */
+    /**
+     * Mirrors Linux {@code tcp_push_pending_frames} (tcp_output.c) — push 本轮待发段。
+     * R4.2b-4e:实现从 {@code SegmentDispatcher} 物理迁入。
+     */
     public void pushPending() {
-        sock.multiplexer().pushPendingFrames(sock);
+        if (sock.hasConnection() && sock.tcpSendHead() != null) {
+            boolean needProbe = sock.multiplexer().output().writeXmit(sock, sock.mss(), TcpConstants.TCP_NAGLE_OFF, 0);
+            if (needProbe) {
+                armProbe0();
+            }
+        }
+    }
+
+    /**
+     * 半关(本端主动发 FIN)状态迁移 — 对齐 Linux {@code tcp_shutdown}。
+     * R4.2b-4e:从 {@code SegmentDispatcher} 物理迁入。
+     */
+    public void shutdown(int how) {
+        if (!sock.hasConnection() || (how & TcpConstants.SEND_SHUTDOWN) == 0) {
+            return;
+        }
+        if (sock.state() == TcpConnectionState.TCP_ESTABLISHED
+                || sock.state() == TcpConnectionState.CLOSE_WAIT) {
+            if (sock.multiplexer().closeState(sock)) {
+                sock.multiplexer().output().sendFin(sock);
+            }
+        }
     }
 
     /** Mirrors Linux {@code tcp_send_fin} — 本端主动发 FIN。 */
