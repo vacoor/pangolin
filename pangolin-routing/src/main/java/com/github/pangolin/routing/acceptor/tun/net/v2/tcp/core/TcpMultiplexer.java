@@ -5,17 +5,10 @@ import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCo
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockHandler;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInitializer;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
 import lombok.extern.slf4j.Slf4j;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.SHUTDOWN_MASK;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCP_INIT_CWND;
@@ -57,109 +50,10 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps
  * 访问,用 HashMap。
  */
 @Slf4j
-public abstract class TcpMultiplexer {
-    public static final int DEFAULT_MAX_SYN_BACKLOG = 1024;
-
-    /**
-     * 返回墙钟秒数(对应 Linux {@code get_seconds()},用于 {@code ts_recent_stamp})。
-     * 溢出语义与 Linux 32 位秒戳一致(2106 年回绕)。
-     */
-    static int nowSeconds() {
-        return (int) (System.currentTimeMillis() / 1000L);
-    }
-
-    public static final int TCP_STATE_MASK = 0xF;
-    public static final int TCP_ACTION_FIN = 1 << TcpConnectionState.TCP_CLOSED.ordinal();
-    public static final int[] NEW_STATE = new int[TcpConnectionState.values().length + 1];
-
-    static {
-        NEW_STATE[TcpConnectionState.TCP_ESTABLISHED.ordinal() + 1] = TcpConnectionState.FIN_WAIT_1.ordinal() | TCP_ACTION_FIN;
-        NEW_STATE[TcpConnectionState.TCP_SYN_SENT.ordinal() + 1] = TcpConnectionState.TCP_CLOSED.ordinal();
-        NEW_STATE[TcpConnectionState.TCP_SYN_RECV.ordinal() + 1] = TcpConnectionState.FIN_WAIT_1.ordinal() | TCP_ACTION_FIN;
-        NEW_STATE[TcpConnectionState.FIN_WAIT_1.ordinal() + 1] = TcpConnectionState.FIN_WAIT_1.ordinal();
-        NEW_STATE[TcpConnectionState.FIN_WAIT_2.ordinal() + 1] = TcpConnectionState.FIN_WAIT_2.ordinal();
-        NEW_STATE[TcpConnectionState.TIME_WAIT.ordinal() + 1] = TcpConnectionState.TCP_CLOSED.ordinal();
-        NEW_STATE[TcpConnectionState.TCP_CLOSED.ordinal() + 1] = TcpConnectionState.TCP_CLOSED.ordinal();
-        NEW_STATE[TcpConnectionState.CLOSE_WAIT.ordinal() + 1] = TcpConnectionState.LAST_ACK.ordinal() | TCP_ACTION_FIN;
-        NEW_STATE[TcpConnectionState.LAST_ACK.ordinal() + 1] = TcpConnectionState.LAST_ACK.ordinal();
-        NEW_STATE[TcpConnectionState.TCP_LISTEN.ordinal() + 1] = TcpConnectionState.TCP_CLOSED.ordinal();
-        NEW_STATE[TcpConnectionState.CLOSING.ordinal() + 1] = TcpConnectionState.CLOSING.ordinal();
-    }
-
-    protected final TcpConfig config;
-    protected final TcpHandshakerFactory handshakerFactory;
-    /**
-     * Per-stack 重传调度器。R1.1(2026-04-23):从 {@code TcpRetransmitter.INSTANCE}
-     * 单例降为实例字段,由 {@link TcpSock#multiplexer()} 路径访问,让同一 JVM 可以并存
-     * 多个独立 TCP 栈(每个栈有自己的 timer 调度根)。
-     */
-    protected final TcpRetransmitter retransmitter = new TcpRetransmitter();
-    /**
-     * Per-stack MIB 计数器。R1.2(2026-04-23):从 {@code TcpMibStats.INSTANCE} 降为
-     * per-stack 字段。核心主干路径(TcpMultiplexer / TcpAck / TcpOutput /
-     * TcpIncomingPreValidator)通过 {@link TcpSock#multiplexer()} 访问本字段;
-     * TcpReceiveBuffer 的 OFO / prune 相关计数仍走 INSTANCE 全局 fallback(R3 收尾)。
-     */
-    protected final TcpMibStats mib = new TcpMibStats();
-    /**
-     * Per-stack 出包器。R1.4(2026-04-23):从 {@code TcpOutput.INSTANCE} 降为
-     * per-stack 实例字段,隔离 RFC 5961 host-wide Challenge ACK 桶等 mutable 状态。
-     * 通过 {@link TcpSock#multiplexer()} 访问。
-     */
-    protected final TcpOutput output = new TcpOutput();
-    /**
-     * 每连接专属 EL 池 — 对齐 v1 里 backend {@code childGroup} 的角色。新建立的 child sock
-     * 在 {@code tcp_v4_syn_recv_sock} 中从 {@code tcpGroup.next()} 取一条 EL 绑定,整个
-     * 连接生命周期(状态机 / timer / user channel / backend channel)都跑在该 EL 上。
-     * 为 {@code null} 时所有 sock 回退到 TUN channel 的 EL(退化为单线程)。
-     */
-    protected final EventLoopGroup tcpGroup;
-    /**
-     * sock 装配钩子 — 必传,构造期 requireNonNull 。{@link #initTransfer} 调
-     * {@link TcpSockInitializer#onEstablished} 让上层(如 netty 子包的 {@code TcpChannelInitializer}、
-     * ext.backend 子包的 {@code TcpPassthroughInitializer})创建并挂 {@link TcpSockHandler}。
-     * 显式关闭端口传 {@link TcpSockInitializer#DENY}。
-     */
-    protected final TcpSockInitializer initializer;
-    /**
-     * ESTABLISHED 槽位 — 跨 EL 并发:
-     * <ul>
-     *   <li>{@code moveToEstablished} 在 TUN EL 上 put(握手完成)</li>
-     *   <li>{@code __inet_lookup_skb} 在 TUN EL 上 get(每入站包查表)</li>
-     *   <li>{@code inet_csk_destroy_sock} 在 <b>sock EL</b> 上 remove(tcp_v4_do_rcv 路径
-     *       在 sock 专属 EL 上执行)</li>
-     * </ul>
-     * 因此必须使用 {@link ConcurrentHashMap}。对齐 v1 {@code Maps.newConcurrentMap()}。
-     */
-    protected final Map<FourTuple, TcpSock> establishedRegistry;
-    /**
-     * TIME_WAIT 迷你 bucket 注册表 — 对齐 Linux {@code inet_timewait_sock} 加入的
-     * {@code ehash} TW 槽位。键为进入 TIME_WAIT 时的四元组,值为快照后的
-     * {@link TcpTimewaitSock};2MSL 到期或收到有效 RST 时由 {@link #inet_twsk_kill} 移除。
-     *
-     * <p>跨 EL 并发:{@code timeWait} 在 sock EL 上 put,{@code inet_twsk_kill} 也在
-     * sock EL 上 remove,但 {@code __inet_lookup_skb} 在 TUN EL 上 get,需 ConcurrentHashMap。
-     */
-    protected final Map<FourTuple, TcpTimewaitSock> timewaitRegistry;
-    /**
-     * LISTEN 端聚合(R4.1):holds listener.listenSock + listener.synRegistry + maxSynBacklog。
-     * 创建在 {@link #init()} 里(listener.listenSock 先创建并 configure),非 final。
-     */
-    protected Listener listener;
-
-    /**
-     * 入站段四元组 → sock 的纯查表组件(R4.2b-1)。在 {@link #init()} 中 listener
-     * 创建完之后实例化。{@link #__inet_lookup_skb} 全部 delegate 到本对象。
-     */
-    protected SockLookup lookup;
+public abstract class TcpMultiplexer extends TcpStack {
 
     protected TcpMultiplexer(TcpConfig config, EventLoopGroup tcpGroup, TcpSockInitializer initializer) {
-        this.config = config;
-        this.handshakerFactory = new TcpHandshakerFactory(config, output);
-        this.tcpGroup = tcpGroup;
-        this.initializer = Objects.requireNonNull(initializer, "initializer");
-        this.establishedRegistry = new ConcurrentHashMap<>();
-        this.timewaitRegistry = new ConcurrentHashMap<>();
+        super(config, tcpGroup, initializer);
         init();
     }
 
@@ -168,10 +62,6 @@ public abstract class TcpMultiplexer {
         listenSk.state(TcpConnectionState.TCP_LISTEN);
         this.listener = new Listener(listenSk, DEFAULT_MAX_SYN_BACKLOG);
         this.lookup = new SockLookup(establishedRegistry, timewaitRegistry, listener);
-    }
-
-    public Listener listener() {
-        return listener;
     }
 
     /**
@@ -189,6 +79,10 @@ public abstract class TcpMultiplexer {
      * 创建 {@link Sender} / {@link Receiver} 并挂入 sock。本方法由 {@link #init(TcpSock)}
      * 调用,外部代码通常不需要直接调。幂等 — 多次调用会覆盖 sender/receiver,但实际
      * 调用路径(listen sock / tcp_v4_syn_recv_sock)保证只经过一次。
+     *
+     * <p>R4.2b-2:configure 留在 TcpMultiplexer 而非 TcpStack,因为依赖
+     * {@code sk.multiplexer(this)} 的 'this' 是 TcpMultiplexer 类型。R4.2b-3 重命名
+     * {@code sk.multiplexer} → {@code sk.stack} 后可上移。
      */
     public TcpSock configure(TcpSock sk) {
         if (sk != null) {
@@ -199,18 +93,6 @@ public abstract class TcpMultiplexer {
             if (sk.receiver() == null) sk.receiver(new Receiver(sk));
         }
         return sk;
-    }
-
-    public TcpRetransmitter retransmitter() {
-        return retransmitter;
-    }
-
-    public TcpMibStats mib() {
-        return mib;
-    }
-
-    public TcpOutput output() {
-        return output;
     }
 
     public abstract void rcv(ChannelHandlerContext net, TcpPacketBuf pkt);
@@ -410,153 +292,6 @@ public abstract class TcpMultiplexer {
         // sender/receiver/multiplexer 已经在 tcp_v4_syn_recv_sock 的 init(newsk) 里 configure
         listener.removeRequest(req);
         establishedRegistry.put(sock.fourTuple(), sock);
-    }
-
-    public void tcpDone(TcpSock tp) {
-        if (!tp.hasConnection()) {
-            return;
-        }
-        tp.state(TcpConnectionState.TCP_CLOSED);
-        tp.skShutdown(SHUTDOWN_MASK);
-        inet_csk_destroy_sock(tp);
-    }
-
-    public void inet_csk_destroy_sock(TcpSock sk) {
-        if (!sk.hasConnection()) {
-            return;
-        }
-        sk.close();
-        establishedRegistry.remove(sk.fourTuple(), sk);
-    }
-
-    public void inet_csk_destroy_sock(TcpRequestSock req) {
-        // P2.1:销毁前让 initializer 释放 attachment 资源(如 backend state)
-        try {
-            initializer.onRequestDestroyed(req);
-        } catch (Throwable ignore) {
-            // 保护:用户 initializer 异常不阻塞 req 销毁
-        }
-        req.request().cancelRetransmitTimer();
-        if (req.connectFuture() != null && req.connectFuture().channel() != null) {
-            if (req.handshakeCloseListener() != null) {
-                req.connectFuture().channel().closeFuture().removeListener(req.handshakeCloseListener());
-            }
-            req.connectFuture().channel().close();
-        }
-        if (req.childChannel() != null && req.childChannel().isOpen()) {
-            if (req.handshakeCloseListener() != null) {
-                req.childChannel().closeFuture().removeListener(req.handshakeCloseListener());
-            }
-            req.childChannel().close();
-        }
-        if (req.synPacket() != null) {
-            req.synPacket().release();
-            req.synPacket(null);
-        }
-        listener.removeRequest(req);
-    }
-
-    public boolean closeState(TcpSock sk) {
-        if (!sk.hasConnection()) {
-            return false;
-        }
-        int next = NEW_STATE[sk.state().ordinal() + 1];
-        int ns = next & TCP_STATE_MASK;
-        sk.state(TcpConnectionState.values()[ns]);
-        return 0 != (next & TCP_ACTION_FIN);
-    }
-
-    public void timeWait(ChannelHandlerContext ctx, TcpSock tp, TcpConnectionState state) {
-        timeWait(tp, state, config.timeWaitMs());
-    }
-
-    /**
-     * 对齐 Linux {@code timeWait}(net/ipv4/tcp_minisocks.c):
-     * 从重量级 {@link TcpSock} 中摘出 TIME_WAIT 阶段所需的最小快照构建 {@link TcpTimewaitSock},
-     * 注册到 {@link #timewaitRegistry} 并安排 2MSL 定时器;原 {@link TcpSock} 立即销毁,
-     * 释放发送 / 接收缓冲、取消所有定时器,腾出 {@link #establishedRegistry} 中的槽位。
-     *
-     * <p>{@code state} 参数对齐 Linux {@code timeWait(sk, state, timeo)} 用于
-     * 区分 FIN_WAIT_2 / TIME_WAIT 子状态 — 值会写入
-     * {@link TcpTimewaitSock#tw_substate},由 {@code timewaitStateProcess}
-     * 根据该字段分派(FIN_WAIT_2 等对端 FIN,TIME_WAIT 静默重放 ACK)。二者到期行为
-     * 均为 {@link #inet_twsk_kill}。
-     *
-     * <p>迟到段重放 FIN-ACK 的通路由 {@code timewaitStateProcess} +
-     * {@code TcpOutput.timewaitSendAck} 承担,共享 TUN 侧 channel,无需 {@link TcpSock}。
-     */
-    public void timeWait(TcpSock tp, TcpConnectionState state, long timeoutMs) {
-        if (!tp.hasConnection()) {
-            return;
-        }
-        final FourTuple ft = tp.fourTuple();
-        final TcpTimewaitSock tw = new TcpTimewaitSock(
-                ft,
-                tp.channel(),
-                tp.rcvNxt(),
-                tp.sndNxt(),
-                tp.rcvWnd(),
-                tp.rcvWscale(),
-                tp.timestampEnabled(),
-                tp.recentTimestamp() & 0xFFFFFFFFL,
-                tp.tsRecentStamp());
-        // 对齐 Linux timeWait(sk, state, timeo):state ∈ {FIN_WAIT_2, TIME_WAIT}
-        tw.tw_substate = (state == TcpConnectionState.FIN_WAIT_2)
-                ? TcpConnectionState.FIN_WAIT_2
-                : TcpConnectionState.TIME_WAIT;
-
-        final long delay = Math.max(timeoutMs, 1L);
-        tw.tw_timeout = System.currentTimeMillis() + delay;
-        timewaitRegistry.put(ft, tw);
-        mib.inc(
-                com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMib.TCPTIMEWAITCREATED);
-
-        final EventLoop el = tp.eventLoop();
-        if (el != null) {
-            tw.tw_timer = el.schedule(() -> inet_twsk_kill(tw), delay, TimeUnit.MILLISECONDS);
-        }
-
-        // 原 TcpSock 下沉为 twsk 后立即销毁:取消所有定时器、释放缓冲、下架 ESTABLISHED 槽
-        tp.state(TcpConnectionState.TCP_CLOSED);
-        tp.skShutdown(SHUTDOWN_MASK);
-        inet_csk_destroy_sock(tp);
-    }
-
-    /**
-     * 对齐 Linux {@code inet_twsk_kill}(net/ipv4/inet_timewait_sock.c):从 TW bucket 移除,
-     * 取消挂起的 2MSL 定时器。线程归属:必须在 twsk 关联 EventLoop 上调用(v2 当前从
-     * 事件循环派发任务或在 2MSL 到期处自然触发,均满足)。
-     */
-    public void inet_twsk_kill(TcpTimewaitSock tw) {
-        if (tw == null) {
-            return;
-        }
-        timewaitRegistry.remove(tw.fourTuple(), tw);
-        java.util.concurrent.ScheduledFuture<?> f = tw.tw_timer;
-        if (f != null && !f.isDone()) {
-            f.cancel(false);
-        }
-        tw.tw_timer = null;
-    }
-
-    /**
-     * 对齐 Linux {@code inet_twsk_reschedule}(net/ipv4/inet_timewait_sock.c):收到迟到 FIN
-     * 重放 ACK 后刷新 2MSL 定时器。
-     */
-    public void inet_twsk_reschedule(TcpTimewaitSock tw, long timeoutMs) {
-        if (tw == null) {
-            return;
-        }
-        java.util.concurrent.ScheduledFuture<?> prev = tw.tw_timer;
-        if (prev != null && !prev.isDone()) {
-            prev.cancel(false);
-        }
-        final long delay = Math.max(timeoutMs, 1L);
-        tw.tw_timeout = System.currentTimeMillis() + delay;
-        final Channel ch = tw.tw_channel;
-        if (ch != null && ch.eventLoop() != null) {
-            tw.tw_timer = ch.eventLoop().schedule(() -> inet_twsk_kill(tw), delay, TimeUnit.MILLISECONDS);
-        }
     }
 
     protected void shutdownStack(TcpSock sk, int how) {

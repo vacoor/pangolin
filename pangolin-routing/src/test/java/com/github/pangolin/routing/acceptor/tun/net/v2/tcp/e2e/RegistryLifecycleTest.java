@@ -215,13 +215,14 @@ class RegistryLifecycleTest {
     }
 
     /**
-     * 反射读 {@code establishedRegistry}。R4.2 之后若 registries 搬家,这里
-     * 需要同步改 —— 这恰是本测试要"钉住"的结构观测点。
+     * 反射读 {@code establishedRegistry}。R4.2b-2 后 registries 搬到 {@code TcpStack},
+     * 测试跟随迁移 —— 这恰是本测试要"钉住"的结构观测点。
      */
     @SuppressWarnings("unchecked")
     private static Map<Object, TcpSock> established(TcpMultiplexer mx) {
         try {
-            Field f = TcpMultiplexer.class.getDeclaredField("establishedRegistry");
+            Field f = com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpStack.class
+                    .getDeclaredField("establishedRegistry");
             f.setAccessible(true);
             return (Map<Object, TcpSock>) f.get(mx);
         } catch (ReflectiveOperationException e) {
@@ -232,7 +233,8 @@ class RegistryLifecycleTest {
     @SuppressWarnings("unchecked")
     private static Map<Object, TcpTimewaitSock> timewait(TcpMultiplexer mx) {
         try {
-            Field f = TcpMultiplexer.class.getDeclaredField("timewaitRegistry");
+            Field f = com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpStack.class
+                    .getDeclaredField("timewaitRegistry");
             f.setAccessible(true);
             return (Map<Object, TcpTimewaitSock>) f.get(mx);
         } catch (ReflectiveOperationException e) {
