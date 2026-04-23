@@ -1,5 +1,12 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockHandler;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandlerContext;
+
 /**
  * 接收侧关注点的聚合对象,对齐 gVisor netstack 的 {@code receiver}
  * (pkg/tcpip/transport/tcp/rcv.go)。每条 {@link TcpSock} 对应一个 {@code Receiver},
@@ -266,5 +273,233 @@ public final class Receiver {
             sock.ackTimeoutMs(TcpConstants.TCP_ATO_MIN_MS);
         }
         sock.multiplexer().output().sendAck(sock);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 数据入队 + 窗口判定(R4.2b-4f 从 SegmentDispatcher 迁入)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 段是否在可接受窗口内 — 对齐 Linux {@code tcp_sequence}。
+     * R4.2b-4f:从 {@code SegmentDispatcher} 迁入的静态工具。
+     */
+    public static boolean sequenceAcceptable(TcpSock sk, TcpPacketBuf pkt) {
+        int seq = pkt.tcpSeq();
+        int segLen = pkt.tcpPayloadLength() + (pkt.isSyn() ? 1 : 0) + (pkt.isFin() ? 1 : 0);
+        int endSeq = seq + segLen;
+        int rcvWup = sk.rcvWup();
+        int rcvWndEnd = sk.rcvNxt() + sk.receiveWindow();
+        if (TcpSequence.before(endSeq, rcvWup)) {
+            return false;
+        }
+        if (TcpSequence.after(endSeq, rcvWndEnd)) {
+            return !TcpSequence.after(seq, rcvWndEnd);
+        }
+        return true;
+    }
+
+    /**
+     * 对齐 Linux {@code dataQueue} (tcp_input.c:5229) 的七分支判定 —— R4.2b-4f 从
+     * {@code SegmentDispatcher} 迁入。
+     */
+    public int handleDataQueue(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
+        if (!sock.hasConnection()) {
+            return 0;
+        }
+        final int seq = pkt.tcpSeq();
+        final int endSeq = TcpUtils.determineEndSeq(pkt);
+        if (seq == endSeq) {
+            return 0;
+        }
+        if (!sock.state().canReceive()) {
+            return 0;
+        }
+
+        final int rcvNxt = sock.rcvNxt();
+        final int rwnd = sock.receiveWindow();
+
+        if (seq == rcvNxt) {
+            if (rwnd == 0) {
+                if (pkt.tcpPayloadLength() == 0 && pkt.isFin()) {
+                    queueAndOut(ctx, pkt);
+                } else {
+                    outOfWindow(SkbDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
+                }
+                return 0;
+            }
+            queueAndOut(ctx, pkt);
+            return 0;
+        }
+
+        if (!TcpSequence.after(endSeq, rcvNxt)) {
+            outOfWindow(SkbDropReason.SKB_DROP_REASON_TCP_OLD_DATA);
+            return 0;
+        }
+
+        if (!TcpSequence.before(seq, rcvNxt + rwnd)) {
+            outOfWindow(SkbDropReason.SKB_DROP_REASON_TCP_OVERWINDOW);
+            return 0;
+        }
+
+        if (TcpSequence.before(seq, rcvNxt)) {
+            if (rwnd == 0) {
+                outOfWindow(SkbDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
+            } else {
+                queueAndOut(ctx, pkt);
+            }
+            return 0;
+        }
+
+        handleOfo(pkt);
+        return 0;
+    }
+
+    /**
+     * 等价 Linux {@code queue_and_out} (tcp_input.c:5150) — 顺序段入缓冲并推进 rcv_nxt,
+     * FIN 到达 rcv_nxt 时触发 {@link #finIncoming}。
+     */
+    private void queueAndOut(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
+        final int priorRcvNxt = sock.rcvNxt();
+        final int payloadLen  = pkt.tcpPayloadLength();
+        final int seq         = pkt.tcpSeq();
+        final int endSeq      = TcpUtils.determineEndSeq(pkt);
+        final boolean fin     = pkt.isFin();
+
+        if (payloadLen > 0) {
+            sock.onDataReceived(payloadLen);
+        }
+
+        final ByteBuf payload = pkt.tcpPayloadSlice();
+        final ByteBuf segment = payloadLen > 0
+                ? payload.retainedSlice()
+                : Unpooled.EMPTY_BUFFER;
+
+        final TcpReceiveBuffer.OfferResult r = sock.receiveBuffer()
+                .offer(seq, endSeq, priorRcvNxt, segment, fin);
+        sock.rcvNxt(r.rcvNxt);
+        if (r.hasDsack()) {
+            sock.setDsack(r.dsackStart, r.dsackEnd);
+            sock.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
+            sock.addAckPending(TcpConstants.ACK_NOW);
+        }
+
+        if (sock.receiveBuffer().isReadable() && !sock.rcvPaused()) {
+            deliverToHandler(sock.receiveBuffer().readAll());
+        }
+
+        if (r.finDelivered) {
+            finIncoming(ctx);
+            return;
+        }
+
+        if (payloadLen > 0) {
+            boolean ofoDrain = r.rcvNxt != priorRcvNxt + payloadLen;
+            if (ofoDrain || seq != priorRcvNxt) {
+                sock.enterQuickAckMode(TcpConstants.TCP_INIT_CWND);
+                sock.addAckPending(TcpConstants.ACK_NOW);
+            } else {
+                sock.addAckPending(TcpConstants.ACK_SCHED);
+            }
+        }
+    }
+
+    /**
+     * 对齐 Linux {@code tcp_fin} 全状态 switch — R4.2b-4f 从 {@code SegmentDispatcher} 迁入。
+     * 负责状态迁移 + {@code onPeerFin} 通知 + FIN_WAIT_2 → TIME_WAIT 转接。
+     */
+    public void finIncoming(ChannelHandlerContext ctx) {
+        sock.addShutdown(TcpConstants.RCV_SHUTDOWN);
+        final TcpConnectionState prevState = sock.state();
+        final TcpOutput output = sock.multiplexer().output();
+        switch (prevState) {
+            case TCP_SYN_RECV:
+            case TCP_ESTABLISHED:
+                sock.state(TcpConnectionState.CLOSE_WAIT);
+                sock.enterPingpongMode();
+                output.sendAck(sock);
+                notifyPeerFin(sock);
+                return;
+            case CLOSE_WAIT:
+            case CLOSING:
+            case LAST_ACK:
+                output.sendAck(sock);
+                return;
+            case FIN_WAIT_1:
+                output.sendAck(sock);
+                sock.state(TcpConnectionState.CLOSING);
+                notifyPeerFin(sock);
+                return;
+            case FIN_WAIT_2:
+                output.sendAck(sock);
+                notifyPeerFin(sock);
+                sock.multiplexer().timeWait(ctx, sock, TcpConnectionState.TIME_WAIT);
+                return;
+            default:
+                return;
+        }
+    }
+
+    private static void notifyPeerFin(TcpSock sk) {
+        TcpSockHandler h = sk.handler();
+        if (h != null) {
+            try {
+                h.onPeerFin();
+            } catch (Throwable ignore) {
+                // 保护:用户 handler 异常不影响状态机推进
+            }
+        }
+    }
+
+    /**
+     * 越窗 / 过旧段统一丢弃路径 — 对齐 Linux {@code out_of_window}。
+     * R4.2b-4f 从 {@code SegmentDispatcher} 迁入。
+     */
+    public void outOfWindow(int reason) {
+        sock.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
+        sock.addAckPending(TcpConstants.ACK_SCHED);
+        TcpMibStats mib = sock.multiplexer().mib();
+        mib.inc(TcpMib.OUTOFWINDOWICMPS);
+        mib.incDrop(reason);
+    }
+
+    /**
+     * 纯乱序段入 OFO 队列(等价 Linux {@code dataQueueOfo})。
+     * R4.2b-4f 从 {@code SegmentDispatcher} 迁入。
+     */
+    private void handleOfo(TcpPacketBuf pkt) {
+        final int seq     = pkt.tcpSeq();
+        final int endSeq  = TcpUtils.determineEndSeq(pkt);
+        final boolean fin = pkt.isFin();
+
+        if (seq == endSeq) {
+            return;
+        }
+
+        final ByteBuf payload    = pkt.tcpPayloadSlice();
+        final int     payloadLen = payload.readableBytes();
+        final ByteBuf segment    = payloadLen > 0
+                ? payload.retainedSlice()
+                : Unpooled.EMPTY_BUFFER;
+
+        TcpReceiveBuffer.OfoResult r = sock.receiveBuffer().offerOfo(seq, endSeq, segment, fin);
+        if (r.hasDsack()) {
+            sock.setDsack(r.dsackStart, r.dsackEnd);
+        }
+        if (!r.queued && !r.hasDsack()) {
+            return;
+        }
+
+        sock.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
+        sock.addAckPending(TcpConstants.ACK_NOW);
+    }
+
+    /** 投递到 user handler;handler 为 null 时防御性 release,避免泄露。 */
+    private void deliverToHandler(ByteBuf data) {
+        TcpSockHandler handler = sock.handler();
+        if (handler == null) {
+            data.release();
+            return;
+        }
+        handler.onInboundData(data);
     }
 }

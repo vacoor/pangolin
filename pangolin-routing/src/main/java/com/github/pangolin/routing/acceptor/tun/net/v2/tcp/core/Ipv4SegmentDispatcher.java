@@ -245,7 +245,7 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
 
         switch (sk.state()) {
             case TCP_ESTABLISHED:
-                return dataQueue(net, sk, pkt);
+                return dataQueueAndPostProcess(net, sk, pkt);
             case FIN_WAIT_1:
             case FIN_WAIT_2:
                 if (sk.hasShutdown(TcpConstants.RCV_SHUTDOWN) && hasDataBeyondRcvNxt(sk, pkt)) {
@@ -253,10 +253,10 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
                     tcpDone(sk);
                     return 0;
                 }
-                // FIN+data 段由 dataQueue → queue_and_out 统一处理:receiveBuffer.offer
-                // 推进 rcv_nxt,finDelivered 时触发 finIncoming 全状态 switch(FIN_WAIT_1 → CLOSING,
-                // FIN_WAIT_2 → TIME_WAIT)。裸 FIN(seq == rcv_nxt,无 payload)同路径生效。
-                return dataQueue(net, sk, pkt);
+                // FIN+data 段由 Receiver.handleDataQueue → queueAndOut 统一处理:receiveBuffer.offer
+                // 推进 rcv_nxt,finDelivered 时触发 Receiver.finIncoming 全状态 switch(FIN_WAIT_1 →
+                // CLOSING,FIN_WAIT_2 → TIME_WAIT)。裸 FIN(seq == rcv_nxt,无 payload)同路径生效。
+                return dataQueueAndPostProcess(net, sk, pkt);
             case CLOSE_WAIT:
             case CLOSING:
             case LAST_ACK:
@@ -266,10 +266,10 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
                     tcpDone(sk);
                     return 0;
                 }
-                // 重传 FIN(seq < rcv_nxt):状态不变,走统一 finIncoming(CLOSE_WAIT/CLOSING/LAST_ACK
-                // 分支仅发 ACK)— 对齐 Linux finIncoming switch。
+                // 重传 FIN(seq < rcv_nxt):状态不变,走统一 Receiver.finIncoming
+                // (CLOSE_WAIT / CLOSING / LAST_ACK 分支仅发 ACK)。
                 if (pkt.isFin()) {
-                    finIncoming(net, sk);
+                    sk.receiver().finIncoming(net);
                 }
                 return 0;
             case TIME_WAIT:
@@ -375,13 +375,16 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
         }
     }
 
-    @Override
-    protected int dataQueue(ChannelHandlerContext ctx, TcpSock sk, TcpPacketBuf pkt) {
-        int err = super.dataQueue(ctx, sk, pkt);
+    /**
+     * ESTABLISHED / FIN_WAIT_x 路径的数据入队 — 代理到 {@link Receiver#handleDataQueue}
+     * 后,触发 push + ACK 调度;CLOSE_WAIT 时关闭 backend 透传 childChannel(保留 v1 语义)。
+     */
+    protected int dataQueueAndPostProcess(ChannelHandlerContext ctx, TcpSock sk, TcpPacketBuf pkt) {
+        int err = sk.receiver().handleDataQueue(ctx, pkt);
         if (!sk.hasConnection() || sk.state() == TcpConnectionState.TCP_CLOSED) {
             return err;
         }
-        dataSndCheck(sk);
+        sk.sender().pushPending();
         sk.receiver().ackSndCheck();
         if (sk.state() == TcpConnectionState.CLOSE_WAIT
                 && sk.childChannel() != null
