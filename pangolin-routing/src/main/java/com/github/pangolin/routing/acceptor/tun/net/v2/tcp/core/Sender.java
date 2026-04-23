@@ -1,5 +1,6 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import io.netty.buffer.ByteBuf;
 
 /**
@@ -202,6 +203,21 @@ public final class Sender {
                 armProbe0();
             }
         }
+    }
+
+    /**
+     * 入站 ACK 处理入口 — 对齐 Linux {@code tcp_ack}(net/ipv4/tcp_input.c)。
+     * R4.2b-4f:从 {@code SegmentDispatcher} 物理迁入。
+     *
+     * @param pkt 入站段,必须带 ACK 标志
+     * @param flag 对齐 Linux FLAG_* 位集(FLAG_SLOWPATH / FLAG_UPDATE_TS_RECENT 等)
+     * @return 错误码:0 正常,1 非 ACK / 无连接
+     */
+    public int ackIncoming(TcpPacketBuf pkt, int flag) {
+        if (!sock.hasConnection() || !pkt.isAck()) {
+            return 1;
+        }
+        return TcpAck.tcpAck(sock, pkt, flag);
     }
 
     /**

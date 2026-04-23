@@ -190,7 +190,7 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
             return 0;
         }
 
-        int reason = ackIncoming(sk, pkt, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT | FLAG_NO_CHALLENGE_ACK);
+        int reason = sk.sender().ackIncoming(pkt, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT | FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {
             if (sk.state() == TcpConnectionState.TCP_SYN_RECV) {
                 return reason == 0 ? 0 : -reason;
@@ -371,7 +371,7 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
         initTransfer(sk);
         sk.rcvMss(initializeRcvMss(sk));
         if (sk.hasShutdown(TcpConstants.SEND_SHUTDOWN)) {
-            shutdownStack(sk, TcpConstants.SEND_SHUTDOWN);
+            sk.sender().shutdown(TcpConstants.SEND_SHUTDOWN);
         }
     }
 

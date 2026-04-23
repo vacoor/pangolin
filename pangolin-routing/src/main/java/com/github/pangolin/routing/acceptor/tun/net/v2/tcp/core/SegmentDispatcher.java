@@ -249,12 +249,6 @@ public abstract class SegmentDispatcher extends TcpStack {
         return child;
     }
 
-    /** @deprecated R4.2b-4e 下沉到 {@link Sender#shutdown}。 */
-    @Deprecated
-    protected void shutdownStack(TcpSock sk, int how) {
-        sk.sender().shutdown(how);
-    }
-
     public void consume(final ChannelHandlerContext ctx, final TcpPacketBuf pkt) {
         rcv(ctx, pkt);
     }
@@ -269,18 +263,6 @@ public abstract class SegmentDispatcher extends TcpStack {
         return true;
     }
 
-    protected int ackIncoming(TcpSock sk, TcpPacketBuf pkt, int flag) {
-        if (!sk.hasConnection() || !pkt.isAck()) {
-            return 1;
-        }
-        return TcpAck.tcpAck(sk, pkt, flag);
-    }
-
-    /** @deprecated R4.2b-4e 下沉到 {@link Sender#pushPending}。 */
-    @Deprecated
-    protected void pushPendingFrames(TcpSock sk) {
-        sk.sender().pushPending();
-    }
 
     protected static void initWl(TcpSock sk, int seq) {
         if (sk.hasConnection()) {
