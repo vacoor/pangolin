@@ -95,7 +95,11 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
         }
 
         if (sk instanceof TcpTimewaitSock) {
-            timewaitStateProcess(net, (TcpTimewaitSock) sk, pkt);
+            TcpTimewaitSock tw = (TcpTimewaitSock) sk;
+            if (!tw.handleIncoming(net, pkt, this)) {
+                // TW_SYN 重用 bucket:bucket 已 kill,重入 rcv 派发到 LISTEN 走 conn_request
+                tcp_v4_rcv(net, pkt);
+            }
             return;
         }
 
@@ -275,110 +279,6 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
                 return 0;
             default:
                 return 0;
-        }
-    }
-
-    /**
-     * 对齐 Linux {@code timewaitStateProcess}(net/ipv4/tcp_minisocks.c):
-     * 处理 TIME_WAIT bucket 收到的迟到段。
-     *
-     * <ul>
-     *   <li><b>Timestamps / PAWS</b>:若协商并缓存了 {@code tw_ts_recent},按
-     *       {@link TcpTimewaitSock#pawsRejected(int)} 判定,拒绝段累加
-     *       {@code LINUX_MIB_PAWSESTABREJECTED} 并刷新 2MSL;合法段同步更新
-     *       {@code tw_ts_recent / tw_ts_recent_stamp}(对齐 {@code tcp_store_ts_recent})。</li>
-     *   <li><b>TW_SYN 被动复用</b>:SYN 且 SEQ 超过 {@code tw_rcv_nxt} 或 timestamps 更新
-     *       时,kill twsk 后重新派发到 listen 路径建立新连接(对齐 {@code TCP_TW_SYN})。</li>
-     *   <li><b>RST</b>:SEQ == {@code tw_rcv_nxt} 时 kill twsk;其它 SEQ 静默丢弃,
-     *       避免 RFC 5961 弱 RST 攻击(对齐 {@code TCP_TW_RST})。</li>
-     *   <li><b>迟到 FIN / 数据</b>:重放 ACK(seq = tw_snd_nxt, ack = tw_rcv_nxt)+
-     *       {@code inet_twsk_reschedule} 刷新 2MSL(对齐 {@code TCP_TW_ACK})。</li>
-     * </ul>
-     *
-     * <p>依据 {@link TcpTimewaitSock#tw_substate} 分派 FIN_WAIT_2 / TIME_WAIT:
-     * FIN_WAIT_2 阶段收到对端 FIN 需推进 {@code tw_rcv_nxt} 并迁入 TIME_WAIT 子状态,
-     * 同时刷新为 2MSL;FIN_WAIT_2 阶段收到裸数据则重放 ACK 但不迁移子状态。
-     *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c">timewaitStateProcess</a>
-     */
-    protected void timewaitStateProcess(ChannelHandlerContext net, TcpTimewaitSock tw, TcpPacketBuf pkt) {
-        if (tw == null) {
-            return;
-        }
-
-        // (1) Timestamps 解析 — 仅当本侧曾协商 timestamps 时才参与 PAWS 判定
-        int tsVal = -1;
-        boolean sawTs = false;
-        boolean pawsReject = false;
-        if (tw.tw_ts_enabled) {
-            long[] ts = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec
-                    .parseTimestamp(pkt.tcpOptionsSlice());
-            if (ts != null) {
-                sawTs = true;
-                tsVal = (int) ts[0];
-                pawsReject = tw.pawsRejected(tsVal);
-            }
-        }
-
-        // (2) TW_SYN — 对新 SYN 允许在 TW bucket 上被动重建连接
-        //     条件:SYN && !RST && !ACK && (seq after tw_rcv_nxt 或 timestamps 更新)。
-        if (pkt.isSyn() && !pkt.isRst() && !pkt.isAck()) {
-            boolean seqAdvanced = after(pkt.tcpSeq(), tw.tw_rcv_nxt);
-            boolean tsAdvanced = sawTs && (((int) tw.tw_ts_recent) - tsVal) < 0;
-            if (seqAdvanced || tsAdvanced) {
-                inet_twsk_kill(tw);
-                // 重新进入派发:TW bucket 已空,查找会回退到 LISTEN 走 tcp_conn_request。
-                tcp_v4_rcv(net, pkt);
-                return;
-            }
-        }
-
-        // (3) RST
-        if (pkt.isRst()) {
-            if (!pawsReject && pkt.tcpSeq() == tw.tw_rcv_nxt) {
-                inet_twsk_kill(tw);
-            }
-            return;
-        }
-
-        // (4) PAWS 拒绝:回放 ACK + 刷新 2MSL,累加 MIB;合法段同步刷新 ts_recent
-        if (pawsReject) {
-            mib.inc(
-                    com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMib.PAWSESTABREJECTED);
-            output.timewaitSendAck(net, tw);
-            inet_twsk_reschedule(tw, config.timeWaitMs());
-            return;
-        }
-        if (sawTs) {
-            tw.updateTsRecent(tsVal);
-        }
-
-        // (5) FIN_WAIT_2 子状态 — 等待对端 FIN。
-        //     对齐 Linux timewaitStateProcess:收到期望序号 FIN 后推进 rcv_nxt,
-        //     迁入 TIME_WAIT 子状态并重置为 2MSL;非 FIN 的迟到数据仅回放 ACK,子状态保持 FIN_WAIT_2。
-        if (tw.tw_substate == TcpConnectionState.FIN_WAIT_2) {
-            if (pkt.isFin() && pkt.tcpSeq() == tw.tw_rcv_nxt) {
-                // FIN 消耗一个 SEQ:推进 rcv_nxt,迁入 TIME_WAIT 子状态进入 2MSL 静默等待
-                tw.tw_rcv_nxt = tw.tw_rcv_nxt + 1;
-                tw.tw_substate = TcpConnectionState.TIME_WAIT;
-                output.timewaitSendAck(net, tw);
-                inet_twsk_reschedule(tw, config.timeWaitMs());
-                return;
-            }
-            if (pkt.tcpPayloadLength() > 0) {
-                // 迟到数据 — 重放 ACK 让对端感知,子状态不变,保持 FIN_WAIT_2 的 linger2 定时器
-                output.timewaitSendAck(net, tw);
-                return;
-            }
-            // 纯 ACK / 空段 / 越界 FIN — 静默丢弃
-            return;
-        }
-
-        // (6) TIME_WAIT 子状态 — 迟到 FIN / 数据段:重放 ACK + 重置 2MSL。
-        //     纯 ACK / 空段静默丢弃,避免反射风暴。
-        if (pkt.isFin() || pkt.tcpPayloadLength() > 0) {
-            output.timewaitSendAck(net, tw);
-            inet_twsk_reschedule(tw, config.timeWaitMs());
         }
     }
 
