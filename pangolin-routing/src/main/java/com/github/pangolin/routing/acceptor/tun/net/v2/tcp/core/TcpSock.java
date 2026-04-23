@@ -197,7 +197,7 @@ public class TcpSock extends SockCommon {
      * {@code tcp_clean_rtx_queue} / {@code tcp_sacktag_write_queue} 识别新投递段时
      * 刷新,{@link #tcpRackUpdateReoWnd} 据此判断 1-RTT 门控。
      */
-    private int rackAckPriorDelivered;
+    // R2.3: rackAckPriorDelivered 已物理迁到 Sender
     /**
      * 对齐 Linux {@code tp->rtt_min} — 以 Kathleen Nichols Windowed Filter 维护
      * 时间窗 {@link TcpConstants#TCP_MIN_RTT_WIN_SEC}(默认 300 秒)内的 RTT 最小值,
@@ -355,7 +355,7 @@ public class TcpSock extends SockCommon {
         sock.sender().rackReoWndSteps(1);
         // R2.3: rackMstamp/rackRttUs/rackReoWndPersist/rackDsackSeen/delivered/rackLastDelivered
         //       默认值由 Sender 字段声明初始化(0/0L/0/false/0/0)
-        sock.rackAckPriorDelivered = 0;
+        // R2.3: rackAckPriorDelivered 默认 0 由 Sender 字段初始化
         sock.rttMinFilter.reset(0, TcpConstants.TCP_MIN_RTT_NO_SAMPLE);
         sock.linger2 = (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
         return sock;
@@ -418,7 +418,7 @@ public class TcpSock extends SockCommon {
         // R2.3: sackedOut / lostOut 默认 0(Sender 字段初值)
         // R2.3: rackMstamp/rackRttUs/rackReoWndSteps(=1)/rackReoWndPersist/rackDsackSeen/delivered/rackLastDelivered
         //       默认值由 Sender 字段声明初始化
-        rackAckPriorDelivered = 0;
+        // R2.3: rackAckPriorDelivered 默认 0 由 Sender 字段初始化
         rttMinFilter.reset(0, TcpConstants.TCP_MIN_RTT_NO_SAMPLE);
         linger2 = (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
         probeBackoffShift = 0;
@@ -1518,15 +1518,15 @@ public class TcpSock extends SockCommon {
     /** {@code tp->delivered++};在累计 ACK 或新 SACK 标记释放段时调用。 */
     public void incrDelivered(int n)           { sender.addDelivered(Math.max(n, 0)); }
     /** {@code rs->prior_delivered} scratchpad:本 ACK 内"已投递段" tx.delivered 的最大值。 */
-    public int  rackAckPriorDelivered()        { return rackAckPriorDelivered; }
+    public int  rackAckPriorDelivered()        { return sender.rackAckPriorDelivered(); }
     /** {@code tcpAck} 入口复位 / {@code clean_rtx / sacktag} 路径用单调最大值刷新。 */
     public void updateRackAckPriorDelivered(int txDelivered) {
-        if (after(txDelivered, rackAckPriorDelivered)) {
-            rackAckPriorDelivered = txDelivered;
+        if (after(txDelivered, sender.rackAckPriorDelivered())) {
+            sender.rackAckPriorDelivered(txDelivered);
         }
     }
     /** {@code tcpAck} 入口清零 scratchpad。 */
-    public void clearRackAckPriorDelivered()   { this.rackAckPriorDelivered = 0; }
+    public void clearRackAckPriorDelivered()   { sender.rackAckPriorDelivered(0); }
     /** {@code tp->rack.last_delivered} — 上次 reo_wnd 步进时的 {@code tp->delivered} 快照。 */
     public int  rackLastDelivered()            { return sender.rackLastDelivered(); }
 
