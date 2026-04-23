@@ -10,9 +10,11 @@ import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 public final class TcpHandshakerFactory {
 
     private final TcpConfig config;
+    private final TcpOutput output;
 
-    public TcpHandshakerFactory(TcpConfig config) {
+    public TcpHandshakerFactory(TcpConfig config, TcpOutput output) {
         this.config = config;
+        this.output = output;
     }
 
     /**
@@ -22,6 +24,6 @@ public final class TcpHandshakerFactory {
      * @param synPkt the SYN packet; fields are extracted immediately, no retain needed
      */
     public TcpHandshaker newHandshaker(TcpPacketBuf synPkt) {
-        return new TcpHandshaker(synPkt, config);
+        return new TcpHandshaker(synPkt, config, output);
     }
 }

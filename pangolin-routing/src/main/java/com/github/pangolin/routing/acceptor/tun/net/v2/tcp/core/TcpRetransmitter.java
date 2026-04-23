@@ -11,15 +11,13 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpTimerSchedule
  */
 public final class TcpRetransmitter {
 
-    public static final TcpRetransmitter INSTANCE = new TcpRetransmitter();
-
-    private TcpRetransmitter() {}
+    public TcpRetransmitter() {}
 
     /**
      * Retransmit the oldest unacknowledged segment.
      */
     public void retransmit(TcpSock sock) {
-        TcpOutput.INSTANCE.tcp_retransmit_skb(sock);
+        sock.sender().retransmitSkb();
     }
 
     /**
@@ -35,9 +33,9 @@ public final class TcpRetransmitter {
         if (sock == null || !sock.hasConnection()) {
             return;
         }
-        sock.tlpHighSeq(0);
+        sock.sender().tlpHighSeq(0);
         sock.onTimeoutByCc();
-        sock.backoffRto();
+        sock.sender().backoff();
         retransmit(sock);
         scheduleRetransmit(sock);
     }
@@ -75,7 +73,7 @@ public final class TcpRetransmitter {
         if (sock == null || !sock.hasConnection()) {
             return;
         }
-        TcpOutput.INSTANCE.tcp_send_loss_probe(sock);
+        sock.sender().sendLossProbe();
         scheduleRetransmit(sock);
     }
 
@@ -89,7 +87,7 @@ public final class TcpRetransmitter {
     /** Cancel the retransmit timer (called when RTX queue becomes empty). */
     public void cancelRetransmit(TcpSock sock) {
         if (sock != null) {
-            sock.tlpHighSeq(0);
+            sock.sender().tlpHighSeq(0);
         }
         TcpTimerScheduler.INSTANCE.cancelWriteTimer(sock);
     }

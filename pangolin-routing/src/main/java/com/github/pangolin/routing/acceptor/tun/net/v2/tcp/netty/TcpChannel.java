@@ -28,7 +28,7 @@ import java.util.Deque;
  * <p>生命周期:
  * <ol>
  *   <li>{@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.Tcp4Multiplexer#tcp_v4_syn_recv_sock}
- *       建 child sock → {@code tcp_try_establish → tcp_init_transfer} 调
+ *       建 child sock → {@code tryEstablish → initTransfer} 调
  *       {@link TcpChannelInitializer#create} 生成本 channel;</li>
  *   <li>{@code TcpMultiplexer} 在 {@code sock.eventLoop()} 上调
  *       {@code eventLoop.register(ch)} → {@code pipeline.fireChannelActive()};</li>
@@ -36,7 +36,7 @@ import java.util.Deque;
  *       {@link TcpSockHandler#onInboundData},经本类内部 autoRead 门控后
  *       {@code fireChannelRead};</li>
  *   <li>写路径:用户 {@code ctx.writeAndFlush(ByteBuf)} → {@link #doWrite} 把 ByteBuf
- *       交给 {@code TcpMultiplexer.tcp_sendmsg}(MSS 切片与 push 由栈内部处理);</li>
+ *       交给 {@code TcpMultiplexer.sendmsg}(MSS 切片与 push 由栈内部处理);</li>
  *   <li>关闭:主动 {@code ch.close()} → {@link #doClose} 发 FIN;被动 FIN / RST
  *       由 bridge 回调,最终由 {@code inet_csk_destroy_sock → sock.close} 触发
  *       bridge.onSocketDestroyed → 本 channel unsafe().closeForcibly。</li>
@@ -134,11 +134,11 @@ public class TcpChannel extends AbstractChannel {
         }
         closing = true;
 
-        // 主动关闭 → 发 FIN(对齐 v1 childCloseListener 的 tcp_close_state + tcp_send_fin);
+        // 主动关闭 → 发 FIN(对齐 v1 childCloseListener 的 closeState + sendFin);
         // abortive 关闭(RST / sock 已销毁)跳过 FIN,避免在已被对端 RST 的连接上再次写入。
         if (!abortive && sock.hasConnection() && sock.state().canSend()) {
-            if (multiplexer.tcp_close_state(sock)) {
-                TcpOutput.INSTANCE.tcp_send_fin(sock);
+            if (multiplexer.closeState(sock)) {
+                sock.sender().sendFin();
             }
         }
 
@@ -160,9 +160,9 @@ public class TcpChannel extends AbstractChannel {
         }
         if (pendingInbound.isEmpty()) {
             readRequested = true;
-            // 接收缓冲仍有数据则放开 rcvPaused,由下一次 tcp_data_queue 驱动 consume
-            if (sock.rcvPaused() && sock.receiveBuffer() != null && sock.receiveBuffer().isReadable()) {
-                sock.rcvPaused(false);
+            // 接收缓冲仍有数据则放开 rcvPaused,由下一次 dataQueue 驱动 consume
+            if (sock.receiver().paused() && sock.receiver().buffer() != null && sock.receiver().buffer().isReadable()) {
+                sock.receiver().paused(false);
             }
             return;
         }
@@ -199,8 +199,8 @@ public class TcpChannel extends AbstractChannel {
                 continue;
             }
             final boolean flush = in.size() == 1;
-            // 引用权转给 tcp_sendmsg(其内部负责 release);in.remove 再释放 ChannelOutboundBuffer 持有的那份
-            multiplexer.tcp_sendmsg(sock, buf.retain(), flush);
+            // 引用权转给 sendmsg(其内部负责 release);in.remove 再释放 ChannelOutboundBuffer 持有的那份
+            sock.sender().sendmsg(buf.retain(), flush);
             in.remove();
         }
 
@@ -256,7 +256,7 @@ public class TcpChannel extends AbstractChannel {
         if (!config.isAutoRead() && !readRequested) {
             pendingInbound.addLast(data);
             // 背压:停止 drain receiveBuffer,让对端感知窗口收缩
-            sock.rcvPaused(true);
+            sock.receiver().paused(true);
             return;
         }
         readRequested = false;

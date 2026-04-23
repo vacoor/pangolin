@@ -25,8 +25,37 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpU
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.between;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.tcp_oow_rate_limited;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.oowRateLimited;
 
+/**
+ * v2 TCP 栈顶层容器。持有 per-stack 的全部栈级资源:
+ * <ul>
+ *   <li>{@link #retransmitter} — 重传 / TLP / RTO 调度(per-stack 独立)</li>
+ *   <li>{@link #output} — 出包器(per-stack 独立 Challenge ACK 桶)</li>
+ *   <li>{@link #mib} — MIB 计数器(per-stack 独立)</li>
+ *   <li>{@link #handshakerFactory} — 握手器工厂</li>
+ *   <li>{@link #initializer} — 装配钩子({@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInitializer})</li>
+ *   <li>注册表三件套:{@link #synRegistry} / {@link #establishedRegistry} / {@link #timewaitRegistry}</li>
+ * </ul>
+ *
+ * <p><b>Sock 装配</b>:所有 sock(listen / child / established)创建后经
+ * {@link #configure(TcpSock)} 统一注入 {@link TcpSock#multiplexer} +
+ * {@link TcpSock#sender} + {@link TcpSock#receiver},使调用方能通过
+ * {@code sock.sender().xxx()} / {@code sock.receiver().xxx()} 访问发送 / 接收行为。
+ *
+ * <p><b>架构三元</b>(对齐 gVisor endpoint + sender + receiver):
+ * <pre>
+ *   TcpSock (= endpoint: 控制块 + FSM)
+ *     ├── sender   (Sender: cwnd/rto/push/retransmit 的统一入口)
+ *     └── receiver (Receiver: rcvWnd/OFO/quickack 的统一入口)
+ * </pre>
+ *
+ * <p><b>子类</b>:当前只有 {@link Tcp4Multiplexer}(IPv4);{@code Tcp6Multiplexer} 未实现。
+ *
+ * <p><b>线程模型</b>:读写 {@link #establishedRegistry} / {@link #timewaitRegistry}
+ * 跨 EL(TUN EL + sock EL),用 ConcurrentHashMap;{@link #synRegistry} 只在 TUN EL
+ * 访问,用 HashMap。
+ */
 @Slf4j
 public abstract class TcpMultiplexer {
     public static final int DEFAULT_MAX_SYN_BACKLOG = 1024;
@@ -60,6 +89,25 @@ public abstract class TcpMultiplexer {
     protected final TcpConfig config;
     protected final TcpHandshakerFactory handshakerFactory;
     /**
+     * Per-stack 重传调度器。R1.1(2026-04-23):从 {@code TcpRetransmitter.INSTANCE}
+     * 单例降为实例字段,由 {@link TcpSock#multiplexer()} 路径访问,让同一 JVM 可以并存
+     * 多个独立 TCP 栈(每个栈有自己的 timer 调度根)。
+     */
+    protected final TcpRetransmitter retransmitter = new TcpRetransmitter();
+    /**
+     * Per-stack MIB 计数器。R1.2(2026-04-23):从 {@code TcpMibStats.INSTANCE} 降为
+     * per-stack 字段。核心主干路径(TcpMultiplexer / TcpAck / TcpOutput /
+     * TcpIncomingPreValidator)通过 {@link TcpSock#multiplexer()} 访问本字段;
+     * TcpReceiveBuffer 的 OFO / prune 相关计数仍走 INSTANCE 全局 fallback(R3 收尾)。
+     */
+    protected final TcpMibStats mib = new TcpMibStats();
+    /**
+     * Per-stack 出包器。R1.4(2026-04-23):从 {@code TcpOutput.INSTANCE} 降为
+     * per-stack 实例字段,隔离 RFC 5961 host-wide Challenge ACK 桶等 mutable 状态。
+     * 通过 {@link TcpSock#multiplexer()} 访问。
+     */
+    protected final TcpOutput output = new TcpOutput();
+    /**
      * 每连接专属 EL 池 — 对齐 v1 里 backend {@code childGroup} 的角色。新建立的 child sock
      * 在 {@code tcp_v4_syn_recv_sock} 中从 {@code tcpGroup.next()} 取一条 EL 绑定,整个
      * 连接生命周期(状态机 / timer / user channel / backend channel)都跑在该 EL 上。
@@ -67,7 +115,7 @@ public abstract class TcpMultiplexer {
      */
     protected final EventLoopGroup tcpGroup;
     /**
-     * sock 装配钩子 — 必传,构造期 requireNonNull 。{@link #tcp_init_transfer} 调
+     * sock 装配钩子 — 必传,构造期 requireNonNull 。{@link #initTransfer} 调
      * {@link TcpSockInitializer#onEstablished} 让上层(如 netty 子包的 {@code TcpChannelInitializer}、
      * ext.backend 子包的 {@code TcpPassthroughInitializer})创建并挂 {@link TcpSockHandler}。
      * 显式关闭端口传 {@link TcpSockInitializer#DENY}。
@@ -94,7 +142,7 @@ public abstract class TcpMultiplexer {
      * {@code ehash} TW 槽位。键为进入 TIME_WAIT 时的四元组,值为快照后的
      * {@link TcpTimewaitSock};2MSL 到期或收到有效 RST 时由 {@link #inet_twsk_kill} 移除。
      *
-     * <p>跨 EL 并发:{@code tcp_time_wait} 在 sock EL 上 put,{@code inet_twsk_kill} 也在
+     * <p>跨 EL 并发:{@code timeWait} 在 sock EL 上 put,{@code inet_twsk_kill} 也在
      * sock EL 上 remove,但 {@code __inet_lookup_skb} 在 TUN EL 上 get,需 ConcurrentHashMap。
      */
     protected final Map<FourTuple, TcpTimewaitSock> timewaitRegistry;
@@ -103,7 +151,7 @@ public abstract class TcpMultiplexer {
 
     protected TcpMultiplexer(TcpConfig config, EventLoopGroup tcpGroup, TcpSockInitializer initializer) {
         this.config = config;
-        this.handshakerFactory = new TcpHandshakerFactory(config);
+        this.handshakerFactory = new TcpHandshakerFactory(config, output);
         this.tcpGroup = tcpGroup;
         this.initializer = Objects.requireNonNull(initializer, "initializer");
         this.synRegistry = new HashMap<>();
@@ -118,9 +166,44 @@ public abstract class TcpMultiplexer {
         listenSock.state(TcpConnectionState.TCP_LISTEN);
     }
 
-    protected abstract TcpSock init(TcpSock sk);
+    /**
+     * Sock 装配钩子 — 所有 sock(listen / child / established)创建后必须经过本方法。
+     * 默认实现:调 {@link #configure(TcpSock)} 注入 multiplexer / sender / receiver
+     * 反向引用。子类若需要额外装配(如 IPv4 / IPv6 特定字段),应 {@code super.init(sk)}
+     * 后再补自身逻辑。
+     */
+    protected TcpSock init(TcpSock sk) {
+        return configure(sk);
+    }
 
-    public abstract void tcp_rcv(ChannelHandlerContext net, TcpPacketBuf pkt);
+    /**
+     * Per-sock 注入 per-stack 服务。建立 {@link TcpSock#multiplexer()} 反向引用,
+     * 创建 {@link Sender} / {@link Receiver} 并挂入 sock。本方法由 {@link #init(TcpSock)}
+     * 调用,外部代码通常不需要直接调。幂等 — 多次调用会覆盖 sender/receiver,但实际
+     * 调用路径(listen sock / tcp_v4_syn_recv_sock)保证只经过一次。
+     */
+    public TcpSock configure(TcpSock sk) {
+        if (sk != null) {
+            sk.multiplexer(this);
+            sk.sender(new Sender(sk));
+            sk.receiver(new Receiver(sk));
+        }
+        return sk;
+    }
+
+    public TcpRetransmitter retransmitter() {
+        return retransmitter;
+    }
+
+    public TcpMibStats mib() {
+        return mib;
+    }
+
+    public TcpOutput output() {
+        return output;
+    }
+
+    public abstract void rcv(ChannelHandlerContext net, TcpPacketBuf pkt);
 
     public abstract void send_reset(ChannelHandlerContext net, TcpPacketBuf pkt, int err);
 
@@ -145,7 +228,7 @@ public abstract class TcpMultiplexer {
      * 对齐 Linux {@code __inet_lookup_skb}(net/ipv4/inet_hashtables.c):先查 ESTABLISHED 槽,
      * miss 再查 TIME_WAIT 槽(v2 的 {@link #timewaitRegistry}),最后回退到半连接 /
      * LISTEN。返回 {@link TcpTimewaitSock} 时由 {@code tcp_v4_rcv} 派发到
-     * {@code tcp_timewait_state_process}。
+     * {@code timewaitStateProcess}。
      */
     protected SockCommon __inet_lookup_skb(final TcpPacketBuf pkt) {
         final FourTuple key = FourTuple.of(pkt);
@@ -166,7 +249,7 @@ public abstract class TcpMultiplexer {
 
     /**
      * SYN_RECV 阶段的逐段校验 — 严格对齐 Linux
-     * <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c">tcp_check_req</a>
+     * <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c">checkReq</a>
      * (net/ipv4/tcp_minisocks.c)。
      *
      * <p>处理顺序(与 Linux 一一对应):
@@ -175,7 +258,7 @@ public abstract class TcpMultiplexer {
      *   <li>PAWS 判定 — {@code th->rst} 不参与 PAWS;</li>
      *   <li>TSECR 范围校验 — {@code rcv_tsecr} 必须落在 {@code [snt_tsval_first, snt_tsval_last]};</li>
      *   <li>纯 SYN 重传分支 — {@code seq == rcv_isn && flg == SYN && !paws_reject}
-     *       + {@code tcp_oow_rate_limited(LINUX_MIB_TCPACKSKIPPEDSYNRECV)} 后 {@code inet_rtx_syn_ack};</li>
+     *       + {@code oowRateLimited(LINUX_MIB_TCPACKSKIPPEDSYNRECV)} 后 {@code inet_rtx_syn_ack};</li>
      *   <li>OOW / PAWS 拒绝分支 — 若 {@code paws_reject || !tcp_in_window(...)} 则
      *       {@code req->rsk_ops->send_ack} 回 Challenge ACK(非 RST 且未限流),
      *       PAWSESTABREJECTED 记 MIB;</li>
@@ -184,13 +267,13 @@ public abstract class TcpMultiplexer {
      *   <li>RST / SYN 走 embryonic_reset — 发 {@code tcp_v4_send_reset} 后销毁 req;</li>
      *   <li>非 ACK 段静默丢弃;</li>
      *   <li>ACK# 必须 {@code == snd_isn + 1},否则走 embryonic_reset(v2 在此显式校验,
-     *       Linux 则下沉到 child 的 {@code tcp_rcv_state_process});</li>
-     *   <li>{@code syn_recv_sock} 建 child → {@code tcp_synack_rtt_meas} RTT 取样 → 返回 child。</li>
+     *       Linux 则下沉到 child 的 {@code rcvStateProcess});</li>
+     *   <li>{@code syn_recv_sock} 建 child → {@code synackRttMeas} RTT 取样 → 返回 child。</li>
      * </ol>
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c">tcp_check_req</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c">checkReq</a>
      */
-    public TcpSock tcp_check_req(ChannelHandlerContext net,
+    public TcpSock checkReq(ChannelHandlerContext net,
                                  TcpSock listenSock,
                                  TcpPacketBuf pkt,
                                  TcpRequestSock req) {
@@ -207,11 +290,11 @@ public abstract class TcpMultiplexer {
         // (2) tcp_paws_reject —— th->rst 段不做 PAWS。
         boolean pawsReject = sawTstamp && !pkt.isRst() && handshaker.pawsRejected(rcvTsval);
 
-        // (3) TSECR 范围 —— 对齐 tcp_check_req 中的 snt_tsval_first/last LAND-style 校验。
+        // (3) TSECR 范围 —— 对齐 checkReq 中的 snt_tsval_first/last LAND-style 校验。
         //     仅当本端已至少发过一次 SYN-ACK(snt_tsval_last != 0)且对端回显 TSecr 时适用。
         if (sawTstamp && handshaker.sntTsvalLast() != 0L
                 && !between((int) handshaker.sntTsvalFirst(), (int) rcvTsecr, (int) handshaker.sntTsvalLast())) {
-            TcpMibStats.INSTANCE.inc(TcpMib.TSECRREJECTED);
+            mib.inc(TcpMib.TSECRREJECTED);
             return null;
         }
 
@@ -222,8 +305,8 @@ public abstract class TcpMultiplexer {
 
         // (4) 纯 SYN 重传 —— 对 3WH 的第一段 SYN 做 SYN-ACK 重发,受 oow_rate_limited 限流。
         if (seq == handshaker.rcvIsn() && pureSyn && !pawsReject) {
-            if (tcp_oow_rate_limited(handshaker, pkt)) {
-                TcpMibStats.INSTANCE.inc(TcpMib.TCPACKSKIPPEDSYNRECV);
+            if (oowRateLimited(handshaker, pkt)) {
+                mib.inc(TcpMib.TCPACKSKIPPEDSYNRECV);
             } else {
                 inet_rtx_syn_ack(net, listenSock, req);
                 req.num_retrans++;
@@ -237,14 +320,14 @@ public abstract class TcpMultiplexer {
         final boolean inWindow = !before(endSeq, handshaker.rcvNxt()) && !after(seq, winEnd);
         if (pawsReject || !inWindow) {
             if (!pkt.isRst()) {
-                if (tcp_oow_rate_limited(handshaker, pkt)) {
-                    TcpMibStats.INSTANCE.inc(TcpMib.TCPACKSKIPPEDSYNRECV);
+                if (oowRateLimited(handshaker, pkt)) {
+                    mib.inc(TcpMib.TCPACKSKIPPEDSYNRECV);
                 } else {
                     handshaker.sendChallengeAck(net.channel());
                 }
             }
             if (pawsReject) {
-                TcpMibStats.INSTANCE.inc(TcpMib.PAWSESTABREJECTED);
+                mib.inc(TcpMib.PAWSESTABREJECTED);
             }
             return null;
         }
@@ -273,17 +356,17 @@ public abstract class TcpMultiplexer {
             return null;
         }
 
-        // (10) ACK# 校验 —— v2 在此处显式判定,等价于 Linux 下沉到 child tcp_rcv_state_process 的行为。
+        // (10) ACK# 校验 —— v2 在此处显式判定,等价于 Linux 下沉到 child rcvStateProcess 的行为。
         if (pkt.tcpAckNum() != handshaker.sndIsn() + 1) {
             send_reset(net, pkt, -1);
             inet_csk_destroy_sock(req);
             return null;
         }
 
-        // (11) syn_recv_sock + tcp_synack_rtt_meas(Karn's rule:num_retrans == 0 才取样)。
+        // (11) syn_recv_sock + synackRttMeas(Karn's rule:num_retrans == 0 才取样)。
         TcpSock child = syn_recv_sock(net, listenSock, pkt, req);
         if (child != null) {
-            tcp_synack_rtt_meas(child, req);
+            synackRttMeas(child, req);
         }
         return child;
     }
@@ -292,9 +375,9 @@ public abstract class TcpMultiplexer {
      * 三次握手完成时用 SYN-ACK 首发到 ACK 的时间差作为首个 RTT 样本。
      * Karn's rule:若 SYN-ACK 曾重传(num_retrans > 0),不取样(无法区分 ACK 确认的是哪一次)。
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_synack_rtt_meas</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">synackRttMeas</a>
      */
-    private static void tcp_synack_rtt_meas(TcpSock child, TcpRequestSock req) {
+    private static void synackRttMeas(TcpSock child, TcpRequestSock req) {
         if (req.num_retrans > 0) {
             return;
         }
@@ -325,11 +408,12 @@ public abstract class TcpMultiplexer {
             req.synPacket().release();
             req.synPacket(null);
         }
+        // sender/receiver/multiplexer 已经在 tcp_v4_syn_recv_sock 的 init(newsk) 里 configure
         synRegistry.remove(req.fourTuple(), req);
         establishedRegistry.put(sock.fourTuple(), sock);
     }
 
-    public void tcp_done(TcpSock tp) {
+    public void tcpDone(TcpSock tp) {
         if (!tp.hasConnection()) {
             return;
         }
@@ -373,7 +457,7 @@ public abstract class TcpMultiplexer {
         synRegistry.remove(req.fourTuple(), req);
     }
 
-    public boolean tcp_close_state(TcpSock sk) {
+    public boolean closeState(TcpSock sk) {
         if (!sk.hasConnection()) {
             return false;
         }
@@ -383,26 +467,26 @@ public abstract class TcpMultiplexer {
         return 0 != (next & TCP_ACTION_FIN);
     }
 
-    public void tcp_time_wait(ChannelHandlerContext ctx, TcpSock tp, TcpConnectionState state) {
-        tcp_time_wait(tp, state, config.timeWaitMs());
+    public void timeWait(ChannelHandlerContext ctx, TcpSock tp, TcpConnectionState state) {
+        timeWait(tp, state, config.timeWaitMs());
     }
 
     /**
-     * 对齐 Linux {@code tcp_time_wait}(net/ipv4/tcp_minisocks.c):
+     * 对齐 Linux {@code timeWait}(net/ipv4/tcp_minisocks.c):
      * 从重量级 {@link TcpSock} 中摘出 TIME_WAIT 阶段所需的最小快照构建 {@link TcpTimewaitSock},
      * 注册到 {@link #timewaitRegistry} 并安排 2MSL 定时器;原 {@link TcpSock} 立即销毁,
      * 释放发送 / 接收缓冲、取消所有定时器,腾出 {@link #establishedRegistry} 中的槽位。
      *
-     * <p>{@code state} 参数对齐 Linux {@code tcp_time_wait(sk, state, timeo)} 用于
+     * <p>{@code state} 参数对齐 Linux {@code timeWait(sk, state, timeo)} 用于
      * 区分 FIN_WAIT_2 / TIME_WAIT 子状态 — 值会写入
-     * {@link TcpTimewaitSock#tw_substate},由 {@code tcp_timewait_state_process}
+     * {@link TcpTimewaitSock#tw_substate},由 {@code timewaitStateProcess}
      * 根据该字段分派(FIN_WAIT_2 等对端 FIN,TIME_WAIT 静默重放 ACK)。二者到期行为
      * 均为 {@link #inet_twsk_kill}。
      *
-     * <p>迟到段重放 FIN-ACK 的通路由 {@code tcp_timewait_state_process} +
-     * {@code TcpOutput.tcp_timewait_send_ack} 承担,共享 TUN 侧 channel,无需 {@link TcpSock}。
+     * <p>迟到段重放 FIN-ACK 的通路由 {@code timewaitStateProcess} +
+     * {@code TcpOutput.timewaitSendAck} 承担,共享 TUN 侧 channel,无需 {@link TcpSock}。
      */
-    public void tcp_time_wait(TcpSock tp, TcpConnectionState state, long timeoutMs) {
+    public void timeWait(TcpSock tp, TcpConnectionState state, long timeoutMs) {
         if (!tp.hasConnection()) {
             return;
         }
@@ -417,7 +501,7 @@ public abstract class TcpMultiplexer {
                 tp.timestampEnabled(),
                 tp.recentTimestamp() & 0xFFFFFFFFL,
                 tp.tsRecentStamp());
-        // 对齐 Linux tcp_time_wait(sk, state, timeo):state ∈ {FIN_WAIT_2, TIME_WAIT}
+        // 对齐 Linux timeWait(sk, state, timeo):state ∈ {FIN_WAIT_2, TIME_WAIT}
         tw.tw_substate = (state == TcpConnectionState.FIN_WAIT_2)
                 ? TcpConnectionState.FIN_WAIT_2
                 : TcpConnectionState.TIME_WAIT;
@@ -425,7 +509,7 @@ public abstract class TcpMultiplexer {
         final long delay = Math.max(timeoutMs, 1L);
         tw.tw_timeout = System.currentTimeMillis() + delay;
         timewaitRegistry.put(ft, tw);
-        com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMibStats.INSTANCE.inc(
+        mib.inc(
                 com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMib.TCPTIMEWAITCREATED);
 
         final EventLoop el = tp.eventLoop();
@@ -476,20 +560,20 @@ public abstract class TcpMultiplexer {
         }
     }
 
-    protected void tcp_shutdown(TcpSock sk, int how) {
+    protected void shutdownStack(TcpSock sk, int how) {
         if (!sk.hasConnection() || (how & TcpConstants.SEND_SHUTDOWN) == 0) {
             return;
         }
         if (sk.state() == TcpConnectionState.TCP_ESTABLISHED
                 || sk.state() == TcpConnectionState.CLOSE_WAIT) {
-            if (tcp_close_state(sk)) {
-                TcpOutput.INSTANCE.tcp_send_fin(sk);
+            if (closeState(sk)) {
+                output.sendFin(sk);
             }
         }
     }
 
     public void consume(final ChannelHandlerContext ctx, final TcpPacketBuf pkt) {
-        tcp_rcv(ctx, pkt);
+        rcv(ctx, pkt);
     }
 
     public boolean sk_acceptq_is_full() {
@@ -502,11 +586,11 @@ public abstract class TcpMultiplexer {
             data.release();
             return false;
         }
-        tcp_sendmsg(sk, data, true);
+        sendmsg(sk, data, true);
         return true;
     }
 
-    protected int tcp_ack(TcpSock sk, TcpPacketBuf pkt, int flag) {
+    protected int ackIncoming(TcpSock sk, TcpPacketBuf pkt, int flag) {
         if (!sk.hasConnection() || !pkt.isAck()) {
             return 1;
         }
@@ -514,7 +598,7 @@ public abstract class TcpMultiplexer {
     }
 
     /**
-     * 对齐 Linux {@code tcp_data_queue} (tcp_input.c:5229) 的七分支判定:
+     * 对齐 Linux {@code dataQueue} (tcp_input.c:5229) 的七分支判定:
      * <ol>
      *   <li>{@code seq == rcv_nxt} 且窗口 &gt; 0 → 顺序入队 {@code queue_and_out};</li>
      *   <li>{@code seq == rcv_nxt} 且窗口 = 0 且携带 FIN(无 payload)→ 仍接受 FIN;</li>
@@ -526,7 +610,7 @@ public abstract class TcpMultiplexer {
      * </ol>
      * FIN 的状态机迁移由 {@code queue_and_out} 内 {@code tcp_fin_state_process} 承担。
      */
-    protected int tcp_data_queue(ChannelHandlerContext ctx, TcpSock sk, TcpPacketBuf pkt) {
+    protected int dataQueue(ChannelHandlerContext ctx, TcpSock sk, TcpPacketBuf pkt) {
         if (!sk.hasConnection()) {
             return 0;
         }
@@ -541,7 +625,7 @@ public abstract class TcpMultiplexer {
         }
 
         final int rcvNxt = sk.rcvNxt();
-        final int rwnd = sk.tcp_receive_window();
+        final int rwnd = sk.receiveWindow();
 
         if (seq == rcvNxt) {
             if (rwnd == 0) {
@@ -549,7 +633,7 @@ public abstract class TcpMultiplexer {
                     // 即使通告零窗口,仍接受裸 FIN(v1 L1617-1618)
                     queue_and_out(ctx, sk, pkt);
                 } else {
-                    tcp_out_of_window(sk, SkbDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
+                    outOfWindow(sk, SkbDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
                 }
                 return 0;
             }
@@ -559,20 +643,20 @@ public abstract class TcpMultiplexer {
 
         if (!after(endSeq, rcvNxt)) {
             // 完整重传段(纯 dup)
-            tcp_out_of_window(sk, SkbDropReason.SKB_DROP_REASON_TCP_OLD_DATA);
+            outOfWindow(sk, SkbDropReason.SKB_DROP_REASON_TCP_OLD_DATA);
             return 0;
         }
 
         if (!before(seq, rcvNxt + rwnd)) {
             // seq 在窗口外(零窗口探测等)
-            tcp_out_of_window(sk, SkbDropReason.SKB_DROP_REASON_TCP_OVERWINDOW);
+            outOfWindow(sk, SkbDropReason.SKB_DROP_REASON_TCP_OVERWINDOW);
             return 0;
         }
 
         if (before(seq, rcvNxt)) {
             // 部分重叠: seq < rcv_nxt < end_seq
             if (rwnd == 0) {
-                tcp_out_of_window(sk, SkbDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
+                outOfWindow(sk, SkbDropReason.SKB_DROP_REASON_TCP_ZEROWINDOW);
             } else {
                 queue_and_out(ctx, sk, pkt);
             }
@@ -580,7 +664,7 @@ public abstract class TcpMultiplexer {
         }
 
         // 纯乱序: seq > rcv_nxt && seq < rcv_nxt + rwnd
-        tcp_data_queue_ofo(sk, pkt);
+        dataQueueOfo(sk, pkt);
         return 0;
     }
 
@@ -622,7 +706,7 @@ public abstract class TcpMultiplexer {
         /*
          * rcvPaused(autoRead=false)时保留数据在 receiveBuffer,不 drain 给 userChannel;
          * rcv_nxt 已随上面 offer 推进,但由于 receiveBuffer 不清空,
-         * tcp_receive_window() = max(0, rcv_wup + rcv_wnd - rcv_nxt) 会随 rcv_nxt 前进
+         * receiveWindow() = max(0, rcv_wup + rcv_wnd - rcv_nxt) 会随 rcv_nxt 前进
          * 而在下一次 tcp_select_window 触发窗口收缩,对端自然感知反压。对齐 Linux
          * "应用未读 socket → tp->rcv_wnd 缩窗" 语义。
          */
@@ -632,7 +716,7 @@ public abstract class TcpMultiplexer {
 
         if (r.finDelivered) {
             // 当前段或先前 OFO 中的 FIN 已抵达 rcv_nxt,执行状态迁移并回 ACK。
-            tcp_fin(ctx, sk);
+            finIncoming(ctx, sk);
             return;
         }
 
@@ -653,25 +737,25 @@ public abstract class TcpMultiplexer {
      *
      * <p>调用约定:{@code rcv_nxt} 必须已由上游推进到 FIN 之后 —
      * {@link #queue_and_out} 通过 {@code receiveBuffer.offer} 推进,
-     * {@code tcp_rcv_state_process} 非数据路径(CLOSE_WAIT/CLOSING/LAST_ACK 的
+     * {@code rcvStateProcess} 非数据路径(CLOSE_WAIT/CLOSING/LAST_ACK 的
      * 重传 FIN)走过时不需要推进(seq &lt; rcv_nxt)。
      *
      * <ul>
      *   <li><b>SYN_RECV / ESTABLISHED</b>:迁移至 {@link TcpConnectionState#CLOSE_WAIT},
      *       置 pingpong,发 ACK。v2 正常路径下 SYN_RECV + FIN+ACK 会先由
-     *       {@code tcp_rcv_state_process} 的 SYN_RECV 分支 {@code tcp_try_establish} 迁入
-     *       ESTABLISHED,再进入 {@code tcp_data_queue} 命中 ESTABLISHED case;与 Linux
-     *       {@code tcp_rcv_state_process} 先 {@code tcp_set_state(ESTABLISHED)} fall-through
-     *       到末尾 {@code tcp_data_queue} 的路径等价。两侧 SYN_RECV case 均作防御性合并保留。</li>
+     *       {@code rcvStateProcess} 的 SYN_RECV 分支 {@code tryEstablish} 迁入
+     *       ESTABLISHED,再进入 {@code dataQueue} 命中 ESTABLISHED case;与 Linux
+     *       {@code rcvStateProcess} 先 {@code tcp_set_state(ESTABLISHED)} fall-through
+     *       到末尾 {@code dataQueue} 的路径等价。两侧 SYN_RECV case 均作防御性合并保留。</li>
      *   <li><b>CLOSE_WAIT / CLOSING / LAST_ACK</b>:重传 FIN,状态保持,发 ACK。</li>
      *   <li><b>FIN_WAIT_1</b>:simultaneous close,先发 ACK 再迁 {@link TcpConnectionState#CLOSING}
      *       (对齐 Linux tcp_input.c:4355)。</li>
-     *   <li><b>FIN_WAIT_2</b>:4-way close 完成,发最后 ACK 并 {@link #tcp_time_wait}
+     *   <li><b>FIN_WAIT_2</b>:4-way close 完成,发最后 ACK 并 {@link #timeWait}
      *       (sk 随后被销毁,调用方不应再触碰)。</li>
      *   <li><b>default</b>:LISTEN / SYN_SENT / CLOSED / TIME_WAIT — v2 架构下不应到达,no-op。</li>
      * </ul>
      */
-    protected void tcp_fin(ChannelHandlerContext ctx, TcpSock sk) {
+    protected void finIncoming(ChannelHandlerContext ctx, TcpSock sk) {
         sk.addShutdown(TcpConstants.RCV_SHUTDOWN);
         final TcpConnectionState prevState = sk.state();
         switch (prevState) {
@@ -679,23 +763,23 @@ public abstract class TcpMultiplexer {
             case TCP_ESTABLISHED:
                 sk.state(TcpConnectionState.CLOSE_WAIT);
                 sk.enterPingpongMode();
-                TcpOutput.INSTANCE.tcp_send_ack(sk);
+                output.sendAck(sk);
                 notifyPeerFin(sk);
                 return;
             case CLOSE_WAIT:
             case CLOSING:
             case LAST_ACK:
-                TcpOutput.INSTANCE.tcp_send_ack(sk);
+                output.sendAck(sk);
                 return;
             case FIN_WAIT_1:
-                TcpOutput.INSTANCE.tcp_send_ack(sk);
+                output.sendAck(sk);
                 sk.state(TcpConnectionState.CLOSING);
                 notifyPeerFin(sk);
                 return;
             case FIN_WAIT_2:
-                TcpOutput.INSTANCE.tcp_send_ack(sk);
+                output.sendAck(sk);
                 notifyPeerFin(sk);
-                tcp_time_wait(ctx, sk, TcpConnectionState.TIME_WAIT);
+                timeWait(ctx, sk, TcpConnectionState.TIME_WAIT);
                 return;
             default:
                 // TCP_LISTEN / TCP_SYN_SENT / TCP_CLOSED / TIME_WAIT — 不应到达,防御性 no-op
@@ -719,16 +803,16 @@ public abstract class TcpMultiplexer {
      * 和 {@code NET_INC_STATS(net, LINUX_MIB_OUTOFWINDOWICMPS)} + 尾部
      * {@code kfree_skb_reason(skb, reason)} 投递。
      */
-    protected void tcp_out_of_window(TcpSock sk, int reason) {
+    protected void outOfWindow(TcpSock sk, int reason) {
         sk.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
         sk.addAckPending(TcpConstants.ACK_SCHED);
-        com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMibStats.INSTANCE.inc(
+        mib.inc(
                 com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMib.OUTOFWINDOWICMPS);
-        com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMibStats.INSTANCE.incDrop(reason);
+        mib.incDrop(reason);
     }
 
     /**
-     * 纯乱序段(seq &gt; rcv_nxt) 入 OFO 队列(等价 Linux {@code tcp_data_queue_ofo}
+     * 纯乱序段(seq &gt; rcv_nxt) 入 OFO 队列(等价 Linux {@code dataQueueOfo}
      * tcp_input.c:5055)。v2 通过 {@link TcpReceiveBuffer#offerOfo} 完成:
      * <ul>
      *   <li>保留 FIN 语义以便后续填洞时重放 {@code tcp_fin};</li>
@@ -736,7 +820,7 @@ public abstract class TcpMultiplexer {
      * </ul>
      * 入队后统一 quickack + ACK_NOW(对齐 Linux OFO 到达立即回 DSACK 行为)。
      */
-    protected void tcp_data_queue_ofo(TcpSock sk, TcpPacketBuf pkt) {
+    protected void dataQueueOfo(TcpSock sk, TcpPacketBuf pkt) {
         final int seq     = pkt.tcpSeq();
         final int endSeq  = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq(pkt);
         final boolean fin = pkt.isFin();
@@ -753,7 +837,7 @@ public abstract class TcpMultiplexer {
 
         TcpReceiveBuffer.OfoResult r = sk.receiveBuffer().offerOfo(seq, endSeq, segment, fin);
         if (r.hasDsack()) {
-            // 对齐 Linux tcp_data_queue_ofo → tcp_dsack_set (Case 3 of RFC 2883):
+            // 对齐 Linux dataQueueOfo → tcp_dsack_set (Case 3 of RFC 2883):
             // 新 OFO 段与已存 OFO 段重叠时,重复区段通过下一次 ACK 首块以 DSACK 通告。
             sk.setDsack(r.dsackStart, r.dsackEnd);
         }
@@ -767,25 +851,25 @@ public abstract class TcpMultiplexer {
         sk.addAckPending(TcpConstants.ACK_NOW);
     }
 
-    protected void tcp_data_snd_check(TcpSock sk) {
-        tcp_push_pending_frames(sk);
+    protected void dataSndCheck(TcpSock sk) {
+        pushPendingFrames(sk);
     }
 
-    protected void tcp_push_pending_frames(TcpSock sk) {
+    protected void pushPendingFrames(TcpSock sk) {
         if (sk.hasConnection() && sk.tcpSendHead() != null) {
-            boolean needProbe = TcpOutput.INSTANCE.tcp_write_xmit(sk, sk.mss(), TCP_NAGLE_OFF, 0);
+            boolean needProbe = output.writeXmit(sk, sk.mss(), TCP_NAGLE_OFF, 0);
             if (needProbe) {
                 armProbe0(sk);
             }
         }
     }
 
-    protected static boolean tcp_sequence_acceptable(TcpSock sk, TcpPacketBuf pkt) {
+    protected static boolean sequenceAcceptable(TcpSock sk, TcpPacketBuf pkt) {
         int seq = pkt.tcpSeq();
         int segLen = pkt.tcpPayloadLength() + (pkt.isSyn() ? 1 : 0) + (pkt.isFin() ? 1 : 0);
         int endSeq = seq + segLen;
         int rcvWup = sk.rcvWup();
-        int rcvWndEnd = sk.rcvNxt() + sk.tcp_receive_window();
+        int rcvWndEnd = sk.rcvNxt() + sk.receiveWindow();
 
         if (before(endSeq, rcvWup)) {
             return false;
@@ -796,18 +880,18 @@ public abstract class TcpMultiplexer {
         return true;
     }
 
-    protected static void tcp_init_wl(TcpSock sk, int seq) {
+    protected static void initWl(TcpSock sk, int seq) {
         if (sk.hasConnection()) {
             sk.sndWl1(seq);
         }
     }
 
-    protected void tcp_init_transfer(TcpSock sk) {
+    protected void initTransfer(TcpSock sk) {
         if (sk == null) {
             return;
         }
-        sk.probeTimerAction(() -> tcp_probe_timer(sk));
-        sk.keepaliveTimerAction(() -> tcp_keepalive_timer(sk));
+        sk.probeTimerAction(() -> probeTimer(sk));
+        sk.keepaliveTimerAction(() -> keepaliveTimer(sk));
 
         /*
          * 统一走 initializer.onEstablished(sk, this) — initializer 构造期已 requireNonNull:
@@ -819,7 +903,7 @@ public abstract class TcpMultiplexer {
         armKeepalive(sk, sk.keepaliveTimeMs());
     }
 
-    protected static int tcp_initialize_rcv_mss(TcpSock sk) {
+    protected static int initializeRcvMss(TcpSock sk) {
         if (!sk.hasConnection()) {
             return TCP_MSS_DEFAULT;
         }
@@ -829,29 +913,29 @@ public abstract class TcpMultiplexer {
         return Math.max(hint, TCP_MSS_DEFAULT);
     }
 
-    protected void tcp_ack_snd_check(TcpSock sk) {
+    protected void ackSndCheck(TcpSock sk) {
         if (!sk.hasAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_NOW)) {
             return;
         }
-        if ((after(sk.rcvNxt(), sk.rcvWup() + sk.rcvMss()) && sk.rcvWnd() >= sk.tcp_receive_window())
+        if ((after(sk.rcvNxt(), sk.rcvWup() + sk.rcvMss()) && sk.rcvWnd() >= sk.receiveWindow())
                 || sk.inQuickAckMode()
                 || sk.hasAckPending(TcpConstants.ACK_NOW)) {
-            TcpOutput.INSTANCE.tcp_send_ack(sk);
+            output.sendAck(sk);
             return;
         }
-        tcp_send_delayed_ack(sk);
+        sendDelayedAck(sk);
     }
 
-    protected void tcp_send_delayed_ack(TcpSock sk) {
+    protected void sendDelayedAck(TcpSock sk) {
         long ato = Math.max(1L, sk.ackTimeoutMs());
         if (sk.inPingpongMode()) {
             ato = Math.max(ato, config.delayedAckMs());
         }
         sk.addAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER);
-        TcpTimerScheduler.INSTANCE.scheduleDelayedAck(sk, ato, () -> tcp_delack_timer(sk));
+        TcpTimerScheduler.INSTANCE.scheduleDelayedAck(sk, ato, () -> delackTimer(sk));
     }
 
-    protected void tcp_delack_timer(TcpSock sk) {
+    protected void delackTimer(TcpSock sk) {
         if (!sk.hasConnection() || !sk.hasAckPending(TcpConstants.ACK_TIMER)) {
             return;
         }
@@ -865,7 +949,7 @@ public abstract class TcpMultiplexer {
             sk.exitPingpongMode();
             sk.ackTimeoutMs(TcpConstants.TCP_ATO_MIN_MS);
         }
-        TcpOutput.INSTANCE.tcp_send_ack(sk);
+        output.sendAck(sk);
     }
 
     protected void armProbe0(TcpSock sk) {
@@ -876,11 +960,11 @@ public abstract class TcpMultiplexer {
                 sk,
                 com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TimerType.ZERO_WINDOW_PROBE,
                 sk.tcpProbe0BaseMs(),
-                () -> tcp_probe_timer(sk)
+                () -> probeTimer(sk)
         );
     }
 
-    protected void tcp_probe_timer(TcpSock sk) {
+    protected void probeTimer(TcpSock sk) {
         if (!sk.hasConnection()) {
             return;
         }
@@ -894,25 +978,25 @@ public abstract class TcpMultiplexer {
             sk.probesTstampMs(now);
         } else if (sk.userTimeoutMs() > 0 && now - sk.probesTstampMs() >= sk.userTimeoutMs()) {
             sk.skErr(110);
-            TcpOutput.INSTANCE.tcp_send_reset(sk);
-            tcp_done(sk);
+            output.sendReset(sk);
+            tcpDone(sk);
             return;
         }
 
         if (sk.probesOut() >= TcpConstants.TCP_RETRIES2) {
             sk.skErr(110);
-            TcpOutput.INSTANCE.tcp_send_reset(sk);
-            tcp_done(sk);
+            output.sendReset(sk);
+            tcpDone(sk);
             return;
         }
 
-        long timeout = TcpOutput.INSTANCE.tcp_send_probe0(sk);
+        long timeout = output.sendProbe0(sk);
         if (timeout > 0L) {
             TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
                     sk,
                     com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TimerType.ZERO_WINDOW_PROBE,
                     timeout,
-                    () -> tcp_probe_timer(sk)
+                    () -> probeTimer(sk)
             );
         }
     }
@@ -926,10 +1010,10 @@ public abstract class TcpMultiplexer {
                 || sk.state() == TcpConnectionState.TCP_SYN_RECV) {
             return;
         }
-        TcpTimerScheduler.INSTANCE.scheduleKeepalive(sk, Math.max(delayMs, 1L), () -> tcp_keepalive_timer(sk));
+        TcpTimerScheduler.INSTANCE.scheduleKeepalive(sk, Math.max(delayMs, 1L), () -> keepaliveTimer(sk));
     }
 
-    protected void tcp_keepalive_timer(TcpSock sk) {
+    protected void keepaliveTimer(TcpSock sk) {
         if (!sk.hasConnection() || !sk.keepaliveEnabled()) {
             return;
         }
@@ -953,12 +1037,12 @@ public abstract class TcpMultiplexer {
         if ((userTimeout > 0L && elapsed >= userTimeout && sk.probesOut() > 0)
                 || (userTimeout == 0L && sk.probesOut() >= sk.keepaliveProbes())) {
             sk.skErr(110);
-            TcpOutput.INSTANCE.tcp_send_reset(sk);
-            tcp_done(sk);
+            output.sendReset(sk);
+            tcpDone(sk);
             return;
         }
 
-        int err = TcpOutput.INSTANCE.tcp_write_wakeup(sk, 1);
+        int err = output.writeWakeup(sk, 1);
         long next;
         if (err <= 0) {
             sk.probesOut(sk.probesOut() + 1);
@@ -983,36 +1067,36 @@ public abstract class TcpMultiplexer {
     }
 
     /**
-     * 应用层 payload 入发送队列 — 对齐 Linux {@code tcp_sendmsg}(net/ipv4/tcp.c)。
+     * 应用层 payload 入发送队列 — 对齐 Linux {@code sendmsg}(net/ipv4/tcp.c)。
      *
      * <p>Linux 用 {@code lock_sock / release_sock} 把对 sk 的操作序列化到单线程上下文,
-     * 再调 {@link #tcp_sendmsg_locked}。v2 用 sock 的 {@link EventLoop} 归属达成同样语义 —
+     * 再调 {@link #sendmsgLocked}。v2 用 sock 的 {@link EventLoop} 归属达成同样语义 —
      * 当前线程 == sock.eventLoop() 时直接同步执行,否则 {@code execute} 跳转到该 EL。
      *
      * <p>调用方**只需传一个 ByteBuf + flush 标志**,不关心 MSS / 分片 / cwnd / Nagle — 这些
-     * 由 {@link #tcp_sendmsg_locked} 内部处理。所有权:传入的 {@code data} 引用计数由本方法
+     * 由 {@link #sendmsgLocked} 内部处理。所有权:传入的 {@code data} 引用计数由本方法
      * 负责 release(无论成功失败),调用方 **retain 一次后交给本方法即可**,不要再自己 release。
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c">tcp_sendmsg</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c">sendmsg</a>
      */
-    public void tcp_sendmsg(TcpSock sk, ByteBuf data, boolean flush) {
+    public void sendmsg(TcpSock sk, ByteBuf data, boolean flush) {
         final EventLoop owner = sk.eventLoop();
         if (owner != null && !owner.inEventLoop()) {
-            owner.execute(() -> tcp_sendmsg_locked(sk, data, flush));
+            owner.execute(() -> sendmsgLocked(sk, data, flush));
         } else {
-            tcp_sendmsg_locked(sk, data, flush);
+            sendmsgLocked(sk, data, flush);
         }
     }
 
     /**
-     * 已持锁(== 已在 sock.eventLoop())路径上的 send — 对齐 Linux {@code tcp_sendmsg_locked}
+     * 已持锁(== 已在 sock.eventLoop())路径上的 send — 对齐 Linux {@code sendmsgLocked}
      * (net/ipv4/tcp.c)。
      *
      * <p>v2 简化:
      * <ul>
      *   <li>入参是一个 ByteBuf(非 msghdr iov),不做 iov 循环;</li>
-     *   <li>入队前按 {@code tcp_current_mss(sk)} 切片,每个 skb = 1 个 MSS 段 —
-     *       偏离 Linux 的 "size_goal 大 skb + 出口 tcp_fragment 切分" 模型,但对端线上
+     *   <li>入队前按 {@code currentMss(sk)} 切片,每个 skb = 1 个 MSS 段 —
+     *       偏离 Linux 的 "size_goal 大 skb + 出口 fragment 切分" 模型,但对端线上
      *       字节流一致(详见 tcp.java.md);</li>
      *   <li>不做 tail skb 合并(Linux {@code skb_add_data_nocache});</li>
      *   <li>不支持 MSG_MORE / TCP_CORK 持续累积,flush 为二元开关。</li>
@@ -1020,9 +1104,9 @@ public abstract class TcpMultiplexer {
      *
      * <p>对 {@code data} 的引用计数负责 release(无论状态检查失败、total==0、还是成功切片后)。
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c">tcp_sendmsg_locked</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp.c">sendmsgLocked</a>
      */
-    protected void tcp_sendmsg_locked(TcpSock sk, ByteBuf data, boolean flush) {
+    protected void sendmsgLocked(TcpSock sk, ByteBuf data, boolean flush) {
         try {
             if (!sk.hasConnection() || !sk.state().canSend()) {
                 return;
@@ -1031,12 +1115,12 @@ public abstract class TcpMultiplexer {
             if (total == 0) {
                 return;
             }
-            final int mss = Math.max(1, TcpOutput.INSTANCE.tcp_current_mss(sk));
+            final int mss = Math.max(1, output.currentMss(sk));
             int offset = 0;
             while (offset < total) {
                 final int len = Math.min(total - offset, mss);
                 final ByteBuf slice = data.retainedSlice(data.readerIndex() + offset, len);
-                sk.tcp_queue_skb(new TcpSkb(
+                sk.queueSkb(new TcpSkb(
                         slice,
                         sk.writeSeq(),
                         len,
@@ -1045,7 +1129,7 @@ public abstract class TcpMultiplexer {
                 offset += len;
             }
             if (flush) {
-                tcp_push_pending_frames(sk);
+                pushPendingFrames(sk);
             }
         } finally {
             data.release();

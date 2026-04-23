@@ -48,16 +48,16 @@ public final class TcpAck {
             final int maxWindow = (int) Math.min(sock.maxWindow(), sock.bytesAcked());
             if (before(ack, priorSndUna - maxWindow)) {
                 if ((flags & FLAG_NO_CHALLENGE_ACK) == 0) {
-                    TcpOutput.INSTANCE.tcp_send_challenge_ack(sock, false);
+                    sock.sender().sendChallengeAck(false);
                 }
-                TcpMibStats.INSTANCE.incDrop(SKB_DROP_REASON_TCP_TOO_OLD_ACK);
+                sock.multiplexer().mib().incDrop(SKB_DROP_REASON_TCP_TOO_OLD_ACK);
                 return -SKB_DROP_REASON_TCP_TOO_OLD_ACK;
             }
             return 0;
         }
 
         if (after(ack, sock.sndNxt())) {
-            TcpMibStats.INSTANCE.incDrop(SKB_DROP_REASON_TCP_ACK_UNSENT_DATA);
+            sock.multiplexer().mib().incDrop(SKB_DROP_REASON_TCP_ACK_UNSENT_DATA);
             return -SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
         }
 
@@ -90,50 +90,50 @@ public final class TcpAck {
             return 1;
         }
 
-        // 先跑 sacktag 把 SACK 块映射到 RTX 段(对齐 Linux tcp_ack 顺序:
-        // tcp_sacktag_write_queue 在 tcp_clean_rtx_queue 之前执行,使得 clean 阶段
+        // 先跑 sacktag 把 SACK 块映射到 RTX 段(对齐 Linux ackIncoming 顺序:
+        // sacktagWriteQueue 在 cleanRtxQueue 之前执行,使得 clean 阶段
         // 能基于 SACK 位处理 sacked_out 计数)。
-        flags |= tcp_sacktag_write_queue(sock, pkt, priorSndUna);
+        flags |= sacktagWriteQueue(sock, pkt, priorSndUna);
 
-        flags |= tcp_clean_rtx_queue(sock, priorSndUna);
+        flags |= cleanRtxQueue(sock, priorSndUna);
         tcpProcessTlpAck(sock, ack);
 
-        // 对齐 Linux tcp_fastretrans_alert 调用点:tcp_clean_rtx_queue 之后、
+        // 对齐 Linux tcp_fastretrans_alert 调用点:cleanRtxQueue 之后、
         // 拥塞控制更新之前尝试 tcp_try_undo_recovery(TSECR-based);命中则 CA_Recovery
         // 已迁至 CA_Open,后续 onAckedByCc 的自然出口分支不再触发 cwnd=ssthresh deflate。
         final int tsecr = parseTimestampEcho(pkt);
         if (sock.tcpTryUndoRecovery(tsecr)) {
-            TcpMibStats.INSTANCE.inc(TcpMib.TCPFULLUNDO);
+            sock.multiplexer().mib().inc(TcpMib.TCPFULLUNDO);
         } else if (sock.tcpTryUndoLoss(tsecr)) {
             // 对齐 Linux tcp_fastretrans_alert → tcp_try_undo_loss:CA_Loss 期间若收到对
             // 原始段(非 RTO 重传副本)的 ACK,TSECR 早于 retrans_stamp,判定为伪 RTO 并回滚。
-            TcpMibStats.INSTANCE.inc(TcpMib.TCPLOSSUNDO);
+            sock.multiplexer().mib().inc(TcpMib.TCPLOSSUNDO);
         } else if (sock.tcpProcessFrto()) {
             // 对齐 Linux tcp_process_loss 中 F-RTO 分支(RFC 5682):CA_Loss 首 ACK
             // 的 sndUna 追平/越过 RTO 瞬间的 sndNxt 快照 — 原始在飞段全部被吸收,
             // RTO 属伪触发;不依赖 TSECR,与 LOSSUNDO 互补。
-            TcpMibStats.INSTANCE.inc(TcpMib.TCPSPURIOUSRTOS);
+            sock.multiplexer().mib().inc(TcpMib.TCPSPURIOUSRTOS);
         } else if (sock.tcpTryUndoDsack()) {
             // 对齐 Linux tcp_try_undo_dsack:当前 epoch 内所有重传副本都被 DSACK 抵消
             // (tp->undo_retrans 经 tcp_check_dsack 递减至 0),说明是伪触发,回滚 cwnd
             // 并迁 CA_Open。与 FULLUNDO/LOSSUNDO 互斥 — Linux 在 TSECR 分支命中后直接
             // 返回,此处走 else 分支保持同样语义。
-            TcpMibStats.INSTANCE.inc(TcpMib.TCPDSACKUNDO);
+            sock.multiplexer().mib().inc(TcpMib.TCPDSACKUNDO);
         }
 
         if (after(sock.sndUna(), priorSndUna)) {
-            TcpRetransmitter.INSTANCE.rearmRto(sock);
+            sock.sender().rearmRto();
             int newlyAcked = Math.max(1, priorPktsOut - sock.packetsOut());
             sock.onAckedByCc(newlyAcked, true);
-            sock.resetRtoBackoff();
+            sock.sender().resetBackoff();
         } else if (priorPktsOut > 0
                 && ack == priorSndUna
                 && (flags & (FLAG_DATA | FLAG_WIN_UPDATE)) == 0) {
             sock.onAckedByCc(1, false);
         }
 
-        // 对齐 Linux tcp_rack_update_reo_wnd:在 tcp_ack 末尾步进 / 衰减
-        // reo_wnd_steps,把 DSACK 观察转化为下一次 tcp_rack_detect_loss 的 reo_wnd 放宽。
+        // 对齐 Linux tcp_rack_update_reo_wnd:在 ackIncoming 末尾步进 / 衰减
+        // reo_wnd_steps,把 DSACK 观察转化为下一次 rackDetectLoss 的 reo_wnd 放宽。
         // S-3: 用本 ACK scratchpad 的 rackAckPriorDelivered(= rs->prior_delivered 最大值)
         // 作为 1-RTT 门控坐标,防止同一 RTT 内重复步进 reo_wnd_steps。
         sock.tcpRackUpdateReoWnd(sock.rackAckPriorDelivered());
@@ -160,9 +160,9 @@ public final class TcpAck {
      *
      * @param priorSndUna 进入 {@code tcpAck} 前的 snd.una,用于判定 SACK 块是否已被累计 ACK 吸收
      * @return 若至少一个段被新 tagged,返回 {@link #FLAG_DATA_SACKED};否则 0
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L1780">tcp_sacktag_write_queue</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L1780">sacktagWriteQueue</a>
      */
-    public static int tcp_sacktag_write_queue(TcpSock sock, TcpPacketBuf pkt, int priorSndUna) {
+    public static int sacktagWriteQueue(TcpSock sock, TcpPacketBuf pkt, int priorSndUna) {
         if (sock == null || !sock.sendBuffer().hasRtxPending()) {
             return 0;
         }
@@ -189,7 +189,7 @@ public final class TcpAck {
                 }
             }
             if (dupSack) {
-                TcpMibStats.INSTANCE.inc(TcpMib.TCPDSACKRECV);
+                sock.multiplexer().mib().inc(TcpMib.TCPDSACKRECV);
                 // 对齐 Linux tcp_check_dsack → tp->rack.dsack_seen = 1,供
                 // tcp_rack_update_reo_wnd 下次步进 reo_wnd_steps 使用。
                 sock.setRackDsackSeen(true);
@@ -258,7 +258,7 @@ public final class TcpAck {
             }
         }
         if (newlyTagged > 0) {
-            tcp_rack_detect_loss(sock);
+            rackDetectLoss(sock);
         }
         return newlyTagged > 0 ? FLAG_DATA_SACKED : 0;
     }
@@ -277,9 +277,9 @@ public final class TcpAck {
      * 保持 ACK 时钟稳态。DSACK 事件由 {@link TcpSock#tcpRackUpdateReoWnd(int)} 驱动
      * {@code steps} 升降,由本路径读回当前值。
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_recovery.c">tcp_rack_detect_loss</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_recovery.c">rackDetectLoss</a>
      */
-    public static void tcp_rack_detect_loss(TcpSock sock) {
+    public static void rackDetectLoss(TcpSock sock) {
         if (sock == null || !sock.sendBuffer().hasRtxPending()) return;
         final long rackMstamp = sock.rackMstamp();
         if (rackMstamp == 0L) return;
@@ -315,7 +315,7 @@ public final class TcpAck {
      * LOST,供无 SACK 场景下 Fast Retransmit 读 LOST 位驱动重传选择。
      * v2 供 {@code NewReno} 在 dupacks == 3 时调用兜底,与 RACK 路径互不冲突。
      */
-    public static void tcp_mark_head_lost(TcpSock sock, int packets) {
+    public static void markHeadLost(TcpSock sock, int packets) {
         if (sock == null || packets <= 0 || !sock.sendBuffer().hasRtxPending()) return;
         int remaining = packets;
         for (TcpSkb skb : sock.sendBuffer().rtxView()) {
@@ -367,7 +367,7 @@ public final class TcpAck {
      * <p>v2 侧 {@code TcpSendBuffer} 保留容器角色(A10/A11 组织差异),本方法承担
      * 原本被 {@code TcpSendBuffer.acknowledgeUpTo} 吞并的标志/采样逻辑。
      */
-    public static int tcp_clean_rtx_queue(TcpSock sock, int priorSndUna) {
+    public static int cleanRtxQueue(TcpSock sock, int priorSndUna) {
         int flag = 0;
         long firstAcktUs = 0;
         long lastAcktUs = 0;
@@ -391,9 +391,9 @@ public final class TcpAck {
                 }
             }
 
-            // 先前被 tcp_sacktag_write_queue 打过 TCPCB_SACKED_ACKED 的段,此刻被累计 ACK
-            // 吞并释放 — 同步递减 sock.sackedOut,对齐 Linux tcp_clean_rtx_queue 中
-            // sacked_out -= tcp_skb_pcount(skb) 的分支。同时若此前未经 SACK tagged 过,
+            // 先前被 sacktagWriteQueue 打过 TCPCB_SACKED_ACKED 的段,此刻被累计 ACK
+            // 吞并释放 — 同步递减 sock.sackedOut,对齐 Linux cleanRtxQueue 中
+            // sacked_out -= skbPcount(skb) 的分支。同时若此前未经 SACK tagged 过,
             // 此处属于"首次投递",仍需 tp->delivered++;若已 SACK tagged 过,sacktag
             // 侧已计入,不再重复。
             if (skb.isSackAcked()) {
@@ -404,7 +404,7 @@ public final class TcpAck {
             // 对齐 Linux tcp_rate_skb_delivered:被累计 ACK 释放的段的 tx.delivered
             // 快照参与 rs->prior_delivered 的最大值刷新(含此前已 SACK tagged 的段)。
             sock.updateRackAckPriorDelivered(skb.txDelivered());
-            // 对齐 Linux:lost_out -= tcp_skb_pcount(skb) — LOST 段被累计 ACK 吸收后计数下移。
+            // 对齐 Linux:lost_out -= skbPcount(skb) — LOST 段被累计 ACK 吸收后计数下移。
             if (skb.isLost()) {
                 lostDecr++;
             }
@@ -441,7 +441,7 @@ public final class TcpAck {
             h.onWritabilityChanged();
         }
 
-        // 对齐 Linux tcp_clean_rtx_queue 不对 tp->undo_retrans 做递减;该字段只由
+        // 对齐 Linux cleanRtxQueue 不对 tp->undo_retrans 做递减;该字段只由
         // __tcp_retransmit_skb 在成功发出重传后自增,以及 tcp_check_dsack 观察到
         // DSACK 落入 undo_marker 窗口时自减,是否全部被 DSACK 抵消由
         // tcp_try_undo_dsack 判定(见 TcpAck.tcpAck 尾部的 TSECR/DSACK 链)。
@@ -457,12 +457,12 @@ public final class TcpAck {
     }
 
     private static void tcpProcessTlpAck(TcpSock sock, int ack) {
-        int tlpHighSeq = sock.tlpHighSeq();
+        int tlpHighSeq = sock.sender().tlpHighSeq();
         if (tlpHighSeq == 0) {
             return;
         }
         if (sock.packetsOut() == 0 || !before(ack, tlpHighSeq)) {
-            sock.tlpHighSeq(0);
+            sock.sender().tlpHighSeq(0);
         }
     }
 
@@ -507,7 +507,7 @@ public final class TcpAck {
                 int priorMaxWindow = sock.maxWindow();
                 sock.sndWnd(nwin);
                 if (Integer.compareUnsigned(nwin, priorMaxWindow) > 0) {
-                    TcpOutput.INSTANCE.tcp_sync_mss(sock, 0);
+                    sock.sender().syncMss(0);
                 }
             }
             return FLAG_WIN_UPDATE;

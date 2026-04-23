@@ -190,7 +190,7 @@ public final class TcpReceiveBuffer {
     /**
      * Queue a pure out-of-order segment (seq &gt; rcv_nxt).  Handles leading / trailing
      * overlap against existing OFO entries and enforces {@link #OFO_MAX_BYTES}.
-     * Mirrors Linux {@code tcp_data_queue_ofo} (tcp_input.c:5055).
+     * Mirrors Linux {@code dataQueueOfo} (tcp_input.c:5055).
      *
      * <p>若新段与已存 OFO 段发生重叠,按 RFC 2883 Case 3 把重复区段通过
      * {@link OfoResult#dsackStart}/{@link OfoResult#dsackEnd} 回报,调用方负责
@@ -226,7 +226,7 @@ public final class TcpReceiveBuffer {
         if (pred != null) {
             TcpSkb prev = pred.getValue();
             if (TcpSequence.after(prev.endSeq(), seq)) {
-                // 对齐 Linux tcp_data_queue_ofo 的 Case 3 DSACK:新 OFO 段的 [origSeq,
+                // 对齐 Linux dataQueueOfo 的 Case 3 DSACK:新 OFO 段的 [origSeq,
                 // min(origEndSeq, prev.endSeq())) 区段已在 pred 中出现过,回报为 DSACK。
                 dsackStart = origSeq;
                 dsackEnd   = TcpSequence.before(origEndSeq, prev.endSeq())
@@ -554,7 +554,7 @@ public final class TcpReceiveBuffer {
 
     /**
      * Result of {@link #offerOfo}: 入队成功标志 + 可选 DSACK 块
-     * (对齐 RFC 2883 Case 3 / Linux {@code tcp_data_queue_ofo} 的 {@code tcp_dsack_set} 调用)。
+     * (对齐 RFC 2883 Case 3 / Linux {@code dataQueueOfo} 的 {@code tcp_dsack_set} 调用)。
      *
      * <p>{@code queued} 与 DSACK 字段相互独立:
      * <ul>

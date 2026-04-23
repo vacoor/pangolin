@@ -86,6 +86,10 @@
         <pangolin.version>0.0.5-SNAPSHOT</pangolin.version>
         <nougat.version>1.0.15.2</nougat.version>
         <lombok.version>1.18.36</lombok.version>
+        <junit.version>5.10.2</junit.version>
+        <mockito.version>5.11.0</mockito.version>
+        <assertj.version>3.25.3</assertj.version>
+        <surefire.version>3.2.5</surefire.version>
         <!--<slf4j.version>1.7.6</slf4j.version>-->
       <slf4j.version>1.7.32</slf4j.version>
       <log4j.version>1.2.17</log4j.version>
@@ -112,6 +116,28 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- JUnit 5 / Mockito / AssertJ — 在 spring-boot-dependencies 之前 import,
+                 覆盖 spring-boot 2.0 带入的旧版 junit4 / mockito2。 -->
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-bom</artifactId>
+                <version>${mockito.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.assertj</groupId>
+                <artifactId>assertj-core</artifactId>
+                <version>${assertj.version}</version>
+            </dependency>
+
             <dependency>
                 <groupId>com.github.nomou</groupId>
                 <artifactId>nougat-lang</artifactId>
@@ -200,6 +226,11 @@
             </dependency>
             <dependency>
                 <groupId>io.netty</groupId>
+                <artifactId>netty-transport-native-io_uring</artifactId>
+                <version>${netty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
                 <artifactId>netty-codec-http</artifactId>
                 <version>${netty.version}</version>
             </dependency>
@@ -234,6 +265,11 @@
     <build>
         <!-- java source & javadoc plugin [[ -->
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${surefire.version}</version>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-source-plugin</artifactId>

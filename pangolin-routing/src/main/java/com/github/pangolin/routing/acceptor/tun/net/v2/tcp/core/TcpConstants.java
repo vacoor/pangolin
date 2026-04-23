@@ -157,7 +157,7 @@ public final class TcpConstants {
     // ---- Buffer sizes ----
     public static final int  TCP_DEFAULT_RCV_BUF = 87380;
 
-    // ---- tcp_win_from_space / 内存压力 ----
+    // ---- winFromSpace / 内存压力 ----
     /**
      * {@code tcp_win_from_space} 缩放因子定点位数 — 对齐 Linux
      * {@code TCP_RMEM_TO_WIN_SCALE} (8) / {@code tcp_win_from_space}:

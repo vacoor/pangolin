@@ -40,7 +40,7 @@ public class TcpMultiplexHandler extends IpPacketHandler<TcpPacketBuf> {
         } catch (final Exception ex) {
             log.error("Failed to process TCP packet", ex);
             // fallback reset in ingress layer
-            com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput.INSTANCE.tcp_v4_send_reset(ctx, rawPkt);
+            multiplexer.output().v4SendReset(ctx, rawPkt);
         }
     }
 

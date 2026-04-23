@@ -23,7 +23,7 @@ import java.util.Objects;
 /**
  * {@link TcpSockInitializer} 的 backend 透传实现 — 覆盖 {@code onRequest} 以在 SYN 阶段
  * 先连 backend 再发 SYN-ACK,覆盖 {@code onEstablished} 以装 {@link TcpPassthroughHandler}
- * 和反向适配器({@link TcpMultiplexer#tcp_sendmsg} — MSS 切片由栈内部处理),实现双向透传。
+ * 和反向适配器({@link TcpMultiplexer#sendmsg} — MSS 切片由栈内部处理),实现双向透传。
  *
  * <p><b>生命周期</b>:
  * <ol>
@@ -107,8 +107,8 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
         //    失败时 RST + destroy req),切入 ESTABLISHED 后换成"backend 关 → sock 推 FIN"。
         final ChannelFutureListener handshakeCloseListener = sock.childCloseListener();
         sock.childCloseListener(future -> {
-            if (multiplexer.tcp_close_state(sock)) {
-                TcpOutput.INSTANCE.tcp_send_fin(sock);
+            if (multiplexer.closeState(sock)) {
+                multiplexer.output().sendFin(sock);
             }
         });
         backend.closeFuture().addListener(sock.childCloseListener());
@@ -116,7 +116,7 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
             backend.closeFuture().removeListener(handshakeCloseListener);
         }
 
-        // 3. 挂反向适配器:backend payload → tcp_sendmsg(MSS 切片 / push 由栈内部处理)
+        // 3. 挂反向适配器:backend payload → sendmsg(MSS 切片 / push 由栈内部处理)
         backend.pipeline().addLast(new ChannelInboundHandlerAdapter() {
             @Override
             public void channelRead(ChannelHandlerContext ctx, Object msg) {
@@ -124,14 +124,14 @@ public final class TcpPassthroughInitializer implements TcpSockInitializer {
                     ReferenceCountUtil.release(msg);
                     return;
                 }
-                // 引用权交给 tcp_sendmsg,其内部负责 release
-                multiplexer.tcp_sendmsg(sock, (ByteBuf) msg, true);
+                // 引用权交给 sendmsg,其内部负责 release
+                sock.sender().sendmsg((ByteBuf) msg, true);
             }
 
             @Override
             public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-                TcpOutput.INSTANCE.tcp_send_reset(sock);
-                multiplexer.tcp_done(sock);
+                multiplexer.output().sendReset(sock);
+                multiplexer.tcpDone(sock);
                 if (ctx.channel().isOpen()) {
                     ctx.channel().close();
                 }

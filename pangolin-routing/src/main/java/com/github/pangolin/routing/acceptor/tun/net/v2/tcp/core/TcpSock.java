@@ -25,6 +25,22 @@ public class TcpSock extends SockCommon {
     private Channel childChannel;
     private ChannelFutureListener childCloseListener;
     /**
+     * 所属协议栈实例 — 由 {@link TcpMultiplexer#configure(TcpSock)} 注入,
+     * 承载 per-stack 服务(retransmitter / MIB / policy 等)的入口。
+     */
+    private TcpMultiplexer multiplexer;
+    /**
+     * 发送侧聚合对象 — R2 抽 Sender 的目标。R2.0(骨架)期间只是 facade,
+     * 状态仍存在 TcpSock 自身;R2.3 起字段下沉到本对象。由
+     * {@link TcpMultiplexer#configure(TcpSock)} 与 {@code multiplexer} 同时注入。
+     */
+    private Sender sender;
+    /**
+     * 接收侧聚合对象 — R3 抽 Receiver 的目标。R3.0(骨架)期间只是 facade,
+     * 状态仍存在 TcpSock 自身;R3.2 起字段下沉到本对象。
+     */
+    private Receiver receiver;
+    /**
      * 挂在 sock 上的业务事件回调 — 由 {@link TcpSockInitializer#onEstablished} 注入。
      * 典型实现是 netty 子包的 {@code TcpChannel},或 ext.backend 子包的
      * {@code TcpPassthroughHandler}。不为 {@code null} 表示这条连接已装配业务层。
@@ -33,7 +49,7 @@ public class TcpSock extends SockCommon {
     /**
      * 应用层 autoRead 反压标志 — {@code true} 时 {@code queue_and_out} 仍把数据放入
      * {@link TcpReceiveBuffer}(保持 rcv_nxt 推进 / ACK 正常),但不再 drain 到
-     * userChannel,从而 {@code tcp_receive_window()} 自然收缩,对端感知反压。
+     * userChannel,从而 {@code receiveWindow()} 自然收缩,对端感知反压。
      * 对齐 Linux "应用 syscall 未读 socket 导致 tp->rcv_wnd 缩窗" 语义。
      */
     private boolean rcvPaused;
@@ -344,7 +360,7 @@ public class TcpSock extends SockCommon {
         sock.rcvSsthresh = Math.max(rcvWnd, TcpConstants.TCP_DEFAULT_RCV_BUF);
         // PMTU / tcp_header_len 初始化(对齐 Linux tcp_create_openreq_child):
         //   tcp_header_len = 20 + (tstamp_ok ? TCPOLEN_TSTAMP_ALIGNED(12) : 0)
-        //   mssCache 延迟到首次 tcp_sync_mss;pmtuCookie/dstMtu 默认 0(无 PMTU 发现)
+        //   mssCache 延迟到首次 syncMss;pmtuCookie/dstMtu 默认 0(无 PMTU 发现)
         sock.tcpHeaderLen = TcpConstants.TCP_MIN_HEADER_LEN
                 + (timestampEnabled ? TcpConstants.TCP_TSOPT_WIRE_LEN : 0);
         sock.mssCache   = mss;
@@ -540,6 +556,30 @@ public class TcpSock extends SockCommon {
         return channel;
     }
 
+    public TcpMultiplexer multiplexer() {
+        return multiplexer;
+    }
+
+    public void multiplexer(TcpMultiplexer multiplexer) {
+        this.multiplexer = multiplexer;
+    }
+
+    public Sender sender() {
+        return sender;
+    }
+
+    public void sender(Sender sender) {
+        this.sender = sender;
+    }
+
+    public Receiver receiver() {
+        return receiver;
+    }
+
+    public void receiver(Receiver receiver) {
+        this.receiver = receiver;
+    }
+
     public Channel childChannel() {
         return childChannel;
     }
@@ -664,7 +704,7 @@ public class TcpSock extends SockCommon {
      * {@code retransOut} 单独计数,SACK 语义由 {@code sackedOut} 覆盖;{@code lostOut}
      * 由 RACK / NewReno 标记,两者共同从 in_flight 中排除。
      *
-     * <p>{@link TcpOutput#tcp_cwnd_test} 用此值作 cwnd 预算分子,避免 SACKed 段既
+     * <p>{@link TcpOutput#cwndTest} 用此值作 cwnd 预算分子,避免 SACKed 段既
      * 占 {@code packetsOut}、又被 cwnd 扣减的双倍计费。
      */
     public int packetsInFlight() {
@@ -839,7 +879,7 @@ public class TcpSock extends SockCommon {
         this.icskAckLrcvtimeMs = v;
     }
 
-    public int tcp_receive_window() {
+    public int receiveWindow() {
         return Math.max(0, rcvWup + rcvWnd - rcvNxt);
     }
 
@@ -873,7 +913,7 @@ public class TcpSock extends SockCommon {
         return sendBuffer == null ? null : sendBuffer.peekWrite();
     }
 
-    public void tcp_queue_skb(TcpSkb skb) {
+    public void queueSkb(TcpSkb skb) {
         if (sendBuffer != null) {
             writeSeq = skb.endSeq();
             sendBuffer.enqueue(skb);
@@ -1234,8 +1274,8 @@ public class TcpSock extends SockCommon {
 
     /**
      * 对应 Linux {@code dst_mtu(sk->sk_dst_cache)}。外部 ICMP PTB / PMTU 发现路径写入此值;
-     * 写入后下一次 {@link TcpOutput#tcp_current_mss} 会检测到与 {@link #pmtuCookie} 不一致,
-     * 触发 {@link TcpOutput#tcp_sync_mss} 重新推导 {@link #mssCache}。
+     * 写入后下一次 {@link TcpOutput#currentMss} 会检测到与 {@link #pmtuCookie} 不一致,
+     * 触发 {@link TcpOutput#syncMss} 重新推导 {@link #mssCache}。
      */
     public int dstMtu() { return dstMtu; }
     public void dstMtu(int v) { this.dstMtu = Math.max(v, 0); }
@@ -1278,7 +1318,7 @@ public class TcpSock extends SockCommon {
 
     /**
      * 读取并清零当前待发的 DSACK。返回 {@code true} 表示本次读取到有效块 —
-     * 对齐 Linux {@code tcp_send_ack} 调用 {@code tcp_write_xmit} 后
+     * 对齐 Linux {@code __tcp_send_ack} 调用 {@code tcp_write_xmit} 后
      * {@code tp->duplicate_sack[0]} 清零的语义。
      */
     public boolean consumeDsack(int[] dst) {
@@ -1314,7 +1354,7 @@ public class TcpSock extends SockCommon {
      * / undo_marker},为后续 {@code tcp_try_undo_*} 提供回滚基线。
      *
      * <p>同时把 {@code undo_retrans / retrans_stamp} 清零 — 本 epoch 的
-     * 计数/打戳由 {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput#tcp_retransmit_skb}
+     * 计数/打戳由 {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutput#retransmitSkb}
      * 在首次重传时写入,避免上一 epoch 的残留污染 DSACK-driven undo 判定
      * (Linux 在 {@code __tcp_retransmit_skb} 自增 {@code undo_retrans} 前并不
      * 显式清零;v2 因上一 epoch 的自然退出路径不再保留 {@code tcp_clean_rtx_queue}
@@ -1365,7 +1405,7 @@ public class TcpSock extends SockCommon {
      *       CA 状态直接迁到 CA_Open(跳过自然 {@code cwnd = ssthresh} deflate)。</li>
      * </ol>
      * {@code !tp->undo_retrans} 兜底路径由 {@link #tcpTryUndoDsack()} 单独承担:
-     * {@code TcpAck.tcp_sacktag_write_queue} 在 DSACK Case 1/2 时按 Linux
+     * {@code TcpAck.sacktagWriteQueue} 在 DSACK Case 1/2 时按 Linux
      * {@code tcp_check_dsack} 守卫递减 {@code undoRetrans},清零后在
      * {@code TcpAck.tcpAck} 尾部命中 DSACK undo 分支。
      *
@@ -1469,7 +1509,7 @@ public class TcpSock extends SockCommon {
      *   <li>本 epoch 至少发出过一次重传({@code retransStamp != 0L} 间接表明
      *       {@code __tcp_retransmit_skb} 命中过,对应 Linux 的 {@code tp->undo_retrans}
      *       曾被自增);</li>
-     *   <li>在 {@code TcpAck.tcp_sacktag_write_queue} 经 DSACK Case 1/2 递减后
+     *   <li>在 {@code TcpAck.sacktagWriteQueue} 经 DSACK Case 1/2 递减后
      *       {@code undoRetrans == 0} — 等价于 Linux {@code !tp->undo_retrans},
      *       说明所有重传副本都已被 DSACK 抵消,判定为伪触发。</li>
      * </ol>
@@ -1499,7 +1539,7 @@ public class TcpSock extends SockCommon {
 
     /**
      * 当前连续 dupack 计数 — 对应 Linux {@code tp->dup_acks}(近似)。RFC 3042
-     * Limited Transmit 在 {@code TcpOutput.tcp_cwnd_test} 读取该值,在
+     * Limited Transmit 在 {@code TcpOutput.cwndTest} 读取该值,在
      * {@code dupacks ∈ [1, 2]} 且 {@link #isCaOpen()} 时放宽 cwnd 预算。
      */
     public int dupacks() { return dupacks; }
@@ -1738,11 +1778,11 @@ public class TcpSock extends SockCommon {
                 tlpHighSeq = 0;
                 congestionState = CongestionState.RECOVERY;
                 caIncrCounter = 0;
-                // 对齐 Linux tcp_enter_recovery → tcp_mark_head_lost:NewReno 无 SACK
+                // 对齐 Linux tcp_enter_recovery → markHeadLost:NewReno 无 SACK
                 // 信息驱动 LOST 标记,进入 Fast Retransmit 前先把队首段记为 LOST,
-                // 这样 tcp_retransmit_skb 的 LOST 优先路径能与 RACK 场景保持一致。
-                TcpAck.tcp_mark_head_lost(this, 1);
-                TcpRetransmitter.INSTANCE.retransmit(this);
+                // 这样 retransmitSkb 的 LOST 优先路径能与 RACK 场景保持一致。
+                TcpAck.markHeadLost(this, 1);
+                this.multiplexer.retransmitter().retransmit(this);
             } else if (congestionState == CongestionState.RECOVERY) {
                 cwnd++;
             }

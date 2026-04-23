@@ -74,12 +74,12 @@ public enum TcpMib {
     TCPSPURIOUSRTOS,
     /**
      * 对应 {@code LINUX_MIB_TCPACKSKIPPEDSYNRECV}:SYN_RECV 半开连接阶段因 OOW 限流
-     * 被跳过的 ACK / SYN-ACK 发送数(对齐 Linux {@code tcp_check_req} 中
-     * {@code tcp_oow_rate_limited(..., LINUX_MIB_TCPACKSKIPPEDSYNRECV, ...)})。
+     * 被跳过的 ACK / SYN-ACK 发送数(对齐 Linux {@code checkReq} 中
+     * {@code oowRateLimited(..., LINUX_MIB_TCPACKSKIPPEDSYNRECV, ...)})。
      */
     TCPACKSKIPPEDSYNRECV,
     /**
-     * 对应 {@code LINUX_MIB_TSECRREJECTED}:{@code tcp_check_req} 阶段因 {@code rcv_tsecr}
+     * 对应 {@code LINUX_MIB_TSECRREJECTED}:{@code checkReq} 阶段因 {@code rcv_tsecr}
      * 越出 {@code [snt_tsval_first, snt_tsval_last]} 而被拒绝的段数。
      */
     TSECRREJECTED,

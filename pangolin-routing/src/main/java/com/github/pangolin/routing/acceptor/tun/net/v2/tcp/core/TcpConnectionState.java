@@ -15,7 +15,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
  * final ACK passes sequence validation, analogous to Linux {@code tcp_create_openreq_child()}.
  * The connection starts in {@link #TCP_SYN_RECV} and transitions to {@link #TCP_ESTABLISHED}
  * inside the multiplexer state machine, mirroring the {@code TCP_SYN_RECV} case in Linux
- * {@code tcp_rcv_state_process()}.
+ * {@code rcvStateProcess()}.
  */
 public enum TcpConnectionState {
 

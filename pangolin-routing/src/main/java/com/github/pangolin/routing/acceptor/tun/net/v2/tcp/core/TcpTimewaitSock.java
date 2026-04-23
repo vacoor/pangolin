@@ -14,11 +14,11 @@ import java.util.concurrent.ScheduledFuture;
  * <p>v2 因 A10/A11 保留组织差异,将 {@code inet_timewait_sock} 与 {@code tcp_timewait_sock}
  * 合并为单类,字段命名与 Linux 源码保持一致,便于逐行对照;同时继承
  * {@link SockCommon},使 {@code __inet_lookup_skb} 在 ESTABLISHED miss 时能
- * 返回 {@code TcpTimewaitSock} 进入 {@code tcp_timewait_state_process} 路径。
+ * 返回 {@code TcpTimewaitSock} 进入 {@code timewaitStateProcess} 路径。
  *
  * <p>仅保留 TIME_WAIT 阶段所必须的上下文:
  * <ul>
- *   <li>{@code tw_channel} — 用于从 {@code TcpOutput.tcp_timewait_send_ack} 重放 FIN-ACK 的
+ *   <li>{@code tw_channel} — 用于从 {@code TcpOutput.timewaitSendAck} 重放 FIN-ACK 的
  *       TUN 侧 channel(共享,原 {@code TcpSock.channel()});</li>
  *   <li>{@code tw_rcv_nxt / tw_snd_nxt / tw_rcv_wnd / tw_rcv_wscale} — 迟到段的序号 / 窗口校验;</li>
  *   <li>PAWS 上下文 ({@code tw_ts_recent / tw_ts_recent_stamp / tw_ts_enabled})。</li>
@@ -51,7 +51,7 @@ public final class TcpTimewaitSock extends SockCommon {
      * 对应 Linux {@code tcp_timewait_sock.tw_rcv_nxt}。
      *
      * <p>FIN_WAIT_2 子状态收到期望序号 FIN 时推进 +1(消耗 FIN 的 SEQ 空间),
-     * 与 Linux {@code tcp_timewait_state_process} 内的 {@code tw->tw_rcv_nxt++} 对齐。
+     * 与 Linux {@code timewaitStateProcess} 内的 {@code tw->tw_rcv_nxt++} 对齐。
      * TIME_WAIT 子状态保持不变。
      */
     public int tw_rcv_nxt;
@@ -85,7 +85,7 @@ public final class TcpTimewaitSock extends SockCommon {
      * </ul>
      *
      * <p>二者到期行为均为 {@link TcpMultiplexer#inet_twsk_kill(TcpTimewaitSock)},区别在
-     * {@code tcp_timewait_state_process} 内的分支行为(FIN_WAIT_2 收到 FIN 需要推进 rcv_nxt
+     * {@code timewaitStateProcess} 内的分支行为(FIN_WAIT_2 收到 FIN 需要推进 rcv_nxt
      * 并刷新 2MSL;TIME_WAIT 收到任何迟到段都仅重放 ACK)。
      */
     public TcpConnectionState tw_substate = TcpConnectionState.TIME_WAIT;

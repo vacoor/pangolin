@@ -40,7 +40,7 @@ public interface TcpFeature {
     /**
      * 被动端收到 SYN 时解析对端带来的选项,决定是否协商成功。
      *
-     * <p>对齐 Linux {@code tcp_parse_options} + {@code tcp_openreq_init}(tcp_input.c)
+     * <p>对齐 Linux {@code tcp_parse_options} + {@code openreqInit}(tcp_input.c)
      * 的选项落库过程。实现应把协商结果写入 {@link TcpOptionsReceived} 或等价字段,
      * 供 {@link #onSynSend} 的 SYN-ACK 构造阶段使用。
      *
@@ -55,7 +55,7 @@ public interface TcpFeature {
     /**
      * ESTABLISHED 态每收到一段数据/ACK 时的通用钩子。
      *
-     * <p>对齐 Linux {@code tcp_ack} / {@code tcp_data_queue} 中的选项旁路 —
+     * <p>对齐 Linux {@code tcp_ack} / {@code dataQueue} 中的选项旁路 —
      * 例如 Timestamps PAWS 校验、SACK 块 ingest、ECN CE-bit 反馈。
      * 实现<b>不得</b>在此修改段序号或有效载荷,仅做"观察 + 更新内部状态"。
      *

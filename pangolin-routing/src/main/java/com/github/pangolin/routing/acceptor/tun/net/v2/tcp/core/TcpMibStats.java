@@ -19,7 +19,11 @@ import java.util.concurrent.atomic.AtomicLongArray;
  */
 public final class TcpMibStats {
 
-    /** 进程内单例 — 所有 v2 TCP 组件共享。 */
+    /**
+     * 进程级 fallback 实例。R1.2(2026-04-23):TcpMultiplexer 已降为 per-stack
+     * 持有独立 {@code mib} 字段;本 INSTANCE 仅保留给少量未持栈引用的叶子对象
+     * (如 TcpReceiveBuffer 的 OFO 相关计数),将在 R3 抽 Receiver 时收尾清理。
+     */
     public static final TcpMibStats INSTANCE = new TcpMibStats();
 
     /**
@@ -31,7 +35,7 @@ public final class TcpMibStats {
     private final AtomicLongArray mibCounters = new AtomicLongArray(TcpMib.values().length);
     private final AtomicLongArray dropReasonCounters = new AtomicLongArray(DROP_REASON_SLOTS);
 
-    private TcpMibStats() {
+    public TcpMibStats() {
     }
 
     /** MIB 计数器 +1 — 对应 Linux {@code NET_INC_STATS(net, mib)}。 */

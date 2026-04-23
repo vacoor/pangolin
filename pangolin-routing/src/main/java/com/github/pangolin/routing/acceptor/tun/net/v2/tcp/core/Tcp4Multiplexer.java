@@ -36,20 +36,17 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         super(config, tcpGroup, initializer);
     }
 
-    @Override
-    protected TcpSock init(TcpSock sk) {
-        return sk;
-    }
+    // init(TcpSock) 继承父类默认实现(configure sender/receiver),IPv4 无额外装配逻辑。
 
     @Override
-    public void tcp_rcv(ChannelHandlerContext net, TcpPacketBuf pkt) {
+    public void rcv(ChannelHandlerContext net, TcpPacketBuf pkt) {
         log.info(TcpLogUtils.logify(pkt, 0));
         tcp_v4_rcv(net, pkt);
     }
 
     @Override
     public void send_reset(ChannelHandlerContext net, TcpPacketBuf pkt, int err) {
-        TcpOutput.INSTANCE.tcp_v4_send_reset(net, pkt);
+        output.v4SendReset(net, pkt);
     }
 
     @Override
@@ -71,7 +68,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         req.request().synAckFailureAction(() -> inet_csk_destroy_sock(req));
         req.handshakeCloseListener(future -> {
             if (req.synPacket() != null) {
-                TcpOutput.INSTANCE.tcp_v4_send_reset(net, req.synPacket());
+                output.v4SendReset(net, req.synPacket());
             }
             inet_csk_destroy_sock(req);
         });
@@ -98,13 +95,13 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         }
 
         if (sk instanceof TcpTimewaitSock) {
-            tcp_timewait_state_process(net, (TcpTimewaitSock) sk, pkt);
+            timewaitStateProcess(net, (TcpTimewaitSock) sk, pkt);
             return;
         }
 
         if (sk instanceof TcpRequestSock) {
             TcpRequestSock req = (TcpRequestSock) sk;
-            TcpSock nsk = tcp_check_req(net, req.listener(), pkt, req);
+            TcpSock nsk = checkReq(net, req.listener(), pkt, req);
             if (nsk == null) {
                 return;
             }
@@ -148,10 +145,10 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
     }
 
     protected int tcp_v4_do_rcv(ChannelHandlerContext net, TcpSock sk, TcpPacketBuf pkt) {
-        return tcp_rcv_state_process(net, sk, pkt);
+        return rcvStateProcess(net, sk, pkt);
     }
 
-    protected int tcp_rcv_state_process(ChannelHandlerContext net, TcpSock sk, TcpPacketBuf pkt) {
+    protected int rcvStateProcess(ChannelHandlerContext net, TcpSock sk, TcpPacketBuf pkt) {
         switch (sk.state()) {
             case TCP_CLOSED:
                 return -1;
@@ -184,41 +181,41 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
             return -1;
         }
 
-        TcpIncomingPreValidator validator = new TcpIncomingPreValidator(sk, () -> tcp_done(sk));
+        TcpIncomingPreValidator validator = new TcpIncomingPreValidator(sk, () -> tcpDone(sk));
         if (!validator.validate(net, pkt)) {
             return 0;
         }
 
-        int reason = tcp_ack(sk, pkt, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT | FLAG_NO_CHALLENGE_ACK);
+        int reason = ackIncoming(sk, pkt, FLAG_SLOWPATH | FLAG_UPDATE_TS_RECENT | FLAG_NO_CHALLENGE_ACK);
         if (reason <= 0) {
             if (sk.state() == TcpConnectionState.TCP_SYN_RECV) {
                 return reason == 0 ? 0 : -reason;
             }
             if (reason < 0) {
-                TcpOutput.INSTANCE.tcp_send_challenge_ack(sk, false);
+                output.sendChallengeAck(sk, false);
                 return 0;
             }
         }
 
         switch (sk.state()) {
             case TCP_SYN_RECV:
-                tcp_try_establish(sk, pkt);
+                tryEstablish(sk, pkt);
                 break;
             case FIN_WAIT_1:
                 if (sk.sndUna() == sk.writeSeq()) {
                     // FIN_WAIT_1 → FIN_WAIT_2: linger2 < 0 表示应用已放弃 2MSL 等待
                     // 立即 abort (对齐 v1 tcp_input.c:2193 abort-on-data-after-close)
                     if (sk.linger2() < 0) {
-                        tcp_done(sk);
+                        tcpDone(sk);
                         return 0;
                     }
                     sk.state(TcpConnectionState.FIN_WAIT_2);
                     sk.addShutdown(TcpConstants.SEND_SHUTDOWN);
                     // 对齐 Linux tcp_input.c 中 TCP_FIN_WAIT1 → TCP_FIN_WAIT2 分支:
                     // 若当前段piggyback peer 的 FIN,直接下沉到 TW bucket 会让后续
-                    // tcp_data_queue → tcp_fin 消费 FIN 的路径失效(sk 已销毁),对齐
+                    // dataQueue → finIncoming 消费 FIN 的路径失效(sk 已销毁),对齐
                     // `else if (th->fin) inet_csk_reset_keepalive_timer(sk, tmo)` 的延迟策略:
-                    // 保留重量级 sk 走完本段的 tcp_data_queue 再由 tcp_fin 迁入 TIME_WAIT。
+                    // 保留重量级 sk 走完本段的 dataQueue 再由 finIncoming 迁入 TIME_WAIT。
                     if (pkt.isFin()) {
                         TcpTimerScheduler.INSTANCE.scheduleKeepalive(sk, sk.tcpFinTimeMs(), () -> onFinWait2Keepalive(sk));
                     } else {
@@ -228,13 +225,13 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
                 break;
             case CLOSING:
                 if (sk.sndUna() == sk.writeSeq()) {
-                    tcp_time_wait(net, sk, TcpConnectionState.TIME_WAIT);
+                    timeWait(net, sk, TcpConnectionState.TIME_WAIT);
                     return 0;
                 }
                 break;
             case LAST_ACK:
                 if (sk.sndUna() == sk.writeSeq()) {
-                    tcp_done(sk);
+                    tcpDone(sk);
                     return 0;
                 }
                 break;
@@ -244,37 +241,37 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
 
         switch (sk.state()) {
             case TCP_ESTABLISHED:
-                return tcp_data_queue(net, sk, pkt);
+                return dataQueue(net, sk, pkt);
             case FIN_WAIT_1:
             case FIN_WAIT_2:
                 if (sk.hasShutdown(TcpConstants.RCV_SHUTDOWN) && hasDataBeyondRcvNxt(sk, pkt)) {
                     send_reset(net, pkt, -1);
-                    tcp_done(sk);
+                    tcpDone(sk);
                     return 0;
                 }
-                // FIN+data 段由 tcp_data_queue → queue_and_out 统一处理:receiveBuffer.offer
-                // 推进 rcv_nxt,finDelivered 时触发 tcp_fin 全状态 switch(FIN_WAIT_1 → CLOSING,
+                // FIN+data 段由 dataQueue → queue_and_out 统一处理:receiveBuffer.offer
+                // 推进 rcv_nxt,finDelivered 时触发 finIncoming 全状态 switch(FIN_WAIT_1 → CLOSING,
                 // FIN_WAIT_2 → TIME_WAIT)。裸 FIN(seq == rcv_nxt,无 payload)同路径生效。
-                return tcp_data_queue(net, sk, pkt);
+                return dataQueue(net, sk, pkt);
             case CLOSE_WAIT:
             case CLOSING:
             case LAST_ACK:
                 // 接收方向已关闭:任何新数据 / 越界 FIN 都视为协议违规(对齐 v1 tcp_input.c:5160)
                 if (hasDataBeyondRcvNxt(sk, pkt)) {
                     send_reset(net, pkt, -1);
-                    tcp_done(sk);
+                    tcpDone(sk);
                     return 0;
                 }
-                // 重传 FIN(seq < rcv_nxt):状态不变,走统一 tcp_fin(CLOSE_WAIT/CLOSING/LAST_ACK
-                // 分支仅发 ACK)— 对齐 Linux tcp_fin switch。
+                // 重传 FIN(seq < rcv_nxt):状态不变,走统一 finIncoming(CLOSE_WAIT/CLOSING/LAST_ACK
+                // 分支仅发 ACK)— 对齐 Linux finIncoming switch。
                 if (pkt.isFin()) {
-                    tcp_fin(net, sk);
+                    finIncoming(net, sk);
                 }
                 return 0;
             case TIME_WAIT:
-                // 正常情况下 TcpSock 在进入 TIME_WAIT 时已被 tcp_time_wait 销毁 →
+                // 正常情况下 TcpSock 在进入 TIME_WAIT 时已被 timeWait 销毁 →
                 // 后续段由 TW bucket({@link TcpMultiplexer#timewaitRegistry})接管,
-                // 走 tcp_timewait_state_process 路径。此分支仅作防御性 no-op。
+                // 走 timewaitStateProcess 路径。此分支仅作防御性 no-op。
                 return 0;
             default:
                 return 0;
@@ -282,7 +279,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
     }
 
     /**
-     * 对齐 Linux {@code tcp_timewait_state_process}(net/ipv4/tcp_minisocks.c):
+     * 对齐 Linux {@code timewaitStateProcess}(net/ipv4/tcp_minisocks.c):
      * 处理 TIME_WAIT bucket 收到的迟到段。
      *
      * <ul>
@@ -302,9 +299,9 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
      * FIN_WAIT_2 阶段收到对端 FIN 需推进 {@code tw_rcv_nxt} 并迁入 TIME_WAIT 子状态,
      * 同时刷新为 2MSL;FIN_WAIT_2 阶段收到裸数据则重放 ACK 但不迁移子状态。
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c">tcp_timewait_state_process</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c">timewaitStateProcess</a>
      */
-    protected void tcp_timewait_state_process(ChannelHandlerContext net, TcpTimewaitSock tw, TcpPacketBuf pkt) {
+    protected void timewaitStateProcess(ChannelHandlerContext net, TcpTimewaitSock tw, TcpPacketBuf pkt) {
         if (tw == null) {
             return;
         }
@@ -346,9 +343,9 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
 
         // (4) PAWS 拒绝:回放 ACK + 刷新 2MSL,累加 MIB;合法段同步刷新 ts_recent
         if (pawsReject) {
-            com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMibStats.INSTANCE.inc(
+            mib.inc(
                     com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpMib.PAWSESTABREJECTED);
-            TcpOutput.INSTANCE.tcp_timewait_send_ack(net, tw);
+            output.timewaitSendAck(net, tw);
             inet_twsk_reschedule(tw, config.timeWaitMs());
             return;
         }
@@ -357,20 +354,20 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         }
 
         // (5) FIN_WAIT_2 子状态 — 等待对端 FIN。
-        //     对齐 Linux tcp_timewait_state_process:收到期望序号 FIN 后推进 rcv_nxt,
+        //     对齐 Linux timewaitStateProcess:收到期望序号 FIN 后推进 rcv_nxt,
         //     迁入 TIME_WAIT 子状态并重置为 2MSL;非 FIN 的迟到数据仅回放 ACK,子状态保持 FIN_WAIT_2。
         if (tw.tw_substate == TcpConnectionState.FIN_WAIT_2) {
             if (pkt.isFin() && pkt.tcpSeq() == tw.tw_rcv_nxt) {
                 // FIN 消耗一个 SEQ:推进 rcv_nxt,迁入 TIME_WAIT 子状态进入 2MSL 静默等待
                 tw.tw_rcv_nxt = tw.tw_rcv_nxt + 1;
                 tw.tw_substate = TcpConnectionState.TIME_WAIT;
-                TcpOutput.INSTANCE.tcp_timewait_send_ack(net, tw);
+                output.timewaitSendAck(net, tw);
                 inet_twsk_reschedule(tw, config.timeWaitMs());
                 return;
             }
             if (pkt.tcpPayloadLength() > 0) {
                 // 迟到数据 — 重放 ACK 让对端感知,子状态不变,保持 FIN_WAIT_2 的 linger2 定时器
-                TcpOutput.INSTANCE.tcp_timewait_send_ack(net, tw);
+                output.timewaitSendAck(net, tw);
                 return;
             }
             // 纯 ACK / 空段 / 越界 FIN — 静默丢弃
@@ -380,7 +377,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         // (6) TIME_WAIT 子状态 — 迟到 FIN / 数据段:重放 ACK + 重置 2MSL。
         //     纯 ACK / 空段静默丢弃,避免反射风暴。
         if (pkt.isFin() || pkt.tcpPayloadLength() > 0) {
-            TcpOutput.INSTANCE.tcp_timewait_send_ack(net, tw);
+            output.timewaitSendAck(net, tw);
             inet_twsk_reschedule(tw, config.timeWaitMs());
         }
     }
@@ -392,7 +389,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
     protected TcpRequestSock tcp_v4_conn_request(ChannelHandlerContext net, TcpSock listenSock, TcpPacketBuf pkt) {
         TcpHandshaker handshaker = handshakerFactory.newHandshaker(pkt);
         TcpRequestSock req = new TcpRequestSock(FourTuple.of(pkt), listenSock, handshaker);
-        tcp_openreq_init(req, handshaker, pkt);
+        openreqInit(req, handshaker, pkt);
         // tcp_timeout_init 等价于 v1 L86:首个 SYN-ACK RTO 基线
         req.timeout = TcpConstants.RTO_INIT_MS;
         req.rsk_timer = null;
@@ -417,9 +414,9 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
     /**
      * 将 SYN 中协商结果写回 req,便于后续 {@code tcp_create_openreq_child} 初始化子 sock。
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7068">tcp_openreq_init</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7068">openreqInit</a>
      */
-    private static void tcp_openreq_init(TcpRequestSock req, TcpHandshaker handshaker, TcpPacketBuf pkt) {
+    private static void openreqInit(TcpRequestSock req, TcpHandshaker handshaker, TcpPacketBuf pkt) {
         req.rcv_isn = handshaker.rcvIsn();
         req.rcv_nxt = handshaker.rcvNxt();
         req.snt_isn = handshaker.sndIsn();
@@ -458,34 +455,34 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         } else if (tcpGroup != null) {
             newsk.tcpEventLoop(tcpGroup.next());
         }
-        // B4: 子 sock MSS 同步(对齐 v1 tcp_create_openreq_child → output.tcp_sync_mss)
-        TcpOutput.INSTANCE.tcp_sync_mss(newsk, 0);
+        // B4: 子 sock MSS 同步(对齐 v1 tcp_create_openreq_child → output.syncMss)
+        output.syncMss(newsk, 0);
         return newsk;
     }
 
-    private void tcp_try_establish(TcpSock sk, TcpPacketBuf pkt) {
+    private void tryEstablish(TcpSock sk, TcpPacketBuf pkt) {
         if (!sk.hasConnection()) {
             return;
         }
-        tcp_init_wl(sk, pkt.tcpSeq());
+        initWl(sk, pkt.tcpSeq());
         sk.state(TcpConnectionState.TCP_ESTABLISHED);
         sk.sndUna(pkt.tcpAckNum());
         sk.sndWnd(pkt.tcpWindow() << sk.sndWscale());
-        tcp_init_transfer(sk);
-        sk.rcvMss(tcp_initialize_rcv_mss(sk));
+        initTransfer(sk);
+        sk.rcvMss(initializeRcvMss(sk));
         if (sk.hasShutdown(TcpConstants.SEND_SHUTDOWN)) {
-            tcp_shutdown(sk, TcpConstants.SEND_SHUTDOWN);
+            shutdownStack(sk, TcpConstants.SEND_SHUTDOWN);
         }
     }
 
     @Override
-    protected int tcp_data_queue(ChannelHandlerContext ctx, TcpSock sk, TcpPacketBuf pkt) {
-        int err = super.tcp_data_queue(ctx, sk, pkt);
+    protected int dataQueue(ChannelHandlerContext ctx, TcpSock sk, TcpPacketBuf pkt) {
+        int err = super.dataQueue(ctx, sk, pkt);
         if (!sk.hasConnection() || sk.state() == TcpConnectionState.TCP_CLOSED) {
             return err;
         }
-        tcp_data_snd_check(sk);
-        tcp_ack_snd_check(sk);
+        dataSndCheck(sk);
+        ackSndCheck(sk);
         if (sk.state() == TcpConnectionState.CLOSE_WAIT
                 && sk.childChannel() != null
                 && sk.childChannel().isOpen()) {
@@ -495,7 +492,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
     }
 
     /**
-     * 对齐 Linux {@code tcp_time_wait(sk, TCP_FIN_WAIT2, tmo)} 的调度入口
+     * 对齐 Linux {@code timeWait(sk, TCP_FIN_WAIT2, tmo)} 的调度入口
      * (net/ipv4/tcp_input.c / tcp_minisocks.c):
      * <ul>
      *   <li>tmo &le; {@code TIME_WAIT_MS}:立即将重量级 {@link TcpSock} 下沉为
@@ -513,7 +510,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         if (tmo > TcpConstants.TIME_WAIT_MS) {
             TcpTimerScheduler.INSTANCE.scheduleKeepalive(sk, tmo - TcpConstants.TIME_WAIT_MS, () -> onFinWait2Keepalive(sk));
         } else {
-            tcp_time_wait(sk, TcpConnectionState.FIN_WAIT_2, tmo);
+            timeWait(sk, TcpConnectionState.FIN_WAIT_2, tmo);
         }
     }
 
@@ -530,12 +527,12 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
         if (sk.linger2() >= 0) {
             final int tmo = sk.tcpFinTimeMs() - (int) TcpConstants.TIME_WAIT_MS;
             if (tmo > 0) {
-                tcp_time_wait(sk, TcpConnectionState.FIN_WAIT_2, tmo);
+                timeWait(sk, TcpConnectionState.FIN_WAIT_2, tmo);
                 return;
             }
         }
         sk.addShutdown(TcpConstants.RCV_SHUTDOWN);
-        TcpOutput.INSTANCE.tcp_send_reset(sk);
-        tcp_done(sk);
+        output.sendReset(sk);
+        tcpDone(sk);
     }
 }

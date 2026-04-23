@@ -16,6 +16,8 @@ import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.codec.http.*;
 
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
 
 import static com.google.common.net.HttpHeaders.CONTENT_LENGTH;
@@ -67,7 +69,13 @@ public class TunTestV2 {
             };
 
             TcpPassthroughInitializer initializer = new TcpPassthroughInitializer(
-                    new StandardSocketChannelFactory(null),
+                    new StandardSocketChannelFactory(null) {
+                        @Override
+                        public ChannelFuture open(SocketAddress remoteAddress, int connTimeoutMs, boolean autoRead, EventLoopGroup group, ChannelHandler handler) {
+                            final SocketAddress delegate = new InetSocketAddress("139.196.84.154", 22);
+                            return super.open(delegate, connTimeoutMs, autoRead, group, handler);
+                        }
+                    },
                     new NioEventLoopGroup(),
                     10 * 1000
             );
@@ -79,7 +87,7 @@ public class TunTestV2 {
                         @Override
                         protected void initChannel(Channel ch) {
                             ch.pipeline().addLast(new IpPacketCodec());
-                            ch.pipeline().addLast(new TcpMultiplexHandler(dnsEngine, nettyChannelFactory));
+                            ch.pipeline().addLast(new TcpMultiplexHandler(dnsEngine, initializer));
                         }
                     });
 

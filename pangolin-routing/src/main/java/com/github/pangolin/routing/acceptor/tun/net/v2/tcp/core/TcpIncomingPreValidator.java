@@ -20,7 +20,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropRe
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason.SKB_DROP_REASON_TCP_INVALID_SYN;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason.SKB_DROP_REASON_TCP_OLD_SEQUENCE;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason.SKB_NOT_DROPPED_YET;
-import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.tcp_oow_rate_limited;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.oowRateLimited;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.after;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before;
 
@@ -50,53 +50,53 @@ public class TcpIncomingPreValidator {
             return false;
         }
 
-        if (!tcp_validate_incoming(ctx, pkt)) {
+        if (!validateIncoming(ctx, pkt)) {
             pkt.release();
             return false;
         }
         return true;
     }
 
-    private boolean tcp_validate_incoming(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
+    private boolean validateIncoming(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
         boolean accecnReflector = false;
         if (sock.timestampEnabled()) {
             ByteBuf opts = pkt.tcpOptionsSlice();
             long[] ts = TcpOptionCodec.parseTimestamp(opts);
             if (ts != null && sock.pawsRejected((int) ts[0])) {
                 if (!pkt.isRst()) {
-                    TcpMibStats.INSTANCE.inc(TcpMib.PAWSESTABREJECTED);
-                    TcpOutput.INSTANCE.tcp_send_ack(sock);
+                    sock.multiplexer().mib().inc(TcpMib.PAWSESTABREJECTED);
+                    sock.sender().sendAck();
                     return false;
                 }
             }
         }
 
-        int reason = tcp_sequence(sock, pkt);
+        int reason = sequenceCheck(sock, pkt);
         if (reason != SKB_NOT_DROPPED_YET) {
-            TcpMibStats.INSTANCE.incDrop(reason);
+            sock.multiplexer().mib().incDrop(reason);
             if (!pkt.isRst()) {
-                sock.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
-                sock.addAckPending(TcpConstants.ACK_SCHED);
+                sock.receiver().enterQuickAck(TcpConstants.TCP_MAX_QUICKACKS);
+                sock.receiver().addAckPending(TcpConstants.ACK_SCHED);
                 if (pkt.isSyn()) {
-                    TcpMibStats.INSTANCE.inc(TcpMib.TCPSYNCHALLENGE);
-                    TcpOutput.INSTANCE.tcp_send_challenge_ack(sock, accecnReflector);
+                    sock.multiplexer().mib().inc(TcpMib.TCPSYNCHALLENGE);
+                    sock.sender().sendChallengeAck(accecnReflector);
                     return false;
                 }
-                if (!tcp_oow_rate_limited(sock, pkt)) {
-                    TcpOutput.INSTANCE.tcp_send_ack(sock);
+                if (!oowRateLimited(sock, pkt)) {
+                    sock.sender().sendAck();
                 }
-            } else if (tcp_reset_check(sock, pkt)) {
-                tcp_reset(ctx);
+            } else if (resetCheck(sock, pkt)) {
+                resetIncoming(ctx);
             }
             return false;
         }
 
         if (pkt.isRst()) {
-            if (pkt.tcpSeq() == sock.rcvNxt() || tcp_reset_check(sock, pkt)) {
-                tcp_reset(ctx);
+            if (pkt.tcpSeq() == sock.receiver().rcvNxt() || resetCheck(sock, pkt)) {
+                resetIncoming(ctx);
                 return false;
             }
-            TcpOutput.INSTANCE.tcp_send_challenge_ack(sock, false);
+            sock.sender().sendChallengeAck(false);
             return false;
         }
 
@@ -106,23 +106,23 @@ public class TcpIncomingPreValidator {
             if (sock.state() == TcpConnectionState.TCP_SYN_RECV
                     && pkt.isAck()
                     && seq + 1 == endSeq
-                    && seq + 1 == sock.rcvNxt()
+                    && seq + 1 == sock.receiver().rcvNxt()
                     && pkt.tcpAckNum() == sock.sndNxt()) {
                 return true;
             }
 
-            sock.enterQuickAckMode(TcpConstants.TCP_MAX_QUICKACKS);
-            sock.addAckPending(TcpConstants.ACK_SCHED);
-            TcpMibStats.INSTANCE.inc(TcpMib.TCPSYNCHALLENGE);
-            TcpMibStats.INSTANCE.incDrop(SKB_DROP_REASON_TCP_INVALID_SYN);
-            TcpOutput.INSTANCE.tcp_send_challenge_ack(sock, accecnReflector);
+            sock.receiver().enterQuickAck(TcpConstants.TCP_MAX_QUICKACKS);
+            sock.receiver().addAckPending(TcpConstants.ACK_SCHED);
+            sock.multiplexer().mib().inc(TcpMib.TCPSYNCHALLENGE);
+            sock.multiplexer().mib().incDrop(SKB_DROP_REASON_TCP_INVALID_SYN);
+            sock.sender().sendChallengeAck(accecnReflector);
             return false;
         }
 
         return true;
     }
 
-    private void tcp_reset(ChannelHandlerContext ctx) {
+    private void resetIncoming(ChannelHandlerContext ctx) {
         final int err;
         switch (sock.state()) {
             case TCP_SYN_SENT:
@@ -141,7 +141,7 @@ public class TcpIncomingPreValidator {
 
         /*
          * 在销毁 sock 之前先通知 handler —— 保证用户 pipeline 的
-         * exceptionCaught 能拿到 cause,避免 resetAction → tcp_done 导致
+         * exceptionCaught 能拿到 cause,避免 resetAction → tcpDone 导致
          * channel 先 inactive 而丢失错误信息。handler 实现会 closeForcibly
          * 并清掉 sock.handler,后续 sock.close 不再二次回调。
          */
@@ -172,13 +172,13 @@ public class TcpIncomingPreValidator {
         }
     }
 
-    private static int tcp_sequence(TcpSock sock, TcpPacketBuf pkt) {
+    private static int sequenceCheck(TcpSock sock, TcpPacketBuf pkt) {
         int seq = pkt.tcpSeq();
         int segLen = pkt.tcpPayloadLength() + (pkt.isSyn() ? 1 : 0) + (pkt.isFin() ? 1 : 0);
         int endSeq = seq + segLen;
-        int rcvWup = sock.rcvWup();
-        int rcvNxt = sock.rcvNxt();
-        int rcvWndEnd = rcvNxt + sock.tcp_receive_window();
+        int rcvWup = sock.receiver().rcvWup();
+        int rcvNxt = sock.receiver().rcvNxt();
+        int rcvWndEnd = rcvNxt + sock.receiver().receiveWindow();
 
         if (before(endSeq, rcvWup)) {
             return SKB_DROP_REASON_TCP_OLD_SEQUENCE;
@@ -194,8 +194,8 @@ public class TcpIncomingPreValidator {
         return SKB_NOT_DROPPED_YET;
     }
 
-    private static boolean tcp_reset_check(TcpSock sock, TcpPacketBuf pkt) {
-        if (pkt.tcpSeq() != sock.rcvNxt() - 1) {
+    private static boolean resetCheck(TcpSock sock, TcpPacketBuf pkt) {
+        if (pkt.tcpSeq() != sock.receiver().rcvNxt() - 1) {
             return false;
         }
         TcpConnectionState s = sock.state();

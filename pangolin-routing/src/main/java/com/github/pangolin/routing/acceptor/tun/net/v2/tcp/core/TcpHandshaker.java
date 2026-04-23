@@ -38,6 +38,7 @@ public final class TcpHandshaker {
     private final int dstPort;
     private final int sndIsn;
     private final TcpConfig config;
+    private final TcpOutput output;
 
     private boolean synAckSent = false;
     private int synAckRetries = 0;
@@ -46,14 +47,14 @@ public final class TcpHandshaker {
     private Runnable synAckFailureAction = () -> {};
     /**
      * 最近一次 SYN-ACK 的发送时戳(微秒),用于三次握手 ACK 到达时的
-     * {@code tcp_synack_rtt_meas} RTT 采样。对应 Linux {@code tcp_rsk(req)->snt_synack}。
+     * {@code synackRttMeas} RTT 采样。对应 Linux {@code tcp_rsk(req)->snt_synack}。
      * {@code 0L} 表示尚未发送。
      */
     private long synAckSentUs = 0L;
 
     /**
      * PAWS 基线 — 对齐 Linux {@code tcp_rsk(req)->ts_recent}(include/net/request_sock.h)。
-     * 初值在收到首个合法 SYN 时来自 {@code clientTsVal},后续 {@code tcp_check_req} 阶段
+     * 初值在收到首个合法 SYN 时来自 {@code clientTsVal},后续 {@code checkReq} 阶段
      * 不更新(PAWS 基线推进在 syn_recv_sock 建完 child sock 后才发生)。
      */
     private int tsRecent;
@@ -72,8 +73,9 @@ public final class TcpHandshaker {
      */
     private long lastOowAckTimeMs = 0L;
 
-    TcpHandshaker(TcpPacketBuf synPkt, TcpConfig config) {
+    TcpHandshaker(TcpPacketBuf synPkt, TcpConfig config, TcpOutput output) {
         this.config = config;
+        this.output = output;
         this.srcAddrBytes = synPkt.srcAddrBytes();
         this.srcPort = synPkt.tcpSrcPort();
         this.dstAddrBytes = synPkt.dstAddrBytes();
@@ -91,7 +93,7 @@ public final class TcpHandshaker {
         this.clientTimestamp = parsedTs != null;
         this.clientTsVal = parsedTs != null ? (int) parsedTs[0] : 0;
         this.sndIsn = TcpUtils.secureSeq(srcAddrBytes, srcPort, dstAddrBytes, dstPort);
-        // 对齐 Linux tcp_openreq_init(tcp_input.c:7010):PAWS 基线从首个合法 SYN 的 TSval 继承。
+        // 对齐 Linux openreqInit(tcp_input.c:7010):PAWS 基线从首个合法 SYN 的 TSval 继承。
         this.tsRecent = this.clientTsVal;
         this.tsRecentStamp = this.clientTimestamp ? TcpMultiplexer.nowSeconds() : 0;
     }
@@ -114,7 +116,7 @@ public final class TcpHandshaker {
 
     /**
      * @return 最近一次 SYN-ACK 的发送微秒时戳;尚未发送时返回 {@code 0L}。
-     *         用于 {@code tcp_synack_rtt_meas} RTT 采样(对齐 Linux {@code snt_synack})。
+     *         用于 {@code synackRttMeas} RTT 采样(对齐 Linux {@code snt_synack})。
      */
     public long synAckSentUs() {
         return synAckSentUs;
@@ -150,9 +152,9 @@ public final class TcpHandshaker {
     }
 
     /**
-     * 推进 PAWS 基线 — 对齐 Linux {@code tcp_check_req} 中的
+     * 推进 PAWS 基线 — 对齐 Linux {@code checkReq} 中的
      * {@code WRITE_ONCE(tcp_rsk(req)->ts_recent, tmp_opt.rcv_tsval)}。
-     * 调用方:{@link TcpMultiplexer#tcp_check_req} 在 {@code saw_tstamp && !after(seq, rcv_nxt)} 时。
+     * 调用方:{@link TcpMultiplexer#checkReq} 在 {@code saw_tstamp && !after(seq, rcv_nxt)} 时。
      */
     public void updateTsRecent(int tsval) {
         if (!clientTimestamp) {
@@ -218,7 +220,7 @@ public final class TcpHandshaker {
 
     /**
      * 本端 SYN-ACK 广告的接收窗(尚未 wscale 解码),对齐 Linux
-     * {@code tcp_synack_window(req)}。用于 {@code tcp_check_req} 的 in-window 判定:
+     * {@code tcp_synack_window(req)}。用于 {@code checkReq} 的 in-window 判定:
      * 落点区间为 {@code [rcv_nxt, rcv_nxt + synackWindow())}。
      */
     public int synackWindow() {
@@ -332,7 +334,7 @@ public final class TcpHandshaker {
         synAckSent = true;
         synAckSentUs = System.nanoTime() / 1_000L;
         final int epoch = ++synAckSendEpoch;
-        TcpOutput.INSTANCE.tcp_send_synack(
+        output.sendSynack(
                 connChannel,
                 dstAddrBytes, dstPort, srcAddrBytes, srcPort,
                 sndIsn, rcvNxt, window, opts
@@ -385,19 +387,19 @@ public final class TcpHandshaker {
      * {@code req->rsk_ops->send_ack}({@code tcp_request_sock_ipv4_ops::send_ack} →
      * {@code tcp_v4_reqsk_send_ack})。
      *
-     * <p>调用方:{@link TcpMultiplexer#tcp_check_req} 中 PAWS / TSECR / OOW 分支。
+     * <p>调用方:{@link TcpMultiplexer#checkReq} 中 PAWS / TSECR / OOW 分支。
      */
     public void sendChallengeAck(Channel connChannel) {
         int window = config.initialRcvWnd() >> (clientWscale >= 0 ? config.windowScale() : 0);
         if (window > TcpConstants.TCP_MAX_WINDOW) window = TcpConstants.TCP_MAX_WINDOW;
-        TcpOutput.INSTANCE.tcp_send_challenge_ack_handshake(
+        output.sendChallengeAckHandshake(
                 connChannel,
                 dstAddrBytes, dstPort, srcAddrBytes, srcPort,
                 sndIsn + 1, rcvNxt, window);
     }
 
     private ChannelFuture sendRst(Channel connChannel, TcpPacketBuf pkt) {
-        return TcpOutput.INSTANCE.tcp_send_reset_handshake(
+        return output.sendResetHandshake(
                 connChannel,
                 dstAddrBytes, dstPort, srcAddrBytes, srcPort,
                 pkt.tcpAckNum());

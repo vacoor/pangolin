@@ -10,7 +10,7 @@ import io.netty.channel.Channel;
  *
  * <p>backend → sock 方向的反向通路不在本类实现,由
  * {@link TcpPassthroughInitializer#onEstablished} 在 backend pipeline 上挂入站适配器,
- * 直接交给 {@code TcpMultiplexer.tcp_sendmsg}(MSS 切片 / push 由栈内部处理)。
+ * 直接交给 {@code TcpMultiplexer.sendmsg}(MSS 切片 / push 由栈内部处理)。
  *
  * <p>生命周期:由 {@link TcpPassthroughInitializer#onEstablished} 构造并挂到
  * {@code sock.handler}。连接销毁或对端 FIN/RST 时,TCP 栈回调 {@link #onSocketDestroyed}
@@ -43,7 +43,7 @@ public final class TcpPassthroughHandler implements TcpSockHandler {
 
     @Override
     public void onPeerFin() {
-        // 对齐 v1 CLOSE_WAIT 下主动关 backend 的语义(原 tcp_data_queue line 505-508)。
+        // 对齐 v1 CLOSE_WAIT 下主动关 backend 的语义(原 dataQueue line 505-508)。
         // 对端半关后 backend 侧也应收到 FIN 信号以推进上游 read shutdown。
         if (closed) {
             return;

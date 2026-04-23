@@ -15,7 +15,7 @@ import io.netty.channel.EventLoop;
  *       实现方在此决定是否 / 何时 {@link TcpMultiplexer#sendSynAck} 响应。默认实现:立发。</li>
  *   <li>{@link #proposeEventLoop} — {@code tcp_v4_syn_recv_sock} 为 child sock 绑 EL 时调用,
  *       返回非空时优先采用(如 backend channel 的 EL)。默认返回 null → 回退 {@code tcpGroup.next()}。</li>
- *   <li>{@link #onEstablished} — {@code tcp_init_transfer} 子 sock 进入 ESTABLISHED 时调用,
+ *   <li>{@link #onEstablished} — {@code initTransfer} 子 sock 进入 ESTABLISHED 时调用,
  *       实现方 <b>必须</b> {@link TcpSock#handler} 安装回调处理器。</li>
  *   <li>{@link #onRequestDestroyed} — {@link TcpMultiplexer#inet_csk_destroy_sock(TcpRequestSock)}
  *       销毁半连接前调用,实现方在此释放挂在 {@link TcpRequestSock#attachment()} 的资源。</li>
@@ -40,7 +40,7 @@ public interface TcpSockInitializer {
      *
      * <p><b>契约</b>:
      * <ul>
-     *   <li>进入时 req 已完成 {@code tcp_openreq_init} / {@code addToHalfQueue},
+     *   <li>进入时 req 已完成 {@code openreqInit} / {@code addToHalfQueue},
      *       {@link TcpRequestSock#net()} 指向入站 {@code ChannelHandlerContext},
      *       {@link TcpRequestSock#synPacket()} 指向 <b>已 retain 一次</b> 的 SYN pkt。
      *       lifetime 与 req 绑定,由 {@code moveToEstablished} 或

@@ -52,7 +52,7 @@ public final class TcpConnection {
     private int ackPending;
     /**
      * Pending socket error — mirrors Linux {@code sk->sk_err}.
-     * Set by {@code TcpInput.tcp_reset} before {@code sk_error_report}; inspectable
+     * Set by {@code TcpInput.resetIncoming} before {@code sk_error_report}; inspectable
      * in {@code channelInactive} handlers to determine why the connection was aborted.
      */
     private int skErr;
@@ -182,7 +182,7 @@ public final class TcpConnection {
         this.sndSml = b.sndUna;
         this.rcvWnd = b.rcvWnd;
         this.rcvWup = b.rcvWup;
-        this.rcvMss = b.mss;    // tcp_initialize_rcv_mss will refine this in ESTABLISHED transition
+        this.rcvMss = b.mss;    // initializeRcvMss will refine this in ESTABLISHED transition
         this.mss = b.mss;
         // PMTU / tcp_header_len 初始化(对齐 Linux tcp_create_openreq_child)
         this.tcpHeaderLen = TcpConstants.TCP_MIN_HEADER_LEN
@@ -342,16 +342,16 @@ public final class TcpConnection {
     }
 
     /**
-     * Available receive window size, mirroring Linux {@code tcp_receive_window()}:
+     * Available receive window size, mirroring Linux {@code receiveWindow()}:
      * <pre>
      *   max(0, rcv_wup + rcv_wnd - rcv_nxt)
      * </pre>
      * {@code rcv_wup} is the sequence number at which the window was last advertised;
      * subtracting {@code rcv_nxt} gives the bytes still available since that advertisement.
      *
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">tcp_receive_window</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c">receiveWindow</a>
      */
-    public int tcp_receive_window() {
+    public int receiveWindow() {
         return Math.max(0, rcvWup + rcvWnd - rcvNxt);
     }
 
@@ -611,12 +611,12 @@ public final class TcpConnection {
      * calling this method — mirroring how Linux callers set {@code TCP_SKB_CB(skb)->seq},
      * {@code ->end_seq}, and {@code ->tcp_flags} before invoking {@code tcp_queue_skb}.
      * RST must never be passed here — RST bypasses the write queue entirely
-     * (see {@code tcp_send_reset} / {@code tcp_v4_send_reset} in the kernel).
+     * (see {@code tcp_send_active_reset} / {@code tcp_v4_send_reset} in the kernel).
      *
      * @param skb fully initialised segment entry; ownership transferred to the write queue
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498">tcp_queue_skb</a>
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498">queueSkb</a>
      */
-    public void tcp_queue_skb(TcpSkb skb) {
+    public void queueSkb(TcpSkb skb) {
         // WRITE_ONCE(tp->write_seq, TCP_SKB_CB(skb)->end_seq)
         writeSeq = skb.endSeq();
         sendBuffer.enqueue(skb);

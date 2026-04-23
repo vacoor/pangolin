@@ -6,7 +6,7 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInit
 import io.netty.channel.ChannelFuture;
 
 /**
- * 用户 Channel 工厂 — 在 v2 三次握手完成后 (tcp_init_transfer 阶段) 由 {@link TcpMultiplexer}
+ * 用户 Channel 工厂 — 在 v2 三次握手完成后 (initTransfer 阶段) 由 {@link TcpMultiplexer}
  * 调用,生产一个已挂 pipeline 的 {@link TcpChannel}。
  *
  * <p>典型用法:
@@ -34,7 +34,7 @@ public interface TcpChannelInitializer extends TcpSockInitializer {
     default void onEstablished(TcpSock sock, TcpMultiplexer multiplexer) {
         final TcpChannel ch = create(sock, multiplexer);
         /*
-         * register 必须在 sock.eventLoop() 上执行;本方法由 tcp_init_transfer 在 EL
+         * register 必须在 sock.eventLoop() 上执行;本方法由 initTransfer 在 EL
          * 内同步调用,直接 register 即可。Netty 会在 register 完成后自动
          * fireChannelActive(若 isActive() 已为 true —— 我们在 ESTABLISHED 后调用,
          * 满足条件)。

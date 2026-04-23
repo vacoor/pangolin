@@ -100,7 +100,7 @@ public final class SysctlOptions {
     /**
      * 全局 TCP 占用字节数 — 对齐 Linux {@code tcp_memory_allocated} /
      * {@code atomic_long_t}。每个 {@code TcpReceiveBuffer} 的加减操作通过
-     * {@link #tcp_mem_delta} 汇总到此处,供 {@link #tcp_under_memory_pressure()} 判定。
+     * {@link #tcp_mem_delta} 汇总到此处,供 {@link #underMemoryPressure()} 判定。
      */
     public static final java.util.concurrent.atomic.AtomicLong tcp_memory_allocated =
             new java.util.concurrent.atomic.AtomicLong();
@@ -121,11 +121,11 @@ public final class SysctlOptions {
     };
 
     /**
-     * 对齐 Linux {@code tcp_under_memory_pressure(sk)}:当前累计占用超过
+     * 对齐 Linux {@code underMemoryPressure(sk)}:当前累计占用超过
      * {@link #ipv4_sysctl_tcp_mem_pressure} 即视为压力,调用方据此 clamp
      * {@code rcv_ssthresh}、触发 {@code tcp_prune_queue} 等退路。
      */
-    public static boolean tcp_under_memory_pressure() {
+    public static boolean underMemoryPressure() {
         return tcp_memory_allocated.get() > ipv4_sysctl_tcp_mem_pressure;
     }
 }

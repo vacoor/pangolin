@@ -72,7 +72,7 @@ public final class TcpSendBuffer {
     }
 
     /**
-     * 将 {@code entry} 插入 RTX 队列头部 — 用于 {@code tcp_fragment(TCP_FRAG_IN_RTX_QUEUE)}
+     * 将 {@code entry} 插入 RTX 队列头部 — 用于 {@code fragment(TCP_FRAG_IN_RTX_QUEUE)}
      * 完成后把 head / tail 片段按序放回队列。
      */
     public void enqueueRtxFirst(TcpSkb entry) {
@@ -150,7 +150,7 @@ public final class TcpSendBuffer {
 
     /**
      * 就地把 {@code target} 在 {@code splitSeq} 处切成 head / tail 两段,并替换原段 —
-     * 对齐 Linux {@code tcp_fragment(TCP_FRAG_IN_RTX_QUEUE)} 的 per-skb 替换语义。
+     * 对齐 Linux {@code fragment(TCP_FRAG_IN_RTX_QUEUE)} 的 per-skb 替换语义。
      *
      * <p>适用任意偏移切分(不要求 MSS 边界),供 SACK 局部重叠精确记账使用:
      * <ul>
@@ -189,7 +189,7 @@ public final class TcpSendBuffer {
                 tailBuf, target.startSeq() + offset, tailLen, tailFlags,
                 target.sacked(), target.sentTimeUs());
         // 发送时 tp->delivered 快照随 split 一同继承 — 拆分后两半的"发送时已投递段数"
-        // 保持不变,对齐 Linux tcp_fragment 保留 TCP_SKB_CB(skb)->tx 的语义。
+        // 保持不变,对齐 Linux fragment 保留 TCP_SKB_CB(skb)->tx 的语义。
         head.txDelivered(target.txDelivered());
         tail.txDelivered(target.txDelivered());
 
