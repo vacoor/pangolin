@@ -382,7 +382,7 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
             return err;
         }
         dataSndCheck(sk);
-        ackSndCheck(sk);
+        sk.receiver().ackSndCheck();
         if (sk.state() == TcpConnectionState.CLOSE_WAIT
                 && sk.childChannel() != null
                 && sk.childChannel().isOpen()) {

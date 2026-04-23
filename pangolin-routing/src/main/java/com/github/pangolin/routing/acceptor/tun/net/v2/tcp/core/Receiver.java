@@ -209,4 +209,62 @@ public final class Receiver {
     public void lastRecvTimeMs(long v) {
         this.lastRecvTimeMs = v;
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ACK 调度行为(R4.2b-4c 从 SegmentDispatcher 迁入)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 入站段处理尾部的 ACK 调度判定 — 对齐 Linux
+     * <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">__tcp_ack_snd_check</a>。
+     * 若无 ACK_SCHED / ACK_NOW 标记则直接返回;否则按 quickack / 大接收窗口 /
+     * 强制 ACK 分支立即出 ACK,否则走 delayed-ACK 定时器。
+     */
+    public void ackSndCheck() {
+        if (!sock.hasAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_NOW)) {
+            return;
+        }
+        if ((TcpSequence.after(sock.rcvNxt(), sock.rcvWup() + sock.rcvMss())
+                && sock.rcvWnd() >= sock.receiveWindow())
+                || sock.inQuickAckMode()
+                || sock.hasAckPending(TcpConstants.ACK_NOW)) {
+            sock.multiplexer().output().sendAck(sock);
+            return;
+        }
+        sendDelayedAck();
+    }
+
+    /**
+     * 安排一次延迟 ACK 定时器 — 对齐 Linux {@code tcp_send_delayed_ack}。
+     * 进 pingpong 模式时把 ATO 夹到至少 {@code config.delayedAckMs()}。
+     */
+    public void sendDelayedAck() {
+        long ato = Math.max(1L, sock.ackTimeoutMs());
+        if (sock.inPingpongMode()) {
+            ato = Math.max(ato, sock.multiplexer().config.delayedAckMs());
+        }
+        sock.addAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER);
+        TcpTimerScheduler.INSTANCE.scheduleDelayedAck(sock, ato, this::delackTimer);
+    }
+
+    /**
+     * 延迟 ACK 定时器到期回调 — 对齐 Linux {@code tcp_delack_timer}。
+     * pingpong 模式下退出 pingpong 并把 ATO 重置到下限;否则指数退避到 RTO 上限。
+     */
+    public void delackTimer() {
+        if (!sock.hasConnection() || !sock.hasAckPending(TcpConstants.ACK_TIMER)) {
+            return;
+        }
+        sock.clearAckPending(TcpConstants.ACK_TIMER);
+        if (!sock.hasAckPending(TcpConstants.ACK_SCHED)) {
+            return;
+        }
+        if (!sock.inPingpongMode()) {
+            sock.ackTimeoutMs(Math.min(sock.ackTimeoutMs() << 1, sock.rtoMs()));
+        } else {
+            sock.exitPingpongMode();
+            sock.ackTimeoutMs(TcpConstants.TCP_ATO_MIN_MS);
+        }
+        sock.multiplexer().output().sendAck(sock);
+    }
 }

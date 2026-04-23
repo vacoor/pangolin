@@ -598,45 +598,6 @@ public abstract class SegmentDispatcher extends TcpStack {
         return Math.max(hint, TCP_MSS_DEFAULT);
     }
 
-    protected void ackSndCheck(TcpSock sk) {
-        if (!sk.hasAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_NOW)) {
-            return;
-        }
-        if ((after(sk.rcvNxt(), sk.rcvWup() + sk.rcvMss()) && sk.rcvWnd() >= sk.receiveWindow())
-                || sk.inQuickAckMode()
-                || sk.hasAckPending(TcpConstants.ACK_NOW)) {
-            output.sendAck(sk);
-            return;
-        }
-        sendDelayedAck(sk);
-    }
-
-    protected void sendDelayedAck(TcpSock sk) {
-        long ato = Math.max(1L, sk.ackTimeoutMs());
-        if (sk.inPingpongMode()) {
-            ato = Math.max(ato, config.delayedAckMs());
-        }
-        sk.addAckPending(TcpConstants.ACK_SCHED | TcpConstants.ACK_TIMER);
-        TcpTimerScheduler.INSTANCE.scheduleDelayedAck(sk, ato, () -> delackTimer(sk));
-    }
-
-    protected void delackTimer(TcpSock sk) {
-        if (!sk.hasConnection() || !sk.hasAckPending(TcpConstants.ACK_TIMER)) {
-            return;
-        }
-        sk.clearAckPending(TcpConstants.ACK_TIMER);
-        if (!sk.hasAckPending(TcpConstants.ACK_SCHED)) {
-            return;
-        }
-        if (!sk.inPingpongMode()) {
-            sk.ackTimeoutMs(Math.min(sk.ackTimeoutMs() << 1, sk.rtoMs()));
-        } else {
-            sk.exitPingpongMode();
-            sk.ackTimeoutMs(TcpConstants.TCP_ATO_MIN_MS);
-        }
-        output.sendAck(sk);
-    }
-
     protected void armProbe0(TcpSock sk) {
         if (!sk.hasConnection() || sk.packetsOut() != 0 || sk.tcpSendHead() == null) {
             return;
