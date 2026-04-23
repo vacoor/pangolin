@@ -147,6 +147,12 @@ public abstract class TcpMultiplexer {
      */
     protected Listener listener;
 
+    /**
+     * 入站段四元组 → sock 的纯查表组件(R4.2b-1)。在 {@link #init()} 中 listener
+     * 创建完之后实例化。{@link #__inet_lookup_skb} 全部 delegate 到本对象。
+     */
+    protected SockLookup lookup;
+
     protected TcpMultiplexer(TcpConfig config, EventLoopGroup tcpGroup, TcpSockInitializer initializer) {
         this.config = config;
         this.handshakerFactory = new TcpHandshakerFactory(config, output);
@@ -161,6 +167,7 @@ public abstract class TcpMultiplexer {
         TcpSock listenSk = init(new TcpSock());
         listenSk.state(TcpConnectionState.TCP_LISTEN);
         this.listener = new Listener(listenSk, DEFAULT_MAX_SYN_BACKLOG);
+        this.lookup = new SockLookup(establishedRegistry, timewaitRegistry, listener);
     }
 
     public Listener listener() {
@@ -229,25 +236,14 @@ public abstract class TcpMultiplexer {
 
     /**
      * 对齐 Linux {@code __inet_lookup_skb}(net/ipv4/inet_hashtables.c):先查 ESTABLISHED 槽,
-     * miss 再查 TIME_WAIT 槽(v2 的 {@link #timewaitRegistry}),最后回退到半连接 /
-     * LISTEN。返回 {@link TcpTimewaitSock} 时由 {@code tcp_v4_rcv} 派发到
-     * {@code timewaitStateProcess}。
+     * miss 再查 TIME_WAIT 槽,最后回退到半连接 / LISTEN。返回 {@link TcpTimewaitSock}
+     * 时由 {@code tcp_v4_rcv} 派发到 {@code timewaitStateProcess}。
+     *
+     * <p>R4.2b-1:实现下沉到 {@link SockLookup},本方法仅作 delegate 保留兼容。
+     * 后续 R4.2b-3 随 {@code SegmentDispatcher} 抽出一并删除。
      */
     protected SockCommon __inet_lookup_skb(final TcpPacketBuf pkt) {
-        final FourTuple key = FourTuple.of(pkt);
-        TcpSock established = establishedRegistry.get(key);
-        if (established != null) {
-            return established;
-        }
-        TcpTimewaitSock tw = timewaitRegistry.get(key);
-        if (tw != null) {
-            return tw;
-        }
-        TcpRequestSock req = listener.findRequest(key);
-        if (req != null) {
-            return req;
-        }
-        return listener.listenSock;
+        return lookup.lookup(pkt);
     }
 
     /**
