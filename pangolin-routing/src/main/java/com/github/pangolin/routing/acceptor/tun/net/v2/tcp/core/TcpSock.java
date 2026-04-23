@@ -52,7 +52,7 @@ public class TcpSock extends SockCommon {
      * userChannel,从而 {@code receiveWindow()} 自然收缩,对端感知反压。
      * 对齐 Linux "应用 syscall 未读 socket 导致 tp->rcv_wnd 缩窗" 语义。
      */
-    private boolean rcvPaused;
+    // R3.2: rcvPaused 已物理迁到 Receiver
     private TcpSendBuffer sendBuffer;
     private TcpReceiveBuffer receiveBuffer;
     private TcpConnectionTimers timers;
@@ -61,13 +61,12 @@ public class TcpSock extends SockCommon {
     private int sndUna;
     private int sndNxt;
     private int writeSeq;
-    private int rcvNxt;
+    // R3.2: rcvNxt 已物理迁到 Receiver
     private int sndWnd;
     private int maxWindow;
     private int sndWl1;
     private int sndSml;
-    private int rcvWnd;
-    private int rcvWup;
+    // R3.2: rcvWnd / rcvWup 已物理迁到 Receiver
     private int rcvMss;
     private int mss;
     private int sndWscale;
@@ -109,12 +108,8 @@ public class TcpSock extends SockCommon {
     private long lastSendTimeMs;
     private long srttUs;
     private long rttvarUs;
-    private int rtoBackoffShift;
-    /**
-     * 首个重传段的发送时戳(微秒);当 {@code undoRetrans} 减至 0 时清零。
-     * 对应 Linux {@code tp->retrans_stamp},用于 RTO 退避 / F-RTO / tcp_any_retrans_done 判定。
-     */
-    private long retransStamp;
+    // R2.3: rtoBackoffShift 已物理迁到 Sender
+    // R2.3: retransStamp 已物理迁到 Sender(对应 Linux tp->retrans_stamp)
     /**
      * 当前 recovery 阶段累计的重传段计数;收到覆盖它们的 ACK 时递减。
      * 对应 Linux {@code tp->undo_retrans},F-RTO 与 CC undo 路径依赖。
@@ -252,7 +247,7 @@ public class TcpSock extends SockCommon {
     private int caIncrCounter;
     private CongestionState congestionState = CongestionState.OPEN;
     private int highSeq;
-    private int tlpHighSeq;
+    // R2.3: tlpHighSeq 已物理迁到 Sender(对应 Linux tp->tlp_high_seq)
     /**
      * 下一次发 ACK 需要通告的 DSACK 块 {@code [dsackStart, dsackEnd)}
      * (对应 Linux {@code tp->duplicate_sack[0]})。{@code dsackStart == dsackEnd}
@@ -328,6 +323,10 @@ public class TcpSock extends SockCommon {
                                       boolean timestampEnabled,
                                       int recentTimestamp) {
         TcpSock sock = new TcpSock(fourTuple);
+        // R2.3/R3.2/R4.1 前置装配:先 new Sender/Receiver 让后续字段 setter 能写进去。
+        // TcpMultiplexer.configure 将检测 sender/receiver 非空后幂等跳过,不会覆盖。
+        sock.sender(new Sender(sock));
+        sock.receiver(new Receiver(sock));
         sock.channel = channel;
         sock.childChannel = childChannel;
         sock.sendBuffer = new TcpSendBuffer();
@@ -337,13 +336,13 @@ public class TcpSock extends SockCommon {
         sock.sndUna = sndUna;
         sock.sndNxt = sndNxt;
         sock.writeSeq = sndNxt;
-        sock.rcvNxt = rcvNxt;
+        sock.receiver().rcvNxt(rcvNxt);
         sock.sndWnd = sndWnd;
         sock.maxWindow = sndWnd;
         sock.sndWl1 = 0;
         sock.sndSml = sndUna;
-        sock.rcvWnd = rcvWnd;
-        sock.rcvWup = rcvNxt;
+        sock.receiver().rcvWnd(rcvWnd);
+        sock.receiver().rcvWup(rcvNxt);
         sock.rcvMss = mss;
         sock.mss = mss;
         sock.sndWscale = sndWscale;
@@ -428,8 +427,7 @@ public class TcpSock extends SockCommon {
         lastSendTimeMs = 0L;
         srttUs = 0L;
         rttvarUs = 0L;
-        rtoBackoffShift = 0;
-        retransStamp = 0L;
+        // R2.3: rtoBackoffShift / retransStamp 默认值 0/0L 由 Sender 字段声明初始化
         undoRetrans = 0;
         rcvBuf = TcpConstants.TCP_DEFAULT_RCV_BUF;
         windowClamp = TcpConstants.TCP_DEFAULT_RCV_BUF;
@@ -467,7 +465,7 @@ public class TcpSock extends SockCommon {
         caIncrCounter = 0;
         congestionState = CongestionState.OPEN;
         highSeq = 0;
-        tlpHighSeq = 0;
+        // R2.3: tlpHighSeq 默认值 0 由 Sender 字段声明初始化
         dsackStart = 0;
         dsackEnd = 0;
         priorCwnd = 0;
@@ -497,13 +495,13 @@ public class TcpSock extends SockCommon {
         this.sndUna = conn.sndUna();
         this.sndNxt = conn.sndNxt();
         this.writeSeq = conn.writeSeq();
-        this.rcvNxt = conn.rcvNxt();
+        // R3.2: rcvNxt 已在 Receiver(dead code path)
         this.sndWnd = conn.sndWnd();
         this.maxWindow = conn.maxWindow();
         this.sndWl1 = conn.sndWl1();
         this.sndSml = conn.sndSml();
-        this.rcvWnd = conn.rcvWnd();
-        this.rcvWup = conn.rcvWup();
+        // R3.2: rcvWnd 已在 Receiver(dead code path)
+        // R3.2: rcvWup 已在 Receiver(dead code path)
         this.rcvMss = conn.rcvMss();
         this.mss = conn.mss();
         this.sndWscale = conn.sndWscale();
@@ -530,8 +528,8 @@ public class TcpSock extends SockCommon {
         this.lastSendTimeMs = conn.lastSendTimeMs();
         this.srttUs = conn.srttUs();
         this.rttvarUs = conn.rttvarUs();
-        this.rtoBackoffShift = conn.rtoBackoffShift();
-        this.retransStamp = conn.retransStamp();
+        // R2.3: rtoBackoffShift / retransStamp 已在 Sender,此路径为 dead code 保留
+        //       (from(conn)/view(conn) 无外部调用者);configure 后由外部重置
         this.undoRetrans = conn.undoRetrans();
         this.mssCache = conn.mssCache();
         this.pmtuCookie = conn.pmtuCookie();
@@ -549,7 +547,7 @@ public class TcpSock extends SockCommon {
                 ? CongestionState.OPEN
                 : CongestionState.valueOf(conn.congestionState());
         this.highSeq = conn.highSeq();
-        this.tlpHighSeq = conn.tlpHighSeq();
+        // R2.3: tlpHighSeq 已在 Sender(dead code path)
     }
 
     public Channel channel() {
@@ -609,11 +607,11 @@ public class TcpSock extends SockCommon {
     }
 
     public boolean rcvPaused() {
-        return rcvPaused;
+        return receiver.paused();
     }
 
     public void rcvPaused(boolean v) {
-        this.rcvPaused = v;
+        receiver.paused(v);
     }
 
     /**
@@ -664,11 +662,11 @@ public class TcpSock extends SockCommon {
     }
 
     public int rcvNxt() {
-        return rcvNxt;
+        return receiver.rcvNxt();
     }
 
     public void rcvNxt(int v) {
-        this.rcvNxt = v;
+        receiver.rcvNxt(v);
     }
 
     public int sndWnd() {
@@ -728,19 +726,19 @@ public class TcpSock extends SockCommon {
     }
 
     public int rcvWnd() {
-        return rcvWnd;
+        return receiver.rcvWnd();
     }
 
     public void rcvWnd(int v) {
-        this.rcvWnd = v;
+        receiver.rcvWnd(v);
     }
 
     public int rcvWup() {
-        return rcvWup;
+        return receiver.rcvWup();
     }
 
     public void rcvWup(int v) {
-        this.rcvWup = v;
+        receiver.rcvWup(v);
     }
 
     public int rcvMss() {
@@ -880,7 +878,7 @@ public class TcpSock extends SockCommon {
     }
 
     public int receiveWindow() {
-        return Math.max(0, rcvWup + rcvWnd - rcvNxt);
+        return Math.max(0, receiver.rcvWup() + receiver.rcvWnd() - receiver.rcvNxt());
     }
 
     public int sndUnaUpdate(int ackSeq) {
@@ -1152,7 +1150,7 @@ public class TcpSock extends SockCommon {
             rttvarUs = (3 * rttvarUs + diff) / 4;
             srttUs = (7 * srttUs + rttUs) / 8;
         }
-        rtoBackoffShift = 0;
+        sender.resetBackoff();
 
         // 对齐 Linux tcp_update_rtt_min(tcp_input.c):每次 RTT 采样喂 Windowed Filter,
         // 窗长 TCP_MIN_RTT_WIN_SEC × 1000(毫秒坐标,与 tcp_jiffies32 同基);
@@ -1190,7 +1188,7 @@ public class TcpSock extends SockCommon {
             baseMs = Math.max((baseUs + 999L) / 1_000L, TcpConstants.RTO_MIN_MS);
         }
         long rtoMs = baseMs;
-        for (int i = 0; i < rtoBackoffShift; i++) {
+        for (int i = 0; i < sender.backoffShift(); i++) {
             if (rtoMs >= TcpConstants.RTO_MAX_MS) {
                 return TcpConstants.RTO_MAX_MS;
             }
@@ -1207,25 +1205,24 @@ public class TcpSock extends SockCommon {
     }
 
     public void backoffRto() {
-        if (rtoBackoffShift < 6) {
-            rtoBackoffShift++;
-        }
+        sender.backoff();
     }
 
     public void resetRtoBackoff() {
-        rtoBackoffShift = 0;
+        sender.resetBackoff();
     }
 
     /**
      * 首段重传的发送微秒时戳;0 表示当前无未确认的重传。
      * 对应 Linux {@code tp->retrans_stamp}。
+     * <p>R2.3 起字段物理位于 {@link Sender};本方法 delegate 保持 API 兼容。
      */
     public long retransStamp() {
-        return retransStamp;
+        return sender.retransStamp();
     }
 
     public void retransStamp(long us) {
-        this.retransStamp = us;
+        sender.retransStamp(us);
     }
 
     /**
@@ -1365,7 +1362,7 @@ public class TcpSock extends SockCommon {
         priorSsthresh = (ssthresh == Integer.MAX_VALUE) ? 0 : ssthresh;
         undoMarker = sndUna;
         undoRetrans = 0;
-        retransStamp = 0L;
+        sender.retransStamp(0L);
     }
 
     /**
@@ -1385,7 +1382,7 @@ public class TcpSock extends SockCommon {
             ssthresh = Math.max(ssthresh, priorSsthresh);
         }
         undoMarker = 0;
-        retransStamp = 0L;
+        sender.retransStamp(0L);
         undoRetrans = 0;
         clearFrto();
         if (unmarkLoss) {
@@ -1416,9 +1413,9 @@ public class TcpSock extends SockCommon {
      */
     public boolean tcpTryUndoRecovery(int tsecr) {
         if (congestionState != CongestionState.RECOVERY) return false;
-        if (undoMarker == 0 || retransStamp == 0L) return false;
+        if (undoMarker == 0 || sender.retransStamp() == 0L) return false;
         if (tsecr == -1) return false;
-        final int retransStampMs = (int) (retransStamp / 1000L);
+        final int retransStampMs = (int) (sender.retransStamp() / 1000L);
         if (!com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before(tsecr, retransStampMs)) {
             return false;
         }
@@ -1449,9 +1446,9 @@ public class TcpSock extends SockCommon {
      */
     public boolean tcpTryUndoLoss(int tsecr) {
         if (congestionState != CongestionState.LOSS) return false;
-        if (undoMarker == 0 || retransStamp == 0L) return false;
+        if (undoMarker == 0 || sender.retransStamp() == 0L) return false;
         if (tsecr == -1) return false;
-        final int retransStampMs = (int) (retransStamp / 1000L);
+        final int retransStampMs = (int) (sender.retransStamp() / 1000L);
         if (!com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before(tsecr, retransStampMs)) {
             return false;
         }
@@ -1528,7 +1525,7 @@ public class TcpSock extends SockCommon {
         if (congestionState != CongestionState.RECOVERY && congestionState != CongestionState.LOSS) {
             return false;
         }
-        if (undoMarker == 0 || retransStamp == 0L) return false;
+        if (undoMarker == 0 || sender.retransStamp() == 0L) return false;
         if (undoRetrans != 0) return false;
         tcpUndoCwndReduction(false);
         congestionState = CongestionState.OPEN;
@@ -1634,7 +1631,7 @@ public class TcpSock extends SockCommon {
     }
 
     public void incrQuickAckCount(int maxQuickAcks) {
-        int quickacks = rcvWnd / Math.max(rcvMss << 1, 1);
+        int quickacks = receiver.rcvWnd() / Math.max(rcvMss << 1, 1);
         if (quickacks == 0) {
             quickacks = 2;
         }
@@ -1775,7 +1772,7 @@ public class TcpSock extends SockCommon {
                 ssthresh = Math.max(cwnd / 2, 2);
                 cwnd = ssthresh + 3;
                 highSeq = sndNxt;
-                tlpHighSeq = 0;
+                sender.tlpHighSeq(0);
                 congestionState = CongestionState.RECOVERY;
                 caIncrCounter = 0;
                 // 对齐 Linux tcp_enter_recovery → markHeadLost:NewReno 无 SACK
@@ -1831,16 +1828,16 @@ public class TcpSock extends SockCommon {
         cwnd = 1;
         dupacks = 0;
         caIncrCounter = 0;
-        tlpHighSeq = 0;
+        sender.tlpHighSeq(0);
         congestionState = CongestionState.LOSS;
     }
 
     public int tlpHighSeq() {
-        return tlpHighSeq;
+        return sender.tlpHighSeq();
     }
 
     public void tlpHighSeq(int tlpHighSeq) {
-        this.tlpHighSeq = tlpHighSeq;
+        sender.tlpHighSeq(tlpHighSeq);
     }
 
     public int cwnd() {

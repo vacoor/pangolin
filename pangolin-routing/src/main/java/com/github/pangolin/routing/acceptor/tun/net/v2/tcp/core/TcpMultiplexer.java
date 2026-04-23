@@ -186,8 +186,10 @@ public abstract class TcpMultiplexer {
     public TcpSock configure(TcpSock sk) {
         if (sk != null) {
             sk.multiplexer(this);
-            sk.sender(new Sender(sk));
-            sk.receiver(new Receiver(sk));
+            // 幂等:createChild 可能已装配 sender/receiver 用于预填充字段(R2.3/R3.2),
+            // 本方法不重建,避免覆盖已填好的状态。
+            if (sk.sender() == null) sk.sender(new Sender(sk));
+            if (sk.receiver() == null) sk.receiver(new Receiver(sk));
         }
         return sk;
     }

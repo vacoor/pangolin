@@ -30,6 +30,22 @@ public final class Sender {
 
     private final TcpSock sock;
 
+    /**
+     * RTO 指数退避 shift(R2.3 物理迁移到 Sender)。Mirrors Linux
+     * {@code inet_csk(sk)->icsk_backoff}。默认 0,每次 RTO timer 触发递增(上限 6)。
+     */
+    private int rtoBackoffShift;
+    /**
+     * 首段重传发送时戳(us),0 表示当前无未确认的重传。Mirrors Linux
+     * {@code tp->retrans_stamp}。R2.3 物理迁移到 Sender。
+     */
+    private long retransStamp;
+    /**
+     * TLP 探测段的 highSeq,0 表示未在 TLP 阶段。Mirrors Linux
+     * {@code tp->tlp_high_seq}。R2.3 物理迁移到 Sender。
+     */
+    private int tlpHighSeq;
+
     Sender(TcpSock sock) {
         this.sock = sock;
     }
@@ -128,36 +144,48 @@ public final class Sender {
     // 发送侧状态访问器 — 当前 delegate 到 TcpSock 的物理字段
     // ═══════════════════════════════════════════════════════════════════════
 
-    /** RTO 指数退避 +1(上限 6)。Mirrors {@code tcp_retransmit_timer} 中的 backoff 递增。 */
+    /** RTO 指数退避 +1(上限 6)。Mirrors Linux {@code tcp_retransmit_timer} 中的 backoff 递增。 */
     public void backoff() {
-        sock.backoffRto();
+        if (rtoBackoffShift < 6) {
+            rtoBackoffShift++;
+        }
     }
 
-    /** 复位 RTO backoff。Mirrors {@code icsk->icsk_backoff = 0}(ACK 推进后)。 */
+    /** 复位 RTO backoff。Mirrors Linux {@code icsk->icsk_backoff = 0}(ACK 推进后)。 */
     public void resetBackoff() {
-        sock.resetRtoBackoff();
+        rtoBackoffShift = 0;
     }
 
-    /** 当前 RTO (ms),按 srtt/rttvar + backoff。Mirrors {@code inet_csk(sk)->icsk_rto}。 */
+    /** 当前 RTO backoff shift。Mirrors Linux {@code icsk->icsk_backoff}。 */
+    public int backoffShift() {
+        return rtoBackoffShift;
+    }
+
+    /** 直接设置 backoff shift(只在 attach 等恢复路径用)。 */
+    public void backoffShift(int v) {
+        this.rtoBackoffShift = Math.max(0, v);
+    }
+
+    /** 当前 RTO (ms),按 srtt/rttvar + backoff。Mirrors Linux {@code inet_csk(sk)->icsk_rto}。 */
     public long rtoMs() {
         return sock.rtoMs();
     }
 
-    /** 首段重传发送时戳(us);0 表示当前无未确认的重传。Mirrors {@code tp->retrans_stamp}。 */
+    /** 首段重传发送时戳(us);0 表示当前无未确认的重传。Mirrors Linux {@code tp->retrans_stamp}。 */
     public long retransStamp() {
-        return sock.retransStamp();
+        return retransStamp;
     }
 
     public void retransStamp(long us) {
-        sock.retransStamp(us);
+        this.retransStamp = us;
     }
 
-    /** TLP 探测段的 highSeq。Mirrors {@code tp->tlp_high_seq}。 */
+    /** TLP 探测段的 highSeq。Mirrors Linux {@code tp->tlp_high_seq}。 */
     public int tlpHighSeq() {
-        return sock.tlpHighSeq();
+        return tlpHighSeq;
     }
 
     public void tlpHighSeq(int seq) {
-        sock.tlpHighSeq(seq);
+        this.tlpHighSeq = seq;
     }
 }

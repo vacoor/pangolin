@@ -29,6 +29,15 @@ public final class Receiver {
 
     private final TcpSock sock;
 
+    /** 下一个期望到达的序号(R3.2 物理迁到 Receiver)。Mirrors Linux {@code tp->rcv_nxt}。 */
+    private int rcvNxt;
+    /** 当前通告接收窗口(字节)(R3.2 物理迁到 Receiver)。Mirrors Linux {@code tp->rcv_wnd}。 */
+    private int rcvWnd;
+    /** 上一次通告 window 时的 rcvNxt 快照(R3.2)。Mirrors Linux {@code tp->rcv_wup}。 */
+    private int rcvWup;
+    /** 背压标志(R3.2);true 时栈暂停向 handler 交付数据。 */
+    private boolean rcvPaused;
+
     Receiver(TcpSock sock) {
         this.sock = sock;
     }
@@ -43,38 +52,38 @@ public final class Receiver {
 
     /** 下一个期望到达的序号。Mirrors Linux {@code tp->rcv_nxt}。 */
     public int rcvNxt() {
-        return sock.rcvNxt();
+        return rcvNxt;
     }
 
     public void rcvNxt(int v) {
-        sock.rcvNxt(v);
+        this.rcvNxt = v;
     }
 
     /** 当前通告接收窗口(字节)。Mirrors Linux {@code tp->rcv_wnd}。 */
     public int rcvWnd() {
-        return sock.rcvWnd();
+        return rcvWnd;
     }
 
     public void rcvWnd(int v) {
-        sock.rcvWnd(v);
+        this.rcvWnd = v;
     }
 
     /** 上一次通告 window 时的 rcvNxt 快照。Mirrors Linux {@code tp->rcv_wup}。 */
     public int rcvWup() {
-        return sock.rcvWup();
+        return rcvWup;
     }
 
     public void rcvWup(int v) {
-        sock.rcvWup(v);
+        this.rcvWup = v;
     }
 
     /** 背压标志:true 时栈暂停向 handler 交付数据,窗口会收缩。 */
     public boolean paused() {
-        return sock.rcvPaused();
+        return rcvPaused;
     }
 
     public void paused(boolean v) {
-        sock.rcvPaused(v);
+        this.rcvPaused = v;
     }
 
     /** 接收缓冲对象(按序已交付 + OFO 暂存)。Mirrors Linux {@code sk->sk_receive_queue}。 */
