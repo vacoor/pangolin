@@ -77,12 +77,12 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
 
     @Override
     protected TcpRequestSock conn_request(ChannelHandlerContext net, TcpSock listenSock, TcpPacketBuf pkt) {
-        return tcp_v4_conn_request(net, listenSock, pkt);
+        return tcp_v4_conn_request(net, listener.listenSock, pkt);
     }
 
     @Override
     protected TcpSock syn_recv_sock(ChannelHandlerContext net, TcpSock listenSock, TcpPacketBuf pkt, TcpRequestSock req) {
-        return tcp_v4_syn_recv_sock(net, listenSock, pkt, req);
+        return tcp_v4_syn_recv_sock(net, listener.listenSock, pkt, req);
     }
 
     protected void tcp_v4_rcv(ChannelHandlerContext net, TcpPacketBuf pkt) {
@@ -111,7 +111,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
 
         final TcpSock sockToUse = (TcpSock) sk;
         // 对齐 v1:ESTABLISHED 连接的状态机处理跳到该 sock 绑定的 EL 执行,TUN EL 只负责派发。
-        // listenSock 无专属 EL,其 eventLoop() 回退到 TUN EL,本分支自然等价于原地执行。
+        // listener.listenSock 无专属 EL,其 eventLoop() 回退到 TUN EL,本分支自然等价于原地执行。
         final EventLoop loop = sockToUse.eventLoop();
         if (loop == null || loop.inEventLoop()) {
             tcp_v4_do_rcv_safely(net, sockToUse, pkt);
@@ -132,12 +132,12 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
             int err = tcp_v4_do_rcv(net, sockToUse, pkt);
             if (err != 0) {
                 send_reset(net, pkt, err);
-                if (sockToUse != listenSock) {
+                if (sockToUse != listener.listenSock) {
                     inet_csk_destroy_sock(sockToUse);
                 }
             }
         } catch (Throwable cause) {
-            if (sockToUse != listenSock) {
+            if (sockToUse != listener.listenSock) {
                 inet_csk_destroy_sock(sockToUse);
             }
             throw cause;
@@ -388,7 +388,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
      */
     protected TcpRequestSock tcp_v4_conn_request(ChannelHandlerContext net, TcpSock listenSock, TcpPacketBuf pkt) {
         TcpHandshaker handshaker = handshakerFactory.newHandshaker(pkt);
-        TcpRequestSock req = new TcpRequestSock(FourTuple.of(pkt), listenSock, handshaker);
+        TcpRequestSock req = new TcpRequestSock(FourTuple.of(pkt), listener.listenSock, handshaker);
         openreqInit(req, handshaker, pkt);
         // tcp_timeout_init 等价于 v1 L86:首个 SYN-ACK RTO 基线
         req.timeout = TcpConstants.RTO_INIT_MS;
@@ -404,7 +404,7 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
          * synPacket / net 在此统一 retain + stash;lifetime 与 req 绑定,由
          * moveToEstablished 或 inet_csk_destroy_sock(req) 负责释放。
          */
-        addToHalfQueue(listenSock, req);
+        addToHalfQueue(listener.listenSock, req);
         req.net(net);
         req.synPacket((TcpPacketBuf) pkt.retain());
         initializer.onRequest(req, this);

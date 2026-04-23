@@ -35,7 +35,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps
  *   <li>{@link #mib} — MIB 计数器(per-stack 独立)</li>
  *   <li>{@link #handshakerFactory} — 握手器工厂</li>
  *   <li>{@link #initializer} — 装配钩子({@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockInitializer})</li>
- *   <li>注册表三件套:{@link #synRegistry} / {@link #establishedRegistry} / {@link #timewaitRegistry}</li>
+ *   <li>注册表三件套:{@link #listener.synRegistry} / {@link #establishedRegistry} / {@link #timewaitRegistry}</li>
  * </ul>
  *
  * <p><b>Sock 装配</b>:所有 sock(listen / child / established)创建后经
@@ -53,7 +53,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps
  * <p><b>子类</b>:当前只有 {@link Tcp4Multiplexer}(IPv4);{@code Tcp6Multiplexer} 未实现。
  *
  * <p><b>线程模型</b>:读写 {@link #establishedRegistry} / {@link #timewaitRegistry}
- * 跨 EL(TUN EL + sock EL),用 ConcurrentHashMap;{@link #synRegistry} 只在 TUN EL
+ * 跨 EL(TUN EL + sock EL),用 ConcurrentHashMap;{@link #listener.synRegistry} 只在 TUN EL
  * 访问,用 HashMap。
  */
 @Slf4j
@@ -122,11 +122,6 @@ public abstract class TcpMultiplexer {
      */
     protected final TcpSockInitializer initializer;
     /**
-     * 半连接队列 — 读写均在 TUN EL(入站 SYN / SYN-ACK 重传 timer 回调 / 握手失败均
-     * 通过 TUN channel EL 调度),{@link java.util.HashMap} 足够。
-     */
-    protected final Map<FourTuple, TcpRequestSock> synRegistry;
-    /**
      * ESTABLISHED 槽位 — 跨 EL 并发:
      * <ul>
      *   <li>{@code moveToEstablished} 在 TUN EL 上 put(握手完成)</li>
@@ -146,24 +141,30 @@ public abstract class TcpMultiplexer {
      * sock EL 上 remove,但 {@code __inet_lookup_skb} 在 TUN EL 上 get,需 ConcurrentHashMap。
      */
     protected final Map<FourTuple, TcpTimewaitSock> timewaitRegistry;
-    protected final int maxSynBacklog;
-    protected TcpSock listenSock;
+    /**
+     * LISTEN 端聚合(R4.1):holds listener.listenSock + listener.synRegistry + maxSynBacklog。
+     * 创建在 {@link #init()} 里(listener.listenSock 先创建并 configure),非 final。
+     */
+    protected Listener listener;
 
     protected TcpMultiplexer(TcpConfig config, EventLoopGroup tcpGroup, TcpSockInitializer initializer) {
         this.config = config;
         this.handshakerFactory = new TcpHandshakerFactory(config, output);
         this.tcpGroup = tcpGroup;
         this.initializer = Objects.requireNonNull(initializer, "initializer");
-        this.synRegistry = new HashMap<>();
         this.establishedRegistry = new ConcurrentHashMap<>();
         this.timewaitRegistry = new ConcurrentHashMap<>();
-        this.maxSynBacklog = DEFAULT_MAX_SYN_BACKLOG;
         init();
     }
 
     protected void init() {
-        listenSock = init(new TcpSock());
-        listenSock.state(TcpConnectionState.TCP_LISTEN);
+        TcpSock listenSk = init(new TcpSock());
+        listenSk.state(TcpConnectionState.TCP_LISTEN);
+        this.listener = new Listener(listenSk, DEFAULT_MAX_SYN_BACKLOG);
+    }
+
+    public Listener listener() {
+        return listener;
     }
 
     /**
@@ -240,11 +241,11 @@ public abstract class TcpMultiplexer {
         if (tw != null) {
             return tw;
         }
-        TcpRequestSock req = synRegistry.get(key);
+        TcpRequestSock req = listener.findRequest(key);
         if (req != null) {
             return req;
         }
-        return listenSock;
+        return listener.listenSock;
     }
 
     /**
@@ -308,7 +309,7 @@ public abstract class TcpMultiplexer {
             if (oowRateLimited(handshaker, pkt)) {
                 mib.inc(TcpMib.TCPACKSKIPPEDSYNRECV);
             } else {
-                inet_rtx_syn_ack(net, listenSock, req);
+                inet_rtx_syn_ack(net, listener.listenSock, req);
                 req.num_retrans++;
             }
             return null;
@@ -364,7 +365,7 @@ public abstract class TcpMultiplexer {
         }
 
         // (11) syn_recv_sock + synackRttMeas(Karn's rule:num_retrans == 0 才取样)。
-        TcpSock child = syn_recv_sock(net, listenSock, pkt, req);
+        TcpSock child = syn_recv_sock(net, listener.listenSock, pkt, req);
         if (child != null) {
             synackRttMeas(child, req);
         }
@@ -400,7 +401,7 @@ public abstract class TcpMultiplexer {
     }
 
     protected void addToHalfQueue(final TcpSock listenSock, final TcpRequestSock req) {
-        synRegistry.putIfAbsent(req.fourTuple(), req);
+        listener.addRequest(req);
     }
 
     protected void moveToEstablished(final TcpRequestSock req, final TcpSock sock) {
@@ -409,7 +410,7 @@ public abstract class TcpMultiplexer {
             req.synPacket(null);
         }
         // sender/receiver/multiplexer 已经在 tcp_v4_syn_recv_sock 的 init(newsk) 里 configure
-        synRegistry.remove(req.fourTuple(), req);
+        listener.removeRequest(req);
         establishedRegistry.put(sock.fourTuple(), sock);
     }
 
@@ -454,7 +455,7 @@ public abstract class TcpMultiplexer {
             req.synPacket().release();
             req.synPacket(null);
         }
-        synRegistry.remove(req.fourTuple(), req);
+        listener.removeRequest(req);
     }
 
     public boolean closeState(TcpSock sk) {
@@ -577,7 +578,7 @@ public abstract class TcpMultiplexer {
     }
 
     public boolean sk_acceptq_is_full() {
-        return synRegistry.size() >= maxSynBacklog;
+        return listener.synRegistry.size() >= listener.maxSynBacklog;
     }
 
     public boolean write(final FourTuple key, final ByteBuf data) {
@@ -1055,7 +1056,7 @@ public abstract class TcpMultiplexer {
 
     protected void consume(TcpSock sk, ByteBuf data) {
         /*
-         * P1.3 单一出口:sink 统一走 sock.handler()。listenSock 不经本路径,
+         * P1.3 单一出口:sink 统一走 sock.handler()。listener.listenSock 不经本路径,
          * 但 handler==null(destroy 途中、异常装配)时防御性 release,不泄露。
          */
         TcpSockHandler handler = sk == null ? null : sk.handler();
