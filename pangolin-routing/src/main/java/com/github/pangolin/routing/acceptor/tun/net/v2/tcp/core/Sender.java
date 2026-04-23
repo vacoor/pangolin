@@ -84,6 +84,22 @@ public final class Sender {
     private int frtoHighmark;
     /** F-RTO 状态机计数器。Mirrors Linux {@code tp->frto_counter}。 */
     private int frtoCounter;
+    /** 累计已确认字节数。Mirrors Linux {@code tp->bytes_acked}。 */
+    private long bytesAcked;
+    /** RACK 最近 SACKed 段 sentTime。Mirrors Linux {@code tp->rack.mstamp}。 */
+    private long rackMstamp;
+    /** RACK 当前窗内 RTT。Mirrors Linux {@code tp->rack.rtt_us}。 */
+    private long rackRttUs;
+    /** RACK reo_wnd 放宽步数;初值 1(Linux 默认)。Mirrors Linux {@code tp->rack.reo_wnd_steps}。 */
+    private int rackReoWndSteps = 1;
+    /** RACK reo_wnd 持续 epoch 数。Mirrors Linux {@code tp->rack.reo_wnd_persist}。 */
+    private int rackReoWndPersist;
+    /** RACK DSACK 是否观察过。Mirrors Linux {@code tp->rack.dsack_seen}。 */
+    private boolean rackDsackSeen;
+    /** 已交付段数累计。Mirrors Linux {@code tp->delivered}。 */
+    private int delivered;
+    /** 上次 RACK step 更新时的 delivered 快照。Mirrors Linux {@code tp->rack.last_delivered}。 */
+    private int rackLastDelivered;
 
     /**
      * RTO 指数退避 shift(R2.3 物理迁移到 Sender)。Mirrors Linux
@@ -536,4 +552,38 @@ public final class Sender {
     public void frtoCounter(int v) {
         this.frtoCounter = v;
     }
+
+    /** 累计已确认字节。Mirrors Linux {@code tp->bytes_acked}。 */
+    public long bytesAcked() { return bytesAcked; }
+    public void bytesAcked(long v) { this.bytesAcked = v; }
+    public void addBytesAcked(long delta) { this.bytesAcked += delta; }
+
+    /** RACK 最近 SACKed 段 sentTime。 */
+    public long rackMstamp() { return rackMstamp; }
+    public void rackMstamp(long v) { this.rackMstamp = v; }
+
+    /** RACK 当前 RTT(us)。 */
+    public long rackRttUs() { return rackRttUs; }
+    public void rackRttUs(long v) { this.rackRttUs = v; }
+
+    /** RACK reo_wnd 放宽步数。 */
+    public int rackReoWndSteps() { return rackReoWndSteps; }
+    public void rackReoWndSteps(int v) { this.rackReoWndSteps = v; }
+
+    /** RACK reo_wnd 持续 epoch 数。 */
+    public int rackReoWndPersist() { return rackReoWndPersist; }
+    public void rackReoWndPersist(int v) { this.rackReoWndPersist = v; }
+
+    /** RACK DSACK 是否观察过。 */
+    public boolean rackDsackSeen() { return rackDsackSeen; }
+    public void rackDsackSeen(boolean v) { this.rackDsackSeen = v; }
+
+    /** 已交付段数累计。Mirrors Linux {@code tp->delivered}。 */
+    public int delivered() { return delivered; }
+    public void delivered(int v) { this.delivered = v; }
+    public void addDelivered(int n) { this.delivered += n; }
+
+    /** 上次 RACK step 更新时的 delivered 快照。 */
+    public int rackLastDelivered() { return rackLastDelivered; }
+    public void rackLastDelivered(int v) { this.rackLastDelivered = v; }
 }

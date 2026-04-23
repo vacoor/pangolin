@@ -66,7 +66,7 @@ public class TcpSock extends SockCommon {
     private int mss;
     private int sndWscale;
     private int rcvWscale;
-    private long bytesAcked;
+    // R2.3: bytesAcked 已物理迁到 Sender
     // R2.3: packetsOut 已物理迁到 Sender
     private int skShutdown;
     private int ackPending;
@@ -153,44 +153,44 @@ public class TcpSock extends SockCommon {
      * RACK 最近一次被 SACK 覆盖段的 {@code sentTimeUs}(对齐 Linux {@code tp->rack.mstamp})。
      * 新 SACK tagging 时单调向上刷新;判断更早发送但未被 SACK 的段是否可判 LOST。
      */
-    private long rackMstamp;
+    // R2.3: rackMstamp 已物理迁到 Sender
     /**
      * RACK 对应上述段的 RTT 样本 (us),参与 reo_wnd 计算。目前未进一步细化:
      * 采 {@code sockTime - sentTimeUs} 近似。
      */
-    private long rackRttUs;
+    // R2.3: rackRttUs 已物理迁到 Sender
     /**
      * RACK {@code reo_wnd} 的步长系数 — 对应 Linux {@code tp->rack.reo_wnd_steps}。
      * 初始 1;每当观察到 DSACK 事件(发送端视角)在 1 RTT 外被确认时递增,直至上限
      * {@link TcpConstants#TCP_RACK_RECOVERY_THRESH} × 16。{@link #tcpRackUpdateReoWnd}
      * 在 {@code reoWndPersist} 耗尽且无 DSACK 时衰减回 1。
      */
-    private int rackReoWndSteps;
+    // R2.3: rackReoWndSteps 已物理迁到 Sender
     /**
      * RACK {@code reo_wnd} 持续计数 — 对应 Linux {@code tp->rack.reo_wnd_persist}。
      * DSACK 事件后复位为 {@link TcpConstants#TCP_RACK_RECOVERY_THRESH}(16),每次
      * {@link #tcpRackUpdateReoWnd} 递减;到 0 时衰减 {@link #rackReoWndSteps} 回 1。
      */
-    private int rackReoWndPersist;
+    // R2.3: rackReoWndPersist 已物理迁到 Sender
     /**
      * 是否看到本轮 ACK 窗口内的 DSACK — 对应 Linux {@code tp->rack.dsack_seen}。
      * 由 {@code tcp_sacktag_write_queue} 识别 DSACK 首块时置位,
      * {@link #tcpRackUpdateReoWnd} 消费后清零。
      */
-    private boolean rackDsackSeen;
+    // R2.3: rackDsackSeen 已物理迁到 Sender
     /**
      * 每段递增的"已投递"计数 — 对应 Linux {@code tp->delivered}。
      * 段被累计 ACK 或新 SACK 标记时 +1;发送(含重传)时会被 {@code tcp_rate_skb_sent}
      * 快照到 {@code TCP_SKB_CB(skb)->tx.delivered},RACK 1-RTT 门控据此计算时序。
      */
-    private int delivered;
+    // R2.3: delivered 已物理迁到 Sender
     /**
      * RACK 上次调整 {@code reo_wnd_steps} 时 {@link #delivered} 的快照 —
      * 对应 Linux {@code tp->rack.last_delivered}。
      * 1-RTT 门控:本 ACK 所确认段的 {@code tx.delivered} 早于该值时,属于同一 RTT
      * 的旧 DSACK,不再重复步进。
      */
-    private int rackLastDelivered;
+    // R2.3: rackLastDelivered 已物理迁到 Sender
     /**
      * 每 ACK 瞬态 scratchpad:本 ACK 内"已投递段"的 {@code tx.delivered} 最大值 —
      * 对应 Linux {@code rate_sample.prior_delivered}。{@code tcpAck} 入口清零,
@@ -352,13 +352,9 @@ public class TcpSock extends SockCommon {
         sock.pmtuCookie = 0;
         sock.dstMtu     = 0;
         // R2.3: sackedOut / lostOut 默认 0(Sender 字段初值)
-        sock.rackMstamp = 0L;
-        sock.rackRttUs  = 0L;
-        sock.rackReoWndSteps   = 1;
-        sock.rackReoWndPersist = 0;
-        sock.rackDsackSeen     = false;
-        sock.delivered             = 0;
-        sock.rackLastDelivered     = 0;
+        sock.sender().rackReoWndSteps(1);
+        // R2.3: rackMstamp/rackRttUs/rackReoWndPersist/rackDsackSeen/delivered/rackLastDelivered
+        //       默认值由 Sender 字段声明初始化(0/0L/0/false/0/0)
         sock.rackAckPriorDelivered = 0;
         sock.rttMinFilter.reset(0, TcpConstants.TCP_MIN_RTT_NO_SAMPLE);
         sock.linger2 = (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
@@ -420,13 +416,8 @@ public class TcpSock extends SockCommon {
         tcpHeaderLen = 0;
         dstMtu = 0;
         // R2.3: sackedOut / lostOut 默认 0(Sender 字段初值)
-        rackMstamp = 0L;
-        rackRttUs = 0L;
-        rackReoWndSteps = 1;
-        rackReoWndPersist = 0;
-        rackDsackSeen = false;
-        delivered = 0;
-        rackLastDelivered = 0;
+        // R2.3: rackMstamp/rackRttUs/rackReoWndSteps(=1)/rackReoWndPersist/rackDsackSeen/delivered/rackLastDelivered
+        //       默认值由 Sender 字段声明初始化
         rackAckPriorDelivered = 0;
         rttMinFilter.reset(0, TcpConstants.TCP_MIN_RTT_NO_SAMPLE);
         linger2 = (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
@@ -473,7 +464,7 @@ public class TcpSock extends SockCommon {
         this.mss = conn.mss();
         this.sndWscale = conn.sndWscale();
         this.rcvWscale = conn.rcvWscale();
-        this.bytesAcked = conn.bytesAcked();
+        // R2.3: bytesAcked 已在 Sender(dead code path)
         // R2.3: packetsOut 已在 Sender(dead code path)
         this.skShutdown = conn.skShutdown();
         this.ackPending = conn.ackPending();
@@ -729,11 +720,11 @@ public class TcpSock extends SockCommon {
     }
 
     public long bytesAcked() {
-        return bytesAcked;
+        return sender.bytesAcked();
     }
 
     public void bytesAcked(long v) {
-        this.bytesAcked = v;
+        sender.bytesAcked(v);
     }
 
     public int skShutdown() {
@@ -843,7 +834,7 @@ public class TcpSock extends SockCommon {
         }
         int delta = ackSeq - cur;
         sender.sndUna(ackSeq);
-        bytesAcked += delta;
+        sender.addBytesAcked(delta);
         return delta;
     }
 
@@ -1506,26 +1497,26 @@ public class TcpSock extends SockCommon {
     public boolean isCaOpen() { return sender.congestionState() == CongestionState.OPEN; }
 
     /** RACK 最新 SACKed 段 {@code sentTimeUs};单调更新。 */
-    public long rackMstamp() { return rackMstamp; }
+    public long rackMstamp() { return sender.rackMstamp(); }
     public void updateRack(long sentTimeUs, long rttUs) {
-        if (sentTimeUs > rackMstamp) {
-            rackMstamp = sentTimeUs;
-            rackRttUs = Math.max(rttUs, 0L);
+        if (sentTimeUs > sender.rackMstamp()) {
+            sender.rackMstamp(sentTimeUs);
+            sender.rackRttUs(Math.max(rttUs, 0L));
         }
     }
-    public long rackRttUs() { return rackRttUs; }
+    public long rackRttUs() { return sender.rackRttUs(); }
 
     /** RACK {@code reo_wnd_steps} — 参与 {@code reo_wnd = base × steps} 的动态缩放。 */
-    public int rackReoWndSteps() { return rackReoWndSteps; }
+    public int rackReoWndSteps() { return sender.rackReoWndSteps(); }
     /** 设置 {@code tp->rack.dsack_seen};由 {@code tcp_sacktag_write_queue} DSACK 首块命中时调用。 */
-    public void setRackDsackSeen(boolean seen) { this.rackDsackSeen = seen; }
+    public void setRackDsackSeen(boolean seen) { sender.rackDsackSeen(seen); }
     /** 当前是否已观察到待消费 DSACK 事件。 */
-    public boolean rackDsackSeen() { return rackDsackSeen; }
+    public boolean rackDsackSeen() { return sender.rackDsackSeen(); }
 
     /** 读取 {@code tp->delivered}(段投递计数)。 */
-    public int  delivered()                    { return delivered; }
+    public int  delivered()                    { return sender.delivered(); }
     /** {@code tp->delivered++};在累计 ACK 或新 SACK 标记释放段时调用。 */
-    public void incrDelivered(int n)           { this.delivered += Math.max(n, 0); }
+    public void incrDelivered(int n)           { sender.addDelivered(Math.max(n, 0)); }
     /** {@code rs->prior_delivered} scratchpad:本 ACK 内"已投递段" tx.delivered 的最大值。 */
     public int  rackAckPriorDelivered()        { return rackAckPriorDelivered; }
     /** {@code tcpAck} 入口复位 / {@code clean_rtx / sacktag} 路径用单调最大值刷新。 */
@@ -1537,7 +1528,7 @@ public class TcpSock extends SockCommon {
     /** {@code tcpAck} 入口清零 scratchpad。 */
     public void clearRackAckPriorDelivered()   { this.rackAckPriorDelivered = 0; }
     /** {@code tp->rack.last_delivered} — 上次 reo_wnd 步进时的 {@code tp->delivered} 快照。 */
-    public int  rackLastDelivered()            { return rackLastDelivered; }
+    public int  rackLastDelivered()            { return sender.rackLastDelivered(); }
 
     /**
      * 对齐 Linux {@code tcp_rack_update_reo_wnd} (tcp_recovery.c):
@@ -1563,19 +1554,19 @@ public class TcpSock extends SockCommon {
             return;
         }
         // S-3: Disregard DSACK if a rtt has not passed since we adjusted reo_wnd
-        if (rackDsackSeen
-                && before(priorDelivered, rackLastDelivered)) {
-            rackDsackSeen = false;
+        if (sender.rackDsackSeen()
+                && before(priorDelivered, sender.rackLastDelivered())) {
+            sender.rackDsackSeen(false);
         }
-        if (rackDsackSeen) {
-            rackReoWndSteps   = Math.min(rackReoWndSteps + 1, 0xFF);
-            rackDsackSeen     = false;
-            rackLastDelivered = delivered;
-            rackReoWndPersist = TcpConstants.TCP_RACK_RECOVERY_THRESH;
-        } else if (rackReoWndPersist <= 0) {
-            rackReoWndSteps = 1;
+        if (sender.rackDsackSeen()) {
+            sender.rackReoWndSteps(Math.min(sender.rackReoWndSteps() + 1, 0xFF));
+            sender.rackDsackSeen(false);
+            sender.rackLastDelivered(sender.delivered());
+            sender.rackReoWndPersist(TcpConstants.TCP_RACK_RECOVERY_THRESH);
+        } else if (sender.rackReoWndPersist() <= 0) {
+            sender.rackReoWndSteps(1);
         } else {
-            rackReoWndPersist--;
+            sender.rackReoWndPersist(sender.rackReoWndPersist() - 1);
         }
     }
 
