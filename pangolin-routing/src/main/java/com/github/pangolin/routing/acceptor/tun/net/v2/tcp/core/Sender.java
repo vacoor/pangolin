@@ -76,6 +76,14 @@ public final class Sender {
     private int highSeq;
     /** Congestion Avoidance 增量累计器。Mirrors Linux {@code tp->snd_cwnd_cnt}。 */
     private int caIncrCounter;
+    /** 本 epoch 未被 ACK 覆盖的重传段计数。Mirrors Linux {@code tp->undo_retrans}。 */
+    private int undoRetrans;
+    /** undo 快照 sndUna。Mirrors Linux {@code tp->undo_marker}。 */
+    private int undoMarker;
+    /** F-RTO 武装时的 sndNxt 快照。Mirrors Linux {@code tp->frto_highmark}。 */
+    private int frtoHighmark;
+    /** F-RTO 状态机计数器。Mirrors Linux {@code tp->frto_counter}。 */
+    private int frtoCounter;
 
     /**
      * RTO 指数退避 shift(R2.3 物理迁移到 Sender)。Mirrors Linux
@@ -483,5 +491,49 @@ public final class Sender {
 
     public void addCaIncrCounter(int v) {
         this.caIncrCounter += v;
+    }
+
+    /** undoRetrans counter。Mirrors Linux {@code tp->undo_retrans}。 */
+    public int undoRetrans() {
+        return undoRetrans;
+    }
+
+    public void undoRetrans(int v) {
+        this.undoRetrans = Math.max(v, 0);
+    }
+
+    public void incrementUndoRetrans() {
+        this.undoRetrans++;
+    }
+
+    public void decrementUndoRetrans(int n) {
+        this.undoRetrans = Math.max(undoRetrans - n, 0);
+    }
+
+    /** undo 快照 sndUna。Mirrors Linux {@code tp->undo_marker}。 */
+    public int undoMarker() {
+        return undoMarker;
+    }
+
+    public void undoMarker(int v) {
+        this.undoMarker = v;
+    }
+
+    /** F-RTO 武装时的 sndNxt 快照。Mirrors Linux {@code tp->frto_highmark}。 */
+    public int frtoHighmark() {
+        return frtoHighmark;
+    }
+
+    public void frtoHighmark(int v) {
+        this.frtoHighmark = v;
+    }
+
+    /** F-RTO 状态机计数器。Mirrors Linux {@code tp->frto_counter}。 */
+    public int frtoCounter() {
+        return frtoCounter;
+    }
+
+    public void frtoCounter(int v) {
+        this.frtoCounter = v;
     }
 }

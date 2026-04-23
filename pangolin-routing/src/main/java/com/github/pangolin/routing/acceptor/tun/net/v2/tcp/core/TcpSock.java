@@ -108,7 +108,7 @@ public class TcpSock extends SockCommon {
      * 当前 recovery 阶段累计的重传段计数;收到覆盖它们的 ACK 时递减。
      * 对应 Linux {@code tp->undo_retrans},F-RTO 与 CC undo 路径依赖。
      */
-    private int undoRetrans;
+    // R2.3: undoRetrans 已物理迁到 Sender
     /** 接收缓冲区上限(字节)— 对应 Linux {@code sk->sk_rcvbuf},用于 {@code tcp_full_space}。 */
     private int rcvBuf;
     /** 单次可通告窗口上限 — 对应 Linux {@code tp->window_clamp}。 */
@@ -254,21 +254,21 @@ public class TcpSock extends SockCommon {
      * 进入 Recovery/Loss 时的 {@code snd_una} 快照 — 对应 Linux {@code tp->undo_marker}。
      * 非 0 表示当前存在一次 undo 机会;{@link #tcpUndoCwndReduction} 执行后清零。
      */
-    private int undoMarker;
+    // R2.3: undoMarker 已物理迁到 Sender
     /**
      * F-RTO high mark — 对应 Linux {@code tp->high_seq}(在 F-RTO 语境下的快照):
      * RTO 触发瞬间 {@code snd_nxt} 的副本,作为后续 ACK 判定伪 RTO 的参照线。
      * {@code frtoCounter != 0} 时有效,{@link #tcpUndoCwndReduction} /
      * {@link #clearFrto} 或自然退出 CA_Loss 时清零。
      */
-    private int frtoHighmark;
+    // R2.3: frtoHighmark 已物理迁到 Sender
     /**
      * F-RTO 状态机 — 对应 Linux {@code tp->frto}:{@code 0} 表示未武装,
      * {@code 1} 表示本轮 RTO 已武装 F-RTO(等待首个 ACK 判定是否伪触发)。
      * 命中 {@link #tcpProcessFrto} 后清零,落入 {@link TcpMib#TCPSPURIOUSRTOS} 记账;
      * 未命中则在首次有效 ACK 后降级回 CA_Loss 常规路径。
      */
-    private int frtoCounter;
+    // R2.3: frtoCounter 已物理迁到 Sender
 
     protected TcpSock() {
         this(null, false);
@@ -411,8 +411,7 @@ public class TcpSock extends SockCommon {
         lastRecvTimeMs = 0L;
         lastSendTimeMs = 0L;
         // R2.3: srttUs / rttvarUs 默认 0L 由 Sender 字段声明初始化
-        // R2.3: rtoBackoffShift / retransStamp 默认值 0/0L 由 Sender 字段声明初始化
-        undoRetrans = 0;
+        // R2.3: rtoBackoffShift / retransStamp / undoRetrans 默认值 0/0L 由 Sender 字段声明初始化
         rcvBuf = TcpConstants.TCP_DEFAULT_RCV_BUF;
         windowClamp = TcpConstants.TCP_DEFAULT_RCV_BUF;
         rcvSsthresh = TcpConstants.TCP_DEFAULT_RCV_BUF;
@@ -445,10 +444,7 @@ public class TcpSock extends SockCommon {
         // R2.3: tlpHighSeq 默认值 0 由 Sender 字段声明初始化
         dsackStart = 0;
         dsackEnd = 0;
-        // R2.3: priorCwnd / priorSsthresh 默认 0 由 Sender 字段声明初始化
-        undoMarker = 0;
-        frtoHighmark = 0;
-        frtoCounter = 0;
+        // R2.3: priorCwnd / priorSsthresh / undoMarker / frtoHighmark / frtoCounter 默认 0 由 Sender 字段声明初始化
     }
 
     private void loadFromConnection(TcpConnection conn) {
@@ -500,7 +496,7 @@ public class TcpSock extends SockCommon {
         // R2.3: srttUs / rttvarUs 已在 Sender(dead code path)
         // R2.3: rtoBackoffShift / retransStamp 已在 Sender,此路径为 dead code 保留
         //       (from(conn)/view(conn) 无外部调用者);configure 后由外部重置
-        this.undoRetrans = conn.undoRetrans();
+        // R2.3: undoRetrans 已在 Sender(dead code path)
         this.mssCache = conn.mssCache();
         this.pmtuCookie = conn.pmtuCookie();
         this.tcpHeaderLen = conn.tcpHeaderLen();
@@ -1192,20 +1188,20 @@ public class TcpSock extends SockCommon {
      * 尚未被 ACK 覆盖的重传段计数;对应 Linux {@code tp->undo_retrans}。
      */
     public int undoRetrans() {
-        return undoRetrans;
+        return sender.undoRetrans();
     }
 
     public void undoRetrans(int v) {
-        this.undoRetrans = Math.max(v, 0);
+        sender.undoRetrans(v);
     }
 
     public void incrUndoRetrans() {
-        undoRetrans++;
+        sender.incrementUndoRetrans();
     }
 
     public void decrUndoRetrans(int n) {
         if (n <= 0) return;
-        undoRetrans = Math.max(undoRetrans - n, 0);
+        sender.decrementUndoRetrans(n);
     }
 
     /** 对应 Linux {@code sk->sk_rcvbuf}。 */
@@ -1288,9 +1284,9 @@ public class TcpSock extends SockCommon {
 
     public int priorCwnd() { return sender.priorCwnd(); }
     public int priorSsthresh() { return sender.priorSsthresh(); }
-    public int undoMarker() { return undoMarker; }
-    public int frtoHighmark() { return frtoHighmark; }
-    public int frtoCounter() { return frtoCounter; }
+    public int undoMarker() { return sender.undoMarker(); }
+    public int frtoHighmark() { return sender.frtoHighmark(); }
+    public int frtoCounter() { return sender.frtoCounter(); }
 
     /**
      * 清除 F-RTO 武装状态 — 对应 Linux {@code tp->frto = 0}。
@@ -1298,8 +1294,8 @@ public class TcpSock extends SockCommon {
      * 避免 F-RTO 高水位影响下一轮 RTO 判定。
      */
     public void clearFrto() {
-        this.frtoHighmark = 0;
-        this.frtoCounter = 0;
+        sender.frtoHighmark(0);
+        sender.frtoCounter(0);
     }
 
     /**
@@ -1319,8 +1315,8 @@ public class TcpSock extends SockCommon {
         int s = sender.ssthresh();
         sender.priorCwnd(c);
         sender.priorSsthresh((s == Integer.MAX_VALUE) ? 0 : s);
-        undoMarker = sender.sndUna();
-        undoRetrans = 0;
+        sender.undoMarker(sender.sndUna());
+        sender.undoRetrans(0);
         sender.retransStamp(0L);
     }
 
@@ -1342,9 +1338,9 @@ public class TcpSock extends SockCommon {
         if (ps > 0) {
             sender.ssthresh(Math.max(sender.ssthresh(), ps));
         }
-        undoMarker = 0;
+        sender.undoMarker(0);
         sender.retransStamp(0L);
-        undoRetrans = 0;
+        sender.undoRetrans(0);
         clearFrto();
         if (unmarkLoss) {
             sender.lostOut(0);
@@ -1374,7 +1370,7 @@ public class TcpSock extends SockCommon {
      */
     public boolean tcpTryUndoRecovery(int tsecr) {
         if (sender.congestionState() != CongestionState.RECOVERY) return false;
-        if (undoMarker == 0 || sender.retransStamp() == 0L) return false;
+        if (sender.undoMarker() == 0 || sender.retransStamp() == 0L) return false;
         if (tsecr == -1) return false;
         final int retransStampMs = (int) (sender.retransStamp() / 1000L);
         if (!com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before(tsecr, retransStampMs)) {
@@ -1407,7 +1403,7 @@ public class TcpSock extends SockCommon {
      */
     public boolean tcpTryUndoLoss(int tsecr) {
         if (sender.congestionState() != CongestionState.LOSS) return false;
-        if (undoMarker == 0 || sender.retransStamp() == 0L) return false;
+        if (sender.undoMarker() == 0 || sender.retransStamp() == 0L) return false;
         if (tsecr == -1) return false;
         final int retransStampMs = (int) (sender.retransStamp() / 1000L);
         if (!com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before(tsecr, retransStampMs)) {
@@ -1447,9 +1443,9 @@ public class TcpSock extends SockCommon {
      */
     public boolean tcpProcessFrto() {
         if (sender.congestionState() != CongestionState.LOSS) return false;
-        if (frtoCounter == 0) return false;
-        if (undoMarker == 0) return false;
-        if (com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before(sender.sndUna(), frtoHighmark)) {
+        if (sender.frtoCounter() == 0) return false;
+        if (sender.undoMarker() == 0) return false;
+        if (com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before(sender.sndUna(), sender.frtoHighmark())) {
             return false;
         }
         tcpUndoCwndReduction(true);
@@ -1486,8 +1482,8 @@ public class TcpSock extends SockCommon {
         if (sender.congestionState() != CongestionState.RECOVERY && sender.congestionState() != CongestionState.LOSS) {
             return false;
         }
-        if (undoMarker == 0 || sender.retransStamp() == 0L) return false;
-        if (undoRetrans != 0) return false;
+        if (sender.undoMarker() == 0 || sender.retransStamp() == 0L) return false;
+        if (sender.undoRetrans() != 0) return false;
         tcpUndoCwndReduction(false);
         sender.congestionState(CongestionState.OPEN);
         sender.caIncrCounter(0);
@@ -1782,9 +1778,9 @@ public class TcpSock extends SockCommon {
         // 有 undo 机会(undoMarker 已建立)且 RTO 瞬间仍有在飞数据(sndNxt > undoMarker),
         // 才把 snd_nxt 快照为 frto_high_mark,等待后续 ACK 判定伪 RTO;否则 RTO 无可用
         // 参照线(单段队列 / 连接刚建立 / snd.nxt == snd.una)直接跳过 F-RTO。
-        if (undoMarker != 0 && after(sender.sndNxt(), undoMarker)) {
-            frtoHighmark = sender.sndNxt();
-            frtoCounter = 1;
+        if (sender.undoMarker() != 0 && after(sender.sndNxt(), sender.undoMarker())) {
+            sender.frtoHighmark(sender.sndNxt());
+            sender.frtoCounter(1);
         } else {
             clearFrto();
         }
