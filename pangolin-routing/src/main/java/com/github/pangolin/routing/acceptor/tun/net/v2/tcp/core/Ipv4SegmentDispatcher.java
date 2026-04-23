@@ -105,7 +105,7 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
 
         if (sk instanceof TcpRequestSock) {
             TcpRequestSock req = (TcpRequestSock) sk;
-            TcpSock nsk = checkReq(net, req.listener(), pkt, req);
+            TcpSock nsk = listener.checkReq(net, pkt, req, this);
             if (nsk == null) {
                 return;
             }

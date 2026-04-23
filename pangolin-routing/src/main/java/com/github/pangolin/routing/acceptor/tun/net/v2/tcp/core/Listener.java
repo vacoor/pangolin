@@ -1,7 +1,17 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
+import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
+import io.netty.channel.ChannelHandlerContext;
+
 import java.util.HashMap;
 import java.util.Map;
+
+import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpOutOps.oowRateLimited;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.after;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before;
+import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.between;
 
 /**
  * LISTEN 端聚合对象 — 把 LISTEN 状态 sock、半连接队列、syn backlog 阈值从
@@ -81,6 +91,131 @@ public final class Listener {
     /** 从半连接队列移除 req;返回是否确实移除。 */
     public boolean removeRequest(TcpRequestSock req) {
         return synRegistry.remove(req.fourTuple(), req);
+    }
+
+    /**
+     * SYN_RECV 阶段的逐段校验 —— R4.2c 从 {@code SegmentDispatcher} 迁入。
+     * 严格对齐 Linux
+     * <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c">checkReq</a>
+     * (net/ipv4/tcp_minisocks.c)。
+     *
+     * <p>处理顺序(与 Linux 一一对应):
+     * <ol>
+     *   <li>{@code tcp_parse_options} — 解析入站 TS 选项;</li>
+     *   <li>PAWS 判定 — {@code th->rst} 不参与 PAWS;</li>
+     *   <li>TSECR 范围校验 — {@code rcv_tsecr} 必须落在 {@code [snt_tsval_first, snt_tsval_last]};</li>
+     *   <li>纯 SYN 重传分支 — {@code seq == rcv_isn && flg == SYN && !paws_reject}
+     *       + {@code oowRateLimited(LINUX_MIB_TCPACKSKIPPEDSYNRECV)} 后 {@code inet_rtx_syn_ack};</li>
+     *   <li>OOW / PAWS 拒绝分支 — 若 {@code paws_reject || !tcp_in_window(...)} 则
+     *       {@code req->rsk_ops->send_ack} 回 Challenge ACK(非 RST 且未限流),
+     *       PAWSESTABREJECTED 记 MIB;</li>
+     *   <li>TS 推进 PAWS 基线 — {@code saw_tstamp && !after(seq, rcv_nxt)} 时更新 {@code ts_recent};</li>
+     *   <li>{@code seq == rcv_isn} → 清 SYN 标志(对齐 Linux 对 "retrans SYN with data" 的截断);</li>
+     *   <li>RST / SYN 走 embryonic_reset — 发 {@code tcp_v4_send_reset} 后销毁 req;</li>
+     *   <li>非 ACK 段静默丢弃;</li>
+     *   <li>ACK# 必须 {@code == snd_isn + 1},否则走 embryonic_reset;</li>
+     *   <li>{@code syn_recv_sock} 建 child → {@link #synackRttMeas} RTT 取样 → 返回 child。</li>
+     * </ol>
+     *
+     * <p>需要 {@code dispatcher} 参数是因为 checkReq 要调用 IP 版本相关的
+     * {@code inet_rtx_syn_ack / send_reset / syn_recv_sock},这些是
+     * {@link SegmentDispatcher} 的 abstract 方法。
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_minisocks.c">checkReq</a>
+     */
+    public TcpSock checkReq(ChannelHandlerContext net,
+                             TcpPacketBuf pkt,
+                             TcpRequestSock req,
+                             SegmentDispatcher dispatcher) {
+        final TcpHandshaker handshaker = req.request();
+        final TcpMibStats mib = dispatcher.mib();
+
+        // (1) tcp_parse_options:仅取 TS 选项(PAWS / TSECR 所需)。
+        long[] tsOpt = handshaker.clientTimestamp()
+                ? TcpOptionCodec.parseTimestamp(pkt.tcpOptionsSlice())
+                : null;
+        final boolean sawTstamp = tsOpt != null;
+        final int rcvTsval = sawTstamp ? (int) tsOpt[0] : 0;
+        final long rcvTsecr = sawTstamp ? tsOpt[1] : 0L;
+
+        // (2) tcp_paws_reject —— th->rst 段不做 PAWS。
+        boolean pawsReject = sawTstamp && !pkt.isRst() && handshaker.pawsRejected(rcvTsval);
+
+        // (3) TSECR 范围 —— 对齐 checkReq 中的 snt_tsval_first/last LAND-style 校验。
+        if (sawTstamp && handshaker.sntTsvalLast() != 0L
+                && !between((int) handshaker.sntTsvalFirst(), (int) rcvTsecr, (int) handshaker.sntTsvalLast())) {
+            mib.inc(TcpMib.TSECRREJECTED);
+            return null;
+        }
+
+        final int seq = pkt.tcpSeq();
+        final int endSeq = determineEndSeq(pkt);
+        final boolean pureSyn = pkt.isSyn() && !pkt.isAck() && !pkt.isRst() && !pkt.isFin();
+
+        // (4) 纯 SYN 重传
+        if (seq == handshaker.rcvIsn() && pureSyn && !pawsReject) {
+            if (oowRateLimited(handshaker, pkt)) {
+                mib.inc(TcpMib.TCPACKSKIPPEDSYNRECV);
+            } else {
+                dispatcher.inet_rtx_syn_ack(net, listenSock, req);
+                req.num_retrans++;
+            }
+            return null;
+        }
+
+        // (5) OOW / PAWS 拒绝
+        final int winEnd = handshaker.rcvNxt() + handshaker.synackWindow();
+        final boolean inWindow = !before(endSeq, handshaker.rcvNxt()) && !after(seq, winEnd);
+        if (pawsReject || !inWindow) {
+            if (!pkt.isRst()) {
+                if (oowRateLimited(handshaker, pkt)) {
+                    mib.inc(TcpMib.TCPACKSKIPPEDSYNRECV);
+                } else {
+                    handshaker.sendChallengeAck(net.channel());
+                }
+            }
+            if (pawsReject) {
+                mib.inc(TcpMib.PAWSESTABREJECTED);
+            }
+            return null;
+        }
+
+        // (6) PAWS 基线推进
+        if (sawTstamp && !after(seq, handshaker.rcvNxt())) {
+            handshaker.updateTsRecent(rcvTsval);
+        }
+
+        // (7) seq == rcv_isn:截断 SYN 标志
+        final boolean hasRst = pkt.isRst();
+        final boolean hasSyn = pkt.isSyn() && seq != handshaker.rcvIsn();
+
+        // (8) RST / SYN → embryonic_reset
+        if (hasRst || hasSyn) {
+            if (!hasRst) {
+                dispatcher.send_reset(net, pkt, -1);
+            }
+            dispatcher.inet_csk_destroy_sock(req);
+            return null;
+        }
+
+        // (9) 非 ACK 静默丢弃
+        if (!pkt.isAck()) {
+            return null;
+        }
+
+        // (10) ACK# 校验
+        if (pkt.tcpAckNum() != handshaker.sndIsn() + 1) {
+            dispatcher.send_reset(net, pkt, -1);
+            dispatcher.inet_csk_destroy_sock(req);
+            return null;
+        }
+
+        // (11) syn_recv_sock + synackRttMeas
+        TcpSock child = dispatcher.syn_recv_sock(net, listenSock, pkt, req);
+        if (child != null) {
+            synackRttMeas(child, req);
+        }
+        return child;
     }
 
     /**
