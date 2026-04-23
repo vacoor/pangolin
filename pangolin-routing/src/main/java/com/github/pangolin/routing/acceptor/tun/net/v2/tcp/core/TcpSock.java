@@ -110,11 +110,11 @@ public class TcpSock extends SockCommon {
      */
     // R2.3: undoRetrans 已物理迁到 Sender
     /** 接收缓冲区上限(字节)— 对应 Linux {@code sk->sk_rcvbuf},用于 {@code tcp_full_space}。 */
-    private int rcvBuf;
+    // R3.2: rcvBuf 已物理迁到 Receiver
     /** 单次可通告窗口上限 — 对应 Linux {@code tp->window_clamp}。 */
-    private int windowClamp;
+    // R3.2: windowClamp 已物理迁到 Receiver
     /** 接收侧慢启动阈值 — 对应 Linux {@code tp->rcv_ssthresh},限制当前可通告窗口。 */
-    private int rcvSsthresh;
+    // R3.2: rcvSsthresh 已物理迁到 Receiver
     /**
      * 缓存的发送侧当前有效 MSS(扣除 IP/TCP 头 + 扩展头,半窗夹紧后)。
      * 对应 Linux {@code tp->mss_cache};由 {@code tcp_sync_mss} 更新。
@@ -243,8 +243,8 @@ public class TcpSock extends SockCommon {
      * (对应 Linux {@code tp->duplicate_sack[0]})。{@code dsackStart == dsackEnd}
      * 表示无待发 DSACK。DSACK 发送后由 {@link #consumeDsack} 清零,保证只通告一次。
      */
-    private int dsackStart;
-    private int dsackEnd;
+    // R3.2: dsackStart 已物理迁到 Receiver
+    // R3.2: dsackEnd 已物理迁到 Receiver
     /**
      * 进入 Recovery/Loss 前的 {@code cwnd} 快照 — 对应 Linux {@code tp->prior_cwnd}。
      * {@link #tcpTryUndoRecovery} 判定伪重传通过后,用它恢复 pre-loss 拥塞窗口。
@@ -340,9 +340,9 @@ public class TcpSock extends SockCommon {
         sock.tsRecentStamp = timestampEnabled ? TcpMultiplexer.nowSeconds() : 0;
         // 接收侧窗口预算初始化(对齐 Linux tcp_init_buffer_space):
         // rcvBuf / windowClamp 取当前通告窗口,rcvSsthresh 同步(无缩放时退化为 rcvWnd)
-        sock.rcvBuf = Math.max(rcvWnd, TcpConstants.TCP_DEFAULT_RCV_BUF);
-        sock.windowClamp = Math.max(rcvWnd, TcpConstants.TCP_DEFAULT_RCV_BUF);
-        sock.rcvSsthresh = Math.max(rcvWnd, TcpConstants.TCP_DEFAULT_RCV_BUF);
+        sock.receiver().rcvBuf(Math.max(rcvWnd, TcpConstants.TCP_DEFAULT_RCV_BUF));
+        sock.receiver().windowClamp(Math.max(rcvWnd, TcpConstants.TCP_DEFAULT_RCV_BUF));
+        sock.receiver().rcvSsthresh(Math.max(rcvWnd, TcpConstants.TCP_DEFAULT_RCV_BUF));
         // PMTU / tcp_header_len 初始化(对齐 Linux tcp_create_openreq_child):
         //   tcp_header_len = 20 + (tstamp_ok ? TCPOLEN_TSTAMP_ALIGNED(12) : 0)
         //   mssCache 延迟到首次 syncMss;pmtuCookie/dstMtu 默认 0(无 PMTU 发现)
@@ -406,9 +406,7 @@ public class TcpSock extends SockCommon {
         lastSendTimeMs = 0L;
         // R2.3: srttUs / rttvarUs 默认 0L 由 Sender 字段声明初始化
         // R2.3: rtoBackoffShift / retransStamp / undoRetrans 默认值 0/0L 由 Sender 字段声明初始化
-        rcvBuf = TcpConstants.TCP_DEFAULT_RCV_BUF;
-        windowClamp = TcpConstants.TCP_DEFAULT_RCV_BUF;
-        rcvSsthresh = TcpConstants.TCP_DEFAULT_RCV_BUF;
+        // R3.2: rcvBuf / windowClamp / rcvSsthresh 默认值由 Receiver 字段声明初始化
         mssCache = 0;
         pmtuCookie = 0;
         tcpHeaderLen = 0;
@@ -431,8 +429,7 @@ public class TcpSock extends SockCommon {
         // R2.3: sndCwndStampMs / sndCwndUsed / isCwndLimited 默认值由 Sender 字段声明初始化
         // R2.3: dupacks / caIncrCounter / congestionState / highSeq 初值由 Sender 字段声明初始化
         // R2.3: tlpHighSeq 默认值 0 由 Sender 字段声明初始化
-        dsackStart = 0;
-        dsackEnd = 0;
+        // R3.2: dsackStart / dsackEnd 默认 0 由 Receiver 字段初始化
         // R2.3: priorCwnd / priorSsthresh / undoMarker / frtoHighmark / frtoCounter 默认 0 由 Sender 字段声明初始化
     }
 
@@ -1191,16 +1188,16 @@ public class TcpSock extends SockCommon {
     }
 
     /** 对应 Linux {@code sk->sk_rcvbuf}。 */
-    public int rcvBuf() { return rcvBuf; }
-    public void rcvBuf(int v) { this.rcvBuf = Math.max(v, 0); }
+    public int rcvBuf() { return receiver.rcvBuf(); }
+    public void rcvBuf(int v) { receiver.rcvBuf(v); }
 
     /** 对应 Linux {@code tp->window_clamp}。 */
-    public int windowClamp() { return windowClamp; }
-    public void windowClamp(int v) { this.windowClamp = Math.max(v, 0); }
+    public int windowClamp() { return receiver.windowClamp(); }
+    public void windowClamp(int v) { receiver.windowClamp(v); }
 
     /** 对应 Linux {@code tp->rcv_ssthresh}。 */
-    public int rcvSsthresh() { return rcvSsthresh; }
-    public void rcvSsthresh(int v) { this.rcvSsthresh = Math.max(v, 0); }
+    public int rcvSsthresh() { return receiver.rcvSsthresh(); }
+    public void rcvSsthresh(int v) { receiver.rcvSsthresh(v); }
 
     /** 对应 Linux {@code tp->mss_cache}。 */
     public int mssCache() { return mssCache; }
@@ -1240,17 +1237,16 @@ public class TcpSock extends SockCommon {
      */
     public void setDsack(int start, int end) {
         if (start == end) return;
-        this.dsackStart = start;
-        this.dsackEnd = end;
+        receiver.setDsackRange(start, end);
     }
 
     /** 当前是否有待通告的 DSACK 块。 */
     public boolean hasPendingDsack() {
-        return dsackStart != dsackEnd;
+        return receiver.dsackStart() != receiver.dsackEnd();
     }
 
-    public int dsackStart() { return dsackStart; }
-    public int dsackEnd() { return dsackEnd; }
+    public int dsackStart() { return receiver.dsackStart(); }
+    public int dsackEnd() { return receiver.dsackEnd(); }
 
     /**
      * 读取并清零当前待发的 DSACK。返回 {@code true} 表示本次读取到有效块 —
@@ -1258,13 +1254,14 @@ public class TcpSock extends SockCommon {
      * {@code tp->duplicate_sack[0]} 清零的语义。
      */
     public boolean consumeDsack(int[] dst) {
-        if (dsackStart == dsackEnd) {
+        int s = receiver.dsackStart();
+        int e = receiver.dsackEnd();
+        if (s == e) {
             return false;
         }
-        dst[0] = dsackStart;
-        dst[1] = dsackEnd;
-        dsackStart = 0;
-        dsackEnd = 0;
+        dst[0] = s;
+        dst[1] = e;
+        receiver.setDsackRange(0, 0);
         return true;
     }
 

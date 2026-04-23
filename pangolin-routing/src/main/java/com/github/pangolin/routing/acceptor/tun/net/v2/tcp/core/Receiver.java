@@ -45,6 +45,15 @@ public final class Receiver {
     private long ackTimeoutMs = TcpConstants.DELAYED_ACK_MS;
     /** Pingpong 检测计数器。Mirrors Linux {@code icsk->icsk_ack.pingpong}。 */
     private int pingpongCount;
+    /** 接收缓冲字节上限。Mirrors Linux {@code sk->sk_rcvbuf}。 */
+    private int rcvBuf = TcpConstants.TCP_DEFAULT_RCV_BUF;
+    /** 接收窗口硬上限(选项协商后的 window clamp)。Mirrors Linux {@code tp->window_clamp}。 */
+    private int windowClamp = TcpConstants.TCP_DEFAULT_RCV_BUF;
+    /** 接收侧的拥塞阈值(缓冲 slow start 阈值)。Mirrors Linux {@code tp->rcv_ssthresh}。 */
+    private int rcvSsthresh = TcpConstants.TCP_DEFAULT_RCV_BUF;
+    /** 下一次 ACK 要通告的 DSACK 块 [start,end)。Mirrors Linux {@code tp->duplicate_sack[0]}。 */
+    private int dsackStart;
+    private int dsackEnd;
 
     Receiver(TcpSock sock) {
         this.sock = sock;
@@ -166,5 +175,27 @@ public final class Receiver {
 
     public void pingpongCount(int v) {
         pingpongCount = Math.max(v, 0);
+    }
+
+    /** 接收缓冲字节上限。 */
+    public int rcvBuf() { return rcvBuf; }
+    public void rcvBuf(int v) { this.rcvBuf = Math.max(v, 0); }
+
+    /** window clamp。 */
+    public int windowClamp() { return windowClamp; }
+    public void windowClamp(int v) { this.windowClamp = Math.max(v, 0); }
+
+    /** rcvSsthresh。 */
+    public int rcvSsthresh() { return rcvSsthresh; }
+    public void rcvSsthresh(int v) { this.rcvSsthresh = Math.max(v, 0); }
+
+    /** DSACK 区间 start。 */
+    public int dsackStart() { return dsackStart; }
+    /** DSACK 区间 end。 */
+    public int dsackEnd() { return dsackEnd; }
+    /** 设置 DSACK 区间。 */
+    public void setDsackRange(int start, int end) {
+        this.dsackStart = start;
+        this.dsackEnd = end;
     }
 }
