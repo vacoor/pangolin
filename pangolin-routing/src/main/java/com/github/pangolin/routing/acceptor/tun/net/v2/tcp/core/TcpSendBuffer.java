@@ -11,7 +11,7 @@ import java.util.Deque;
  * TCP send buffer: holds application data waiting to be segmented and sent,
  * plus a retransmit queue of in-flight segments.
  *
- * <p>Following Linux's model, the write queue stores {@link TcpSkb} objects
+ * <p>Following Linux's model, the write queue stores {@link TcpSegment} objects
  * with sequence numbers assigned at enqueue time (mirroring {@code sk_write_queue} where
  * each {@code sk_buff} carries {@code TCP_SKB_CB(skb)->seq} when added via
  * {@code tcp_queue_skb}).  The same entry object is promoted from the write queue to
@@ -26,10 +26,10 @@ public final class TcpSendBuffer {
      * Unsent application data: entries with sequence numbers already assigned.
      * Mirrors Linux {@code sk->sk_write_queue}.
      */
-    private final Deque<TcpSkb> writeQueue = new ArrayDeque<>();
+    private final Deque<TcpSegment> writeQueue = new ArrayDeque<>();
 
     /** In-flight segments awaiting ACK (retransmit queue). Mirrors Linux {@code sk->tcp_rtx_queue}. */
-    private final Deque<TcpSkb> rtxQueue = new ArrayDeque<>();
+    private final Deque<TcpSegment> rtxQueue = new ArrayDeque<>();
 
     // ---- Write queue ----
 
@@ -37,7 +37,7 @@ public final class TcpSendBuffer {
      * Append an entry to the tail of the write queue.
      * Mirrors Linux {@code tcp_queue_skb}: called after seq and end_seq have been set on the entry.
      */
-    public void enqueue(TcpSkb entry) {
+    public void enqueue(TcpSegment entry) {
         writeQueue.addLast(entry);
     }
 
@@ -45,15 +45,15 @@ public final class TcpSendBuffer {
      * Insert an entry at the head of the write queue.
      * Used by {@code tcp_fragment} to re-enqueue the split head fragment.
      */
-    public void enqueueWriteFirst(TcpSkb entry) {
+    public void enqueueWriteFirst(TcpSegment entry) {
         writeQueue.addFirst(entry);
     }
 
-    public TcpSkb peekWrite() {
+    public TcpSegment peekWrite() {
         return writeQueue.peekFirst();
     }
 
-    public TcpSkb pollWrite() {
+    public TcpSegment pollWrite() {
         return writeQueue.pollFirst();
     }
 
@@ -67,7 +67,7 @@ public final class TcpSendBuffer {
 
     // ---- Retransmit queue ----
 
-    public void enqueueRtx(TcpSkb entry) {
+    public void enqueueRtx(TcpSegment entry) {
         rtxQueue.addLast(entry);
     }
 
@@ -75,16 +75,16 @@ public final class TcpSendBuffer {
      * 将 {@code entry} 插入 RTX 队列头部 — 用于 {@code fragment(TCP_FRAG_IN_RTX_QUEUE)}
      * 完成后把 head / tail 片段按序放回队列。
      */
-    public void enqueueRtxFirst(TcpSkb entry) {
+    public void enqueueRtxFirst(TcpSegment entry) {
         rtxQueue.addFirst(entry);
     }
 
     /** 弹出 RTX 队列头部(调用方负责 release)— 用于 {@code tcp_fragment} 前取出待切分段。 */
-    public TcpSkb pollRtx() {
+    public TcpSegment pollRtx() {
         return rtxQueue.pollFirst();
     }
 
-    public TcpSkb peekRtx() {
+    public TcpSegment peekRtx() {
         return rtxQueue.peekFirst();
     }
 
@@ -96,7 +96,7 @@ public final class TcpSendBuffer {
     public int acknowledgeUpTo(int ackSeq) {
         int removed = 0;
         while (!rtxQueue.isEmpty()) {
-            TcpSkb head = rtxQueue.peekFirst();
+            TcpSegment head = rtxQueue.peekFirst();
             if (head.endSeq() - ackSeq <= 0) {
                 rtxQueue.pollFirst().release();
                 removed++;
@@ -113,10 +113,10 @@ public final class TcpSendBuffer {
      * drain loop that inspects {@code TCP_SKB_CB(skb)->sacked} / flags before freeing.
      *
      * @param ackSeq cumulative ACK number
-     * @return polled entry (caller must call {@link TcpSkb#release()}) or {@code null}
+     * @return polled entry (caller must call {@link TcpSegment#release()}) or {@code null}
      */
-    public TcpSkb pollIfAcknowledged(int ackSeq) {
-        TcpSkb head = rtxQueue.peekFirst();
+    public TcpSegment pollIfAcknowledged(int ackSeq) {
+        TcpSegment head = rtxQueue.peekFirst();
         if (head == null || head.endSeq() - ackSeq > 0) {
             return null;
         }
@@ -135,7 +135,7 @@ public final class TcpSendBuffer {
      * 只读 RTX 队列视图,供 {@code tcp_sacktag_write_queue} / 重传扫描等路径按序遍历。
      * 返回的 {@code Iterable} 背后是私有 {@link #rtxQueue};消费方不得通过迭代器修改队列。
      */
-    public Iterable<TcpSkb> rtxView() {
+    public Iterable<TcpSegment> rtxView() {
         return rtxQueue;
     }
 
@@ -144,8 +144,8 @@ public final class TcpSendBuffer {
      * (如 {@link #splitRtx}) 的同时安全遍历。迭代以快照为准,当前帧只处理快照期间
      * 已存在的段;后续帧按需重新取快照即可。
      */
-    public TcpSkb[] rtxSnapshot() {
-        return rtxQueue.toArray(new TcpSkb[0]);
+    public TcpSegment[] rtxSnapshot() {
+        return rtxQueue.toArray(new TcpSegment[0]);
     }
 
     /**
@@ -159,14 +159,14 @@ public final class TcpSendBuffer {
      *   <li>head 保留除 FIN / PSH 外的 flags(对齐 Linux:FIN / PSH 只能落在最后一段);
      *       tail 保留完整 flags;{@code sacked} / {@code sentTimeUs} 二者均继承自原段。</li>
      *   <li>原段的 payload 由新 head / tail 的 {@code retainedSlice} 继承引用计数,
-     *       原 {@link TcpSkb} 释放。</li>
+     *       原 {@link TcpSegment} 释放。</li>
      *   <li>返回新 tail(起点 {@code splitSeq}),便于调用方继续在 tail 上做进一步切分。</li>
      * </ul>
      *
      * <p>调用方必须保证 target 当前仍在 rtxQueue 中,且不持有在本次调用后仍需使用的
      * 老 target 引用(老段会被 release)。
      */
-    public TcpSkb splitRtx(TcpSkb target, int splitSeq) {
+    public TcpSegment splitRtx(TcpSegment target, int splitSeq) {
         if (target == null) return null;
         int offset = splitSeq - target.startSeq();
         if (offset <= 0 || offset >= target.dataLen()) {
@@ -182,10 +182,10 @@ public final class TcpSendBuffer {
         byte headFlags = (byte) (target.tcpFlags() & ~(TcpConstants.TCPHDR_FIN | TcpConstants.TCPHDR_PSH));
         byte tailFlags = target.tcpFlags();
 
-        TcpSkb head = new TcpSkb(
+        TcpSegment head = new TcpSegment(
                 headBuf, target.startSeq(), offset, headFlags,
                 target.sacked(), target.sentTimeUs());
-        TcpSkb tail = new TcpSkb(
+        TcpSegment tail = new TcpSegment(
                 tailBuf, target.startSeq() + offset, tailLen, tailFlags,
                 target.sacked(), target.sentTimeUs());
         // 发送时 tp->delivered 快照随 split 一同继承 — 拆分后两半的"发送时已投递段数"
@@ -195,10 +195,10 @@ public final class TcpSendBuffer {
 
         // O(n) 原地替换:rtxQueue 为 ArrayDeque,iterator 不支持 remove + insertAfter。
         // SACK 块 ≤ 4、RTX 段数量有限,量级可接受。
-        TcpSkb[] snap = rtxQueue.toArray(new TcpSkb[0]);
+        TcpSegment[] snap = rtxQueue.toArray(new TcpSegment[0]);
         rtxQueue.clear();
         boolean replaced = false;
-        for (TcpSkb e : snap) {
+        for (TcpSegment e : snap) {
             if (!replaced && e == target) {
                 rtxQueue.addLast(head);
                 rtxQueue.addLast(tail);
@@ -224,9 +224,9 @@ public final class TcpSendBuffer {
      * {@code tcp_adjust_pcount})。
      */
     public static final class CollapseResult {
-        public final TcpSkb merged;
+        public final TcpSegment merged;
         public final int droppedSacked;
-        public CollapseResult(TcpSkb merged, int droppedSacked) {
+        public CollapseResult(TcpSegment merged, int droppedSacked) {
             this.merged = merged;
             this.droppedSacked = droppedSacked;
         }
@@ -258,10 +258,10 @@ public final class TcpSendBuffer {
      * @return {@link CollapseResult} 成功合并时非 {@code null};前置条件不满足返回
      *         {@code null},队列不变
      */
-    public CollapseResult collapseRtx(TcpSkb head, int mssNow) {
+    public CollapseResult collapseRtx(TcpSegment head, int mssNow) {
         if (head == null || mssNow <= 0) return null;
 
-        TcpSkb[] snap = rtxQueue.toArray(new TcpSkb[0]);
+        TcpSegment[] snap = rtxQueue.toArray(new TcpSegment[0]);
         int idx = -1;
         for (int i = 0; i < snap.length - 1; i++) {
             if (snap[i] == head) {
@@ -271,7 +271,7 @@ public final class TcpSendBuffer {
         }
         if (idx < 0) return null;
 
-        TcpSkb next = snap[idx + 1];
+        TcpSegment next = snap[idx + 1];
         if (next == null) return null;
 
         if (head.endSeq() != next.startSeq()) return null;
@@ -294,7 +294,7 @@ public final class TcpSendBuffer {
                 : (next.sentTimeUs() == 0L ? head.sentTimeUs()
                 : Math.min(head.sentTimeUs(), next.sentTimeUs()));
 
-        TcpSkb collapsed = new TcpSkb(
+        TcpSegment collapsed = new TcpSegment(
                 merged, head.startSeq(), combinedLen,
                 mergedFlags, mergedSacked, mergedSentUs);
         // 对齐 Linux tcp_collapse_retrans 保留 head 的 TCP_SKB_CB:merged 段的
@@ -320,24 +320,24 @@ public final class TcpSendBuffer {
     }
 
     /**
-     * 已入队但尚未发送的应用字节数(累加 {@code writeQueue} 中所有 {@link TcpSkb#dataLen}。
+     * 已入队但尚未发送的应用字节数(累加 {@code writeQueue} 中所有 {@link TcpSegment#dataLen}。
      * 对应 Linux {@code tp->write_seq - tp->snd_nxt} 中 "未离 pipeline 的应用数据"。
      */
     public long enqueuedBytes() {
         long total = 0;
-        for (TcpSkb skb : writeQueue) {
+        for (TcpSegment skb : writeQueue) {
             total += skb.dataLen();
         }
         return total;
     }
 
     /**
-     * 在途未确认字节数 — 累加 {@code rtxQueue} 中所有 {@link TcpSkb#dataLen}。
+     * 在途未确认字节数 — 累加 {@code rtxQueue} 中所有 {@link TcpSegment#dataLen}。
      * 对应 Linux {@code tp->snd_nxt - tp->snd_una} 去掉已 SACK 部分的近似值。
      */
     public long unackedBytes() {
         long total = 0;
-        for (TcpSkb skb : rtxQueue) {
+        for (TcpSegment skb : rtxQueue) {
             total += skb.dataLen();
         }
         return total;
@@ -353,11 +353,11 @@ public final class TcpSendBuffer {
 
     /** Release all buffers (called on connection close). */
     public void releaseAll() {
-        for (TcpSkb entry : writeQueue) {
+        for (TcpSegment entry : writeQueue) {
             entry.release();
         }
         writeQueue.clear();
-        for (TcpSkb entry : rtxQueue) {
+        for (TcpSegment entry : rtxQueue) {
             entry.release();
         }
         rtxQueue.clear();

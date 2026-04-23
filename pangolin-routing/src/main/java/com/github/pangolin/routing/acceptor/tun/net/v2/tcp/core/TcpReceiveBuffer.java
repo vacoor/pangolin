@@ -19,10 +19,10 @@ import java.util.function.IntConsumer;
  *
  * <p>Mirrors Linux {@code sk->sk_receive_queue} + {@code tp->out_of_order_queue}:
  * <ul>
- *   <li>The OFO queue is keyed by segment {@code seq} and stores {@link TcpSkb}
+ *   <li>The OFO queue is keyed by segment {@code seq} and stores {@link TcpSegment}
  *       entries — the same struct used by the send / RTX paths, mirroring Linux's
  *       shared {@code struct sk_buff} + {@code TCP_SKB_CB} across all TCP queues.
- *       {@link TcpSkb#isFin()} carries the FIN bit so that a FIN arriving ahead of
+ *       {@link TcpSegment#isFin()} carries the FIN bit so that a FIN arriving ahead of
  *       its data can be replayed when the gap is filled.</li>
  *   <li>{@link #rmemAlloc()} reports OFO + in-order bytes (Linux
  *       {@code atomic_read(&sk->sk_rmem_alloc)}). The OFO budget
@@ -43,13 +43,13 @@ public final class TcpReceiveBuffer {
     /**
      * {@link #collapseOfoQueue} 单个合并段的字节上限 — 对齐 Linux
      * {@code tcp_collapse} 的 {@code SKB_WITH_OVERHEAD(pskb_may_pull)} 思路:
-     * 把邻接段合并为单一 {@link TcpSkb},避免 {@link Unpooled#wrappedBuffer} 组合件
+     * 把邻接段合并为单一 {@link TcpSegment},避免 {@link Unpooled#wrappedBuffer} 组合件
      * 层级过深;64 KiB 覆盖典型 GRO / TSO 上限。
      */
     private static final int OFO_COLLAPSE_MAX_LEN = 64 * 1024;
 
     /** Out-of-order segment queue: seq → SKB. */
-    private final TreeMap<Integer, TcpSkb> ofoQueue = new TreeMap<>(Integer::compareUnsigned);
+    private final TreeMap<Integer, TcpSegment> ofoQueue = new TreeMap<>(Integer::compareUnsigned);
 
     /** Accumulated in-order data ready for the application. */
     private final CompositeByteBuf readBuffer;
@@ -156,8 +156,8 @@ public final class TcpReceiveBuffer {
         int curStart = 0;
         int curEnd   = 0;
         boolean inRun = false;
-        for (Map.Entry<Integer, TcpSkb> e : ofoQueue.entrySet()) {
-            TcpSkb skb = e.getValue();
+        for (Map.Entry<Integer, TcpSegment> e : ofoQueue.entrySet()) {
+            TcpSegment skb = e.getValue();
             int segStart = skb.startSeq();
             int segEnd   = skb.endSeq();
             if (!inRun) {
@@ -222,9 +222,9 @@ public final class TcpReceiveBuffer {
         }
 
         // ── Trim leading overlap against predecessor ──
-        Map.Entry<Integer, TcpSkb> pred = ofoQueue.lowerEntry(seq);
+        Map.Entry<Integer, TcpSegment> pred = ofoQueue.lowerEntry(seq);
         if (pred != null) {
-            TcpSkb prev = pred.getValue();
+            TcpSegment prev = pred.getValue();
             if (TcpSequence.after(prev.endSeq(), seq)) {
                 // 对齐 Linux dataQueueOfo 的 Case 3 DSACK:新 OFO 段的 [origSeq,
                 // min(origEndSeq, prev.endSeq())) 区段已在 pred 中出现过,回报为 DSACK。
@@ -241,10 +241,10 @@ public final class TcpReceiveBuffer {
         }
 
         // ── Evict or trim overlapping successors ──
-        java.util.Iterator<Map.Entry<Integer, TcpSkb>> it =
+        java.util.Iterator<Map.Entry<Integer, TcpSegment>> it =
                 ofoQueue.tailMap(seq).entrySet().iterator();
         while (it.hasNext()) {
-            TcpSkb succ = it.next().getValue();
+            TcpSegment succ = it.next().getValue();
             if (!TcpSequence.before(succ.startSeq(), endSeq)) {
                 break;
             }
@@ -287,7 +287,7 @@ public final class TcpReceiveBuffer {
 
         // endSeq() = startSeq + dataLen + (fin ? 1 : 0),因此有 FIN 时 dataLen 需扣除 1。
         byte flags = (byte) (retainedFin ? TcpConstants.TCPHDR_FIN : 0);
-        ofoQueue.put(seq, new TcpSkb(slice, seq, payloadLen, flags, 0L));
+        ofoQueue.put(seq, new TcpSegment(slice, seq, payloadLen, flags, 0L));
         addOfoBytes(slice.readableBytes());
         return new OfoResult(true, dsackStart, dsackEnd);
     }
@@ -316,7 +316,7 @@ public final class TcpReceiveBuffer {
         TcpMibStats.INSTANCE.inc(TcpMib.TCPPRUNECALLED);
         collapseOfoQueue();
         while (ofoBytes >= OFO_MAX_BYTES && !ofoQueue.isEmpty()) {
-            Map.Entry<Integer, TcpSkb> last = ofoQueue.pollLastEntry();
+            Map.Entry<Integer, TcpSegment> last = ofoQueue.pollLastEntry();
             removeOfoBytes(last.getValue().payload().readableBytes());
             last.getValue().release();
         }
@@ -346,19 +346,19 @@ public final class TcpReceiveBuffer {
         if (ofoQueue.size() < 2) {
             return;
         }
-        Map.Entry<Integer, TcpSkb> cur = ofoQueue.firstEntry();
+        Map.Entry<Integer, TcpSegment> cur = ofoQueue.firstEntry();
         while (cur != null) {
-            TcpSkb prev = cur.getValue();
+            TcpSegment prev = cur.getValue();
             // FIN 段必为 stream 终点,不参与前向合并
             if (prev.isFin()) {
                 cur = ofoQueue.higherEntry(cur.getKey());
                 continue;
             }
-            Map.Entry<Integer, TcpSkb> nextEntry = ofoQueue.higherEntry(cur.getKey());
+            Map.Entry<Integer, TcpSegment> nextEntry = ofoQueue.higherEntry(cur.getKey());
             if (nextEntry == null) {
                 break;
             }
-            TcpSkb next = nextEntry.getValue();
+            TcpSegment next = nextEntry.getValue();
             if (prev.endSeq() != next.startSeq()
                     || prev.dataLen() + next.dataLen() > OFO_COLLAPSE_MAX_LEN) {
                 cur = nextEntry;
@@ -369,7 +369,7 @@ public final class TcpReceiveBuffer {
             final ByteBuf combined = Unpooled.wrappedBuffer(
                     prev.payload().retainedSlice(),
                     next.payload().retainedSlice());
-            TcpSkb merged = new TcpSkb(combined, prev.startSeq(), combinedLen, mergedFlags, 0L);
+            TcpSegment merged = new TcpSegment(combined, prev.startSeq(), combinedLen, mergedFlags, 0L);
 
             prev.release();
             next.release();
@@ -394,8 +394,8 @@ public final class TcpReceiveBuffer {
     private DrainOutcome drainOfo(int rcvNxt) {
         boolean finDelivered = false;
         while (!ofoQueue.isEmpty()) {
-            Map.Entry<Integer, TcpSkb> head = ofoQueue.firstEntry();
-            TcpSkb entry = head.getValue();
+            Map.Entry<Integer, TcpSegment> head = ofoQueue.firstEntry();
+            TcpSegment entry = head.getValue();
 
             // Still out-of-order — stop.
             if (TcpSequence.after(entry.startSeq(), rcvNxt)) {
@@ -480,7 +480,7 @@ public final class TcpReceiveBuffer {
     public void releaseAll() {
         int drainBytes = ofoBytes + inorderBytes;
         readBuffer.release();
-        for (TcpSkb e : ofoQueue.values()) {
+        for (TcpSegment e : ofoQueue.values()) {
             e.release();
         }
         ofoQueue.clear();

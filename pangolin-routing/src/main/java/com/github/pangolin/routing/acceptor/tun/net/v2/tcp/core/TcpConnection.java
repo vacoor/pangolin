@@ -593,7 +593,7 @@ public final class TcpConnection {
      *
      * @see <a href="https://github.com/torvalds/linux/blob/master/include/net/tcp.h">tcp_send_head</a>
      */
-    public TcpSkb tcpSendHead() {
+    public TcpSegment tcpSendHead() {
         return sendBuffer.peekWrite();
     }
 
@@ -616,7 +616,7 @@ public final class TcpConnection {
      * @param skb fully initialised segment entry; ownership transferred to the write queue
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L1498">queueSkb</a>
      */
-    public void queueSkb(TcpSkb skb) {
+    public void queueSkb(TcpSegment skb) {
         // WRITE_ONCE(tp->write_seq, TCP_SKB_CB(skb)->end_seq)
         writeSeq = skb.endSeq();
         sendBuffer.enqueue(skb);

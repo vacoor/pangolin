@@ -222,8 +222,8 @@ public final class TcpAck {
             if (!after(end, priorSndUna)) continue;
 
             // 本块扫描以快照为准,允许 carveToBlock 在遍历过程中对 RTX 队列做切分操作。
-            TcpSkb[] snap = sock.sendBuffer().rtxSnapshot();
-            for (TcpSkb skb : snap) {
+            TcpSegment[] snap = sock.sendBuffer().rtxSnapshot();
+            for (TcpSegment skb : snap) {
                 final int segStart = skb.startSeq();
                 final int segEnd   = skb.endSeq();
                 // 段已越过 SACK 块尾,后续段更高序,停止本块扫描
@@ -236,7 +236,7 @@ public final class TcpAck {
                 final int iEnd   = after(segEnd, end)      ? end   : segEnd;
                 if (!before(iStart, iEnd)) continue;
 
-                TcpSkb target = carveToBlock(sock, skb, iStart, iEnd);
+                TcpSegment target = carveToBlock(sock, skb, iStart, iEnd);
                 if (target == null) continue;
 
                 if (!target.isSackAcked()) {
@@ -299,7 +299,7 @@ public final class TcpAck {
         final long reoWndUs = Math.max(Math.min(baseUs, capUs), 1_000L);
         final long lossBoundary = rackMstamp - reoWndUs;
 
-        for (TcpSkb skb : sock.sendBuffer().rtxView()) {
+        for (TcpSegment skb : sock.sendBuffer().rtxView()) {
             if (skb.isSackAcked() || skb.isLost()) continue;
             final long sentUs = skb.sentTimeUs();
             if (sentUs <= 0L) continue;
@@ -318,7 +318,7 @@ public final class TcpAck {
     public static void markHeadLost(TcpSock sock, int packets) {
         if (sock == null || packets <= 0 || !sock.sendBuffer().hasRtxPending()) return;
         int remaining = packets;
-        for (TcpSkb skb : sock.sendBuffer().rtxView()) {
+        for (TcpSegment skb : sock.sendBuffer().rtxView()) {
             if (remaining <= 0) break;
             if (skb.isSackAcked() || skb.isLost()) {
                 continue;
@@ -340,17 +340,17 @@ public final class TcpAck {
      * </ul>
      * 返回切分完毕、与 SACK 交集完全匹配的段;失败返回 {@code null}。
      */
-    private static TcpSkb carveToBlock(TcpSock sock, TcpSkb skb, int iStart, int iEnd) {
-        TcpSkb target = skb;
+    private static TcpSegment carveToBlock(TcpSock sock, TcpSegment skb, int iStart, int iEnd) {
+        TcpSegment target = skb;
         if (before(target.startSeq(), iStart)) {
-            TcpSkb tail = sock.sendBuffer().splitRtx(target, iStart);
+            TcpSegment tail = sock.sendBuffer().splitRtx(target, iStart);
             if (tail == null) {
                 return null;
             }
             target = tail;
         }
         if (after(target.endSeq(), iEnd)) {
-            TcpSkb tail = sock.sendBuffer().splitRtx(target, iEnd);
+            TcpSegment tail = sock.sendBuffer().splitRtx(target, iEnd);
             if (tail == null) {
                 return null;
             }
@@ -374,7 +374,7 @@ public final class TcpAck {
         int ackedPcount = 0;
         final int ack = sock.sndUna();
 
-        TcpSkb skb;
+        TcpSegment skb;
         int sackedDecr = 0;
         int lostDecr = 0;
         while ((skb = sock.sendBuffer().pollIfAcknowledged(ack)) != null) {
@@ -467,7 +467,7 @@ public final class TcpAck {
     }
 
     public static void tcpAckProbe(TcpSock sock) {
-        TcpSkb head = sock.tcpSendHead();
+        TcpSegment head = sock.tcpSendHead();
         if (head == null) {
             return;
         }

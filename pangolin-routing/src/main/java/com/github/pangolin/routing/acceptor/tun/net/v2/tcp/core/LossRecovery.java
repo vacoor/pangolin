@@ -59,7 +59,7 @@ public interface LossRecovery {
      * @param skb 待判定的重传队列段
      * @return {@code true} 表示应立即重传
      */
-    default boolean shouldRetransmit(TcpSock sk, TcpSkb skb) {
+    default boolean shouldRetransmit(TcpSock sk, TcpSegment skb) {
         throw new UnsupportedOperationException("LossRecovery.shouldRetransmit not wired yet");
     }
 

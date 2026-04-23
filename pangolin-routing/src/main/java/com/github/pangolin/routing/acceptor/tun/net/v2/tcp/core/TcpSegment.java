@@ -33,7 +33,7 @@ import io.netty.buffer.ByteBuf;
  * {@link TcpConstants#TCPCB_SACKED_ACKED} / {@link TcpConstants#TCPCB_SACKED_RETRANS} /
  * {@link TcpConstants#TCPCB_LOST} / {@link TcpConstants#TCPCB_EVER_RETRANS} 等位集。
  */
-public final class TcpSkb {
+public final class TcpSegment {
 
     private final ByteBuf payload;
     private final int     startSeq;
@@ -57,12 +57,12 @@ public final class TcpSkb {
      */
     private       int     txDelivered;
 
-    public TcpSkb(ByteBuf payload, int startSeq, int dataLen,
+    public TcpSegment(ByteBuf payload, int startSeq, int dataLen,
                   byte tcpFlags, long sentTimeUs) {
         this(payload, startSeq, dataLen, tcpFlags, 0, sentTimeUs);
     }
 
-    public TcpSkb(ByteBuf payload, int startSeq, int dataLen,
+    public TcpSegment(ByteBuf payload, int startSeq, int dataLen,
                   byte tcpFlags, int sacked, long sentTimeUs) {
         this.payload    = payload;
         this.startSeq   = startSeq;

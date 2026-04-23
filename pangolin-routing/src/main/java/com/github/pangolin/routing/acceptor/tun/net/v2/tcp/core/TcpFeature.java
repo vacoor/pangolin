@@ -33,7 +33,7 @@ public interface TcpFeature {
      * @param sk  即将发送 SYN 的套接字
      * @param skb SYN 段控制块(调用方已设置 {@code SYN} 位)
      */
-    default void onSynSend(TcpSock sk, TcpSkb skb) {
+    default void onSynSend(TcpSock sk, TcpSegment skb) {
         // default no-op
     }
 
@@ -48,7 +48,7 @@ public interface TcpFeature {
      * @param skb  入站 SYN 段
      * @param opts 已解析的选项视图
      */
-    default void onSynReceive(TcpRequestSock req, TcpSkb skb, TcpOptionsReceived opts) {
+    default void onSynReceive(TcpRequestSock req, TcpSegment skb, TcpOptionsReceived opts) {
         // default no-op
     }
 
@@ -63,7 +63,7 @@ public interface TcpFeature {
      * @param skb  入站段控制块
      * @param opts 已解析的选项视图
      */
-    default void onSegmentReceive(TcpSock sk, TcpSkb skb, TcpOptionsReceived opts) {
+    default void onSegmentReceive(TcpSock sk, TcpSegment skb, TcpOptionsReceived opts) {
         // default no-op
     }
 
@@ -79,7 +79,7 @@ public interface TcpFeature {
      * @param sk  出站套接字
      * @param skb 出站段控制块
      */
-    default void decorateOutgoing(TcpSock sk, TcpSkb skb) {
+    default void decorateOutgoing(TcpSock sk, TcpSegment skb) {
         // default no-op
     }
 }

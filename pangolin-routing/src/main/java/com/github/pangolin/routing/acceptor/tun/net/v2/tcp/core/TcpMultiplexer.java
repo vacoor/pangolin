@@ -1120,7 +1120,7 @@ public abstract class TcpMultiplexer {
             while (offset < total) {
                 final int len = Math.min(total - offset, mss);
                 final ByteBuf slice = data.retainedSlice(data.readerIndex() + offset, len);
-                sk.queueSkb(new TcpSkb(
+                sk.queueSkb(new TcpSegment(
                         slice,
                         sk.writeSeq(),
                         len,

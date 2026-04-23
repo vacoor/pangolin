@@ -909,11 +909,11 @@ public class TcpSock extends SockCommon {
         packetsOut = Math.max(0, packetsOut - count);
     }
 
-    public TcpSkb tcpSendHead() {
+    public TcpSegment tcpSendHead() {
         return sendBuffer == null ? null : sendBuffer.peekWrite();
     }
 
-    public void queueSkb(TcpSkb skb) {
+    public void queueSkb(TcpSegment skb) {
         if (sendBuffer != null) {
             writeSeq = skb.endSeq();
             sendBuffer.enqueue(skb);
