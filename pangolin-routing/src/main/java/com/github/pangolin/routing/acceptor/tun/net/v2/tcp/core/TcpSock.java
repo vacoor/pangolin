@@ -1448,6 +1448,12 @@ public class TcpSock extends SockCommon {
      */
     public boolean isCaOpen() { return sender.congestionState() == CongestionState.OPEN; }
 
+    /** 是否处于 Fast Recovery 阶段(CA_Recovery)。Mirrors Linux {@code inet_csk(sk)->icsk_ca_state == TCP_CA_Recovery}。 */
+    public boolean inRecovery() { return sender.congestionState() == CongestionState.RECOVERY; }
+
+    /** 是否处于 RTO-triggered Loss 阶段(CA_Loss)。Mirrors Linux {@code ... == TCP_CA_Loss}。 */
+    public boolean inLoss() { return sender.congestionState() == CongestionState.LOSS; }
+
     /** RACK 最新 SACKed 段 {@code sentTimeUs};单调更新。 */
     public long rackMstamp() { return sender.rackMstamp(); }
     public void updateRack(long sentTimeUs, long rttUs) {
