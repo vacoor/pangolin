@@ -20,7 +20,6 @@ public class TcpSock extends SockCommon {
         LOSS
     }
 
-    private TcpConnection conn;
     private Channel channel;
     private Channel childChannel;
     private ChannelFutureListener childCloseListener;
@@ -264,28 +263,12 @@ public class TcpSock extends SockCommon {
     // R2.3: frtoCounter 已物理迁到 Sender
 
     protected TcpSock() {
-        this(null, false);
-    }
-
-    protected TcpSock(TcpConnection conn) {
-        this(conn, true);
-    }
-
-    protected TcpSock(TcpConnection conn, boolean initializeExtensions) {
-        super(conn == null ? null : conn.fourTuple());
-        attach(conn, initializeExtensions);
+        super(null);
+        initInlineTcpState();
     }
 
     protected TcpSock(FourTuple fourTuple) {
         super(fourTuple);
-    }
-
-    public static TcpSock from(TcpConnection conn) {
-        return new TcpSock(conn, true);
-    }
-
-    public static TcpSock view(TcpConnection conn) {
-        return new TcpSock(conn, false);
     }
 
     public static TcpSock createChild(Channel channel,
@@ -354,34 +337,12 @@ public class TcpSock extends SockCommon {
         return sock;
     }
 
-    public TcpConnection connection() {
-        return conn;
-    }
-
     public boolean hasConnection() {
         return channel != null && sendBuffer != null && receiveBuffer != null;
     }
 
     public boolean hasBackendChannel() {
         return childChannel != null && childChannel.isActive();
-    }
-
-    public void attach(TcpConnection conn) {
-        attach(conn, true);
-    }
-
-    public void attach(TcpConnection conn, boolean initializeExtensions) {
-        this.conn = conn;
-        this.channel = conn == null ? null : conn.channel();
-        this.childChannel = null;
-        this.sendBuffer = conn == null ? null : conn.sendBuffer();
-        this.receiveBuffer = conn == null ? null : conn.receiveBuffer();
-        this.timers = conn == null ? null : conn.timers();
-        this.attributes.clear();
-        loadFromConnection(conn);
-        if (initializeExtensions || conn == null) {
-            initInlineTcpState();
-        }
     }
 
     private void initInlineTcpState() {
@@ -417,64 +378,6 @@ public class TcpSock extends SockCommon {
         // R2.3: tlpHighSeq 默认值 0 由 Sender 字段声明初始化
         // R3.2: dsackStart / dsackEnd 默认 0 由 Receiver 字段初始化
         // R2.3: priorCwnd / priorSsthresh / undoMarker / frtoHighmark / frtoCounter 默认 0 由 Sender 字段声明初始化
-    }
-
-    private void loadFromConnection(TcpConnection conn) {
-        if (conn == null) {
-            return;
-        }
-        if (channel == null) {
-            channel = conn.channel();
-        }
-        if (sendBuffer == null) {
-            sendBuffer = conn.sendBuffer();
-        }
-        if (receiveBuffer == null) {
-            receiveBuffer = conn.receiveBuffer();
-        }
-        if (timers == null) {
-            timers = conn.timers();
-        }
-        this.state = conn.state();
-        // R2.3: sndUna / sndNxt / writeSeq 已在 Sender(dead code path)
-        // R3.2: rcvNxt 已在 Receiver(dead code path)
-        // R2.3: sndWnd / maxWindow / sndWl1 / sndSml 已在 Sender(dead code path)
-        // R3.2: rcvWnd 已在 Receiver(dead code path)
-        // R3.2: rcvWup 已在 Receiver(dead code path)
-        this.rcvMss = conn.rcvMss();
-        this.mss = conn.mss();
-        this.sndWscale = conn.sndWscale();
-        this.rcvWscale = conn.rcvWscale();
-        // R2.3: bytesAcked 已在 Sender(dead code path)
-        // R2.3: packetsOut 已在 Sender(dead code path)
-        this.skShutdown = conn.skShutdown();
-        // R3.2: ackPending 已在 Receiver(dead code path)
-        this.skErr = conn.skErr();
-        this.lastOowAckTimeMs = conn.lastOowAckTimeMs();
-        this.tos = conn.tos();
-        this.ipv4TcpChallengeTimestamp = conn.ipv4TcpChallengeTimestamp();
-        this.ipv4TcpChallengeCount = conn.ipv4TcpChallengeCount();
-        this.icskAckRetry = conn.icskAckRetry();
-        this.icskAckLastSegSize = conn.icskAckLastSegSize();
-        this.icskAckLrcvtimeMs = conn.icskAckLrcvtimeMs();
-        this.timestampEnabled = conn.timestampEnabled();
-        this.recentTimestamp = conn.recentTimestamp();
-        this.tsRecentStamp = conn.tsRecentStamp();
-        // R3.2: quickAckCount / ackTimeoutMs / pingpongCount 已在 Receiver(dead code path)
-        // R2.3/R3.2: lastRecvTimeMs / lastSendTimeMs 已在 Receiver/Sender(dead code path)
-        // R2.3: srttUs / rttvarUs 已在 Sender(dead code path)
-        // R2.3: rtoBackoffShift / retransStamp 已在 Sender,此路径为 dead code 保留
-        //       (from(conn)/view(conn) 无外部调用者);configure 后由外部重置
-        // R2.3: undoRetrans 已在 Sender(dead code path)
-        this.mssCache = conn.mssCache();
-        this.pmtuCookie = conn.pmtuCookie();
-        this.tcpHeaderLen = conn.tcpHeaderLen();
-        this.dstMtu = conn.dstMtu();
-        // R2.3: sackedOut 已在 Sender(dead code path)
-        // R2.3: cwnd / ssthresh 已在 Sender(dead code path)
-        // R2.3: sndCwndStampMs / sndCwndUsed / isCwndLimited 已在 Sender(dead code path)
-        // R2.3: dupacks / caIncrCounter / congestionState / highSeq 已在 Sender(dead code path)
-        // R2.3: tlpHighSeq 已在 Sender(dead code path)
     }
 
     public Channel channel() {

@@ -189,7 +189,8 @@ class Sender {
 原计划保留 `CongestionControl` / `LossRecovery` / `RttEstimator` / `TcpSockInitializer` / `TcpSockHandler` 五条 SPI。实际落地(R2/R7.3 路线):当前所有算法都是单实现,物理内嵌进 `Sender` / `TcpAck` 读起来更像 Linux 内核,跨文件追踪更顺;SPI 入口等出现第二实现需求再引入。
 
 - `CongestionControl` / `LossRecovery` / `ClassicRecovery` / `NewRenoCongestionControl` —— R0 一版 SPI 草稿,主路径始终没接上去,四个类在 2026-04-24 **作为死代码删除**。将来加 CUBIC / BBR 时再按当前 Sender 的物理形态抽出新的 SPI,不复用这份。
-- `RttEstimator` / `Rfc6298RttEstimator` —— 当前只被 `TcpConnection` 死路径引用,实际 RTT 采样在 `Sender.addRttSample / srttUs / rttvarUs / rtoMs` 里内嵌。待 TcpConnection 清理时一并删除(或迁到 `Sender` 作为后续抽回 SPI 的起点)。
+- `RttEstimator` / `Rfc6298RttEstimator` —— 只被 `TcpConnection` 死路径引用,同日随 `TcpConnection` 一并删除。实际 RTT 采样在 `TcpSock.addRttSample` / `Sender.srttUs / rttvarUs / rtoMs` 内嵌,SYN-ACK 首样本由 `Listener.synackRttMeas` 直接调 `child.addRttSample`(原走 `conn.rttEstimator` 的路径恒 null 不生效,修复后首样本正常产生)。
+- `TcpConnection` —— R0 阶段的"富模型"草稿(988 行),从未被实例化;R2/R7.x 的实际路线把所有字段/方法物理下沉到 `Sender` / `Receiver` / `TcpSock`。配套胶水(`TcpSock.attach / loadFromConnection / connection()`、`TcpInput` 整个文件、`TcpTimerScheduler` / `TcpOutput` / `TcpOutOps` 的 `TcpConnection` 重载)**一并删除**,共 ~1500 行。
 - `TcpSockInitializer` / `TcpSockHandler` **保留活用** —— 用户代码接入点(对齐 Netty `ChannelInitializer` / `ChannelInboundHandler`),不是算法 SPI。
 - `TcpFeature` **接口保留但无实现**,留作未来 SACK/TS/WS 握手协商可插拔的锚点。
 

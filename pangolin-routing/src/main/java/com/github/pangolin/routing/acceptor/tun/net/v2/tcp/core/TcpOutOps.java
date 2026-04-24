@@ -9,14 +9,6 @@ import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpU
 public class TcpOutOps {
 
     /** Rate-limit out-of-window ACKs to avoid ACK storms. */
-    public static boolean oowRateLimited(TcpConnection conn, final TcpPacketBuf pkt, final long last_oow_ack_time) {
-        /* Data packets without SYNs are not likely part of an ACK loop. */
-        if (pkt.tcpSeq() != determineEndSeq(pkt) && !pkt.isSyn()) {
-            return false;
-        }
-        return __tcp_oow_rate_limited(conn, last_oow_ack_time);
-    }
-
     public static boolean oowRateLimited(TcpSock sock, final TcpPacketBuf pkt) {
         if (sock == null || !sock.hasConnection()) {
             return false;
@@ -61,16 +53,4 @@ public class TcpOutOps {
         return false;
     }
 
-    private static boolean __tcp_oow_rate_limited(TcpConnection conn, long last_oow_ack_time) {
-        if (0 != last_oow_ack_time) {
-            final long elapsed = tcp_jiffies32() - last_oow_ack_time;
-            if (0 <= elapsed && elapsed < TcpConstants.INVALID_ACK_RATELIMIT_MS) {
-                return true;/* rate-limited: don't send yet! */
-            }
-        }
-
-        conn.lastOowAckTimeMs(tcp_jiffies32());
-
-        return false;    /* not rate-limited: go ahead, send dupack now! */
-    }
 }

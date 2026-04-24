@@ -17,7 +17,7 @@ import io.netty.buffer.ByteBuf;
  *
  * <p>TCB 生命周期(mirrors Linux):
  * <ol>
- *   <li>在 {@link TcpConnection#queueSkb} 内完成 {@code startSeq} 赋值后入 write 队列;</li>
+ *   <li>在 {@link TcpSock#queueSkb} 内完成 {@code startSeq} 赋值后入 write 队列;</li>
  *   <li>{@code TcpOutput.transmitSkb} 发送后就地继承,{@link #updateSentTime} 打戳,
  *       晋升至 RTX 队列(无新分配);</li>
  *   <li>接收端 OFO 情况下由 {@link TcpReceiveBuffer#offerOfo} 构建对应 SKB,落入
