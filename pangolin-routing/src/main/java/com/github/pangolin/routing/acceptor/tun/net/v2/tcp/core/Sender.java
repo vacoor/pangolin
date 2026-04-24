@@ -1041,6 +1041,90 @@ public final class Sender {
         return Math.min(when, maxWhenMs);
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // R7.3d cwnd 管理(从 TcpSock 迁入)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 空闲期后的 cwnd 回退 — 对齐 Linux {@code tcp_slow_start_after_idle_check}。
+     * 在 {@code tcp_write_xmit} 入口处调用:sysctl 关闭 / 尚有 packets_out / 未曾发送
+     * 时跳过;否则若 idle 跨过一个 RTO,调 {@link #tcpCwndRestart} 对半衰减 cwnd。
+     */
+    public void tcpSlowStartAfterIdleCheck() {
+        if (!SysctlOptions.ipv4_sysctl_tcp_slow_start_after_idle) return;
+        if (packetsOut != 0) return;
+        if (lastSendTimeMs == 0L) return;
+        long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+        long delta = now - lastSendTimeMs;
+        long rto = rtoMs();
+        if (delta > rto) {
+            tcpCwndRestart(delta, rto);
+        }
+    }
+
+    /**
+     * 对齐 Linux {@code tcp_cwnd_restart}:restart_cwnd = min(INIT, cwnd);
+     * 按 RTO 步长把 cwnd 右移 1 直至降到 restart_cwnd;刷新 cwnd_stamp,
+     * 重置 cwnd_used。CA_Open 下同步把 ssthresh 抬到 max(ssthresh, 3*cwnd/4+1)。
+     */
+    private void tcpCwndRestart(long delta, long rtoMs) {
+        int restartCwnd = TcpConstants.TCP_INIT_CWND;
+        int curCwnd = cwnd;
+        if (congestionState == TcpSock.CongestionState.OPEN) {
+            int conservative = (curCwnd * 3 / 4) + 1;
+            if (ssthresh < conservative) ssthresh = conservative;
+        }
+        restartCwnd = Math.min(restartCwnd, curCwnd);
+        long remain = delta;
+        while ((remain -= rtoMs) > 0 && curCwnd > restartCwnd) {
+            curCwnd >>= 1;
+        }
+        cwnd = Math.max(curCwnd, restartCwnd);
+        sndCwndStampMs = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+        sndCwndUsed = 0;
+    }
+
+    /**
+     * 对齐 Linux {@code tcp_cwnd_validate}:本轮发送结束后确认 cwnd 可用性。
+     * cwnd-limited 分支刷新 stamp;application-limited 且超 1 RTO 时走
+     * {@link #tcpCwndApplicationLimited} 向下收敛。
+     */
+    public void tcpCwndValidate(boolean isCwndLimitedFlag) {
+        if (isCwndLimitedFlag) {
+            isCwndLimited = true;
+            sndCwndStampMs = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+        } else {
+            if (isCwndLimited) {
+                long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+                long elapsed = now - sndCwndStampMs;
+                if (elapsed >= rtoMs()) {
+                    tcpCwndApplicationLimited();
+                }
+            }
+        }
+    }
+
+    /**
+     * application-limited 场景下的 cwnd 收敛 — 对齐 Linux
+     * {@code tcp_cwnd_application_limited}。CA_Open 下把 cwnd 向
+     * (cwnd + max(cwnd_used, INIT)) / 2 收敛,并保守抬 ssthresh。
+     */
+    private void tcpCwndApplicationLimited() {
+        if (congestionState == TcpSock.CongestionState.OPEN) {
+            int initWin = TcpConstants.TCP_INIT_CWND;
+            int winUsed = Math.max(sndCwndUsed, initWin);
+            int c = cwnd;
+            if (winUsed < c) {
+                int conservative = (c * 3 / 4) + 1;
+                if (ssthresh < conservative) ssthresh = conservative;
+                cwnd = (c + winUsed) >> 1;
+            }
+            sndCwndUsed = 0;
+        }
+        sndCwndStampMs = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+        isCwndLimited = false;
+    }
+
     /** 若 USER_TIMEOUT 配置了,把等待时间夹到剩余窗口内,否则原值返回。 */
     public long tcpClampProbe0ToUserTimeout(long whenMs) {
         if (userTimeoutMs == 0L || probesTstampMs == 0L) {
