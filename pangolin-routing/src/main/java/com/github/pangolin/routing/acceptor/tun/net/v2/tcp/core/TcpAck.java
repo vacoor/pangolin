@@ -83,7 +83,7 @@ public final class TcpAck {
         }
 
         sock.sndUnaUpdate(ack);
-        sock.probesOut(0);
+        sock.sender().probesOut(0);
 
         if (priorPktsOut == 0) {
             tcpAckProbe(sock);
@@ -472,19 +472,20 @@ public final class TcpAck {
             return;
         }
         int wndEnd = sock.sndUna() + sock.sndWnd();
+        Sender sender = sock.sender();
         if (!after(head.endSeq(), wndEnd)) {
-            sock.probeBackoffShift(0);
-            sock.probesTstampMs(0L);
+            sender.probeBackoffShift(0);
+            sender.probesTstampMs(0L);
             TcpTimerScheduler.INSTANCE.cancelWriteTimer(sock);
             return;
         }
-        long when = sock.tcpProbe0WhenMs(sock.tcpRtoMaxMs());
-        when = sock.tcpClampProbe0ToUserTimeout(when);
+        long when = sender.tcpProbe0WhenMs(sender.tcpRtoMaxMs());
+        when = sender.tcpClampProbe0ToUserTimeout(when);
         TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
                 sock,
                 com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TimerType.ZERO_WINDOW_PROBE,
                 when,
-                () -> sock.probeTimerAction().run()
+                sender::probeTimer
         );
     }
 

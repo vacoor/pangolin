@@ -519,23 +519,24 @@ public final class TcpOutput {
         }
         int err = writeWakeup(sock, 0);
 
+        Sender sender = sock.sender();
         if (sock.packetsOut() > 0 || sock.tcpSendHead() == null) {
-            sock.resetProbeState();
+            sender.resetProbeState();
             return -1L;
         }
 
-        sock.probesOut(sock.probesOut() + 1);
+        sender.probesOut(sender.probesOut() + 1);
         long timeout;
         if (err <= 0) {
-            if (sock.probeBackoffShift() < TcpConstants.TCP_RETRIES2) {
-                sock.incProbeBackoff();
+            if (sender.probeBackoffShift() < TcpConstants.TCP_RETRIES2) {
+                sender.incProbeBackoff();
             }
-            timeout = sock.tcpProbe0WhenMs(TcpConstants.RTO_MAX_MS);
+            timeout = sender.tcpProbe0WhenMs(TcpConstants.RTO_MAX_MS);
         } else {
             timeout = TcpConstants.TCP_RESOURCE_PROBE_INTERVAL_MS;
         }
 
-        timeout = sock.tcpClampProbe0ToUserTimeout(timeout);
+        timeout = sender.tcpClampProbe0ToUserTimeout(timeout);
         return timeout;
     }
 

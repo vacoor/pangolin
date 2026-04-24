@@ -132,9 +132,6 @@ public abstract class SegmentDispatcher extends TcpStack {
         if (sk == null) {
             return;
         }
-        sk.probeTimerAction(sk.sender()::probeTimer);
-        sk.keepaliveTimerAction(sk.sender()::keepaliveTimer);
-
         /*
          * 统一走 initializer.onEstablished(sk, this) — initializer 构造期已 requireNonNull:
          * - TcpChannelInitializer:创建 TcpChannel,用户 pipeline 接管 payload
@@ -142,7 +139,7 @@ public abstract class SegmentDispatcher extends TcpStack {
          * - TcpSockInitializer.DENY:onRequest 阶段已直接发 RST 销毁 req,此路径不会触发
          */
         initializer.onEstablished(sk, this);
-        sk.sender().armKeepalive(sk.keepaliveTimeMs());
+        sk.sender().armKeepalive(sk.sender().keepaliveTimeMs());
     }
 
     /**

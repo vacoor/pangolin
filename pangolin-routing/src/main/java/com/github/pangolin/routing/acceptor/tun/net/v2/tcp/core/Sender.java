@@ -113,6 +113,27 @@ public final class Sender {
     /** 上次发送时戳(毫秒 jiffies)。 */
     private long lastSendTimeMs;
 
+    // ── R7.1 probe / keepalive / linger2(从 TcpSock 迁入) ──────────────────
+
+    /** FIN_WAIT_2 超时(ms)。Mirrors Linux {@code tp->linger2}。 */
+    private int linger2 = (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
+    /** 零窗探测指数退避 shift。Mirrors Linux {@code icsk->icsk_probes_tstamp/icsk_backoff}。 */
+    private int probeBackoffShift;
+    /** 已发探测包计数。Mirrors Linux {@code icsk->icsk_probes_out}。 */
+    private int probesOut;
+    /** 进入探测阶段的时戳(jiffies)。Mirrors Linux {@code icsk->icsk_probes_tstamp}。 */
+    private long probesTstampMs;
+    /** TCP_USER_TIMEOUT(ms,0 表示未设置)。Mirrors Linux {@code icsk->icsk_user_timeout}。 */
+    private long userTimeoutMs;
+    /** keepalive 空闲阈值。Mirrors Linux {@code tp->keepalive_time}。 */
+    private long keepaliveTimeMs = TcpConstants.TCP_KEEPALIVE_TIME_MS;
+    /** keepalive 探测间隔。Mirrors Linux {@code tp->keepalive_intvl}。 */
+    private long keepaliveIntvlMs = TcpConstants.TCP_KEEPALIVE_INTVL_MS;
+    /** keepalive 探测次数上限。Mirrors Linux {@code tp->keepalive_probes}。 */
+    private int keepaliveProbes = TcpConstants.TCP_KEEPALIVE_PROBES;
+    /** keepalive 开关(SO_KEEPALIVE)。Mirrors Linux {@code sock_flag(sk, SOCK_KEEPOPEN)}。 */
+    private boolean keepaliveEnabled;
+
     /**
      * RTO 指数退避 shift(R2.3 物理迁移到 Sender)。Mirrors Linux
      * {@code inet_csk(sk)->icsk_backoff}。默认 0,每次 RTO timer 触发递增(上限 6)。
@@ -699,6 +720,114 @@ public final class Sender {
     public void lastSendTimeMs(long v) { this.lastSendTimeMs = v; }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // R7.1 probe / keepalive / linger2 状态访问器(从 TcpSock 迁入)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /** FIN_WAIT_2 超时。Mirrors Linux {@code tp->linger2}。 */
+    public int linger2() { return linger2; }
+    public void linger2(int v) { this.linger2 = v; }
+
+    /** 零窗探测指数退避 shift。 */
+    public int probeBackoffShift() { return probeBackoffShift; }
+    public void probeBackoffShift(int v) { this.probeBackoffShift = Math.max(v, 0); }
+    /** 退避 shift +1(上限 31)— 对齐 Linux {@code tcp_probe_timer} 的退避逻辑。 */
+    public void incProbeBackoff() {
+        if (probeBackoffShift < 31) {
+            probeBackoffShift++;
+        }
+    }
+
+    /** 已发探测包计数。 */
+    public int probesOut() { return probesOut; }
+    public void probesOut(int v) { this.probesOut = Math.max(v, 0); }
+
+    /** 进入探测阶段的时戳。 */
+    public long probesTstampMs() { return probesTstampMs; }
+    public void probesTstampMs(long v) { this.probesTstampMs = Math.max(v, 0L); }
+
+    /** TCP_USER_TIMEOUT(ms)。 */
+    public long userTimeoutMs() { return userTimeoutMs; }
+    public void userTimeoutMs(long v) { this.userTimeoutMs = Math.max(v, 0L); }
+
+    /** keepalive 空闲阈值。 */
+    public long keepaliveTimeMs() { return keepaliveTimeMs; }
+
+    /** keepalive 探测间隔。 */
+    public long keepaliveIntvlMs() { return keepaliveIntvlMs; }
+
+    /** keepalive 探测次数上限。 */
+    public int keepaliveProbes() { return keepaliveProbes; }
+
+    /** keepalive 开关。 */
+    public boolean keepaliveEnabled() { return keepaliveEnabled; }
+    public void keepaliveEnabled(boolean v) { this.keepaliveEnabled = v; }
+
+    /**
+     * 自上次有效段交付/发送以来的 idle 时间(ms)。对齐 Linux
+     * {@code keepalive_time_elapsed}:取 {@code lrcv_time} 与 {@code last_send_time} 的较新者。
+     */
+    public long keepaliveElapsedMs() {
+        long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
+        long lastRecv = sock.receiver() != null ? sock.receiver().lastRecvTimeMs() : 0L;
+        long lastActivity = lastRecv != 0L ? lastRecv : lastSendTimeMs;
+        if (lastActivity == 0L) {
+            return 0L;
+        }
+        return Math.max(now - lastActivity, 0L);
+    }
+
+    /** 对齐 Linux {@code TCP_RTO_MAX}。 */
+    public long tcpRtoMaxMs() {
+        return TcpConstants.RTO_MAX_MS;
+    }
+
+    /** 零窗探测基线 = max(RTO, RTO_MIN)。 */
+    public long tcpProbe0BaseMs() {
+        return Math.max(sock.rtoMs(), TcpConstants.RTO_MIN_MS);
+    }
+
+    /** 下一次探测的绝对等待时长,按当前退避 shift 指数放大,并夹到 maxWhenMs。 */
+    public long tcpProbe0WhenMs(long maxWhenMs) {
+        int backoff = Math.min(9, probeBackoffShift);
+        long when = tcpProbe0BaseMs() << backoff;
+        return Math.min(when, maxWhenMs);
+    }
+
+    /** 若 USER_TIMEOUT 配置了,把等待时间夹到剩余窗口内,否则原值返回。 */
+    public long tcpClampProbe0ToUserTimeout(long whenMs) {
+        if (userTimeoutMs == 0L || probesTstampMs == 0L) {
+            return whenMs;
+        }
+        long elapsed = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32() - probesTstampMs;
+        if (elapsed < 0L) {
+            elapsed = 0L;
+        }
+        long remaining = Math.max(userTimeoutMs - elapsed, TcpConstants.RTO_MIN_MS);
+        return Math.min(remaining, whenMs);
+    }
+
+    /** 探测状态重置 —— 收到对端任何 ACK / 窗口更新时调用。 */
+    public void resetProbeState() {
+        probeBackoffShift = 0;
+        probesOut = 0;
+        probesTstampMs = 0L;
+    }
+
+    /**
+     * FIN_WAIT_2 阶段的超时计算 —— 对齐 Linux {@code tcp_fin_time}。
+     * 若 {@code linger2 > 0},取 {@code max(linger2, 3.5 × RTO)},否则回退默认 2MSL。
+     */
+    public int tcpFinTimeMs() {
+        int finTimeout = linger2 != 0 ? linger2 : (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
+        long rto = sock.rtoMs();
+        long minTimeout = (rto << 2) - (rto >> 1);
+        if (finTimeout < minTimeout) {
+            finTimeout = (int) minTimeout;
+        }
+        return finTimeout;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // 发送侧 Timer 行为(R4.2b-4d 从 SegmentDispatcher 迁入)
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -713,7 +842,7 @@ public final class Sender {
         TcpTimerScheduler.INSTANCE.scheduleWriteTimer(
                 sock,
                 TimerType.ZERO_WINDOW_PROBE,
-                sock.tcpProbe0BaseMs(),
+                tcpProbe0BaseMs(),
                 this::probeTimer
         );
     }
@@ -727,21 +856,21 @@ public final class Sender {
             return;
         }
         if (packetsOut() > 0 || sock.tcpSendHead() == null) {
-            sock.resetProbeState();
+            resetProbeState();
             return;
         }
 
         long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
-        if (sock.probesTstampMs() == 0L) {
-            sock.probesTstampMs(now);
-        } else if (sock.userTimeoutMs() > 0 && now - sock.probesTstampMs() >= sock.userTimeoutMs()) {
+        if (probesTstampMs == 0L) {
+            probesTstampMs = now;
+        } else if (userTimeoutMs > 0 && now - probesTstampMs >= userTimeoutMs) {
             sock.skErr(110);
             sock.stack().output().sendReset(sock);
             sock.stack().tcpDone(sock);
             return;
         }
 
-        if (sock.probesOut() >= TcpConstants.TCP_RETRIES2) {
+        if (probesOut >= TcpConstants.TCP_RETRIES2) {
             sock.skErr(110);
             sock.stack().output().sendReset(sock);
             sock.stack().tcpDone(sock);
@@ -765,7 +894,7 @@ public final class Sender {
      */
     public void armKeepalive(long delayMs) {
         if (!sock.hasConnection()
-                || !sock.keepaliveEnabled()
+                || !keepaliveEnabled
                 || sock.state() == TcpConnectionState.TIME_WAIT
                 || sock.state() == TcpConnectionState.TCP_CLOSED
                 || sock.state() == TcpConnectionState.TCP_LISTEN
@@ -780,7 +909,7 @@ public final class Sender {
      * FIN_WAIT_2 不做 keepalive;有在途包时续期;idle 超过 keepaliveTime 后发 probe。
      */
     public void keepaliveTimer() {
-        if (!sock.hasConnection() || !sock.keepaliveEnabled()) {
+        if (!sock.hasConnection() || !keepaliveEnabled) {
             return;
         }
 
@@ -789,19 +918,19 @@ public final class Sender {
         }
 
         if (packetsOut() > 0 || sock.tcpSendHead() != null) {
-            armKeepalive(sock.keepaliveTimeMs());
+            armKeepalive(keepaliveTimeMs);
             return;
         }
 
-        long elapsed = sock.keepaliveElapsedMs();
-        if (elapsed < sock.keepaliveTimeMs()) {
-            armKeepalive(sock.keepaliveTimeMs() - elapsed);
+        long elapsed = keepaliveElapsedMs();
+        if (elapsed < keepaliveTimeMs) {
+            armKeepalive(keepaliveTimeMs - elapsed);
             return;
         }
 
-        long userTimeout = sock.userTimeoutMs();
-        if ((userTimeout > 0L && elapsed >= userTimeout && sock.probesOut() > 0)
-                || (userTimeout == 0L && sock.probesOut() >= sock.keepaliveProbes())) {
+        long userTimeout = userTimeoutMs;
+        if ((userTimeout > 0L && elapsed >= userTimeout && probesOut > 0)
+                || (userTimeout == 0L && probesOut >= keepaliveProbes)) {
             sock.skErr(110);
             sock.stack().output().sendReset(sock);
             sock.stack().tcpDone(sock);
@@ -811,8 +940,8 @@ public final class Sender {
         int err = sock.stack().output().writeWakeup(sock, 1);
         long next;
         if (err <= 0) {
-            sock.probesOut(sock.probesOut() + 1);
-            next = sock.keepaliveIntvlMs();
+            probesOut++;
+            next = keepaliveIntvlMs;
         } else {
             next = TcpConstants.TCP_RESOURCE_PROBE_INTERVAL_MS;
         }

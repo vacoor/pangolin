@@ -207,17 +207,10 @@ public class TcpSock extends SockCommon {
      */
     private final com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.WinMinMax rttMinFilter
             = new com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.WinMinMax();
-    private int linger2;
-    private int probeBackoffShift;
-    private int probesOut;
-    private long probesTstampMs;
-    private long userTimeoutMs;
-    private long keepaliveTimeMs;
-    private long keepaliveIntvlMs;
-    private int keepaliveProbes;
-    private boolean keepaliveEnabled;
-    private Runnable probeTimerAction = () -> {};
-    private Runnable keepaliveTimerAction = () -> {};
+    // R7.1: linger2 / probeBackoffShift / probesOut / probesTstampMs / userTimeoutMs /
+    //       keepaliveTimeMs / keepaliveIntvlMs / keepaliveProbes / keepaliveEnabled
+    //       物理迁到 Sender(probeTimerAction / keepaliveTimerAction 一并删除,
+    //       调用方直接 sock.sender()::probeTimer / ::keepaliveTimer)。
     // R2.3: cwnd / ssthresh 已物理迁到 Sender
     /**
      * cwnd 最近一次被 {@code tcp_cwnd_validate} 确认的毫秒时戳 —
@@ -357,7 +350,7 @@ public class TcpSock extends SockCommon {
         //       默认值由 Sender 字段声明初始化(0/0L/0/false/0/0)
         // R2.3: rackAckPriorDelivered 默认 0 由 Sender 字段初始化
         sock.rttMinFilter.reset(0, TcpConstants.TCP_MIN_RTT_NO_SAMPLE);
-        sock.linger2 = (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
+        // R7.1: linger2 默认值由 Sender 字段声明初始化(FIN_WAIT_2_TIMEOUT_MS)
         return sock;
     }
 
@@ -415,15 +408,9 @@ public class TcpSock extends SockCommon {
         //       默认值由 Sender 字段声明初始化
         // R2.3: rackAckPriorDelivered 默认 0 由 Sender 字段初始化
         rttMinFilter.reset(0, TcpConstants.TCP_MIN_RTT_NO_SAMPLE);
-        linger2 = (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
-        probeBackoffShift = 0;
-        probesOut = 0;
-        probesTstampMs = 0L;
-        userTimeoutMs = 0L;
-        keepaliveTimeMs = TcpConstants.TCP_KEEPALIVE_TIME_MS;
-        keepaliveIntvlMs = TcpConstants.TCP_KEEPALIVE_INTVL_MS;
-        keepaliveProbes = TcpConstants.TCP_KEEPALIVE_PROBES;
-        keepaliveEnabled = false;
+        // R7.1: linger2 / probeBackoffShift / probesOut / probesTstampMs /
+        //       userTimeoutMs / keepaliveTimeMs / keepaliveIntvlMs /
+        //       keepaliveProbes / keepaliveEnabled 默认值由 Sender 字段声明初始化
         // R2.3: cwnd / ssthresh 初值由 Sender 字段声明初始化 (TCP_INIT_CWND / Integer.MAX_VALUE)
         // R2.3: sndCwndStampMs / sndCwndUsed / isCwndLimited 默认值由 Sender 字段声明初始化
         // R2.3: dupacks / caIncrCounter / congestionState / highSeq 初值由 Sender 字段声明初始化
@@ -1112,7 +1099,7 @@ public class TcpSock extends SockCommon {
 
     /**
      * 对齐 Linux {@code tcp_set_rto}(tcp_input.c):先将 {@code base = srtt + 4·rttvar}
-     * clamp 到 {@code [RTO_MIN_MS, RTO_MAX_MS]},再按 {@link #rtoBackoffShift}
+     * clamp 到 {@code [RTO_MIN_MS, RTO_MAX_MS]},再按 {@code Sender.rtoBackoffShift}
      * 逐步左移,每一步检测是否触顶 {@code RTO_MAX_MS}。
      *
      * <p>若 {@code srttUs} 为 0(未取样)使用 {@link TcpConstants#RTO_INIT_MS}(1000ms)。
@@ -1560,13 +1547,12 @@ public class TcpSock extends SockCommon {
         }
     }
 
-    public int linger2() {
-        return linger2;
-    }
-
-    public void linger2(int linger2) {
-        this.linger2 = linger2;
-    }
+    // R7.1: linger2 / probeBackoffShift / probesOut / probesTstampMs / userTimeoutMs /
+    //       keepaliveTimeMs / keepaliveIntvlMs / keepaliveProbes / keepaliveEnabled /
+    //       keepaliveElapsedMs / tcpRtoMaxMs / tcpProbe0BaseMs / tcpProbe0WhenMs /
+    //       tcpClampProbe0ToUserTimeout / resetProbeState / tcpFinTimeMs / incProbeBackoff
+    //       全部迁到 Sender。probeTimerAction / keepaliveTimerAction 两个 Runnable
+    //       存储字段删除,调用方直接 sock.sender()::probeTimer / ::keepaliveTimer。
 
     public void incrQuickAckCount(int maxQuickAcks) {
         int quickacks = receiver.rcvWnd() / Math.max(rcvMss << 1, 1);
@@ -1574,131 +1560,6 @@ public class TcpSock extends SockCommon {
             quickacks = 2;
         }
         receiver.quickAckCount(Math.max(receiver.quickAckCount(), Math.min(quickacks, maxQuickAcks)));
-    }
-
-    public int tcpFinTimeMs() {
-        int finTimeout = linger2 != 0 ? linger2 : (int) TcpConstants.FIN_WAIT_2_TIMEOUT_MS;
-        long rto = rtoMs();
-        long minTimeout = (rto << 2) - (rto >> 1);
-        if (finTimeout < minTimeout) {
-            finTimeout = (int) minTimeout;
-        }
-        return finTimeout;
-    }
-
-    public int probeBackoffShift() {
-        return probeBackoffShift;
-    }
-
-    public void probeBackoffShift(int probeBackoffShift) {
-        this.probeBackoffShift = Math.max(probeBackoffShift, 0);
-    }
-
-    public void incProbeBackoff() {
-        if (probeBackoffShift < 31) {
-            probeBackoffShift++;
-        }
-    }
-
-    public int probesOut() {
-        return probesOut;
-    }
-
-    public void probesOut(int probesOut) {
-        this.probesOut = Math.max(probesOut, 0);
-    }
-
-    public long probesTstampMs() {
-        return probesTstampMs;
-    }
-
-    public void probesTstampMs(long probesTstampMs) {
-        this.probesTstampMs = Math.max(probesTstampMs, 0L);
-    }
-
-    public long userTimeoutMs() {
-        return userTimeoutMs;
-    }
-
-    public void userTimeoutMs(long userTimeoutMs) {
-        this.userTimeoutMs = Math.max(userTimeoutMs, 0L);
-    }
-
-    public long keepaliveTimeMs() {
-        return keepaliveTimeMs;
-    }
-
-    public long keepaliveIntvlMs() {
-        return keepaliveIntvlMs;
-    }
-
-    public int keepaliveProbes() {
-        return keepaliveProbes;
-    }
-
-    public boolean keepaliveEnabled() {
-        return keepaliveEnabled;
-    }
-
-    public void keepaliveEnabled(boolean keepaliveEnabled) {
-        this.keepaliveEnabled = keepaliveEnabled;
-    }
-
-    public long keepaliveElapsedMs() {
-        long now = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32();
-        long lastActivity = receiver.lastRecvTimeMs() != 0L ? receiver.lastRecvTimeMs() : sender.lastSendTimeMs();
-        if (lastActivity == 0L) {
-            return 0L;
-        }
-        return Math.max(now - lastActivity, 0L);
-    }
-
-    public long tcpRtoMaxMs() {
-        return TcpConstants.RTO_MAX_MS;
-    }
-
-    public long tcpProbe0BaseMs() {
-        return Math.max(rtoMs(), TcpConstants.RTO_MIN_MS);
-    }
-
-    public long tcpProbe0WhenMs(long maxWhenMs) {
-        int backoff = Math.min(9, probeBackoffShift);
-        long when = tcpProbe0BaseMs() << backoff;
-        return Math.min(when, maxWhenMs);
-    }
-
-    public long tcpClampProbe0ToUserTimeout(long whenMs) {
-        if (userTimeoutMs == 0L || probesTstampMs == 0L) {
-            return whenMs;
-        }
-        long elapsed = com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32() - probesTstampMs;
-        if (elapsed < 0L) {
-            elapsed = 0L;
-        }
-        long remaining = Math.max(userTimeoutMs - elapsed, TcpConstants.RTO_MIN_MS);
-        return Math.min(remaining, whenMs);
-    }
-
-    public void resetProbeState() {
-        probeBackoffShift = 0;
-        probesOut = 0;
-        probesTstampMs = 0L;
-    }
-
-    public Runnable probeTimerAction() {
-        return probeTimerAction;
-    }
-
-    public void probeTimerAction(Runnable probeTimerAction) {
-        this.probeTimerAction = probeTimerAction == null ? () -> {} : probeTimerAction;
-    }
-
-    public Runnable keepaliveTimerAction() {
-        return keepaliveTimerAction;
-    }
-
-    public void keepaliveTimerAction(Runnable keepaliveTimerAction) {
-        this.keepaliveTimerAction = keepaliveTimerAction == null ? () -> {} : keepaliveTimerAction;
     }
 
     public void onAckedByCc(int newlyAcked, boolean advanced) {
@@ -1830,7 +1691,7 @@ public class TcpSock extends SockCommon {
      * (tcp_output.c)。在 {@code tcp_write_xmit} 入口处调用:
      * <ul>
      *   <li>sysctl 关闭 / 尚有 {@code packets_out} / CC 接管拥塞控制 时直接返回;</li>
-     *   <li>{@code delta = now - lsndtime > RTO} 时触发 {@link #tcpCwndRestart(long)}
+     *   <li>{@code delta = now - lsndtime > RTO} 时触发 {@link #tcpCwndRestart(long, long)}
      *       把 cwnd 按 {@code RTO} 为步长对半衰减到 {@code TCP_INIT_CWND} 上限。</li>
      * </ul>
      *

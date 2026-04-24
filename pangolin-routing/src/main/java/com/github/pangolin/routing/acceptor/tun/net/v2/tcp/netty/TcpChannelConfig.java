@@ -39,7 +39,7 @@ public class TcpChannelConfig extends DefaultChannelConfig {
     @SuppressWarnings({"unchecked", "deprecation"})
     public <T> T getOption(ChannelOption<T> option) {
         if (option == ChannelOption.SO_KEEPALIVE) {
-            return (T) Boolean.valueOf(tcpChannel().sock().keepaliveEnabled());
+            return (T) Boolean.valueOf(tcpChannel().sock().sender().keepaliveEnabled());
         }
         if (option == ChannelOption.TCP_NODELAY) {
             return (T) Boolean.valueOf(tcpNoDelay);
@@ -51,7 +51,7 @@ public class TcpChannelConfig extends DefaultChannelConfig {
     public <T> boolean setOption(ChannelOption<T> option, T value) {
         validate(option, value);
         if (option == ChannelOption.SO_KEEPALIVE) {
-            tcpChannel().sock().keepaliveEnabled(Boolean.TRUE.equals(value));
+            tcpChannel().sock().sender().keepaliveEnabled(Boolean.TRUE.equals(value));
             return true;
         }
         if (option == ChannelOption.TCP_NODELAY) {

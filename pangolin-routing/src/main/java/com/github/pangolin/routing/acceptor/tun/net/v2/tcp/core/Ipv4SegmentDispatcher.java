@@ -209,7 +209,7 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
                 if (sk.sndUna() == sk.writeSeq()) {
                     // FIN_WAIT_1 → FIN_WAIT_2: linger2 < 0 表示应用已放弃 2MSL 等待
                     // 立即 abort (对齐 v1 tcp_input.c:2193 abort-on-data-after-close)
-                    if (sk.linger2() < 0) {
+                    if (sk.sender().linger2() < 0) {
                         tcpDone(sk);
                         return 0;
                     }
@@ -221,7 +221,7 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
                     // `else if (th->fin) inet_csk_reset_keepalive_timer(sk, tmo)` 的延迟策略:
                     // 保留重量级 sk 走完本段的 dataQueue 再由 finIncoming 迁入 TIME_WAIT。
                     if (pkt.isFin()) {
-                        TcpTimerScheduler.INSTANCE.scheduleKeepalive(sk, sk.tcpFinTimeMs(), () -> onFinWait2Keepalive(sk));
+                        TcpTimerScheduler.INSTANCE.scheduleKeepalive(sk, sk.sender().tcpFinTimeMs(), () -> onFinWait2Keepalive(sk));
                     } else {
                         scheduleFinWait2Timeout(sk);
                     }
@@ -409,7 +409,7 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
         if (!sk.hasConnection()) {
             return;
         }
-        final int tmo = sk.tcpFinTimeMs();
+        final int tmo = sk.sender().tcpFinTimeMs();
         if (tmo > TcpConstants.TIME_WAIT_MS) {
             TcpTimerScheduler.INSTANCE.scheduleKeepalive(sk, tmo - TcpConstants.TIME_WAIT_MS, () -> onFinWait2Keepalive(sk));
         } else {
@@ -427,8 +427,8 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
         if (!sk.hasConnection() || sk.state() != TcpConnectionState.FIN_WAIT_2) {
             return;
         }
-        if (sk.linger2() >= 0) {
-            final int tmo = sk.tcpFinTimeMs() - (int) TcpConstants.TIME_WAIT_MS;
+        if (sk.sender().linger2() >= 0) {
+            final int tmo = sk.sender().tcpFinTimeMs() - (int) TcpConstants.TIME_WAIT_MS;
             if (tmo > 0) {
                 timeWait(sk, TcpConnectionState.FIN_WAIT_2, tmo);
                 return;
