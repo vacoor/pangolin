@@ -855,7 +855,7 @@ public final class Sender {
             if (incrementDupacks() == 3 && congestionState == TcpSock.CongestionState.OPEN) {
                 // 对齐 Linux tcp_init_undo:进 Recovery 前快照 cwnd/ssthresh/snd_una,
                 // 为后续 tcp_try_undo_recovery 提供回滚基线。
-                sock.tcpInitUndo();
+                tcpInitUndo();
                 int newSs = Math.max(cwnd / 2, 2);
                 ssthresh = newSs;
                 cwnd = newSs + 3;
@@ -882,7 +882,7 @@ public final class Sender {
             congestionState = TcpSock.CongestionState.OPEN;
             caIncrCounter = 0;
             // 自然退出 CA_Loss(非 F-RTO / TSECR undo 路径)时清 F-RTO 武装。
-            sock.clearFrto();
+            clearFrto();
         }
 
         dupacks = 0;
@@ -904,14 +904,14 @@ public final class Sender {
      * R7.3b:方法体从 TcpSock 迁入。
      */
     public void onTimeoutByCc() {
-        sock.tcpInitUndo();
+        tcpInitUndo();
         // F-RTO 武装条件(RFC 5682):有 undo 机会(undoMarker 已建立)且
         // RTO 瞬间仍有在飞数据(sndNxt > undoMarker),才把 snd_nxt 快照为 frto_high_mark。
         if (undoMarker != 0 && TcpSequence.after(sndNxt, undoMarker)) {
             frtoHighmark = sndNxt;
             frtoCounter = 1;
         } else {
-            sock.clearFrto();
+            clearFrto();
         }
         ssthresh = Math.max(cwnd / 2, 2);
         cwnd = 1;
@@ -919,6 +919,119 @@ public final class Sender {
         caIncrCounter = 0;
         tlpHighSeq = 0;
         congestionState = TcpSock.CongestionState.LOSS;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // R7.3c Undo / F-RTO 家族(从 TcpSock 迁入)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /** 清除 F-RTO 武装状态 — 对应 Linux {@code tp->frto = 0}。 */
+    public void clearFrto() {
+        frtoHighmark = 0;
+        frtoCounter = 0;
+    }
+
+    /**
+     * 对齐 Linux {@code tcp_init_undo}:进入 Recovery/Loss 前快照
+     * {@code cwnd / ssthresh / snd_una} 到 {@code priorCwnd / priorSsthresh
+     * / undoMarker},为后续 {@code tcp_try_undo_*} 提供回滚基线。
+     * 同时清零 {@code undoRetrans / retransStamp}(本 epoch 的计数 / 打戳由
+     * {@code TcpOutput.retransmitSkb} 在首次重传时写入,避免上一 epoch 残留污染
+     * DSACK-driven undo 判定)。
+     */
+    public void tcpInitUndo() {
+        priorCwnd = cwnd;
+        priorSsthresh = (ssthresh == Integer.MAX_VALUE) ? 0 : ssthresh;
+        undoMarker = sndUna;
+        undoRetrans = 0;
+        retransStamp = 0L;
+    }
+
+    /**
+     * 对齐 Linux {@code tcp_undo_cwnd_reduction}:将 cwnd/ssthresh 回滚到
+     * {@link #tcpInitUndo} 记录的快照(取 max 防止已自然增长的 cwnd 被压回);
+     * 清空 undo / retrans 记录,并顺带清 F-RTO。
+     *
+     * @param unmarkLoss 为 true 时清空 lostOut(tcp_try_undo_loss 专用)
+     */
+    public void tcpUndoCwndReduction(boolean unmarkLoss) {
+        if (priorCwnd > 0) cwnd = Math.max(cwnd, priorCwnd);
+        if (priorSsthresh > 0) ssthresh = Math.max(ssthresh, priorSsthresh);
+        undoMarker = 0;
+        retransStamp = 0L;
+        undoRetrans = 0;
+        clearFrto();
+        if (unmarkLoss) {
+            lostOut = 0;
+        }
+    }
+
+    /**
+     * 对齐 Linux {@code tcp_try_undo_recovery} 的 TSECR-based 伪 FR 闭环。
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_try_undo_recovery</a>
+     */
+    public boolean tcpTryUndoRecovery(int tsecr) {
+        if (congestionState != TcpSock.CongestionState.RECOVERY) return false;
+        if (undoMarker == 0 || retransStamp == 0L) return false;
+        if (tsecr == -1) return false;
+        final int retransStampMs = (int) (retransStamp / 1000L);
+        if (!TcpSequence.before(tsecr, retransStampMs)) return false;
+        tcpUndoCwndReduction(false);
+        congestionState = TcpSock.CongestionState.OPEN;
+        caIncrCounter = 0;
+        dupacks = 0;
+        return true;
+    }
+
+    /**
+     * 对齐 Linux {@code tcp_try_undo_loss} 的 TSECR-based 伪 RTO 闭环。
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_try_undo_loss</a>
+     */
+    public boolean tcpTryUndoLoss(int tsecr) {
+        if (congestionState != TcpSock.CongestionState.LOSS) return false;
+        if (undoMarker == 0 || retransStamp == 0L) return false;
+        if (tsecr == -1) return false;
+        final int retransStampMs = (int) (retransStamp / 1000L);
+        if (!TcpSequence.before(tsecr, retransStampMs)) return false;
+        tcpUndoCwndReduction(false);
+        congestionState = TcpSock.CongestionState.OPEN;
+        caIncrCounter = 0;
+        dupacks = 0;
+        return true;
+    }
+
+    /**
+     * F-RTO(RFC 5682)基于 sndUna 追上 frtoHighmark 的伪 RTO 判定。
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_process_loss</a>
+     */
+    public boolean tcpProcessFrto() {
+        if (congestionState != TcpSock.CongestionState.LOSS) return false;
+        if (frtoCounter == 0) return false;
+        if (undoMarker == 0) return false;
+        if (TcpSequence.before(sndUna, frtoHighmark)) return false;
+        tcpUndoCwndReduction(true);
+        congestionState = TcpSock.CongestionState.OPEN;
+        caIncrCounter = 0;
+        dupacks = 0;
+        return true;
+    }
+
+    /**
+     * 对齐 Linux {@code tcp_try_undo_dsack}:DSACK 抵消所有重传后的 undo 路径。
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c">tcp_try_undo_dsack</a>
+     */
+    public boolean tcpTryUndoDsack() {
+        if (congestionState != TcpSock.CongestionState.RECOVERY
+                && congestionState != TcpSock.CongestionState.LOSS) {
+            return false;
+        }
+        if (undoMarker == 0 || retransStamp == 0L) return false;
+        if (undoRetrans != 0) return false;
+        tcpUndoCwndReduction(false);
+        congestionState = TcpSock.CongestionState.OPEN;
+        caIncrCounter = 0;
+        dupacks = 0;
+        return true;
     }
 
     /** 下一次探测的绝对等待时长,按当前退避 shift 指数放大,并夹到 maxWhenMs。 */
