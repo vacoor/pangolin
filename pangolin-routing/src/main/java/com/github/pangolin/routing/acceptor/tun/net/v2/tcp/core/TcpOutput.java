@@ -372,6 +372,19 @@ public final class TcpOutput {
         if (sock == null || !sock.hasConnection()) {
             return false;
         }
+        // enterXmit/exitXmit 是给 EmbeddedChannel 路径的 re-entry 守卫:
+        // writeAndFlush 内部 maybeRunPendingTasks 若 inline fire 到 TLP/RTO
+        // callback,看到 isInXmit() 就 skip,避免陈旧 tcpSendHead 导致的双入队。
+        // 生产 NIO 下调度器不会 inline fire,这一对 enter/exit 是纯 no-op。
+        sock.sender().enterXmit();
+        try {
+            return writeXmitLocked(sock, mss_now, nonagle, push_one);
+        } finally {
+            sock.sender().exitXmit();
+        }
+    }
+
+    private boolean writeXmitLocked(TcpSock sock, int mss_now, int nonagle, int push_one) {
         int sent_pkts = 0;
         boolean is_cwnd_limited = false;
         boolean is_rwnd_limited = false;

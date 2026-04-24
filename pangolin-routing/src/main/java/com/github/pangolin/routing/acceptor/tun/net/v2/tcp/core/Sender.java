@@ -76,6 +76,23 @@ public final class Sender {
     private long srttUs;
     /** RTT 方差(us)。Mirrors Linux {@code tp->rttvar_us}。 */
     private long rttvarUs;
+    /**
+     * writeXmit 再入深度 —— 专给 {@code EmbeddedChannel} 测试路径用的守卫。
+     *
+     * <p>背景:生产路径(NIO EventLoop)里 {@code writeAndFlush} 不会 inline 驱动
+     * scheduled tasks,定时器只在 select loop 下一轮才 fire,无 re-entry 问题。
+     * 但 {@code EmbeddedChannel.writeAndFlush} 内部的 {@code maybeRunPendingTasks}
+     * 会同步驱动调度器,让 TLP 等定时器在 writeAndFlush 调用栈里 inline fire。
+     * 若此时 fire 到的 callback 又回头调 {@code writeXmit},就会在外层尚未完成
+     * {@code eventNewDataSent}(pop write queue / enqueueRtx / pktsOut++)时看到
+     * 陈旧的 {@code tcpSendHead},导致同一段被双入队。加这个计数器让 re-entrant
+     * callback 自行跳过;外层 writeXmit 尾部的 {@code scheduleLossProbe} 会重新
+     * 评估是否再武装 TLP。
+     *
+     * <p>生产 NIO 下,{@link #isInXmit()} 恒为 false(调度器根本不会在 writeXmit
+     * 栈帧里 fire),guard 是零开销 no-op。
+     */
+    private int xmitDepth;
     /** dupack 计数器。Mirrors Linux {@code tp->dup_ack}(经由 {@code icsk_ca_state} 触发)。 */
     private int dupacks;
     /** 拥塞控制阶段。Mirrors Linux {@code icsk->icsk_ca_state}。 */
@@ -582,6 +599,11 @@ public final class Sender {
     public void rttvarUs(long v) {
         this.rttvarUs = v;
     }
+
+    /** writeXmit 进入/退出打桩,re-entry 守卫,详见字段 javadoc。 */
+    public void enterXmit() { xmitDepth++; }
+    public void exitXmit()  { if (xmitDepth > 0) xmitDepth--; }
+    public boolean isInXmit() { return xmitDepth > 0; }
 
     /** dupack 计数器。Mirrors Linux {@code tp->dup_ack}。 */
     public int dupacks() {

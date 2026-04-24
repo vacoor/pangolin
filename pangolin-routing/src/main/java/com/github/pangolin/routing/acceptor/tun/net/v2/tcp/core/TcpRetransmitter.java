@@ -73,6 +73,13 @@ public final class TcpRetransmitter {
         if (sock == null || !sock.hasConnection()) {
             return;
         }
+        // writeXmit 栈帧内部若被 EmbeddedChannel.maybeRunPendingTasks 驱动 inline fire
+        // 就 skip —— 外层 writeXmit 尾部的 scheduleLossProbe 会重新评估是否再武装
+        // TLP。生产 NIO 下此分支恒不触发(NioEventLoop.writeAndFlush 不 inline 跑
+        // scheduled tasks)。详见 Sender.xmitDepth 字段 javadoc。
+        if (sock.sender().isInXmit()) {
+            return;
+        }
         sock.sender().sendLossProbe();
         scheduleRetransmit(sock);
     }
