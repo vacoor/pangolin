@@ -1109,6 +1109,31 @@ public final class Sender {
      * {@code tcp_cwnd_application_limited}。CA_Open 下把 cwnd 向
      * (cwnd + max(cwnd_used, INIT)) / 2 收敛,并保守抬 ssthresh。
      */
+    /**
+     * 对齐 Linux {@code tcp_rack_update_reo_wnd}:DSACK 触发 reo_wnd 动态放宽
+     * (1-RTT 门控 + 持续 epoch 递减衰减),供 RACK 乱序检测用。
+     * R7.3e:方法体从 TcpSock 迁入。
+     *
+     * @param priorDelivered 本 ACK 所确认段的 {@code tx.delivered} 最大值
+     */
+    public void tcpRackUpdateReoWnd(int priorDelivered) {
+        if (priorDelivered == 0) return;
+        // S-3: 同一 RTT 内的旧 DSACK 不再步进
+        if (rackDsackSeen && TcpSequence.before(priorDelivered, rackLastDelivered)) {
+            rackDsackSeen = false;
+        }
+        if (rackDsackSeen) {
+            rackReoWndSteps = Math.min(rackReoWndSteps + 1, 0xFF);
+            rackDsackSeen = false;
+            rackLastDelivered = delivered;
+            rackReoWndPersist = TcpConstants.TCP_RACK_RECOVERY_THRESH;
+        } else if (rackReoWndPersist <= 0) {
+            rackReoWndSteps = 1;
+        } else {
+            rackReoWndPersist--;
+        }
+    }
+
     private void tcpCwndApplicationLimited() {
         if (congestionState == TcpSock.CongestionState.OPEN) {
             int initWin = TcpConstants.TCP_INIT_CWND;

@@ -1308,25 +1308,9 @@ public class TcpSock extends SockCommon {
      *                       (对应 Linux {@code rs->prior_delivered});{@code 0} 表示
      *                       本 ACK 未确认任何已打戳的段(例如纯窗口更新),直接返回。
      */
+    /** R7.3e:方法体迁到 {@link Sender#tcpRackUpdateReoWnd},此处保留 delegate。 */
     public void tcpRackUpdateReoWnd(int priorDelivered) {
-        if (priorDelivered == 0) {
-            return;
-        }
-        // S-3: Disregard DSACK if a rtt has not passed since we adjusted reo_wnd
-        if (sender.rackDsackSeen()
-                && before(priorDelivered, sender.rackLastDelivered())) {
-            sender.rackDsackSeen(false);
-        }
-        if (sender.rackDsackSeen()) {
-            sender.rackReoWndSteps(Math.min(sender.rackReoWndSteps() + 1, 0xFF));
-            sender.rackDsackSeen(false);
-            sender.rackLastDelivered(sender.delivered());
-            sender.rackReoWndPersist(TcpConstants.TCP_RACK_RECOVERY_THRESH);
-        } else if (sender.rackReoWndPersist() <= 0) {
-            sender.rackReoWndSteps(1);
-        } else {
-            sender.rackReoWndPersist(sender.rackReoWndPersist() - 1);
-        }
+        sender.tcpRackUpdateReoWnd(priorDelivered);
     }
 
     // R7.1: linger2 / probeBackoffShift / probesOut / probesTstampMs / userTimeoutMs /
