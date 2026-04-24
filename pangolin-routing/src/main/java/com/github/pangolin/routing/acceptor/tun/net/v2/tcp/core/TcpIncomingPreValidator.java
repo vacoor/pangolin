@@ -44,17 +44,14 @@ public class TcpIncomingPreValidator {
     }
 
     public boolean validate(ChannelHandlerContext ctx, TcpPacketBuf pkt) {
+        // NOTE: pkt 生命周期由 {@link com.github.pangolin.routing.acceptor.tun.net.codec.IpPacketHandler}
+        // 的 finally 统一释放,本方法及其被调用者不要再 release(否则双重释放)。
         if (!pkt.isAck() && !pkt.isRst() && !pkt.isSyn()) {
             log.warn(logFormat("[TCP] [RCV]", pkt, "Invalid TCP flag(!ACK, !RST, !SYN)"));
-            pkt.release();
             return false;
         }
 
-        if (!validateIncoming(ctx, pkt)) {
-            pkt.release();
-            return false;
-        }
-        return true;
+        return validateIncoming(ctx, pkt);
     }
 
     private boolean validateIncoming(ChannelHandlerContext ctx, TcpPacketBuf pkt) {

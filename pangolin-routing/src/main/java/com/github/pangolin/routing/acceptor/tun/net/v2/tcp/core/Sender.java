@@ -744,14 +744,17 @@ public final class Sender {
     public long userTimeoutMs() { return userTimeoutMs; }
     public void userTimeoutMs(long v) { this.userTimeoutMs = Math.max(v, 0L); }
 
-    /** keepalive 空闲阈值。 */
+    /** keepalive 空闲阈值(Mirrors Linux TCP_KEEPIDLE)。 */
     public long keepaliveTimeMs() { return keepaliveTimeMs; }
+    public void keepaliveTimeMs(long v) { this.keepaliveTimeMs = Math.max(v, 1L); }
 
-    /** keepalive 探测间隔。 */
+    /** keepalive 探测间隔(Mirrors Linux TCP_KEEPINTVL)。 */
     public long keepaliveIntvlMs() { return keepaliveIntvlMs; }
+    public void keepaliveIntvlMs(long v) { this.keepaliveIntvlMs = Math.max(v, 1L); }
 
-    /** keepalive 探测次数上限。 */
+    /** keepalive 探测次数上限(Mirrors Linux TCP_KEEPCNT)。 */
     public int keepaliveProbes() { return keepaliveProbes; }
+    public void keepaliveProbes(int v) { this.keepaliveProbes = Math.max(v, 1); }
 
     /** keepalive 开关。 */
     public boolean keepaliveEnabled() { return keepaliveEnabled; }
