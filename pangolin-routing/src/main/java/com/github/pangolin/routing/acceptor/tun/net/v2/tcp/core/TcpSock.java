@@ -620,17 +620,9 @@ public class TcpSock extends SockCommon {
         sender.packetsOut(v);
     }
 
-    /**
-     * 对齐 Linux {@code tcp_packets_in_flight}(include/net/tcp.h):
-     * {@code packets_out - sacked_out - lost_out + retrans_out}。v2 暂不维护
-     * {@code retransOut} 单独计数,SACK 语义由 {@code sackedOut} 覆盖;{@code lostOut}
-     * 由 RACK / NewReno 标记,两者共同从 in_flight 中排除。
-     *
-     * <p>{@link TcpOutput#cwndTest} 用此值作 cwnd 预算分子,避免 SACKed 段既
-     * 占 {@code packetsOut}、又被 cwnd 扣减的双倍计费。
-     */
+    /** R7.3a:方法体迁到 {@link Sender#packetsInFlight()},此处保留 delegate。 */
     public int packetsInFlight() {
-        return Math.max(0, sender.packetsOut() - sender.sackedOut() - sender.lostOut());
+        return sender.packetsInFlight();
     }
 
     public int sndWl1() {

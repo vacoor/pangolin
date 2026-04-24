@@ -780,6 +780,17 @@ public final class Sender {
     }
 
     /**
+     * 对齐 Linux {@code tcp_packets_in_flight}(include/net/tcp.h):
+     * {@code packets_out - sacked_out - lost_out + retrans_out}。v2 不单独维护
+     * {@code retransOut},SACK 语义由 {@code sackedOut} 覆盖;{@code lostOut}
+     * 由 RACK / NewReno 标记,两者共同从 in_flight 中排除。
+     * R7.3a:方法体从 TcpSock 迁入。
+     */
+    public int packetsInFlight() {
+        return Math.max(0, packetsOut - sackedOut - lostOut);
+    }
+
+    /**
      * 对齐 Linux {@code tcp_set_rto}(tcp_input.c):先将 {@code base = srtt + 4·rttvar}
      * clamp 到 {@code [RTO_MIN_MS, RTO_MAX_MS]},再按 {@code rtoBackoffShift}
      * 逐步左移,每一步检测是否触顶 {@code RTO_MAX_MS}。
