@@ -99,42 +99,53 @@ gVisor 的价值取向是:**主体对象明确(endpoint)+ 两个核心子对象(
 
 核心主张:**以 gVisor 为蓝本,做 Endpoint + Sender + Receiver 的三元分解,保留 Linux 函数名作为 Javadoc 锚点,不追求"纯 OO 教科书"**。
 
-### 目标包结构(方案 A,推荐)
+### 目标包结构(方案 A — 原始草案,**仅部分采纳**)
+
+> ⚠ **本节是 R0 阶段的目标设想,非实际落地形态**。实际 R4.2 + R5.x + R7.x
+> 走下来的终态见 §十四,要点:
+>
+> - **保留单一扁平包 `v2.tcp.core/`**(34 个类全在这里),未按类型拆 sender/receiver/listen/input 子包
+> - **无 cc / recovery / segment / timer / timewait / config / mib 子包**,相应类直接以前缀命名(如 `TcpTimerScheduler` / `TcpTimewaitSock` / `TcpConfig` / `TcpMib`)
+> - **`ext/sack`, `ext/timestamps`, `ext/wscale`, `ext/recovery/rack` 子包未建立** — SACK/TS/WS 的解析与应用直接内嵌在 `TcpOptionCodec` / `TcpHandshaker` / `TcpAck` / `Sender`,不走 SPI
+> - **`cc/` 与 `recovery/` 包未形成** —— NewReno + RACK + F-RTO + DSACK undo 全部物理内嵌在 `Sender` / `TcpAck`(R2.3 + R7.3b-e 决策)
+> - **`StateHandlers.java` 未采纳** —— FSM switch 薄到不必拆类(§十三 · §十四 决策 3)
+>
+> 以下包结构列出时,✅ = 已落地(可能命名不同)/ ⚠ = 部分落地(未开独立子包)/ ❌ = 未落地。
 
 ```
 v2.tcp/
-├── TcpStack.java                    ← 顶层聚合:registries + policy + listeners
-├── Endpoint.java                    ← 一条连接 = 控制块 + FSM (≈ 现在 TcpSock,但瘦身 1989→<600 行)
-├── EndpointState.java               ← enum(已有 TcpConnectionState,rename 即可)
-├── sender/
-│   ├── Sender.java                  ← 发送侧主对象:skb 队列 + cwnd + nagle + push + fragment
-│   ├── SendBuffer.java              ← 现 TcpSendBuffer
-│   ├── RtoTimer.java
-│   ├── Retransmitter.java           ← 现 TcpRetransmitter 的逻辑上收
-│   └── SegmentEmitter.java          ← 从 TcpOutput 拆出:IP/TCP 组包 + Netty 写
-├── receiver/
-│   ├── Receiver.java                ← 接收侧主对象:OFO + 交付
-│   ├── ReceiveBuffer.java           ← 现 TcpReceiveBuffer
-│   └── WindowCalculator.java        ← rcvWnd / rcvWup 计算
-├── listen/
-│   ├── Listener.java                ← LISTEN 端:accept 队列 + syn 队列 + handshake 编排
-│   └── Handshaker.java              ← 现 TcpHandshaker
-├── input/
-│   ├── SegmentValidator.java        ← 现 TcpIncomingPreValidator
-│   ├── SegmentDispatcher.java       ← 顶层 rcv:路由到 listener / endpoint / TW
-│   └── StateHandlers.java           ← FSM 分派(按 state 调 endpoint 相应方法)
-├── segment/
-│   ├── Segment.java                 ← 现 TcpSkb(rename + 不可变化)
-│   └── IncomingPacket.java          ← 现 TcpPacketBuf 在 TCP 层的视图
-├── cc/                              ← 已存在,保留
-├── recovery/                        ← 已存在,保留
-├── timer/                           ← 现 TcpTimerScheduler
-├── timewait/                        ← 现 TcpTimewaitSock + 2MSL 管理
-├── hook/                            ← 已存在
-├── config/                          ← TcpConfig / SysctlOptions
-├── mib/                             ← TcpMib / TcpMibStats
-├── netty/                           ← 已存在
-└── ext/                             ← 已存在
+├── TcpStack.java                    ✅ registries + policy + 全局组件
+├── Endpoint.java                    ⚠ 类名仍为 TcpSock;经 R7.x 瘦身到 1420 行(未达 <600 行)
+├── EndpointState.java               ⚠ 仍命名 TcpConnectionState
+├── sender/                          ❌ 未建,以下类全在 core/
+│   ├── Sender.java                  ✅ core/Sender.java(物理持有 37 字段)
+│   ├── SendBuffer.java              ✅ core/TcpSendBuffer.java
+│   ├── RtoTimer.java                ❌ RTO 逻辑嵌在 Sender(rtoMs / rearmRto / backoff)
+│   ├── Retransmitter.java           ⚠ core/TcpRetransmitter.java(未上收进 Sender)
+│   └── SegmentEmitter.java          ⚠ core/TcpOutput.java(未拆 IP/TCP 组包)
+├── receiver/                        ❌ 未建,以下类全在 core/
+│   ├── Receiver.java                ✅ core/Receiver.java
+│   ├── ReceiveBuffer.java           ✅ core/TcpReceiveBuffer.java
+│   └── WindowCalculator.java        ❌ rcvWnd / rcvWup 计算嵌在 Receiver
+├── listen/                          ❌ 未建
+│   ├── Listener.java                ✅ core/Listener.java
+│   └── Handshaker.java              ⚠ core/TcpHandshaker.java(未归入 Listener 子包)
+├── input/                           ❌ 未建
+│   ├── SegmentValidator.java        ✅ core/TcpIncomingPreValidator.java
+│   ├── SegmentDispatcher.java       ✅ core/SegmentDispatcher.java + Ipv4SegmentDispatcher.java
+│   └── StateHandlers.java           ❌ FSM switch 留在 Ipv4SegmentDispatcher.rcvStateProcess
+├── segment/                         ❌ 未建
+│   ├── Segment.java                 ⚠ core/TcpSegment.java(rename ✅;不可变化未开工)
+│   └── IncomingPacket.java          ⚠ 复用 codec.TcpPacketBuf(v1/v2 共享)
+├── cc/                              ❌ CC 算法物理内嵌在 Sender(R2/R7.3 路线否决 SPI)
+├── recovery/                        ❌ RACK/F-RTO/DSACK undo 物理内嵌在 Sender / TcpAck
+├── timer/                           ❌ core/TcpTimerScheduler.java
+├── timewait/                        ❌ core/TcpTimewaitSock.java(含 2MSL)
+├── hook/                            ✅ core/hook/(TcpSockInitializer / TcpSockHandler)
+├── config/                          ❌ core/TcpConfig.java + core/SysctlOptions.java
+├── mib/                             ❌ core/TcpMib.java + core/TcpMibStats.java
+├── netty/                           ✅ netty/(TcpChannel / TcpChannelInitializer / TcpChannelConfig)
+└── ext/                             ⚠ 仅有 ext/backend/ 与 ext/recovery/rack/(后者空包)
 ```
 
 ### 为什么这样拆(逐项依据)
@@ -174,8 +185,13 @@ class Sender {
 **⑦ 不引入 State Pattern**
 11 个状态 × 多个操作 = 11×N 个方法实现类,全是 1-2 行或空实现。用 `switch (endpoint.state())` 或 EnumMap 更清爽。gVisor / Linux 都不用 State Pattern,有原因。
 
-**⑧ SPI 界面克制**
-当前已有的 `CongestionControl` / `LossRecovery` / `RttEstimator` / `TcpSockInitializer` / `TcpSockHandler` **已经是恰当的 SPI 集合**。改造中不要在每层之间再插接口。内部类间用具体类型直接调用,JIT 友好、栈帧清晰。FreeBSD 的 tcp_function_block 是针对"整套 output 栈替换"这种强需求,我们当前没有这个需求。
+**⑧ SPI 界面克制**(最终走得更极端:除用户钩子外全部去 SPI)
+原计划保留 `CongestionControl` / `LossRecovery` / `RttEstimator` / `TcpSockInitializer` / `TcpSockHandler` 五条 SPI。实际落地(R2/R7.3 决策):
+- `CongestionControl` / `LossRecovery` / `ClassicRecovery` / `NewRenoCongestionControl` **已删除**(2026-04-24)—— NewReno + RACK + F-RTO + DSACK undo 全部物理内嵌在 `Sender` / `TcpAck`,SPI 版本始终没被主路径调用。
+- `RttEstimator` / `Rfc6298RttEstimator` **保留**,作为 Sender 的 RTT 计算实现抽象(接入 Listener 的 SYN-ACK RTT 采样),不属于"每层插接口"的 SPI 范式。
+- `TcpSockInitializer` / `TcpSockHandler` **保留** —— 是用户代码接入点(对齐 Netty `ChannelInitializer` / `ChannelInboundHandler`),不是算法 SPI。
+- `TcpFeature` **接口保留但无实现**,留作未来 SACK/TS/WS 握手协商可插拔的锚点(当前三者直接内嵌)。
+依据:FreeBSD 的 tcp_function_block 是针对"整套 output 栈替换"的强需求,我们当前不需要;内部类间用具体类型直接调用,JIT 友好、栈帧清晰、跨 Linux 源码追踪更顺。
 
 ---
 
