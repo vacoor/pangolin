@@ -1097,34 +1097,9 @@ public class TcpSock extends SockCommon {
         return rttMinFilter.min();
     }
 
-    /**
-     * 对齐 Linux {@code tcp_set_rto}(tcp_input.c):先将 {@code base = srtt + 4·rttvar}
-     * clamp 到 {@code [RTO_MIN_MS, RTO_MAX_MS]},再按 {@code Sender.rtoBackoffShift}
-     * 逐步左移,每一步检测是否触顶 {@code RTO_MAX_MS}。
-     *
-     * <p>若 {@code srttUs} 为 0(未取样)使用 {@link TcpConstants#RTO_INIT_MS}(1000ms)。
-     */
+    /** R7.2:方法体迁到 {@link Sender#rtoMs()},此处保留 delegate 避免大量调用方改动。 */
     public long rtoMs() {
-        long baseMs;
-        long s = sender.srttUs();
-        if (s <= 0L) {
-            baseMs = TcpConstants.RTO_INIT_MS;
-        } else {
-            long varianceUs = Math.max(4L * sender.rttvarUs(), 0L);
-            long baseUs = s + varianceUs;
-            baseMs = Math.max((baseUs + 999L) / 1_000L, TcpConstants.RTO_MIN_MS);
-        }
-        long rtoMs = baseMs;
-        for (int i = 0; i < sender.backoffShift(); i++) {
-            if (rtoMs >= TcpConstants.RTO_MAX_MS) {
-                return TcpConstants.RTO_MAX_MS;
-            }
-            rtoMs <<= 1;
-            if (rtoMs < 0L) {
-                return TcpConstants.RTO_MAX_MS;
-            }
-        }
-        return Math.min(rtoMs, TcpConstants.RTO_MAX_MS);
+        return sender.rtoMs();
     }
 
     public long srttUs() {

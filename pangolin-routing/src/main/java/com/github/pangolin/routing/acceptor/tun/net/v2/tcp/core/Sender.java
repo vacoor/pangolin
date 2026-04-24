@@ -361,11 +361,6 @@ public final class Sender {
         this.rtoBackoffShift = Math.max(0, v);
     }
 
-    /** 当前 RTO (ms),按 srtt/rttvar + backoff。Mirrors Linux {@code inet_csk(sk)->icsk_rto}。 */
-    public long rtoMs() {
-        return sock.rtoMs();
-    }
-
     /** 首段重传发送时戳(us);0 表示当前无未确认的重传。Mirrors Linux {@code tp->retrans_stamp}。 */
     public long retransStamp() {
         return retransStamp;
@@ -779,6 +774,36 @@ public final class Sender {
     /** 对齐 Linux {@code TCP_RTO_MAX}。 */
     public long tcpRtoMaxMs() {
         return TcpConstants.RTO_MAX_MS;
+    }
+
+    /**
+     * 对齐 Linux {@code tcp_set_rto}(tcp_input.c):先将 {@code base = srtt + 4·rttvar}
+     * clamp 到 {@code [RTO_MIN_MS, RTO_MAX_MS]},再按 {@code rtoBackoffShift}
+     * 逐步左移,每一步检测是否触顶 {@code RTO_MAX_MS}。
+     *
+     * <p>若 {@code srttUs} 为 0(未取样)使用 {@link TcpConstants#RTO_INIT_MS}(1000ms)。
+     * R7.2:从 TcpSock 迁入,方法体全部读 Sender 字段,归位。
+     */
+    public long rtoMs() {
+        long baseMs;
+        if (srttUs <= 0L) {
+            baseMs = TcpConstants.RTO_INIT_MS;
+        } else {
+            long varianceUs = Math.max(4L * rttvarUs, 0L);
+            long baseUs = srttUs + varianceUs;
+            baseMs = Math.max((baseUs + 999L) / 1_000L, TcpConstants.RTO_MIN_MS);
+        }
+        long r = baseMs;
+        for (int i = 0; i < rtoBackoffShift; i++) {
+            if (r >= TcpConstants.RTO_MAX_MS) {
+                return TcpConstants.RTO_MAX_MS;
+            }
+            r <<= 1;
+            if (r < 0L) {
+                return TcpConstants.RTO_MAX_MS;
+            }
+        }
+        return Math.min(r, TcpConstants.RTO_MAX_MS);
     }
 
     /** 零窗探测基线 = max(RTO, RTO_MIN)。 */
