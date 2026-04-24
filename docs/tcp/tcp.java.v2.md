@@ -101,16 +101,16 @@ gVisor 的价值取向是:**主体对象明确(endpoint)+ 两个核心子对象(
 
 ### 目标包结构(方案 A — 原始草案,**仅部分采纳**)
 
-> ⚠ **本节是 R0 阶段的目标设想,非实际落地形态**。实际 R4.2 + R5.x + R7.x
-> 走下来的终态见 §十四,要点:
+> ⚠ **本节是 R0 阶段的目标设想,当前阶段仅部分采纳**。实际 R4.2 + R5.x + R7.x
+> 走下来的终态见 §十四;未采纳的部分**延后**到需求出现时再引入,不是永久否决。要点:
 >
-> - **保留单一扁平包 `v2.tcp.core/`**(34 个类全在这里),未按类型拆 sender/receiver/listen/input 子包
-> - **无 cc / recovery / segment / timer / timewait / config / mib 子包**,相应类直接以前缀命名(如 `TcpTimerScheduler` / `TcpTimewaitSock` / `TcpConfig` / `TcpMib`)
-> - **`ext/sack`, `ext/timestamps`, `ext/wscale`, `ext/recovery/rack` 子包未建立** — SACK/TS/WS 的解析与应用直接内嵌在 `TcpOptionCodec` / `TcpHandshaker` / `TcpAck` / `Sender`,不走 SPI
-> - **`cc/` 与 `recovery/` 包未形成** —— NewReno + RACK + F-RTO + DSACK undo 全部物理内嵌在 `Sender` / `TcpAck`(R2.3 + R7.3b-e 决策)
-> - **`StateHandlers.java` 未采纳** —— FSM switch 薄到不必拆类(§十三 · §十四 决策 3)
+> - **保留单一扁平包 `v2.tcp.core/`**(34 个类全在这里),未按类型拆 sender/receiver/listen/input 子包 —— 当前阶段包拆分收益低于命名整洁收益,延后。
+> - **无 cc / recovery / segment / timer / timewait / config / mib 子包**,相应类直接以前缀命名(如 `TcpTimerScheduler` / `TcpTimewaitSock` / `TcpConfig` / `TcpMib`)—— 同上,延后。
+> - **`ext/sack`, `ext/timestamps`, `ext/wscale`, `ext/recovery/rack` 子包未建立** — SACK/TS/WS 当前是"单实现",物理内嵌在 `TcpOptionCodec` / `TcpHandshaker` / `TcpAck` / `Sender`。SPI 入口将来可插回,当前没有第二实现需求。
+> - **`cc/` 与 `recovery/` 包未形成** —— NewReno + RACK + F-RTO + DSACK undo 先走物理内嵌路线(R2.3 + R7.3b-e 决策)。将来要加 CUBIC / BBR 时,再把 NewReno 抽成 strategy。
+> - **`StateHandlers.java` 未采纳** —— FSM switch 薄到不必拆类(§十三 · §十四 决策 3),这一项是**否决**,不是延后。
 >
-> 以下包结构列出时,✅ = 已落地(可能命名不同)/ ⚠ = 部分落地(未开独立子包)/ ❌ = 未落地。
+> 以下包结构列出时,✅ = 已落地(可能命名不同)/ ⚠ = 部分落地(未开独立子包)/ ❌ = 未落地(大多是延后)。
 
 ```
 v2.tcp/
@@ -185,13 +185,15 @@ class Sender {
 **⑦ 不引入 State Pattern**
 11 个状态 × 多个操作 = 11×N 个方法实现类,全是 1-2 行或空实现。用 `switch (endpoint.state())` 或 EnumMap 更清爽。gVisor / Linux 都不用 State Pattern,有原因。
 
-**⑧ SPI 界面克制**(最终走得更极端:除用户钩子外全部去 SPI)
-原计划保留 `CongestionControl` / `LossRecovery` / `RttEstimator` / `TcpSockInitializer` / `TcpSockHandler` 五条 SPI。实际落地(R2/R7.3 决策):
-- `CongestionControl` / `LossRecovery` / `ClassicRecovery` / `NewRenoCongestionControl` **已删除**(2026-04-24)—— NewReno + RACK + F-RTO + DSACK undo 全部物理内嵌在 `Sender` / `TcpAck`,SPI 版本始终没被主路径调用。
-- `RttEstimator` / `Rfc6298RttEstimator` **保留**,作为 Sender 的 RTT 计算实现抽象(接入 Listener 的 SYN-ACK RTT 采样),不属于"每层插接口"的 SPI 范式。
-- `TcpSockInitializer` / `TcpSockHandler` **保留** —— 是用户代码接入点(对齐 Netty `ChannelInitializer` / `ChannelInboundHandler`),不是算法 SPI。
-- `TcpFeature` **接口保留但无实现**,留作未来 SACK/TS/WS 握手协商可插拔的锚点(当前三者直接内嵌)。
-依据:FreeBSD 的 tcp_function_block 是针对"整套 output 栈替换"的强需求,我们当前不需要;内部类间用具体类型直接调用,JIT 友好、栈帧清晰、跨 Linux 源码追踪更顺。
+**⑧ SPI 界面克制 —— 当前"单实现"优先物理内嵌,SPI 延后**
+原计划保留 `CongestionControl` / `LossRecovery` / `RttEstimator` / `TcpSockInitializer` / `TcpSockHandler` 五条 SPI。实际落地(R2/R7.3 路线):当前所有算法都是单实现,物理内嵌进 `Sender` / `TcpAck` 读起来更像 Linux 内核,跨文件追踪更顺;SPI 入口等出现第二实现需求再引入。
+
+- `CongestionControl` / `LossRecovery` / `ClassicRecovery` / `NewRenoCongestionControl` —— R0 一版 SPI 草稿,主路径始终没接上去,四个类在 2026-04-24 **作为死代码删除**。将来加 CUBIC / BBR 时再按当前 Sender 的物理形态抽出新的 SPI,不复用这份。
+- `RttEstimator` / `Rfc6298RttEstimator` —— 当前只被 `TcpConnection` 死路径引用,实际 RTT 采样在 `Sender.addRttSample / srttUs / rttvarUs / rtoMs` 里内嵌。待 TcpConnection 清理时一并删除(或迁到 `Sender` 作为后续抽回 SPI 的起点)。
+- `TcpSockInitializer` / `TcpSockHandler` **保留活用** —— 用户代码接入点(对齐 Netty `ChannelInitializer` / `ChannelInboundHandler`),不是算法 SPI。
+- `TcpFeature` **接口保留但无实现**,留作未来 SACK/TS/WS 握手协商可插拔的锚点。
+
+依据:FreeBSD 的 tcp_function_block 是针对"整套 output 栈替换"的强需求,我们当前没有;内部类间用具体类型直接调用,JIT 友好、栈帧清晰、跨 Linux 源码追踪更顺。**"延后"不等于"否决"** —— 只是当前 scope 内不值得提前抽。
 
 ---
 
