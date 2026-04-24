@@ -246,11 +246,10 @@ public final class Listener {
         if (!child.hasConnection()) {
             return;
         }
-        TcpConnection conn = child.connection();
-        if (conn == null || conn.rttEstimator() == null) {
-            return;
-        }
-        conn.rttEstimator().addSample(conn, rttUs);
+        // 接入 Sender 的 SRTT/RTTVAR + WinMinMax(TcpSock.addRttSample),
+        // 对齐 Linux tcp_synack_rtt_meas。首样本从此产生,之后 rtoMs() 脱离 SRTT=0
+        // 的退化路径。
+        child.addRttSample(rttUs);
     }
 }
 

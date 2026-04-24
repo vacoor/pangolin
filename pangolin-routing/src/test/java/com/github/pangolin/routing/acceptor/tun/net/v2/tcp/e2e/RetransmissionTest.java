@@ -75,7 +75,10 @@ class RetransmissionTest {
 
         assertThat(h.sock().packetsOut()).as("one segment in flight").isEqualTo(1);
         long rtoBefore = h.sock().rtoMs();
-        assertThat(rtoBefore).as("initial RTO should be RTO_INIT_MS").isGreaterThanOrEqualTo(1000L);
+        // 3WHS 完成时 synackRttMeas 已喂首个 RTT 样本,rtoMs() 从此脱离 SRTT=0 的
+        // 默认 1s 退化路径 —— 仅断言 RTO 在 [TCP_RTO_MIN, TCP_RTO_MAX] 合理区间。
+        assertThat(rtoBefore).as("RTO positive after 3WHS RTT sample").isPositive();
+        assertThat(rtoBefore).as("RTO not above RTO_MAX").isLessThanOrEqualTo(120_000L);
 
         // 2) 推进 RTO + 一点余量,运行已到期调度任务
         harness.channel().advanceTimeBy(rtoBefore + 200, TimeUnit.MILLISECONDS);

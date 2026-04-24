@@ -66,6 +66,14 @@ class RackLostDetectionTest {
         CapturingInitializer.CapturingHandler h = initializer.handler();
         Sender sender = h.sock().sender();
 
+        // 隔离 TLP 噪声:synackRttMeas 喂首样本后 srttUs 较小、rtoMs=200ms 左右,
+        // tlpTimeout ≈ 199ms 会被调度;在 Thread.sleep(50ms) 真实墙钟推进中
+        // EmbeddedChannel 的 schedule(TLP) 会被某些路径触发(runPendingTasks 入口),
+        // 导致 h.send(p1) 内 writeXmit 被追加一次 push_one=2 的 TLP 探测,
+        // 把 seg1 当作新段再 queue 一次污染 RTX。本测试只验 RACK 时间窗丢失判定,
+        // 不验 TLP 时序 —— 把 tlpHighSeq 预置非零使 scheduleLossProbe 恒退出。
+        sender.tlpHighSeq(Integer.MAX_VALUE);
+
         // Step 1:发 seg0(t0)
         byte[] p0 = new byte[MSS];
         for (int i = 0; i < MSS; i++) p0[i] = 'a';
