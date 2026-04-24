@@ -19,8 +19,8 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
  *   <li>是否装配由 {@link TcpConfig} 开关决定(如 {@code sackEnabled()})。</li>
  * </ol>
  *
- * <p>同一特性可同时实现多条 SPI(例如 SACK 同时是 {@code TcpFeature} 与
- * {@link LossRecovery}),各接口职责正交。
+ * <p>本接口定义握手协商 + 选项注入的契约,与具体算法 (NewReno / RACK / SACK 解析等)
+ * 正交 —— 后者直接内嵌在 {@link Sender} / {@link TcpAck} 中,不走 SPI。
  */
 public interface TcpFeature {
 

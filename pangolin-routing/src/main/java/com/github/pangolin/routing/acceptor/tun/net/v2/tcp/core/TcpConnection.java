@@ -1,6 +1,5 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
-import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.CongestionControl;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.RttEstimator;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.FourTuple;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants;
@@ -9,7 +8,6 @@ import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConnectionTim
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
 
-import java.util.function.Consumer;
 
 /**
  * Rich domain model for a single TCP connection (RFC 9293).
@@ -161,8 +159,6 @@ public final class TcpConnection {
     private String congestionState = "OPEN";
     private int highSeq;
     private int tlpHighSeq;
-    private CongestionControl congestionControl;
-    private Consumer<TcpConnection> fastRetransmitAction;
     private RttEstimator rttEstimator;
 
     // ── Timer slots ──────────────────────────────────────────────────────────
@@ -213,8 +209,6 @@ public final class TcpConnection {
         this.isCwndLimited = false;
         this.sendBuffer = new TcpSendBuffer();
         this.receiveBuffer = new TcpReceiveBuffer(channel.alloc());
-        this.congestionControl = b.congestionControl;
-        this.fastRetransmitAction = b.fastRetransmitAction;
         this.rttEstimator = b.rttEstimator;
     }
 
@@ -851,20 +845,6 @@ public final class TcpConnection {
         this.tlpHighSeq = tlpHighSeq;
     }
 
-    public CongestionControl congestionControl() {
-        return congestionControl;
-    }
-
-    public Consumer<TcpConnection> fastRetransmitAction() {
-        return fastRetransmitAction;
-    }
-
-    public void fireFastRetransmit() {
-        if (fastRetransmitAction != null) {
-            fastRetransmitAction.accept(this);
-        }
-    }
-
     public RttEstimator rttEstimator() {
         return rttEstimator;
     }
@@ -916,8 +896,6 @@ public final class TcpConnection {
         private int rcvWscale;
         private boolean timestampEnabled;
         private int recentTimestamp;
-        private CongestionControl congestionControl;
-        private Consumer<TcpConnection> fastRetransmitAction;
         private RttEstimator rttEstimator;
 
         public Builder channel(Channel ch) {
@@ -988,13 +966,6 @@ public final class TcpConnection {
 
         public Builder recentTimestamp(int v) {
             this.recentTimestamp = v;
-            return this;
-        }
-
-        public Builder congestionControl(CongestionControl congestionControl,
-                                         Consumer<TcpConnection> fastRetransmitAction) {
-            this.congestionControl = congestionControl;
-            this.fastRetransmitAction = fastRetransmitAction;
             return this;
         }
 
