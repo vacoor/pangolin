@@ -1307,14 +1307,19 @@ public final class TcpOutput {
 
     private int xmitProbeSkb(TcpSock sock, int urgent, int mib) {
         final FourTuple ft = sock.fourTuple();
+        // rcvNxt 必须只读一次:旧版 eventAckSent 再读一次,导致守卫
+        // `rcv_nxt != sock.receiver().rcvNxt()` 对自身恒为 false,
+        // 跨 async 期间若 rcvNxt 被入站段推进,我们发出的 ACK 段携带老值,
+        // 守卫本应拒绝 clearAckPending 却被旁路,错误地清零 ack-pending 位。
+        final int rcvNxt = sock.receiver().rcvNxt();
         int seq = sock.sndUna() - (urgent == 0 ? 1 : 0);
         ByteBuf buf = TcpPacketBuilder.buildRaw(
                 ft.dstAddrBytes(), ft.dstPort(),
                 ft.srcAddrBytes(), ft.srcPort(),
-                seq, sock.receiver().rcvNxt(),
+                seq, rcvNxt,
                 TCPHDR_ACK, selectAdvertisedWindow(sock), null, null, 0);
         sock.channel().writeAndFlush(buf);
-        eventAckSent(sock, sock.receiver().rcvNxt());
+        eventAckSent(sock, rcvNxt);
         return 0;
     }
 
