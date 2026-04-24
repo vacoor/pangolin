@@ -822,7 +822,103 @@ public final class Sender {
 
     /** 零窗探测基线 = max(RTO, RTO_MIN)。 */
     public long tcpProbe0BaseMs() {
-        return Math.max(sock.rtoMs(), TcpConstants.RTO_MIN_MS);
+        return Math.max(rtoMs(), TcpConstants.RTO_MIN_MS);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // R7.3b CC 状态机(从 TcpSock 迁入)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 每个 ACK 处理尾部的 CC 反馈入口 — 对齐 Linux {@code tcp_ack} 尾部
+     * congestion-control 更新块:
+     * <ul>
+     *   <li>{@code !advanced}:ACK 未推进 SND.UNA(duplicate ACK);
+     *     <ul>
+     *       <li>第 3 个 dupack 且当前 CA_Open:进 CA_Recovery(ssthresh=cwnd/2,
+     *           cwnd=ssthresh+3,标记 head LOST,立即重传)</li>
+     *       <li>已在 CA_Recovery:每个 dupack cwnd++(NewReno cwnd inflation)</li>
+     *     </ul>
+     *   </li>
+     *   <li>{@code advanced}:ACK 推进了 SND.UNA;
+     *     <ul>
+     *       <li>CA_Recovery 且 SND.UNA 跨过 highSeq:退出 → cwnd=ssthresh,CA_Open</li>
+     *       <li>CA_Loss:直接退出 → CA_Open(清 F-RTO)</li>
+     *       <li>dupacks 归零,按 slow-start / CA cwnd 增长</li>
+     *     </ul>
+     *   </li>
+     * </ul>
+     * R7.3b:方法体从 TcpSock 迁入。
+     */
+    public void onAckedByCc(int newlyAcked, boolean advanced) {
+        if (!advanced) {
+            if (incrementDupacks() == 3 && congestionState == TcpSock.CongestionState.OPEN) {
+                // 对齐 Linux tcp_init_undo:进 Recovery 前快照 cwnd/ssthresh/snd_una,
+                // 为后续 tcp_try_undo_recovery 提供回滚基线。
+                sock.tcpInitUndo();
+                int newSs = Math.max(cwnd / 2, 2);
+                ssthresh = newSs;
+                cwnd = newSs + 3;
+                highSeq = sndNxt;
+                tlpHighSeq = 0;
+                congestionState = TcpSock.CongestionState.RECOVERY;
+                caIncrCounter = 0;
+                // 对齐 Linux tcp_enter_recovery → markHeadLost:NewReno 无 SACK 时
+                // 进 FR 前先把队首段标为 LOST,让 retransmitSkb 的 LOST 优先路径生效。
+                TcpAck.markHeadLost(sock, 1);
+                sock.stack().retransmitter().retransmit(sock);
+            } else if (congestionState == TcpSock.CongestionState.RECOVERY) {
+                incrementCwnd();
+            }
+            return;
+        }
+
+        if (congestionState == TcpSock.CongestionState.RECOVERY
+                && TcpSequence.after(sndUna, highSeq)) {
+            cwnd = ssthresh;
+            congestionState = TcpSock.CongestionState.OPEN;
+            caIncrCounter = 0;
+        } else if (congestionState == TcpSock.CongestionState.LOSS) {
+            congestionState = TcpSock.CongestionState.OPEN;
+            caIncrCounter = 0;
+            // 自然退出 CA_Loss(非 F-RTO / TSECR undo 路径)时清 F-RTO 武装。
+            sock.clearFrto();
+        }
+
+        dupacks = 0;
+        if (cwnd < ssthresh) {
+            cwnd += newlyAcked;
+        } else {
+            caIncrCounter += newlyAcked;
+            if (caIncrCounter >= cwnd) {
+                cwnd++;
+                caIncrCounter = 0;
+            }
+        }
+    }
+
+    /**
+     * RTO 到期后的 CC 反馈入口 — 对齐 Linux {@code tcp_enter_loss}:
+     * 快照 undo 基线 + 武装 F-RTO(如有 undo 机会)+ ssthresh = cwnd/2 + cwnd = 1
+     * + CA 状态 → CA_Loss。
+     * R7.3b:方法体从 TcpSock 迁入。
+     */
+    public void onTimeoutByCc() {
+        sock.tcpInitUndo();
+        // F-RTO 武装条件(RFC 5682):有 undo 机会(undoMarker 已建立)且
+        // RTO 瞬间仍有在飞数据(sndNxt > undoMarker),才把 snd_nxt 快照为 frto_high_mark。
+        if (undoMarker != 0 && TcpSequence.after(sndNxt, undoMarker)) {
+            frtoHighmark = sndNxt;
+            frtoCounter = 1;
+        } else {
+            sock.clearFrto();
+        }
+        ssthresh = Math.max(cwnd / 2, 2);
+        cwnd = 1;
+        dupacks = 0;
+        caIncrCounter = 0;
+        tlpHighSeq = 0;
+        congestionState = TcpSock.CongestionState.LOSS;
     }
 
     /** 下一次探测的绝对等待时长,按当前退避 shift 指数放大,并夹到 maxWhenMs。 */

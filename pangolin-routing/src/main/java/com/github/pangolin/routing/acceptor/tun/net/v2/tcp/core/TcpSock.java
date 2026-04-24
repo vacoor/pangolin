@@ -1535,76 +1535,14 @@ public class TcpSock extends SockCommon {
         receiver.quickAckCount(Math.max(receiver.quickAckCount(), Math.min(quickacks, maxQuickAcks)));
     }
 
+    /** R7.3b:方法体迁到 {@link Sender#onAckedByCc},此处保留 delegate。 */
     public void onAckedByCc(int newlyAcked, boolean advanced) {
-        if (!advanced) {
-            if (sender.incrementDupacks() == 3 && sender.congestionState() == CongestionState.OPEN) {
-                // 对齐 Linux tcp_init_undo:进 Recovery 前快照 cwnd/ssthresh/snd_una,
-                // 为后续 tcp_try_undo_recovery 提供回滚基线。
-                tcpInitUndo();
-                int newSs = Math.max(sender.cwnd() / 2, 2);
-                sender.ssthresh(newSs);
-                sender.cwnd(newSs + 3);
-                sender.highSeq(sender.sndNxt());
-                sender.tlpHighSeq(0);
-                sender.congestionState(CongestionState.RECOVERY);
-                sender.caIncrCounter(0);
-                // 对齐 Linux tcp_enter_recovery → markHeadLost:NewReno 无 SACK
-                // 信息驱动 LOST 标记,进入 Fast Retransmit 前先把队首段记为 LOST,
-                // 这样 retransmitSkb 的 LOST 优先路径能与 RACK 场景保持一致。
-                TcpAck.markHeadLost(this, 1);
-                this.stack.retransmitter().retransmit(this);
-            } else if (sender.congestionState() == CongestionState.RECOVERY) {
-                sender.incrementCwnd();
-            }
-            return;
-        }
-
-        if (sender.congestionState() == CongestionState.RECOVERY && after(sender.sndUna(), sender.highSeq())) {
-            sender.cwnd(sender.ssthresh());
-            sender.congestionState(CongestionState.OPEN);
-            sender.caIncrCounter(0);
-        } else if (sender.congestionState() == CongestionState.LOSS) {
-            sender.congestionState(CongestionState.OPEN);
-            sender.caIncrCounter(0);
-            // 自然退出 CA_Loss(非 F-RTO / TSECR undo 路径)时一并清 F-RTO 武装,
-            // 避免 high_mark 悬挂影响下一轮 RTO 判定。
-            clearFrto();
-        }
-
-        sender.dupacks(0);
-        int c = sender.cwnd();
-        int s = sender.ssthresh();
-        if (c < s) {
-            sender.cwnd(c + newlyAcked);
-        } else {
-            sender.addCaIncrCounter(newlyAcked);
-            if (sender.caIncrCounter() >= c) {
-                sender.incrementCwnd();
-                sender.caIncrCounter(0);
-            }
-        }
+        sender.onAckedByCc(newlyAcked, advanced);
     }
 
+    /** R7.3b:方法体迁到 {@link Sender#onTimeoutByCc},此处保留 delegate。 */
     public void onTimeoutByCc() {
-        // 对齐 Linux tcp_enter_loss → tcp_init_undo:RTO 前快照 cwnd/ssthresh/snd_una,
-        // F4-2 tcp_try_undo_loss 将据此判定伪 RTO 并回滚。
-        tcpInitUndo();
-        // 对齐 Linux tcp_enter_loss 中 F-RTO 武装条件(RFC 5682):
-        // 有 undo 机会(undoMarker 已建立)且 RTO 瞬间仍有在飞数据(sndNxt > undoMarker),
-        // 才把 snd_nxt 快照为 frto_high_mark,等待后续 ACK 判定伪 RTO;否则 RTO 无可用
-        // 参照线(单段队列 / 连接刚建立 / snd.nxt == snd.una)直接跳过 F-RTO。
-        if (sender.undoMarker() != 0 && after(sender.sndNxt(), sender.undoMarker())) {
-            sender.frtoHighmark(sender.sndNxt());
-            sender.frtoCounter(1);
-        } else {
-            clearFrto();
-        }
-        sender.ssthresh(Math.max(sender.cwnd() / 2, 2));
-        sender.cwnd(1);
-        sender.dupacks(0);
-        sender.caIncrCounter(0);
-        sender.tlpHighSeq(0);
-        sender.congestionState(CongestionState.LOSS);
+        sender.onTimeoutByCc();
     }
 
     public int tlpHighSeq() {
