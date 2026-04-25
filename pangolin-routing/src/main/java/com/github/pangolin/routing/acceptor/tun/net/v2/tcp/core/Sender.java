@@ -977,12 +977,24 @@ public final class Sender {
         dupacks = 0;
         caIncrCounter = 0;
         tlpHighSeq = 0;
-        // 对齐 Linux tcp_enter_loss:retrans_out = 0。Linux 还会扫 rtx 队列把每个段的
-        // TCPCB_SACKED_RETRANS 清掉、重新打 TCPCB_LOST,这一遍走 v2 当前未实现 ——
-        // 因此 RTO 后段上仍带原 Recovery 阶段的 RETRANS 标记,后续 retransmitSkb 的
-        // "首次重传"守卫不会再触发 retrans_out++。这一发散等同于 Linux 在 RTO 重传期
-        // retrans_out 实际是 "本轮已重传段数",而 v2 在 RTO 期暂保持 0;影响范围限于
-        // packetsInFlight 估算精度,不影响检测/CC 触发。后续若做 R2+ 可补上 rtx 扫描。
+        // 对齐 Linux tcp_enter_loss(net/ipv4/tcp_input.c):扫 rtx 队列重置每段标记。
+        //   - 一律清 TCPCB_SACKED_RETRANS + TCPCB_LOST(LOST_MASK);
+        //   - 非 TCPCB_SACKED_ACKED 段重打 TCPCB_LOST,并重新计入 lost_out;
+        //   - retrans_out = 0(Linux 在函数体起始处直接归零)。
+        // SACK_ACKED 段不重打 LOST(已视作交付,等待累计 ACK 释放即可)。
+        // RTO 后 retransmitSkb 走 LOST-driven 路径选段,首次重传时 retrans_out++
+        // 重新累积,与 Linux 行为一致。
+        int newLostOut = 0;
+        for (TcpSegment skb : sock.sendBuffer().rtxView()) {
+            int s = skb.sacked();
+            s &= ~(TcpConstants.TCPCB_SACKED_RETRANS | TcpConstants.TCPCB_LOST);
+            if ((s & TcpConstants.TCPCB_SACKED_ACKED) == 0) {
+                s |= TcpConstants.TCPCB_LOST;
+                newLostOut++;
+            }
+            skb.sacked(s);
+        }
+        lostOut = newLostOut;
         retransOut = 0;
         congestionState = TcpSock.CongestionState.LOSS;
     }
