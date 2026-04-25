@@ -176,15 +176,58 @@
 
 ## 对照:当前 pangolin-routing/v2 的 RFC 覆盖(建议对齐时参考)
 
-> 用作开发"v2 TCP"时对齐 Linux 内核实现的 checklist,详见 `gap.md` / `tcp-gap-phase4.md`。
+> 用作开发"v2 TCP"时对齐 Linux 内核实现的 checklist。详细 RFC × 模块矩阵见 `tcp.v2.rfc.report.md`。
 
-- ✅ 基础 FSM、段格式、三次握手/挥手:RFC 9293
-- ✅ 累计 ACK / 接收窗口 / 重传:RFC 9293 + 6298
-- ⚠️ SACK / D-SACK / SACK-based 恢复:RFC 2018 / 2883 / 6675 — 与 Linux 对齐
-- ⚠️ NewReno / CUBIC:RFC 5681 / 6582 / 9438 — 详见 `tcp-gap-phase4.md`
-- ⚠️ 窗口扩展 / Timestamps / PAWS:RFC 7323
-- ⚠️ PMTU:RFC 1191 / 4821
-- ❌ RACK-TLP / ECN / TFO / MPTCP:视场景取舍
+### 接收侧 / 流量控制
+
+- ✅ **基础 FSM、段格式、三次握手/挥手**:RFC 9293
+- ✅ **累计 ACK / 接收窗口 / 窗口更新 / 重传**:RFC 9293 + 6298
+  - 接收窗口主路径已覆盖:`__tcp_select_window` 中间分支(零窗 / SWS 避免 / `rcv_ssthresh` 限幅)、no-shrink 右边沿守卫、`tcp_grow_window`(顺序段 + OFO)、`tcp_clamp_window`(OFO prune 压力记忆)、`tcp_cleanup_rbuf`(反压解除主动开窗)
+  - SYN-ACK window 字段对齐 RFC 7323 §2.2:不被 wscale 缩放(已修历史 right-shift bug)
+- ✅ **SACK / D-SACK**:RFC 2018 / 2883
+- ✅ **窗口扩展 / Timestamps / PAWS**:RFC 7323
+
+### 拥塞控制 / 恢复
+
+- ✅ **NewReno / Limited Transmit / IW10**:RFC 5681 / 6582 / 3042 / 6928
+  - CA 状态机已含 `Open / Disorder / Recovery / Loss`(对齐 Linux `tcp_ca_state`,2026-04 R4)
+  - Limited Transmit 在 `Open` 与 `Disorder` 都生效
+- ✅ **RACK-TLP**:RFC 8985
+  - RACK 时间窗判丢、reo_wnd 自适应(DSACK feedback 推 `reo_wnd_steps`)
+  - TLP 公式严格对齐 Linux `tcp_schedule_loss_probe`:`packets_out==1 → 2*srtt+RTO_MIN`(让单段 tail 走 RTO);`packets_out>1 → 2*srtt+2ms`
+- ⚠️ **SACK-based 恢复**:RFC 6675 — 部分覆盖,实际形态是 Linux/RACK 子集
+  - 已有:SACK tagging、per-segment state、`retrans_out` 维护、`packets_in_flight = packets_out - sacked_out - lost_out + retrans_out`(对齐 Linux 公式)、`tcp_enter_loss` 完整 rtx 队列重置(R3)、`tcp_fastretrans_alert` undo 链聚合(R2)、LOST/RTX 头段优先重传
+  - 缺口:**PRR (RFC 6937)**(Recovery 期 cwnd 平滑下降)、partial ACK 重扫 LOST、`tcp_xmit_retransmit_queue` 队列遍历(当前为单次单段)、显式 RFC 6675 `NextSeg` / `RescueRxt`(选择不实现,跟随 Linux)
+- ✅ **F-RTO / DSACK undo**:RFC 5682 / 3708
+- ❌ **CUBIC**:RFC 9438 — 未实现 Linux 默认 CUBIC
+
+### 安全
+
+- ✅ **抗盲攻击 / Challenge ACK**:RFC 5961
+  - host-wide netns 桶(对齐 Linux `net->ipv4.tcp_challenge_*`,使用 `sysctl_tcp_challenge_ack_limit`)
+  - per-socket OOW 限速通过 `tp->last_oow_ack_time` + `sysctl_tcp_invalid_ratelimit`
+  - challenge ACK 与 OOW ACK 桶严格分离(2026-04 S3)
+- ✅ **ISN 随机化**:RFC 6528 — `TcpUtils.secureSeq` 使用 SipHash(四元组 + SecureRandom key) + 时间分量,仍需补专项测试
+
+### 未实现
+
+- ❌ **PMTU / PLPMTUD**:RFC 1191 / 8201 / 4821 — 配置字段存在但主路径未消费,MTU probing 未实现;ICMP Fragmentation Needed 未接入 v2 栈
+- ❌ **ECN**:RFC 3168 / 8311 — 仅常量定义,未接路径
+- ❌ **TFO**:RFC 7413 — 未实现
+- ❌ **TCP-AO / MD5**:RFC 5925 / 2385 — 未实现
+- ❌ **MPTCP**:RFC 8684 — 未实现
+- ❌ **主动 connect / SYN_SENT**:v2 当前仅被动打开(passive open)
+- ❌ **IPv6 v2 TCP**:仅 IPv4 dispatcher;IPv6 PMTUD 不可达
+- ❌ **完整 Nagle**:`TCP_NODELAY` setter 仅记录,发送路径恒 `TCP_NAGLE_OFF`
+- ❌ **URG**:`TCPHDR_URG` 标记未消费
+
+### 其他次要
+
+- ⚠️ **RFC 813** ACK/window strategy:已覆盖 delayed ACK / quickack / no-shrink / zero-window threshold / `tcpCleanupRbuf` / `grow_window` 主路径
+- ⚠️ **RFC 1337** TIME-WAIT 危害:TIME_WAIT bucket、迟到段重放、TW SYN 重用
+- ⚠️ **RFC 2861** cwnd validation:`slow_start_after_idle` + `tcpCwndValidate` 存在,需逐条核对
+- ❌ **RFC 3522 Eifel**:未实现 timestamp-based 伪重传检测
+- ❌ **TSO / GSO / Pacing / ABC (RFC 3465)**:未实现
 
 对齐原则参见 CLAUDE.md(按 Linux 内核 `net/ipv4/tcp_input.c` / `tcp_output.c` 实现)。
 
@@ -200,3 +243,6 @@
 6. **RFC 2018** + **RFC 6675** — SACK
 7. **RFC 5961** — 安全
 8. **RFC 8985 / 9438** — 现代丢包检测与拥塞控制
+
+
+
