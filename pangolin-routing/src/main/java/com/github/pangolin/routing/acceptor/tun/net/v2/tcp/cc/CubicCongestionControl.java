@@ -30,6 +30,19 @@ public final class CubicCongestionControl implements TcpCongestionControl {
     private static final double C = 0.4;
     /** Multiplicative decrease factor β(RFC 9438 §4.5)。 */
     private static final double BETA = 0.7;
+    /**
+     * Fast convergence 系数:{@code (2 - BETA) / 2 = 0.65}。
+     * loss 时 {@code cwnd < lastMaxCwnd} 触发,把 lastMaxCwnd 拉到 cwnd × 0.65,
+     * 让新流更快"爬到"上次到顶位置,达成多流公平收敛(对齐 RFC 9438 §4.6)。
+     */
+    private static final double FAST_CONVERGENCE_FACTOR = (2.0 - BETA) / 2.0;
+    /**
+     * Hystart++ RTT delay 阈值(微秒)— 慢启动期间 round_min RTT 涨过此阈值即提前退出。
+     * 简化版,Linux Hystart++ 默认 4ms;v2 用 4000us 与之一致。
+     */
+    private static final long HYSTART_RTT_THRESH_US = 4_000L;
+    /** Hystart++ 一个 round 内最少 RTT 样本数(避免抖动误判)。 */
+    private static final int HYSTART_MIN_SAMPLES = 8;
 
     // Per-connection 状态
     /** 上次 loss 时的 cwnd 快照(段)。 */
@@ -45,6 +58,18 @@ public final class CubicCongestionControl implements TcpCongestionControl {
     /** ACK 累计 — 达到 {@code cnt} 后 cwnd++。 */
     private int ackCnt;
 
+    // Hystart++ 状态(简化版)
+    /** Hystart++ 是否已强制退出 slow start(本 epoch)。 */
+    private boolean hystartFound;
+    /** 上一个 round 的最小 RTT(微秒);0 表示无样本。 */
+    private long hystartLastRoundMinRttUs;
+    /** 当前 round 的最小 RTT(微秒);Long.MAX_VALUE 表示尚未采样。 */
+    private long hystartCurrRoundMinRttUs = Long.MAX_VALUE;
+    /** 当前 round 的 RTT 样本数 — 凑足 HYSTART_MIN_SAMPLES 才判定。 */
+    private int hystartCurrRoundSamples;
+    /** 当前 round 结束时的 sndNxt(到达即开新 round)— 0 表示未初始化。 */
+    private int hystartRoundEnd;
+
     @Override
     public void init(TcpSock sock) {
         lastMaxCwnd = 0L;
@@ -53,6 +78,15 @@ public final class CubicCongestionControl implements TcpCongestionControl {
         bicOrigin = 0L;
         tcpCwnd = 0L;
         ackCnt = 0;
+        hystartReset();
+    }
+
+    private void hystartReset() {
+        hystartFound = false;
+        hystartLastRoundMinRttUs = 0L;
+        hystartCurrRoundMinRttUs = Long.MAX_VALUE;
+        hystartCurrRoundSamples = 0;
+        hystartRoundEnd = 0;
     }
 
     @Override
@@ -72,8 +106,37 @@ public final class CubicCongestionControl implements TcpCongestionControl {
             return;
         }
 
-        // Slow start:cwnd += newlyAcked
+        // Slow start:cwnd += newlyAcked,Hystart++ 监测 RTT 上升提前退出
         if (s.cwnd() < s.ssthresh()) {
+            // Hystart++ round 推进
+            if (rs.rttUs > 0L) {
+                if (hystartRoundEnd == 0) {
+                    hystartRoundEnd = s.sndNxt();
+                }
+                if (rs.rttUs < hystartCurrRoundMinRttUs) {
+                    hystartCurrRoundMinRttUs = rs.rttUs;
+                }
+                hystartCurrRoundSamples++;
+
+                // round 结束:sndUna 已跨过 round_end → 评估 + rotate
+                if (com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence
+                        .after(s.sndUna(), hystartRoundEnd)
+                        || s.sndUna() == hystartRoundEnd) {
+                    if (!hystartFound
+                            && hystartLastRoundMinRttUs > 0L
+                            && hystartCurrRoundSamples >= HYSTART_MIN_SAMPLES
+                            && hystartCurrRoundMinRttUs > hystartLastRoundMinRttUs + HYSTART_RTT_THRESH_US) {
+                        // RTT 显著上升 → 缓冲填满 → 提前退出 slow start
+                        hystartFound = true;
+                        s.ssthresh(s.cwnd());      // 让 cwnd ≥ ssthresh,下次进 CA
+                    }
+                    hystartLastRoundMinRttUs = hystartCurrRoundMinRttUs;
+                    hystartCurrRoundMinRttUs = Long.MAX_VALUE;
+                    hystartCurrRoundSamples = 0;
+                    hystartRoundEnd = s.sndNxt();
+                }
+            }
+            // 即便 Hystart++ 已触发,本次 ACK 仍允许 cwnd += newlyAcked(下次 ACK 进 CA)
             s.cwnd(s.cwnd() + rs.ackedPackets);
             return;
         }
@@ -131,10 +194,17 @@ public final class CubicCongestionControl implements TcpCongestionControl {
     @Override
     public int ssthresh(TcpSock sock) {
         int cwnd = sock.cwnd();
-        // 进 Recovery / Loss 时记录 lastMaxCwnd,下次 CA 用作 K 参数
-        lastMaxCwnd = cwnd;
+        // Fast convergence(RFC 9438 §4.6):若 cwnd 还没爬到上次的 lastMaxCwnd 就又丢,
+        // 把 lastMaxCwnd 拉到 cwnd × 0.65 让出位置,加快多流公平收敛。
+        if (lastMaxCwnd > 0 && cwnd < lastMaxCwnd) {
+            lastMaxCwnd = (long) (cwnd * FAST_CONVERGENCE_FACTOR);
+        } else {
+            lastMaxCwnd = cwnd;
+        }
         // 下次进 CA 重置 epoch
         epochStartUs = 0L;
+        // Hystart++ 状态在每次 loss 后清(下次进入 slow start 重新探测)
+        hystartReset();
         return Math.max((int) (cwnd * BETA), 2);
     }
 
