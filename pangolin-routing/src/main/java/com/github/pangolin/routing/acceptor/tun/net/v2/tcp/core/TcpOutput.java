@@ -5,6 +5,7 @@ import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.buffer.Unpooled;
 import lombok.extern.slf4j.Slf4j;
@@ -1068,6 +1069,25 @@ public final class TcpOutput {
                 tcpFlags, selectAdvertisedWindow(sock),
                 rawOptions, skb.payload(), skb.dataLen());
 
+        // 诊断日志(仅 TRACE 级别活跃 — 生产/UT 默认 INFO/DEBUG 不打开):
+        // 对每个 data 段的 wire-level 发送都打一行 + caller stack。与 wireshark
+        // 抓到的每个 outbound 段一一对应,确认是首发还是重传。
+        // 注意:stack trace 创建 + IO 输出会显著放大 sentTime 间隔,可能让 RACK
+        // 反向把先发段误判为 LOST。所以 gate 在 TRACE,UT 跑不到。生产复现时
+        // 临时把 log4j 的 com.github.pangolin 调到 TRACE 即可启用。
+        if (skb.dataLen() > 0 && log.isTraceEnabled()) {
+            log.trace("[TCP-WIRE-OUT] {} {} seq={} len={} sndUna={} sndNxt={} packetsOut={} caState={}",
+                    ft,
+                    skb.isRetransmitted() ? "RETRX" : "FIRST",
+                    Integer.toUnsignedString(skb.startSeq()),
+                    skb.dataLen(),
+                    Integer.toUnsignedString(sock.sndUna()),
+                    Integer.toUnsignedString(sock.sndNxt()),
+                    sock.packetsOut(),
+                    sock.sender().congestionState(),
+                    new Throwable("[TCP-WIRE-OUT] caller stack"));
+        }
+
         sock.channel().writeAndFlush(buf);
         eventAckSent(sock, rcv_nxt);
 
@@ -1151,11 +1171,42 @@ public final class TcpOutput {
         sock.sender().scheduleLossProbe(timeout);
     }
 
+    /**
+     * 对齐 Linux {@code tcp_schedule_loss_probe}(net/ipv4/tcp_output.c)与
+     * RFC 8985 §3.2 的 PTO(probe timeout)公式:
+     *
+     * <pre>
+     *   PTO = 2 * SRTT + WCDelAckT     if packets_out == 1   (single-segment tail)
+     *   PTO = 2 * SRTT + 2 ticks       if packets_out > 1
+     * </pre>
+     *
+     * <p>{@code WCDelAckT}(worst-case delayed ACK timer)取 Linux {@code tcp_rto_min}
+     * 即 {@link TcpConstants#RTO_MIN_MS}(200ms);单段 tail 场景下 TLP 几乎被 RTO 撞掉,
+     * 让 RTO 主导单段重传(因为单段没有"tail"结构,TLP 探测意义不大)。
+     * 多段在飞时只加 2ms 的 timer 余量,让 TLP 比 RTO 早 ~rto-2ms 触发,完成 tail 探测。
+     *
+     * <p>历史上 v2 用 {@code (2*srtt) + max(ackTimeoutMs, ATO_MIN)},不区分 packets_out;
+     * 在本地 loopback + 客户端 quick-ACK 场景下导致 ~56ms 频繁触发 TLP 探测,
+     * Wireshark 看到 [TCP Spurious Retransmission] — 协议正常但 wire 上视觉嘈杂。
+     * 本次按 Linux/RFC 严格对齐。
+     *
+     * <p>cap 上限按 {@code rto - 1}(对齐 Linux {@code rto_delta_us} 兜底)。
+     */
     private long tlpTimeout(TcpSock sock) {
         long srttMs = sock.srttUs() > 0L
                 ? Math.max(sock.srttUs() / 1_000L, 1L)
                 : Math.max(sock.rtoMs() >> 1, 1L);
-        long timeout = (srttMs << 1) + Math.max(sock.ackTimeoutMs(), TcpConstants.TCP_ATO_MIN_MS);
+        long timeout;
+        if (sock.srttUs() > 0L) {
+            timeout = srttMs << 1;
+            if (sock.packetsOut() == 1) {
+                timeout += TcpConstants.RTO_MIN_MS;        // WCDelAckT
+            } else {
+                timeout += 2L;                              // TCP_TIMEOUT_MIN ≈ 2ms
+            }
+        } else {
+            timeout = TcpConstants.RTO_INIT_MS;
+        }
         long rto = sock.rtoMs();
         if (rto <= 1L) {
             return 1L;
