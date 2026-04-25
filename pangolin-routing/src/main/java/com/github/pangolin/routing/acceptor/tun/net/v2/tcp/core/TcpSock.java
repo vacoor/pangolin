@@ -24,7 +24,7 @@ public class TcpSock extends SockCommon {
      *
      * <p>{@code CWR} 状态(对应 ECN 拥塞反应)v2 当前未实现。
      */
-    enum CongestionState {
+    public enum CongestionState {
         OPEN,
         DISORDER,
         RECOVERY,

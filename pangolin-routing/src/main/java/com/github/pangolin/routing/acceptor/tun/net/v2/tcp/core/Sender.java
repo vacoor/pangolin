@@ -1,6 +1,8 @@
 package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.cc.NewRenoCongestionControl;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.cc.TcpCongestionControl;
 import io.netty.buffer.ByteBuf;
 import lombok.extern.slf4j.Slf4j;
 
@@ -86,6 +88,12 @@ public final class Sender {
     private int cwnd = TcpConstants.TCP_INIT_CWND;
     /** 慢启动阈值(段数);默认 {@code Integer.MAX_VALUE} 表示仍在 slow start。Mirrors Linux {@code tp->snd_ssthresh}。 */
     private int ssthresh = Integer.MAX_VALUE;
+    /**
+     * 拥塞控制算法 SPI(BBR-ready 统一接口) — 默认 NewReno。Phase 1a 仅承载
+     * {@code ssthresh} / {@code undoCwnd} 公式,cwnd 增长仍在 {@code Sender}
+     * 内联;Phase 6/7 引入 CUBIC / BBR 时彻底迁到 SPI。
+     */
+    private TcpCongestionControl congestionControl = NewRenoCongestionControl.INSTANCE;
     /** 平滑 RTT(us)。Mirrors Linux {@code tp->srtt_us}。 */
     private long srttUs;
     /** RTT 方差(us)。Mirrors Linux {@code tp->rttvar_us}。 */
@@ -613,6 +621,16 @@ public final class Sender {
         this.ssthresh = v;
     }
 
+    /** 拥塞控制算法 SPI 当前实例。默认 NewReno。 */
+    public TcpCongestionControl congestionControl() {
+        return congestionControl;
+    }
+
+    /** 注入拥塞控制算法实现 — 通常在握手完成时由 stack 配置一次。 */
+    public void congestionControl(TcpCongestionControl cc) {
+        this.congestionControl = cc != null ? cc : NewRenoCongestionControl.INSTANCE;
+    }
+
     /** 平滑 RTT (us)。Mirrors Linux {@code tp->srtt_us}。 */
     public long srttUs() {
         return srttUs;
@@ -937,7 +955,8 @@ public final class Sender {
                 // 对齐 Linux tcp_init_undo:进 Recovery 前快照 cwnd/ssthresh/snd_una,
                 // 为后续 tcp_try_undo_recovery 提供回滚基线。
                 tcpInitUndo();
-                int newSs = Math.max(cwnd / 2, 2);
+                // CC SPI 决定 ssthresh — NewReno: max(cwnd/2, 2);CUBIC: max(cwnd*0.7, 2);BBR: 通常不变
+                int newSs = congestionControl.ssthresh(sock);
                 ssthresh = newSs;
                 cwnd = newSs + 3;
                 highSeq = sndNxt;
@@ -1009,7 +1028,8 @@ public final class Sender {
         } else {
             clearFrto();
         }
-        ssthresh = Math.max(cwnd / 2, 2);
+        // CC SPI 决定 ssthresh — 与 Recovery 入口同语义,所有算法在此返回新阈值
+        ssthresh = congestionControl.ssthresh(sock);
         cwnd = 1;
         dupacks = 0;
         caIncrCounter = 0;
@@ -1070,7 +1090,8 @@ public final class Sender {
      * @param unmarkLoss 为 true 时清空 lostOut(tcp_try_undo_loss 专用)
      */
     public void tcpUndoCwndReduction(boolean unmarkLoss) {
-        if (priorCwnd > 0) cwnd = Math.max(cwnd, priorCwnd);
+        // CC SPI 决定 undoCwnd — NewReno/CUBIC: max(priorCwnd, cwnd) 不让自然增长被压回
+        if (priorCwnd > 0) cwnd = congestionControl.undoCwnd(sock);
         if (priorSsthresh > 0) ssthresh = Math.max(ssthresh, priorSsthresh);
         undoMarker = 0;
         retransStamp = 0L;
