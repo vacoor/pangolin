@@ -56,6 +56,15 @@ public final class TcpSegment {
      * 同一 RTT 内不再重复步进。
      */
     private       int     txDelivered;
+    /**
+     * 发送(或重传)时 {@code tp->delivered_mstamp} 的快照(微秒)— 对齐 Linux
+     * {@code TCP_SKB_CB(skb)->tx.delivered_mstamp}(tcp_rate.c)。BBR 计算
+     * {@code rate_sample.ack_elapsed = now - prior_mstamp},不走 Karn / RTT
+     * 采样路径。
+     * <p>Phase 1b 加入字段,由 {@code __tcp_transmit_skb} 在发送瞬间复制
+     * {@code Sender.deliveredMstamp};NewReno / CUBIC 不读,BBR 在 onAck 中读。
+     */
+    private       long    priorMstamp;
 
     public TcpSegment(ByteBuf payload, int startSeq, int dataLen,
                   byte tcpFlags, long sentTimeUs) {
@@ -71,6 +80,7 @@ public final class TcpSegment {
         this.sacked     = sacked;
         this.sentTimeUs = sentTimeUs;
         this.txDelivered = 0;
+        this.priorMstamp = 0L;
     }
 
     /**
@@ -137,6 +147,11 @@ public final class TcpSegment {
     public int  txDelivered()                { return txDelivered; }
     /** 写入 {@code TCP_SKB_CB->tx.delivered};由 {@code tcp_rate_skb_sent} 等价点调用。 */
     public void txDelivered(int d)           { this.txDelivered = d; }
+
+    /** 读取 {@code TCP_SKB_CB->tx.delivered_mstamp}(微秒)— BBR rate sample 用。 */
+    public long priorMstamp()                { return priorMstamp; }
+    /** 写入 {@code TCP_SKB_CB->tx.delivered_mstamp};由 {@code __tcp_transmit_skb} 调用。 */
+    public void priorMstamp(long us)         { this.priorMstamp = us; }
 
     public void release() {
         if (payload != null) payload.release();

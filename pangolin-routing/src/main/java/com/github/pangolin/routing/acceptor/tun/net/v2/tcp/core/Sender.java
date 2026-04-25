@@ -159,6 +159,20 @@ public final class Sender {
     /** 上次发送时戳(毫秒 jiffies)。 */
     private long lastSendTimeMs;
 
+    // ── BBR-ready 基础设施(Phase 1b 加入,NewReno/CUBIC 不读) ─────────────────
+    /**
+     * {@code tp->delivered_mstamp}(微秒)— 最近一次 {@code delivered} 推进的时戳。
+     * {@code __tcp_transmit_skb} 复制到 {@code TcpSegment.priorMstamp};BBR 用
+     * {@code rate_sample.ack_elapsed = now - prior_mstamp} 计算 ack-side 区间。
+     */
+    private long deliveredMstampUs;
+    /**
+     * 发送时刻 sender 是否 application-limited(写队列空 / cwnd 未用满)— 对齐 Linux
+     * {@code tp->app_limited}。BBR 用此过滤 sample,不让 idle 期间错误压低 BDP 估计。
+     * v2 Phase 1b 仅维护字段,Phase 7 BBR 落地时由 sender 主路径填。
+     */
+    private boolean appLimited;
+
     // ── R7.1 probe / keepalive / linger2(从 TcpSock 迁入) ──────────────────
 
     /** FIN_WAIT_2 超时(ms)。Mirrors Linux {@code tp->linger2}。 */
@@ -780,7 +794,20 @@ public final class Sender {
     /** 已交付段数累计。Mirrors Linux {@code tp->delivered}。 */
     public int delivered() { return delivered; }
     public void delivered(int v) { this.delivered = v; }
-    public void addDelivered(int n) { this.delivered += n; }
+    public void addDelivered(int n) {
+        this.delivered += n;
+        // 对齐 Linux tcp_rate_check_app_limited 内的 delivered_mstamp 推进:
+        // 每次 delivered 增长就刷新时戳(微秒,用 nanoTime 源,与 sentTimeUs 同口径)。
+        this.deliveredMstampUs = System.nanoTime() / 1_000L;
+    }
+
+    /** 最近一次 {@code delivered} 推进的时戳(微秒)— BBR rate sample 用。 */
+    public long deliveredMstampUs() { return deliveredMstampUs; }
+    public void deliveredMstampUs(long v) { this.deliveredMstampUs = v; }
+
+    /** sender 是否 application-limited(写队列空 / cwnd 未用满)— BBR 过滤 sample 用。 */
+    public boolean appLimited() { return appLimited; }
+    public void appLimited(boolean v) { this.appLimited = v; }
 
     /** 上次 RACK step 更新时的 delivered 快照。 */
     public int rackLastDelivered() { return rackLastDelivered; }
@@ -1004,8 +1031,16 @@ public final class Sender {
         // cwnd 增长走 SPI(NewReno: slow start / CA;CUBIC: cubic 曲线;BBR: BDP 模型)
         rateSampleScratch.reset();
         rateSampleScratch.ackedPackets = newlyAcked;
-        // ackedBytes 估算:newlyAcked × 当前 MSS(Phase 1b 会用真实字节数填充)
+        // ackedBytes 估算:newlyAcked × 当前 MSS(Phase 1b 用 MSS 估,Phase 7 BBR 落地时
+        // 在 cleanRtxQueue 内累加真实段长度)
         rateSampleScratch.ackedBytes = newlyAcked * Math.max(sock.mss(), 1);
+        // BBR-ready 字段(Phase 1b)
+        rateSampleScratch.delivered = delivered;
+        rateSampleScratch.priorDelivered = rackAckPriorDelivered;
+        rateSampleScratch.appLimited = appLimited;
+        rateSampleScratch.minRttUs = sock.minRttUs();
+        // sendElapsedUs / ackElapsedUs / isAckedRetrans 留 0 — Phase 7 BBR 落地时
+        // 在 cleanRtxQueue 内基于首段 sentTimeUs / priorMstamp 聚合
         congestionControl.onAck(sock, rateSampleScratch);
     }
 

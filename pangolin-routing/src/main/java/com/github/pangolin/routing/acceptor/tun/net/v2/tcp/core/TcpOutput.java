@@ -354,6 +354,8 @@ public final class TcpOutput {
         // 对齐 Linux tcp_rate_skb_sent:重传时同样重置 tx.delivered 为当前 tp->delivered,
         // 让本次重传在被 ACK 时参与最新 rs->prior_delivered 评估(而非沿用原始发送快照)。
         oldest.txDelivered(sock.delivered());
+        // 同步刷新 tx.delivered_mstamp(BBR 用)。
+        oldest.priorMstamp(sock.sender().deliveredMstampUs());
         sock.stack().mib().inc(TcpMib.TCPRETRANSSEGS);
 
         if (log.isInfoEnabled()) {
@@ -1025,6 +1027,9 @@ public final class TcpOutput {
                 tailBuf, skb.startSeq() + limit, tailLen, tailFlags, skb.sacked(), skb.sentTimeUs());
         headEntry.txDelivered(skb.txDelivered());
         tailEntry.txDelivered(skb.txDelivered());
+        // 切分继承 priorMstamp(BBR rate sample 用)
+        headEntry.priorMstamp(skb.priorMstamp());
+        tailEntry.priorMstamp(skb.priorMstamp());
 
         TcpSegment polled = sock.sendBuffer().pollRtx();
         if (polled != null) {
@@ -1138,6 +1143,9 @@ public final class TcpOutput {
         // 对齐 Linux tcp_rate_skb_sent:发送瞬间把 tp->delivered 打戳到 TCP_SKB_CB(skb)->tx.delivered,
         // 供 tcp_rate_gen / tcp_rack_update_reo_wnd 的 1-RTT 门控读回本段"发出时的投递水位"。
         skb.txDelivered(sock.delivered());
+        // 对齐 Linux tcp_rate_skb_sent:同时打戳 tp->delivered_mstamp 到 tx.delivered_mstamp,
+        // BBR 用 (now - prior_mstamp) 计算 ack_elapsed。NewReno/CUBIC 不读。
+        skb.priorMstamp(sock.sender().deliveredMstampUs());
         sock.sendBuffer().enqueueRtx(skb);
 
         sock.incrementPacketsOut();
