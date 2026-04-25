@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.cc.NewRenoCongestionControl;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.cc.RateSample;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.cc.TcpCongestionControl;
 import io.netty.buffer.ByteBuf;
 import lombok.extern.slf4j.Slf4j;
@@ -94,6 +95,12 @@ public final class Sender {
      * 内联;Phase 6/7 引入 CUBIC / BBR 时彻底迁到 SPI。
      */
     private TcpCongestionControl congestionControl = NewRenoCongestionControl.INSTANCE;
+    /**
+     * RateSample scratch — 单连接复用对象,免每次 ACK GC 压力。Phase 1a-2 只填
+     * {@code ackedPackets / ackedBytes / appLimited} 走通 NewReno;Phase 1b 后续
+     * 聚合 BBR 专用字段(delivered / sendElapsedUs / ...)。
+     */
+    private final RateSample rateSampleScratch = new RateSample();
     /** 平滑 RTT(us)。Mirrors Linux {@code tp->srtt_us}。 */
     private long srttUs;
     /** RTT 方差(us)。Mirrors Linux {@code tp->rttvar_us}。 */
@@ -604,7 +611,9 @@ public final class Sender {
     }
 
     public void cwnd(int v) {
-        this.cwnd = Math.max(v, 2);
+        // 对齐 Linux:cwnd 最小 1 SMSS(进 Loss 时 tcp_enter_loss 设 1)。
+        // 历史 v2 用 max(v, 2) 是过度保守,改为 max(v, 1) 与 Linux 一致。
+        this.cwnd = Math.max(v, 1);
     }
 
     /** cwnd++ 原子操作。 */
@@ -932,12 +941,11 @@ public final class Sender {
     public void onAckedByCc(int newlyAcked, boolean advanced) {
         if (!advanced) {
             final int newDup = incrementDupacks();
-            // 对齐 Linux:OPEN 收到第一个 dupack → 进 CA_Disorder。该状态本身不改变
-            // cwnd / ssthresh,只是标记"已观察到乱序",让 RFC 3042 Limited Transmit
-            // 与 Disorder-aware 启发式有可挂载点。后续 sndUna 推进时退回 OPEN;
-            // 累计到 3 个 dupack 时升级到 RECOVERY。
+            // 对齐 Linux:OPEN 收到第一个 dupack → 进 CA_Disorder。
             if (congestionState == TcpSock.CongestionState.OPEN && newDup >= 1) {
+                TcpSock.CongestionState old = congestionState;
                 congestionState = TcpSock.CongestionState.DISORDER;
+                congestionControl.onStateChange(sock, old, congestionState);
             }
             if (newDup == 3
                     && (congestionState == TcpSock.CongestionState.OPEN
@@ -952,53 +960,53 @@ public final class Sender {
                             sock.packetsOut(), sock.lostOut(), sock.sackedOut(), retransOut,
                             cwnd, ssthresh, congestionState);
                 }
-                // 对齐 Linux tcp_init_undo:进 Recovery 前快照 cwnd/ssthresh/snd_una,
-                // 为后续 tcp_try_undo_recovery 提供回滚基线。
+                // 进 Recovery: undo 快照 → 计算 ssthresh → 切状态字段 → 通知 CC
+                // 让 CC 在 onStateChange 内决定 cwnd(NewReno: ssthresh+3;BBR: 通常不动)
                 tcpInitUndo();
-                // CC SPI 决定 ssthresh — NewReno: max(cwnd/2, 2);CUBIC: max(cwnd*0.7, 2);BBR: 通常不变
-                int newSs = congestionControl.ssthresh(sock);
-                ssthresh = newSs;
-                cwnd = newSs + 3;
+                ssthresh = congestionControl.ssthresh(sock);
                 highSeq = sndNxt;
                 tlpHighSeq = 0;
+                TcpSock.CongestionState old = congestionState;
                 congestionState = TcpSock.CongestionState.RECOVERY;
                 caIncrCounter = 0;
-                // 对齐 Linux tcp_enter_recovery → markHeadLost:NewReno 无 SACK 时
-                // 进 FR 前先把队首段标为 LOST,让 retransmitSkb 的 LOST 优先路径生效。
+                congestionControl.onStateChange(sock, old, congestionState);
+                // 对齐 Linux tcp_enter_recovery → markHeadLost
                 TcpAck.markHeadLost(sock, 1);
                 sock.stack().retransmitter().retransmit(sock);
             } else if (congestionState == TcpSock.CongestionState.RECOVERY) {
-                incrementCwnd();
+                // dupack inflation 走 SPI:ackedPackets=0 表示 dupack
+                rateSampleScratch.reset();
+                congestionControl.onAck(sock, rateSampleScratch);
             }
             return;
         }
 
-        if (congestionState == TcpSock.CongestionState.RECOVERY
+        // advanced(SND.UNA 推进)路径
+        TcpSock.CongestionState old = congestionState;
+        if (old == TcpSock.CongestionState.RECOVERY
                 && TcpSequence.after(sndUna, highSeq)) {
-            cwnd = ssthresh;
             congestionState = TcpSock.CongestionState.OPEN;
             caIncrCounter = 0;
-        } else if (congestionState == TcpSock.CongestionState.LOSS) {
+            congestionControl.onStateChange(sock, old, congestionState);
+        } else if (old == TcpSock.CongestionState.LOSS) {
             congestionState = TcpSock.CongestionState.OPEN;
             caIncrCounter = 0;
-            // 自然退出 CA_Loss(非 F-RTO / TSECR undo 路径)时清 F-RTO 武装。
             clearFrto();
-        } else if (congestionState == TcpSock.CongestionState.DISORDER) {
-            // 对齐 Linux:CA_Disorder 期间若 SND.UNA 真正推进(说明只是误判 / reorder
-            // 而不是实际丢包),回退到 OPEN。不改 cwnd / ssthresh,后续走正常增长。
+            congestionControl.onStateChange(sock, old, congestionState);
+        } else if (old == TcpSock.CongestionState.DISORDER) {
+            // CA_Disorder + SND.UNA 推进 → reorder 不是丢包 → 回 OPEN(不动 cwnd/ssthresh)
             congestionState = TcpSock.CongestionState.OPEN;
+            congestionControl.onStateChange(sock, old, congestionState);
         }
 
         dupacks = 0;
-        if (cwnd < ssthresh) {
-            cwnd += newlyAcked;
-        } else {
-            caIncrCounter += newlyAcked;
-            if (caIncrCounter >= cwnd) {
-                cwnd++;
-                caIncrCounter = 0;
-            }
-        }
+
+        // cwnd 增长走 SPI(NewReno: slow start / CA;CUBIC: cubic 曲线;BBR: BDP 模型)
+        rateSampleScratch.reset();
+        rateSampleScratch.ackedPackets = newlyAcked;
+        // ackedBytes 估算:newlyAcked × 当前 MSS(Phase 1b 会用真实字节数填充)
+        rateSampleScratch.ackedBytes = newlyAcked * Math.max(sock.mss(), 1);
+        congestionControl.onAck(sock, rateSampleScratch);
     }
 
     /**
@@ -1030,7 +1038,7 @@ public final class Sender {
         }
         // CC SPI 决定 ssthresh — 与 Recovery 入口同语义,所有算法在此返回新阈值
         ssthresh = congestionControl.ssthresh(sock);
-        cwnd = 1;
+        // cwnd 由 CC.onStateChange(_, LOSS) 设置(NewReno: 1;BBR: 不变)
         dupacks = 0;
         caIncrCounter = 0;
         tlpHighSeq = 0;
@@ -1053,7 +1061,10 @@ public final class Sender {
         }
         lostOut = newLostOut;
         retransOut = 0;
+        TcpSock.CongestionState oldStateForLoss = congestionState;
         congestionState = TcpSock.CongestionState.LOSS;
+        // CC 在此设最终 cwnd:NewReno → 1;BBR → 由 BBR 模型决定
+        congestionControl.onStateChange(sock, oldStateForLoss, TcpSock.CongestionState.LOSS);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
