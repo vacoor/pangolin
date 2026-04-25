@@ -911,7 +911,17 @@ public final class Sender {
      */
     public void onAckedByCc(int newlyAcked, boolean advanced) {
         if (!advanced) {
-            if (incrementDupacks() == 3 && congestionState == TcpSock.CongestionState.OPEN) {
+            final int newDup = incrementDupacks();
+            // 对齐 Linux:OPEN 收到第一个 dupack → 进 CA_Disorder。该状态本身不改变
+            // cwnd / ssthresh,只是标记"已观察到乱序",让 RFC 3042 Limited Transmit
+            // 与 Disorder-aware 启发式有可挂载点。后续 sndUna 推进时退回 OPEN;
+            // 累计到 3 个 dupack 时升级到 RECOVERY。
+            if (congestionState == TcpSock.CongestionState.OPEN && newDup >= 1) {
+                congestionState = TcpSock.CongestionState.DISORDER;
+            }
+            if (newDup == 3
+                    && (congestionState == TcpSock.CongestionState.OPEN
+                            || congestionState == TcpSock.CongestionState.DISORDER)) {
                 // 对齐 Linux tcp_init_undo:进 Recovery 前快照 cwnd/ssthresh/snd_una,
                 // 为后续 tcp_try_undo_recovery 提供回滚基线。
                 tcpInitUndo();
@@ -942,6 +952,10 @@ public final class Sender {
             caIncrCounter = 0;
             // 自然退出 CA_Loss(非 F-RTO / TSECR undo 路径)时清 F-RTO 武装。
             clearFrto();
+        } else if (congestionState == TcpSock.CongestionState.DISORDER) {
+            // 对齐 Linux:CA_Disorder 期间若 SND.UNA 真正推进(说明只是误判 / reorder
+            // 而不是实际丢包),回退到 OPEN。不改 cwnd / ssthresh,后续走正常增长。
+            congestionState = TcpSock.CongestionState.OPEN;
         }
 
         dupacks = 0;

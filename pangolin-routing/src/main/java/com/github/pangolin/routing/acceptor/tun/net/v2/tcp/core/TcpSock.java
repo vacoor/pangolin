@@ -13,9 +13,20 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequen
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence.before;
 
 public class TcpSock extends SockCommon {
-    /** CA 状态枚举 — 对应 Linux {@code tp->ca_state} 子集({@code CA_Open/Recovery/Loss})。 */
+    /**
+     * CA 状态枚举 — 对应 Linux {@code tp->ca_state} 子集
+     * ({@code CA_Open / CA_Disorder / CA_Recovery / CA_Loss})。
+     *
+     * <p>{@code DISORDER}:对齐 Linux {@code TCP_CA_Disorder}。{@code OPEN} 状态下
+     * 收到第一个 dup ACK 时进入此状态;第 3 个 dup ACK 时升级到 {@code RECOVERY},
+     * 期间若 {@code SND.UNA} 推进则回退 {@code OPEN}。RFC 3042 Limited Transmit
+     * 在 {@code OPEN} 与 {@code DISORDER} 都生效。
+     *
+     * <p>{@code CWR} 状态(对应 ECN 拥塞反应)v2 当前未实现。
+     */
     enum CongestionState {
         OPEN,
+        DISORDER,
         RECOVERY,
         LOSS
     }
@@ -1149,6 +1160,9 @@ public class TcpSock extends SockCommon {
 
     /** 是否处于 RTO-triggered Loss 阶段(CA_Loss)。Mirrors Linux {@code ... == TCP_CA_Loss}。 */
     public boolean inLoss() { return sender.congestionState() == CongestionState.LOSS; }
+
+    /** 是否处于 Disorder 阶段(CA_Disorder,dupack 已起但未达 FR 阈值)。 */
+    public boolean inDisorder() { return sender.congestionState() == CongestionState.DISORDER; }
 
     /** RACK 最新 SACKed 段 {@code sentTimeUs};单调更新。 */
     public long rackMstamp() { return sender.rackMstamp(); }

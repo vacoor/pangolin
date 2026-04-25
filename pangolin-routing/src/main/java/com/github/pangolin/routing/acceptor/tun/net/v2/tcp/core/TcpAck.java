@@ -103,7 +103,9 @@ public final class TcpAck {
         // (FULLUNDO/LOSSUNDO/SPURIOUSRTOS/DSACKUNDO 互斥);剩余的状态机路径
         // (Disorder/Recovery/Loss 进出、partial ACK 处理、cwnd reduction)v2 仍在
         // Sender.onAckedByCc 里(见后续 onAckedByCc 调用)。
-        tcpFastretransAlert(sock, pkt);
+        // 返回值表示是否成功 undo 到 CA_Open;若是,后续 onAckedByCc 跳过同一 ACK 的
+        // OPEN→DISORDER 推进(对齐 Linux 把 undo 与 dupack 状态推进合在一个函数内的语义)。
+        final boolean undoFired = tcpFastretransAlert(sock, pkt);
 
         if (after(sock.sndUna(), priorSndUna)) {
             sock.sender().rearmRto();
@@ -112,7 +114,8 @@ public final class TcpAck {
             sock.sender().resetBackoff();
         } else if (priorPktsOut > 0
                 && ack == priorSndUna
-                && (flags & (FLAG_DATA | FLAG_WIN_UPDATE)) == 0) {
+                && (flags & (FLAG_DATA | FLAG_WIN_UPDATE)) == 0
+                && !undoFired) {
             sock.onAckedByCc(1, false);
         }
 
@@ -458,28 +461,34 @@ public final class TcpAck {
      *
      * <p>调用点:{@link #tcpAck} 的 {@code cleanRtxQueue} + {@code tcpProcessTlpAck} 之后,
      * {@code onAckedByCc} 之前 — 让 undo 命中后续的 CC 回调能看到 CA_Open。
+     *
+     * @return {@code true} 表示本次 ACK 触发了某条 undo 把状态归到 CA_Open;{@code false} 否则。
+     *   调用方据此抑制同一 ACK 的"dupack→DISORDER"推进(对齐 Linux 把 undo 与 dupack
+     *   状态推进合在一个函数体内的整体语义)。
      */
-    private static void tcpFastretransAlert(TcpSock sock, TcpPacketBuf pkt) {
+    private static boolean tcpFastretransAlert(TcpSock sock, TcpPacketBuf pkt) {
         // FULLUNDO:CA_Recovery 期间收到对原始段的 ACK,TSECR 早于 retransStamp → undo
         final int tsecr = parseTimestampEcho(pkt);
         if (sock.tcpTryUndoRecovery(tsecr)) {
             sock.stack().mib().inc(TcpMib.TCPFULLUNDO);
-            return;
+            return true;
         }
         // LOSSUNDO:CA_Loss 期间同上 — 收到对原始段(非 RTO 重传副本)的 ACK 时回滚
         if (sock.tcpTryUndoLoss(tsecr)) {
             sock.stack().mib().inc(TcpMib.TCPLOSSUNDO);
-            return;
+            return true;
         }
         // F-RTO(RFC 5682):CA_Loss 首 ACK 的 sndUna 越过 RTO 瞬间快照 → 伪 RTO,不依赖 TSECR
         if (sock.tcpProcessFrto()) {
             sock.stack().mib().inc(TcpMib.TCPSPURIOUSRTOS);
-            return;
+            return true;
         }
         // DSACKUNDO:本 epoch 内所有重传副本都被 DSACK 抵消(undoRetrans → 0)
         if (sock.tcpTryUndoDsack()) {
             sock.stack().mib().inc(TcpMib.TCPDSACKUNDO);
+            return true;
         }
+        return false;
     }
 
     private static void tcpProcessTlpAck(TcpSock sock, int ack) {

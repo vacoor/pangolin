@@ -872,7 +872,10 @@ public final class TcpOutput {
         final int cwnd = sock.cwnd();
         final int in_flight = sock.packetsInFlight();
         int bonus = 0;
-        if (sock.isCaOpen()) {
+        // RFC 3042 Limited Transmit:OPEN 与 DISORDER(收到 1~2 个 dupack)都允许
+        // 多发 1~2 段,助 fast retransmit 预热;Recovery / Loss 不放行(对齐 Linux
+        // !tcp_in_cwnd_reduction 等价过滤)。
+        if (sock.isCaOpen() || sock.inDisorder()) {
             final int dupacks = sock.dupacks();
             if (dupacks >= 1) {
                 bonus = Math.min(dupacks, 2);
