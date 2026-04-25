@@ -102,14 +102,10 @@ public final class CubicCongestionControl implements TcpCongestionControl {
         Sender s = sock.sender();
         TcpSock.CongestionState st = s.congestionState();
 
-        // RECOVERY 期间(含 dupack 与 partial ACK):PRR 接管 cwnd 调整,
-        // 替代经典 NewReno-style "dupack inflation cwnd++"。
-        if (st == TcpSock.CongestionState.RECOVERY) {
-            Prr.onAck(sock, rs, 1);
-            return;
-        }
-        if (st == TcpSock.CongestionState.LOSS) {
-            // Loss 中持续累计 ACK 但未退出,不动 cwnd
+        // Recovery / Loss 不在此处动 cwnd:Recovery 由 Sender 直接调 Prr.onAck 驱动
+        // (对齐 Linux tcp_cwnd_reduction 在 fastretrans_alert 路径,而非 cong_avoid)
+        if (st == TcpSock.CongestionState.RECOVERY
+                || st == TcpSock.CongestionState.LOSS) {
             return;
         }
         if (rs.ackedPackets <= 0) return;
@@ -242,11 +238,8 @@ public final class CubicCongestionControl implements TcpCongestionControl {
         if (newS == TcpSock.CongestionState.RECOVERY
                 && (oldS == TcpSock.CongestionState.OPEN
                         || oldS == TcpSock.CongestionState.DISORDER)) {
-            // 对齐 Linux tcp_enter_recovery + tcp_init_cwnd_reduction:
-            //   cwnd 在入口保持 prior_cwnd,由 PRR 在每个 ACK 平滑下降到 ssthresh。
-            //   priorCwnd / priorSsthresh 已由 Sender.tcpInitUndo 快照,ssthresh 已设。
-            Prr.enterRecovery(sock);
-            // CUBIC 自身 epoch 重置(下次 CA 重新算 K / bicOrigin)
+            // CUBIC-specific:重置 epoch,下次进 CA 重新算 K / bicOrigin。
+            // PRR 计数器重置已由 Sender 直接调 Prr.enterRecovery 完成。
             epochStartUs = 0L;
         } else if (newS == TcpSock.CongestionState.LOSS) {
             // RTO 进 Loss:cwnd = 1

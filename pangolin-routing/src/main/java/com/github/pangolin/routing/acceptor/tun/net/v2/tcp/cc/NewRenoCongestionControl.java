@@ -37,13 +37,12 @@ public final class NewRenoCongestionControl implements TcpCongestionControl {
         Sender s = sock.sender();
         TcpSock.CongestionState st = s.congestionState();
 
-        // RECOVERY 期间(含 dupack 与 partial ACK):PRR 接管 cwnd 调整
-        if (st == TcpSock.CongestionState.RECOVERY) {
-            Prr.onAck(sock, rs, 1);
-            return;
-        }
-        if (st == TcpSock.CongestionState.LOSS) {
-            // Loss 中持续累计 ACK 但未退出,不动 cwnd
+        // Recovery / Loss 不在此处动 cwnd:
+        //   - Recovery 由 Sender 直接调 Prr.onAck 驱动 cwnd(对齐 Linux tcp_cwnd_reduction
+        //     在 tcp_input.c 的 fastretrans_alert 路径,而非 cong_avoid plugin)
+        //   - Loss 期保持 cwnd=1 直到状态退出,无自然增长
+        if (st == TcpSock.CongestionState.RECOVERY
+                || st == TcpSock.CongestionState.LOSS) {
             return;
         }
 
@@ -83,18 +82,7 @@ public final class NewRenoCongestionControl implements TcpCongestionControl {
                               TcpSock.CongestionState oldS,
                               TcpSock.CongestionState newS) {
         Sender s = sock.sender();
-        if (newS == TcpSock.CongestionState.RECOVERY
-                && (oldS == TcpSock.CongestionState.OPEN
-                        || oldS == TcpSock.CongestionState.DISORDER)) {
-            // 对齐 Linux tcp_enter_recovery + tcp_init_cwnd_reduction:
-            //   进 Recovery 时 cwnd **不变**(保持 prior_cwnd),由 PRR 在每个
-            //   ACK 平滑下降到 ssthresh。priorCwnd / priorSsthresh 已由 Sender
-            //   tcpInitUndo 快照,cc.ssthresh() 已被 Sender 设到 ssthresh 字段。
-            //   markHeadLost + retransmit 触发的 Fast Retransmit 段直接发出,
-            //   PRR 计数 prr_out 由 TcpOutput.eventNewDataSent / retransmitSkb
-            //   末尾的 Prr.onSegmentSent 维护。
-            Prr.enterRecovery(sock);
-        } else if (newS == TcpSock.CongestionState.LOSS) {
+        if (newS == TcpSock.CongestionState.LOSS) {
             // 进 Loss:cwnd = 1(对齐 Linux tcp_enter_loss)
             s.cwnd(1);
         } else if (newS == TcpSock.CongestionState.OPEN
@@ -102,6 +90,7 @@ public final class NewRenoCongestionControl implements TcpCongestionControl {
             // 退出 Recovery:cwnd = ssthresh
             s.cwnd(s.ssthresh());
         }
-        // OPEN ↔ DISORDER 切换 / LOSS → OPEN 退出:不动 cwnd,走自然增长
+        // OPEN ↔ DISORDER / OPEN → RECOVERY / LOSS → OPEN:NewReno 自身不动 cwnd
+        // RECOVERY 入口的 PRR 计数器重置已由 Sender 直接调 Prr.enterRecovery 完成
     }
 }

@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.cc.NewRenoCongestionControl;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.cc.Prr;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.cc.RateSample;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.cc.TcpCongestionControl;
 import io.netty.buffer.ByteBuf;
@@ -1039,8 +1040,9 @@ public final class Sender {
                             sock.packetsOut(), sock.lostOut(), sock.sackedOut(), retransOut,
                             cwnd, ssthresh, congestionState);
                 }
-                // 进 Recovery: undo 快照 → 计算 ssthresh → 切状态字段 → 通知 CC
-                // 让 CC 在 onStateChange 内决定 cwnd(NewReno: ssthresh+3;BBR: 通常不动)
+                // 进 Recovery — 对齐 Linux tcp_enter_recovery:
+                //   undo 快照 → ssthresh = cc.ssthresh() → 切状态 → 重置 PRR →
+                //   通知 CC(CC-specific reset,如 CUBIC epoch)→ markHeadLost → 重传
                 tcpInitUndo();
                 ssthresh = congestionControl.ssthresh(sock);
                 highSeq = sndNxt;
@@ -1048,34 +1050,47 @@ public final class Sender {
                 TcpSock.CongestionState old = congestionState;
                 congestionState = TcpSock.CongestionState.RECOVERY;
                 caIncrCounter = 0;
+                // PRR 直接由 Sender 调(对齐 Linux:tcp_init_cwnd_reduction 在 tcp_input.c
+                // 调用,不在 cong_ops 里)
+                Prr.enterRecovery(sock);
                 congestionControl.onStateChange(sock, old, congestionState);
                 // 对齐 Linux tcp_enter_recovery → markHeadLost
                 TcpAck.markHeadLost(sock, 1);
                 sock.stack().retransmitter().retransmit(sock);
             } else if (congestionState == TcpSock.CongestionState.RECOVERY) {
-                // dupack inflation 走 SPI:ackedPackets=0 表示 dupack
+                // Recovery 期 dupack:cc.onAck 让 BBR 等持续观测 rate sample(NewReno/CUBIC
+                // 早 return),Prr.onAck 再驱动 cwnd(对齐 Linux tcp_in_cwnd_reduction)
                 rateSampleScratch.reset();
                 congestionControl.onAck(sock, rateSampleScratch);
+                Prr.onAck(sock, rateSampleScratch, 1);
             }
             return;
         }
 
         // advanced(SND.UNA 推进)路径
         TcpSock.CongestionState old = congestionState;
+        // 记下"进 onAck 时是否还在 Recovery",用于决定 cwnd 是否由 PRR 接管
+        final boolean stillInRecovery;
         if (old == TcpSock.CongestionState.RECOVERY
                 && TcpSequence.after(sndUna, highSeq)) {
             congestionState = TcpSock.CongestionState.OPEN;
             caIncrCounter = 0;
             congestionControl.onStateChange(sock, old, congestionState);
+            stillInRecovery = false;
         } else if (old == TcpSock.CongestionState.LOSS) {
             congestionState = TcpSock.CongestionState.OPEN;
             caIncrCounter = 0;
             clearFrto();
             congestionControl.onStateChange(sock, old, congestionState);
+            stillInRecovery = false;
         } else if (old == TcpSock.CongestionState.DISORDER) {
             // CA_Disorder + SND.UNA 推进 → reorder 不是丢包 → 回 OPEN(不动 cwnd/ssthresh)
             congestionState = TcpSock.CongestionState.OPEN;
             congestionControl.onStateChange(sock, old, congestionState);
+            stillInRecovery = false;
+        } else {
+            // 状态没切:partial ACK 在 Recovery 内推进 / 普通 OPEN ACK / 等
+            stillInRecovery = (old == TcpSock.CongestionState.RECOVERY);
         }
 
         dupacks = 0;
@@ -1106,7 +1121,13 @@ public final class Sender {
                 rateSampleScratch.ackElapsedUs = Math.max(0L, nowUs - ackFirstPriorMstamp);
             }
         }
+        // 始终调 cc.onAck:让 BBR 持续观测 rate sample / 推进状态机 / 计算 pacing;
+        // NewReno / CUBIC 在 Recovery / Loss 状态下早 return,不动 cwnd。
         congestionControl.onAck(sock, rateSampleScratch);
+        if (stillInRecovery) {
+            // partial ACK 在 Recovery 内推进:PRR 接管 cwnd(对齐 Linux tcp_cwnd_reduction)
+            Prr.onAck(sock, rateSampleScratch, 1);
+        }
     }
 
     /**

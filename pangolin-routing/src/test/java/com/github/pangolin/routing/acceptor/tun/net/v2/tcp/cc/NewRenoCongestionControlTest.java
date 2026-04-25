@@ -120,48 +120,58 @@ class NewRenoCongestionControlTest {
     }
 
     @Test
-    @DisplayName("onAck RECOVERY + ackedPackets=0(dupack):PRR 接管,sndcnt 至少 lossSegments=1")
-    void onAckRecoveryDupackTriggersPrr() {
+    @DisplayName("onAck RECOVERY:NewReno SPI 自身不动 cwnd(PRR 由 Sender 直接驱动)")
+    void onAckInRecoveryIsNoOp() {
         TcpSock sock = initializer.handler().sock();
         Sender s = sock.sender();
         s.cwnd(10);
         s.ssthresh(5);
-        s.priorCwnd(10);
-        s.prrDelivered(0);
-        s.prrOut(0);
         s.congestionState(TcpSock.CongestionState.RECOVERY);
 
-        // 没有任何 inflight(packetsOut=0 → pipe=0):走 SSRB 分支
-        //   limit = max(prrDelivered(0) - prrOut(0), lossSegments(1)) = 1
-        //   sndcnt = min(limit, ssthresh - pipe) = min(1, 5) = 1
-        //   sndcnt = max(sndcnt, lossSegments) = 1
-        //   cwnd = pipe + sndcnt = 0 + 1 = 1
-        RateSample rs = new RateSample();   // ackedPackets=0 表 dupack
-        reno.onAck(sock, rs);
-        assertThat(s.cwnd())
-                .as("PRR Recovery + dupack(无 delivered,无 inflight)→ cwnd = pipe + lossSegments")
-                .isEqualTo(1);
+        // dupack 形态(ackedPackets=0)
+        RateSample dupack = new RateSample();
+        reno.onAck(sock, dupack);
+        assertThat(s.cwnd()).as("Recovery dupack:NewReno SPI 不动 cwnd").isEqualTo(10);
+
+        // partial ACK 形态(ackedPackets=2)
+        RateSample partial = new RateSample();
+        partial.ackedPackets = 2;
+        partial.ackedBytes = 2 * 1460;
+        reno.onAck(sock, partial);
+        assertThat(s.cwnd()).as("Recovery partial ACK:NewReno SPI 不动 cwnd").isEqualTo(10);
     }
 
     @Test
-    @DisplayName("onStateChange OPEN→RECOVERY:PRR 重置 prrDelivered/prrOut,不动 cwnd")
-    void onStateChangeRecoveryEntryResetsPrrCountersWithoutTouchingCwnd() {
+    @DisplayName("onAck LOSS:NewReno SPI 不动 cwnd(等状态退出后再走自然增长)")
+    void onAckInLossIsNoOp() {
+        TcpSock sock = initializer.handler().sock();
+        Sender s = sock.sender();
+        s.cwnd(1);
+        s.congestionState(TcpSock.CongestionState.LOSS);
+
+        RateSample rs = new RateSample();
+        rs.ackedPackets = 5;
+        rs.ackedBytes = 5 * 1460;
+        reno.onAck(sock, rs);
+
+        assertThat(s.cwnd()).as("Loss 期 SPI 不动 cwnd").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("onStateChange OPEN→RECOVERY:NewReno 自身 no-op(PRR 重置由 Sender 直接调)")
+    void onStateChangeRecoveryEntryIsCcNoOp() {
         TcpSock sock = initializer.handler().sock();
         Sender s = sock.sender();
         s.cwnd(20);
         s.ssthresh(7);          // 已被 Sender 通过 cc.ssthresh() 设好
-        s.priorCwnd(20);
-        s.prrDelivered(99);     // 上一轮残留(应该被清零)
-        s.prrOut(77);
         s.congestionState(TcpSock.CongestionState.RECOVERY);
 
         reno.onStateChange(sock, TcpSock.CongestionState.OPEN, TcpSock.CongestionState.RECOVERY);
 
-        // 对齐 Linux tcp_enter_recovery + tcp_init_cwnd_reduction:
-        //   cwnd 在入口保持不变(由 PRR 在每个 ACK 平滑下降到 ssthresh)
-        assertThat(s.cwnd()).as("Recovery 入口 cwnd 不变(PRR 接管平滑下降)").isEqualTo(20);
-        assertThat(s.prrDelivered()).as("prrDelivered 清零").isZero();
-        assertThat(s.prrOut()).as("prrOut 清零").isZero();
+        // 对齐 Linux:cong_ops 的 set_state 不负责 cwnd,也不负责 PRR 计数器重置 —
+        //   cwnd 由 PRR 在 ACK 路径渐降;prrDelivered/prrOut 重置由调用方
+        //  (Sender)在 set_state 之前直接调 Prr.enterRecovery 完成。
+        assertThat(s.cwnd()).as("NewReno.onStateChange(_, RECOVERY) 不动 cwnd").isEqualTo(20);
     }
 
     @Test
