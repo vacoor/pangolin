@@ -2,6 +2,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 
 import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import io.netty.buffer.ByteBuf;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 发送侧关注点的聚合对象,对齐 gVisor netstack 的 {@code sender}
@@ -34,6 +35,7 @@ import io.netty.buffer.ByteBuf;
  *   long rto = sock.sender().rtoMs();       // 读当前 RTO
  * </pre>
  */
+@Slf4j
 public final class Sender {
 
     private final TcpSock sock;
@@ -922,6 +924,16 @@ public final class Sender {
             if (newDup == 3
                     && (congestionState == TcpSock.CongestionState.OPEN
                             || congestionState == TcpSock.CongestionState.DISORDER)) {
+                if (log.isInfoEnabled()) {
+                    log.info("[TCP-FR] {} fastRetransmit(3 dupacks) sndUna={} sndNxt={}"
+                                    + "packetsOut={} lostOut={} sackedOut={} retransOut={} "
+                                    + "cwnd={} ssthresh={} caState={}",
+                            sock.fourTuple(),
+                            Integer.toUnsignedString(sndUna),
+                            Integer.toUnsignedString(sndNxt),
+                            sock.packetsOut(), sock.lostOut(), sock.sackedOut(), retransOut,
+                            cwnd, ssthresh, congestionState);
+                }
                 // 对齐 Linux tcp_init_undo:进 Recovery 前快照 cwnd/ssthresh/snd_una,
                 // 为后续 tcp_try_undo_recovery 提供回滚基线。
                 tcpInitUndo();
@@ -977,6 +989,17 @@ public final class Sender {
      * R7.3b:方法体从 TcpSock 迁入。
      */
     public void onTimeoutByCc() {
+        if (log.isInfoEnabled()) {
+            log.info("[TCP-RTO] {} onTimeoutByCc(enter_loss) sndUna={} sndNxt={}"
+                            + "packetsOut={} lostOut={} sackedOut={} retransOut={} cwnd={} "
+                            + "ssthresh={} srttUs={} rtoMs={} caState={}",
+                    sock.fourTuple(),
+                    Integer.toUnsignedString(sock.sndUna()),
+                    Integer.toUnsignedString(sock.sndNxt()),
+                    sock.packetsOut(), sock.lostOut(), sock.sackedOut(), retransOut,
+                    cwnd, ssthresh, srttUs, rtoMs(), congestionState,
+                    new Throwable("[TCP-RTO] caller stack"));
+        }
         tcpInitUndo();
         // F-RTO 武装条件(RFC 5682):有 undo 机会(undoMarker 已建立)且
         // RTO 瞬间仍有在飞数据(sndNxt > undoMarker),才把 snd_nxt 快照为 frto_high_mark。

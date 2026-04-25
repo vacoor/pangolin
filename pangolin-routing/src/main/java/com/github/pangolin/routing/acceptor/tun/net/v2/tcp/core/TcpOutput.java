@@ -7,6 +7,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.buffer.Unpooled;
+import lombok.extern.slf4j.Slf4j;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_clock_ms;
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpClock.tcp_jiffies32;
@@ -34,6 +35,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConsta
  *
  * <p>Stateless — all mutable state lives in {@link TcpSock}/{@link Sender}.
  */
+@Slf4j
 public final class TcpOutput {
 
     /**
@@ -316,12 +318,14 @@ public final class TcpOutput {
             com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSendBuffer.CollapseResult cr
                     = sock.sendBuffer().collapseRtx(oldest, sock.mss());
             if (cr != null) {
-                // 对齐 Linux tcp_adjust_pcount:合并吞掉 next 段,packetsOut/lostOut 按
-                // next 的 sacked 位集递减。未实现 retransOut 计数,LOST / 记账相关项
-                // 用现有字段兜底。
+                // 对齐 Linux tcp_adjust_pcount:合并吞掉 next 段,packetsOut/lostOut/
+                // retransOut 按 next 的 sacked 位集递减。
                 sock.decrementPacketsOut(1);
                 if ((cr.droppedSacked & com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCPCB_LOST) != 0) {
                     sock.decrLostOut(1);
+                }
+                if ((cr.droppedSacked & com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCPCB_SACKED_RETRANS) != 0) {
+                    sock.decrRetransOut(1);
                 }
                 oldest = cr.merged;
             }
@@ -350,6 +354,20 @@ public final class TcpOutput {
         // 让本次重传在被 ACK 时参与最新 rs->prior_delivered 评估(而非沿用原始发送快照)。
         oldest.txDelivered(sock.delivered());
         sock.stack().mib().inc(TcpMib.TCPRETRANSSEGS);
+
+        if (log.isInfoEnabled()) {
+            log.info("[TCP-RETRX] {} retransmitSkb seq={} len={} sndUna={} sndNxt={}"
+                            + "lostOut={} sackedOut={} retransOut={} packetsOut={} cwnd={} caState={}",
+                    sock.fourTuple(),
+                    Integer.toUnsignedString(oldest.startSeq()),
+                    oldest.dataLen(),
+                    Integer.toUnsignedString(sock.sndUna()),
+                    Integer.toUnsignedString(sock.sndNxt()),
+                    sock.lostOut(), sock.sackedOut(), sock.sender().retransOut(),
+                    sock.packetsOut(), sock.cwnd(), sock.sender().congestionState(),
+                    new Throwable("[TCP-RETRX] caller stack"));
+        }
+
         __tcp_transmit_skb(sock, oldest, sock.receiver().rcvNxt());
     }
 
@@ -556,6 +574,17 @@ public final class TcpOutput {
     public void sendLossProbe(TcpSock sock) {
         if (sock == null || !sock.hasConnection()) {
             return;
+        }
+        if (log.isInfoEnabled()) {
+            log.info("[TCP-TLP] {} sendLossProbe sndUna={} sndNxt={} packetsOut={}"
+                            + "lostOut={} retransOut={} sendHead={} rtxHead={} caState={}",
+                    sock.fourTuple(),
+                    Integer.toUnsignedString(sock.sndUna()),
+                    Integer.toUnsignedString(sock.sndNxt()),
+                    sock.packetsOut(), sock.lostOut(), sock.sender().retransOut(),
+                    sock.tcpSendHead() != null,
+                    sock.sendBuffer() != null && sock.sendBuffer().peekRtx() != null,
+                    sock.sender().congestionState());
         }
         if (sock.tcpSendHead() != null) {
             writeXmit(sock, currentMss(sock), TCP_NAGLE_OFF, 2);

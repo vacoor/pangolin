@@ -3,6 +3,7 @@ package com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core;
 import com.github.pangolin.routing.acceptor.tun.net.codec.TcpPacketBuf;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpOptionCodec;
 import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.hook.TcpSockHandler;
+import lombok.extern.slf4j.Slf4j;
 
 import static com.github.pangolin.routing.acceptor.tun.net.handler.tcp.util.TcpUtils.determineEndSeq;
 import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SkbDropReason.SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
@@ -18,6 +19,7 @@ import static com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequen
  * 随 v2 向 {@link com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.SegmentDispatcher}
  * 主循环集中分发演进后,handler 身份已移除,仅保留标志位常量与静态入口供主循环调用。
  */
+@Slf4j
 public final class TcpAck {
 
     private TcpAck() {}
@@ -286,6 +288,7 @@ public final class TcpAck {
         final long reoWndUs = Math.max(Math.min(baseUs, capUs), 1_000L);
         final long lossBoundary = rackMstamp - reoWndUs;
 
+        int newlyMarked = 0;
         for (TcpSegment skb : sock.sendBuffer().rtxView()) {
             if (skb.isSackAcked() || skb.isLost()) continue;
             final long sentUs = skb.sentTimeUs();
@@ -293,7 +296,23 @@ public final class TcpAck {
             if (sentUs < lossBoundary) {
                 skb.sacked(skb.sacked() | com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpConstants.TCPCB_LOST);
                 sock.incrLostOut();
+                newlyMarked++;
+                if (log.isInfoEnabled()) {
+                    log.info("[TCP-RACK-LOST] {} markLost seq={} len={} sentUs={}"
+                                    + "rackMstamp={} reoWndUs={} gapUs={} alreadyRetrans={}",
+                            sock.fourTuple(),
+                            Integer.toUnsignedString(skb.startSeq()),
+                            skb.dataLen(),
+                            sentUs, rackMstamp, reoWndUs, (rackMstamp - sentUs),
+                            skb.isRetransmitted());
+                }
             }
+        }
+        if (newlyMarked > 0 && log.isInfoEnabled()) {
+            log.info("[TCP-RACK-LOST] {} rackDetectLoss summary newlyMarked={} totalLostOut={}"
+                            + "reoWndSteps={} srttUs={} minRttUs={}",
+                    sock.fourTuple(),
+                    newlyMarked, sock.lostOut(), sock.rackReoWndSteps(), srttUs, minRttUs);
         }
     }
 
