@@ -15,11 +15,14 @@ import com.github.pangolin.routing.acceptor.tun.channel.TunChannelV2;
 import com.github.pangolin.routing.acceptor.tun.fakedns.DnsEngine;
 import com.github.pangolin.routing.acceptor.tun.net.codec.IpPacketCodec;
 import com.github.pangolin.routing.acceptor.tun.net.handler.tcp.handler.Tcp4MultiplexHandler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.TcpMultiplexHandler;
+import com.github.pangolin.routing.acceptor.tun.net.v2.tcp.ext.backend.TcpPassthroughInitializer;
 import com.github.pangolin.routing.context.RouteContext;
 import com.github.pangolin.routing.route.Route;
 import com.github.pangolin.routing.route.predicate.Subnet4RoutePredicate;
 import com.github.pangolin.routing.support.DatagramChannelFactory;
 import com.github.pangolin.routing.support.SocketChannelFactory;
+import com.github.pangolin.routing.support.StandardSocketChannelFactory;
 import com.github.pangolin.routing.upstream.DirectUpstream;
 import com.github.pangolin.routing.upstream.DynamicUpstream;
 import com.github.pangolin.routing.upstream.Upstream;
@@ -28,6 +31,7 @@ import com.google.common.collect.Sets;
 import freework.crypto.digest.Hash;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.codec.dns.DatagramDnsQuery;
 import io.netty.handler.codec.dns.DatagramDnsResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.Arrays;
 import java.util.Set;
 
@@ -107,6 +112,9 @@ public class TunAcceptor2 implements Acceptor {
                                  final String wintunType, final String wintunUuid,
                                  final DnsEngine dnsEngine,
                                  final SocketChannelFactory socketFactory, final DatagramChannelFactory datagramFactory) throws Exception {
+
+        TcpPassthroughInitializer initializer = new TcpPassthroughInitializer(socketFactory, new NioEventLoopGroup(), 10 * 1000 );
+
         final EventLoopGroup group = new DefaultEventLoopGroup();
         final Bootstrap b = new Bootstrap()
                 .group(group)
@@ -117,7 +125,8 @@ public class TunAcceptor2 implements Acceptor {
                     @Override
                     protected void initChannel(final Channel ch) throws Exception {
                         ch.pipeline().addLast(new IpPacketCodec());
-                        ch.pipeline().addLast(new Tcp4MultiplexHandler(dnsEngine, socketFactory));
+//                        ch.pipeline().addLast(new Tcp4MultiplexHandler(dnsEngine, socketFactory));
+                        ch.pipeline().addLast(new TcpMultiplexHandler(dnsEngine, initializer));
 
                         /*
                         TcpPassthroughInitializer initializer = new TcpPassthroughInitializer(

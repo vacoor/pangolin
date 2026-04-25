@@ -11,7 +11,7 @@ public abstract class WintunLoader {
     public static final String PREFER_SYSTEM = "pref_system";
     public static final String PREFER_BUNDLED = "pref_bundled";
 
-    private static final String RESOURCE_PREFIX = "/META-INF/native/";
+    private static final String RESOURCE_PREFIX = "/META-INF/native";
 
     private WintunLoader() {
     }

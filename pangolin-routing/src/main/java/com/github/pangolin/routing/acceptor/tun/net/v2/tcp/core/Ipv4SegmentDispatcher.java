@@ -40,7 +40,7 @@ public class Ipv4SegmentDispatcher extends SegmentDispatcher {
 
     @Override
     public void rcv(ChannelHandlerContext net, TcpPacketBuf pkt) {
-        log.info(TcpLogUtils.logify(pkt, 0));
+//        log.info(TcpLogUtils.logify(pkt, 0));
         tcp_v4_rcv(net, pkt);
     }
 
