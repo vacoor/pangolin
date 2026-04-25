@@ -45,6 +45,8 @@ public final class BbrCongestionControl implements TcpCongestionControl {
     private static final double STARTUP_CWND_GAIN = STARTUP_PACING_GAIN;
     /** ProbeBW cwnd gain — 2× BDP 容纳 reordering / pacing 抖动。 */
     private static final double PROBE_BW_CWND_GAIN = 2.0;
+    /** BtlBw 滑窗(微秒) — 10 秒(对齐 Linux BBRv1 ~10 RTT,简化为固定 10s)。 */
+    private static final long BTLBW_FILTER_LEN_US = 10_000_000L;
     /** RTprop 滑窗(微秒) — 10 秒。 */
     private static final long RTPROP_FILTER_LEN_US = 10_000_000L;
     /** ProbeRTT 触发间隔(微秒) — 10 秒不见更小 RTT 就探测。 */
@@ -62,8 +64,8 @@ public final class BbrCongestionControl implements TcpCongestionControl {
 
     // Per-connection 状态
     private Phase phase = Phase.STARTUP;
-    /** BtlBw 估计(字节/秒)。 */
-    private long btlBwBps;
+    /** BtlBw 滑窗最大值过滤器(BBR 严格语义,替代 last-update + expiry)。 */
+    private final WinMaxFilter btlBwFilter = new WinMaxFilter();
     /** 上一次 BtlBw 样本,用于 StartUp 退出判定。 */
     private long lastBtlBwBps;
     /** StartUp 期间已观察 BtlBw 不再涨的连续轮数。 */
@@ -82,7 +84,7 @@ public final class BbrCongestionControl implements TcpCongestionControl {
     @Override
     public void init(TcpSock sock) {
         phase = Phase.STARTUP;
-        btlBwBps = 0L;
+        btlBwFilter.reset(0L, 0L);
         lastBtlBwBps = 0L;
         startupFullBwCount = 0;
         rtPropUs = Long.MAX_VALUE;
@@ -90,7 +92,6 @@ public final class BbrCongestionControl implements TcpCongestionControl {
         probeBwCycleIdx = 0;
         probeBwCycleStartUs = 0L;
         probeRttDoneUs = 0L;
-        // 启动时给个粗略初始 pacing rate:cwnd × MSS / srtt(srtt 未采样时不动)
         sock.sender().pacingRateBps(0L);
     }
 
@@ -114,31 +115,31 @@ public final class BbrCongestionControl implements TcpCongestionControl {
         }
 
         // (2) BtlBw 估计:deliveryRate = (delivered - priorDelivered) / interval
-        //     interval = max(sendElapsedUs, ackElapsedUs);Phase 1b 留 0 时 fallback srttUs
+        //     interval = max(sendElapsedUs, ackElapsedUs)。精细化 1 后 cleanRtxQueue
+        //     真聚合;若仍为 0(纯 dup ACK 等)则 fallback srttUs。
         long interval = Math.max(rs.sendElapsedUs, rs.ackElapsedUs);
         if (interval == 0L) interval = sock.srttUs();
         int deliveredDelta = rs.delivered - rs.priorDelivered;
         if (interval > 0L && deliveredDelta > 0
                 && !rs.isAckedRetrans && !rs.appLimited) {
-            // delivered 单位是段数(对齐 v2 sender.delivered),换算字节
             long deliveredBytes = (long) deliveredDelta * mss;
             long sampleBps = (deliveredBytes * 1_000_000L) / interval;
-            if (sampleBps > btlBwBps) {
-                btlBwBps = sampleBps;
-            }
+            // 精细化 2:严格 windowed-max filter(对齐 Linux BBRv1)
+            btlBwFilter.update(BTLBW_FILTER_LEN_US, nowUs, sampleBps);
         }
 
         // (3) 状态机
         advanceStateMachine(sock, nowUs);
 
-        // (4) 计算 pacing rate
+        // (4) 计算 pacing rate(读 windowed-max BtlBw)
+        long btlBw = btlBwFilter.max();
         double pacingGain = currentPacingGain();
-        long pacingBps = (long) (btlBwBps * pacingGain);
+        long pacingBps = (long) (btlBw * pacingGain);
         s.pacingRateBps(pacingBps);
 
         // (5) 计算 cwnd target = BDP × cwnd_gain
-        if (btlBwBps > 0L && rtPropUs > 0L && rtPropUs != Long.MAX_VALUE) {
-            long bdpBytes = (btlBwBps * rtPropUs) / 1_000_000L;
+        if (btlBw > 0L && rtPropUs > 0L && rtPropUs != Long.MAX_VALUE) {
+            long bdpBytes = (btlBw * rtPropUs) / 1_000_000L;
             int bdpSegs = (int) Math.max(bdpBytes / mss, 1L);
             double cwndGain = currentCwndGain();
             int targetCwnd;
@@ -158,14 +159,15 @@ public final class BbrCongestionControl implements TcpCongestionControl {
     private void advanceStateMachine(TcpSock sock, long nowUs) {
         switch (phase) {
             case STARTUP:
-                // 检测 BtlBw 是否还在涨 ≥ 1.25×
-                if (btlBwBps > 0L) {
-                    if ((double) btlBwBps < STARTUP_FULL_BW_GAIN * lastBtlBwBps) {
+                // 检测 BtlBw(滑窗 max)是否还在涨 ≥ 1.25×
+                long btlBwNow = btlBwFilter.max();
+                if (btlBwNow > 0L) {
+                    if ((double) btlBwNow < STARTUP_FULL_BW_GAIN * lastBtlBwBps) {
                         startupFullBwCount++;
                     } else {
                         startupFullBwCount = 0;
                     }
-                    lastBtlBwBps = btlBwBps;
+                    lastBtlBwBps = btlBwNow;
                     if (startupFullBwCount >= STARTUP_FULL_BW_THRESH_ROUNDS) {
                         phase = Phase.DRAIN;
                     }
@@ -249,7 +251,7 @@ public final class BbrCongestionControl implements TcpCongestionControl {
             phase = Phase.STARTUP;
             startupFullBwCount = 0;
             lastBtlBwBps = 0L;
-            // 保留 btlBwBps / rtPropUs(BBR 模型不丢)
+            // 保留 btlBwFilter / rtPropUs(BBR 模型不丢,即使 RTO 也不重置 filter)
         }
     }
 
@@ -263,9 +265,9 @@ public final class BbrCongestionControl implements TcpCongestionControl {
         return phase;
     }
 
-    /** 暴露当前 BtlBw 估计。 */
+    /** 暴露当前 BtlBw 估计(从 windowed-max filter 读)。 */
     public long btlBwBps() {
-        return btlBwBps;
+        return btlBwFilter.max();
     }
 
     /** 暴露当前 RTprop 估计。 */
