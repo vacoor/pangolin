@@ -320,8 +320,11 @@ public final class TcpHandshaker {
         // 对齐 Linux tcp_make_synack(tcp_output.c):TSval 生成点与 snt_tsval_* 的记账点一致。
         final long tsvalNow = clientTimestamp ? ((System.nanoTime() / 1_000_000L) & 0xFFFFFFFFL) : 0L;
         byte[] opts = buildSynAckOptions(tsvalNow);
-        int window = config.initialRcvWnd() >> (clientWscale >= 0 ? config.windowScale() : 0);
-        if (window > TcpConstants.TCP_MAX_WINDOW) window = TcpConstants.TCP_MAX_WINDOW;
+        // 对齐 Linux tcp_make_synack:窗口字段不能被 wscale 缩放(RFC 7323 §2.2:
+        // "The window field in a segment where the SYN bit is set MUST NOT be scaled")。
+        // SYN-ACK 上 window 是字节实数,只截到 16-bit 上限;wscale 选项被同时发出去,
+        // 对端在 SYN+1 之后才会用它放大后续段的 window 字段。
+        int window = Math.min(config.initialRcvWnd(), TcpConstants.TCP_MAX_WINDOW);
 
         cancelRetransmitTimer();
         if (clientTimestamp) {

@@ -24,8 +24,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>栈 SYN-ACK 带 WS={@code TcpConfig.windowScale()}(默认 7);</li>
  *   <li>完成 3WHS 后 sock.sndWscale=5(对端 WS,解释对端 window 值),
  *       sock.rcvWscale=7(本端 WS,缩放本端通告 window);</li>
- *   <li>后续 ACK 中的 {@code window} 字段在本端解释为 {@code window << sndWscale};
- *       SYN-ACK 中通告的 {@code window} 是 {@code rcvWnd >> rcvWscale}。</li>
+ *   <li>SYN/SYN-ACK 段自身的 {@code window} 字段 <b>不被 wscale 缩放</b>
+ *       (RFC 7323 §2.2:"The window field in a segment where the SYN bit is set
+ *       MUST NOT be scaled");wscale 仅在 SYN+1 之后的段上对 {@code window}
+ *       作 {@code <<} 解码 / {@code >>} 编码。</li>
  * </ul>
  *
  * <p>本测试验证 TcpHandshaker 在 WS 协商路径下的字段传递(未 WS 协商时二者都为 0)。
@@ -70,9 +72,8 @@ class WindowScaleNegotiationTest {
         try {
             assertThat(synAck.isSyn() && synAck.isAck()).isTrue();
             isn = synAck.tcpSeq();
-            // 栈的 SYN-ACK 通告 window 应被 rcvWscale 缩放(即 >> 7)
-            // 对此测试我们只验证协商字段,不断言 window 具体值(会受 initialRcvWnd 影响)。
-            // 但可以验证 options 中有 WSCALE 块
+            // SYN-ACK 自身的 window 不被 wscale 缩放(RFC 7323 §2.2),只截到 16-bit。
+            // 此处只验证 WS 选项;具体 window 值由 NoScaleOnSynAckWindowFieldTest 覆盖。
             int serverWs = parseWScale(synAck.tcpOptionsSlice());
             assertThat(serverWs)
                     .as("server SYN-ACK must carry WS option")
