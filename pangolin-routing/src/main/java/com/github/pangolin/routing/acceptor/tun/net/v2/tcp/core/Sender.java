@@ -824,6 +824,32 @@ public final class Sender {
     /** Per-Sender pacing token bucket。 */
     public PacingTokenBucket pacingBucket() { return pacingBucket; }
 
+    // ── Per-ACK scratchpad(BBR rate sample 输入,cleanRtxQueue 内填) ─────────
+    /** 本次 ACK 释放最旧段的 sentTimeUs(微秒);0 表示无效样本。 */
+    private long ackFirstSentTimeUs;
+    /** 本次 ACK 释放最旧段的 priorMstamp(微秒)。 */
+    private long ackFirstPriorMstamp;
+    /** 本次 ACK 释放的段集合是否含重传段(Karn's rule:含则 BDP 估计应排除)。 */
+    private boolean ackHasRetrans;
+    /** 本次 ACK 释放的真实字节数(累计)。 */
+    private int ackTotalBytes;
+
+    public long ackFirstSentTimeUs() { return ackFirstSentTimeUs; }
+    public void ackFirstSentTimeUs(long v) { this.ackFirstSentTimeUs = v; }
+    public long ackFirstPriorMstamp() { return ackFirstPriorMstamp; }
+    public void ackFirstPriorMstamp(long v) { this.ackFirstPriorMstamp = v; }
+    public boolean ackHasRetrans() { return ackHasRetrans; }
+    public void ackHasRetrans(boolean v) { this.ackHasRetrans = v; }
+    public int ackTotalBytes() { return ackTotalBytes; }
+    public void ackTotalBytes(int v) { this.ackTotalBytes = v; }
+    /** ACK 入口前 reset,让 cleanRtxQueue 重新填。 */
+    public void resetAckScratchpad() {
+        this.ackFirstSentTimeUs = 0L;
+        this.ackFirstPriorMstamp = 0L;
+        this.ackHasRetrans = false;
+        this.ackTotalBytes = 0;
+    }
+
     /** 上次 RACK step 更新时的 delivered 快照。 */
     public int rackLastDelivered() { return rackLastDelivered; }
     public void rackLastDelivered(int v) { this.rackLastDelivered = v; }
@@ -1046,16 +1072,29 @@ public final class Sender {
         // cwnd 增长走 SPI(NewReno: slow start / CA;CUBIC: cubic 曲线;BBR: BDP 模型)
         rateSampleScratch.reset();
         rateSampleScratch.ackedPackets = newlyAcked;
-        // ackedBytes 估算:newlyAcked × 当前 MSS(Phase 1b 用 MSS 估,Phase 7 BBR 落地时
-        // 在 cleanRtxQueue 内累加真实段长度)
-        rateSampleScratch.ackedBytes = newlyAcked * Math.max(sock.mss(), 1);
-        // BBR-ready 字段(Phase 1b)
+        // ackedBytes:cleanRtxQueue 内累加的真实字节数;cleanRtxQueue 未填(纯 dup ACK 等)
+        // 时退化为 newlyAcked × MSS 估算。
+        rateSampleScratch.ackedBytes = ackTotalBytes > 0
+                ? ackTotalBytes
+                : newlyAcked * Math.max(sock.mss(), 1);
+        // BBR rate sample 字段(由 cleanRtxQueue 填的 scratchpad 转过来)
         rateSampleScratch.delivered = delivered;
         rateSampleScratch.priorDelivered = rackAckPriorDelivered;
         rateSampleScratch.appLimited = appLimited;
         rateSampleScratch.minRttUs = sock.minRttUs();
-        // sendElapsedUs / ackElapsedUs / isAckedRetrans 留 0 — Phase 7 BBR 落地时
-        // 在 cleanRtxQueue 内基于首段 sentTimeUs / priorMstamp 聚合
+        rateSampleScratch.rttUs = srttUs;
+        rateSampleScratch.isAckedRetrans = ackHasRetrans;
+        if (ackFirstSentTimeUs > 0L) {
+            // 对齐 Linux tcp_rate_gen:
+            //   send_us = now - first_acked.sent_time
+            //   ack_us  = now - first_acked.prior_mstamp
+            //   interval = max(send_us, ack_us)
+            long nowUs = System.nanoTime() / 1_000L;
+            rateSampleScratch.sendElapsedUs = Math.max(0L, nowUs - ackFirstSentTimeUs);
+            if (ackFirstPriorMstamp > 0L) {
+                rateSampleScratch.ackElapsedUs = Math.max(0L, nowUs - ackFirstPriorMstamp);
+            }
+        }
         congestionControl.onAck(sock, rateSampleScratch);
     }
 

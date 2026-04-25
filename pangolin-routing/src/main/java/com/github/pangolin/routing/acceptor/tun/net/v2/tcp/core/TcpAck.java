@@ -45,6 +45,9 @@ public final class TcpAck {
         // 对齐 Linux tcp_rate_gen 前置:本 ACK 内 rs->prior_delivered 的 scratchpad 清零,
         // clean_rtx / sacktag 路径在识别投递段时用 tx.delivered 的最大值刷新。
         sock.clearRackAckPriorDelivered();
+        // 对齐 Linux tcp_rate_gen 的 sample interval scratchpad 清零(BBR 用):
+        // cleanRtxQueue 在释放最旧段时填 ackFirstSentTimeUs / ackFirstPriorMstamp 等。
+        sock.sender().resetAckScratchpad();
 
         if (before(ack, priorSndUna)) {
             final int maxWindow = (int) Math.min(sock.maxWindow(), sock.bytesAcked());
@@ -384,9 +387,24 @@ public final class TcpAck {
         int sackedDecr = 0;
         int lostDecr = 0;
         int retransDecr = 0;
+        // BBR rate-sample scratchpad — 聚合本次 ACK 释放最旧段的 sample 信息
+        long ackFirstSentTimeUs = 0L;
+        long ackFirstPriorMstamp = 0L;
+        boolean ackHasRetrans = false;
+        int ackTotalBytes = 0;
         while ((skb = sock.sendBuffer().pollIfAcknowledged(ack)) != null) {
             final boolean retrans = skb.isRetransmitted();
             final long sentUs = skb.sentTimeUs();
+
+            // BBR rate sample 聚合:取本次 ACK 释放的"最旧段"作为 send/ack interval 的起点
+            if (ackFirstSentTimeUs == 0L && sentUs > 0L) {
+                ackFirstSentTimeUs = sentUs;
+                ackFirstPriorMstamp = skb.priorMstamp();
+            }
+            if (retrans) {
+                ackHasRetrans = true;
+            }
+            ackTotalBytes += skb.dataLen();
 
             if (retrans) {
                 flag |= FLAG_RETRANS_DATA_ACKED;
@@ -441,6 +459,15 @@ public final class TcpAck {
 
         if (ackedPcount > 0) {
             sock.decrementPacketsOut(ackedPcount);
+        }
+
+        // 把 BBR rate sample 聚合结果写到 sender scratchpad,Sender.onAckedByCc 读取
+        if (ackedPcount > 0) {
+            Sender s = sock.sender();
+            s.ackFirstSentTimeUs(ackFirstSentTimeUs);
+            s.ackFirstPriorMstamp(ackFirstPriorMstamp);
+            s.ackHasRetrans(ackHasRetrans);
+            s.ackTotalBytes(ackTotalBytes);
         }
 
         /*
