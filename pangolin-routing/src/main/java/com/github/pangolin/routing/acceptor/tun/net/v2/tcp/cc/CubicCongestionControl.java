@@ -37,10 +37,12 @@ public final class CubicCongestionControl implements TcpCongestionControl {
      */
     private static final double FAST_CONVERGENCE_FACTOR = (2.0 - BETA) / 2.0;
     /**
-     * Hystart++ RTT delay 阈值(微秒)— 慢启动期间 round_min RTT 涨过此阈值即提前退出。
-     * 简化版,Linux Hystart++ 默认 4ms;v2 用 4000us 与之一致。
+     * Hystart++ RTT delay 阈值下限(微秒)— RFC 9406 §4.2 MIN_RTT_THRESH。
+     * 实际阈值为动态:{@code max(MIN, min(MAX, sample_min / 8))}。
      */
-    private static final long HYSTART_RTT_THRESH_US = 4_000L;
+    private static final long HYSTART_RTT_THRESH_MIN_US = 4_000L;
+    /** Hystart++ RTT delay 阈值上限(微秒)— RFC 9406 §4.2 MAX_RTT_THRESH。 */
+    private static final long HYSTART_RTT_THRESH_MAX_US = 16_000L;
     /** Hystart++ 一个 round 内最少 RTT 样本数(避免抖动误判)。 */
     private static final int HYSTART_MIN_SAMPLES = 8;
 
@@ -57,6 +59,11 @@ public final class CubicCongestionControl implements TcpCongestionControl {
     private long tcpCwnd;
     /** ACK 累计 — 达到 {@code cnt} 后 cwnd++。 */
     private int ackCnt;
+    /**
+     * Reno-friendly W_est 累加器(RFC 9438 §4.3):每 W_est 个 ACK 累计后 W_est++,
+     * 等价于"每 RTT 增 1 段"。
+     */
+    private int renoAckCnt;
 
     // Hystart++ 状态(简化版)
     /** Hystart++ 是否已强制退出 slow start(本 epoch)。 */
@@ -78,6 +85,7 @@ public final class CubicCongestionControl implements TcpCongestionControl {
         bicOrigin = 0L;
         tcpCwnd = 0L;
         ackCnt = 0;
+        renoAckCnt = 0;
         hystartReset();
     }
 
@@ -122,10 +130,13 @@ public final class CubicCongestionControl implements TcpCongestionControl {
                 if (com.github.pangolin.routing.acceptor.tun.net.v2.tcp.core.TcpSequence
                         .after(s.sndUna(), hystartRoundEnd)
                         || s.sndUna() == hystartRoundEnd) {
+                    // RFC 9406 §4.2 动态阈值:max(MIN, min(MAX, sample_min / 8))
+                    long rttThresh = Math.max(HYSTART_RTT_THRESH_MIN_US,
+                            Math.min(HYSTART_RTT_THRESH_MAX_US, hystartCurrRoundMinRttUs / 8L));
                     if (!hystartFound
                             && hystartLastRoundMinRttUs > 0L
                             && hystartCurrRoundSamples >= HYSTART_MIN_SAMPLES
-                            && hystartCurrRoundMinRttUs > hystartLastRoundMinRttUs + HYSTART_RTT_THRESH_US) {
+                            && hystartCurrRoundMinRttUs > hystartLastRoundMinRttUs + rttThresh) {
                         // RTT 显著上升 → 缓冲填满 → 提前退出 slow start
                         hystartFound = true;
                         s.ssthresh(s.cwnd());      // 让 cwnd ≥ ssthresh,下次进 CA
@@ -158,6 +169,7 @@ public final class CubicCongestionControl implements TcpCongestionControl {
             }
             ackCnt = 0;
             tcpCwnd = cwnd;
+            renoAckCnt = 0;
         }
 
         // 当前 cubic target:bic_origin + C * (t - K)^3
@@ -173,8 +185,15 @@ public final class CubicCongestionControl implements TcpCongestionControl {
             cnt = 100L * cwnd;       // target ≤ cwnd:几乎不增长
         }
 
-        // TCP friendliness:模拟 Reno 增长,与 cubic 取较快者
-        tcpCwnd += rs.ackedPackets;
+        // Reno-friendly W_est 增长(RFC 9438 §4.3):每 W_est ACK 增 1 段,等价 Reno
+        // 每 RTT +1 段。原 v2 简化版直接 += newlyAcked 等于每 RTT 翻倍,过激;改为
+        // ack_cnt / W_est 累加器。
+        renoAckCnt += rs.ackedPackets;
+        while (tcpCwnd > 0L && renoAckCnt >= tcpCwnd) {
+            renoAckCnt -= tcpCwnd;
+            tcpCwnd++;
+        }
+        // 与 cubic target 取较快者(Reno 友好性:cubic 慢于 Reno 时跟 Reno)
         if (tcpCwnd > cwnd) {
             long tcpDelta = tcpCwnd - cwnd;
             if (tcpDelta > 0L) {
