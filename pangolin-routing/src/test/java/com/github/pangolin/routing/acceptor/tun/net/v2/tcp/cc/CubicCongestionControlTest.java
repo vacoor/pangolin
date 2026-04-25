@@ -134,6 +134,53 @@ class CubicCongestionControlTest {
                 .isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("CUBIC undoCwnd = max(priorCwnd, cwnd) — 不让自然增长被压回")
+    void undoCwndPicksMax() {
+        TcpSock sock = initializer.handler().sock();
+        Sender s = sock.sender();
+        CubicCongestionControl cc =
+                (CubicCongestionControl) s.congestionControl();
+
+        s.cwnd(80);
+        s.priorCwnd(60);
+        assertThat(cc.undoCwnd(sock)).as("cwnd > priorCwnd → 取 cwnd").isEqualTo(80);
+
+        s.cwnd(40);
+        s.priorCwnd(60);
+        assertThat(cc.undoCwnd(sock)).as("priorCwnd > cwnd → 取 priorCwnd").isEqualTo(60);
+    }
+
+    @Test
+    @DisplayName("CUBIC 退出 Recovery:cwnd = ssthresh(NewReno 风格收尾)")
+    void recoveryExitDeflatesCwnd() {
+        TcpSock sock = initializer.handler().sock();
+        Sender s = sock.sender();
+        CubicCongestionControl cc =
+                (CubicCongestionControl) s.congestionControl();
+
+        // 模拟 Recovery 期 inflated cwnd
+        s.cwnd(15);
+        s.ssthresh(7);
+        s.congestionState(TcpSock.CongestionState.OPEN);
+        cc.onStateChange(sock, TcpSock.CongestionState.RECOVERY,
+                TcpSock.CongestionState.OPEN);
+
+        assertThat(s.cwnd())
+                .as("退出 Recovery cwnd = ssthresh")
+                .isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("CUBIC pacingRateBps 默认 0(不 pace)")
+    void cubicDoesNotPaceByDefault() {
+        TcpSock sock = initializer.handler().sock();
+        Sender s = sock.sender();
+        CubicCongestionControl cc =
+                (CubicCongestionControl) s.congestionControl();
+        assertThat(cc.pacingRateBps(sock)).as("CUBIC 不 pace").isZero();
+    }
+
     private int completeHandshake() {
         harness.sendInbound(PacketFactory.syn(
                 CLIENT_IP, CLIENT_PORT, SERVER_IP, SERVER_PORT, CLIENT_ISN));
