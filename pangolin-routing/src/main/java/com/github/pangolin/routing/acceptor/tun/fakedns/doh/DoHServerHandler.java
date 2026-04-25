@@ -9,12 +9,14 @@ import io.netty.handler.codec.CorruptedFrameException;
 import io.netty.handler.codec.dns.*;
 import io.netty.handler.codec.http.*;
 import io.netty.util.CharsetUtil;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.Base64;
 
+@Slf4j
 public class DoHServerHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     
     @Override
@@ -217,7 +219,7 @@ public class DoHServerHandler extends SimpleChannelInboundHandler<FullHttpReques
     
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        cause.printStackTrace();
+        log.error("DoH handler caught exception", cause);
         ctx.close();
     }
 

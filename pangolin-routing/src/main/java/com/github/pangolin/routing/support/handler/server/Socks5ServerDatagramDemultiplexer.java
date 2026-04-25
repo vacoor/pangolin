@@ -10,6 +10,7 @@ import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.util.AbstractReferenceCounted;
 import io.netty.util.ReferenceCounted;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -19,6 +20,7 @@ import java.util.concurrent.ConcurrentMap;
  * @since 20240831
  */
 // @Sharable
+@Slf4j
 public class Socks5ServerDatagramDemultiplexer extends ChannelInboundHandlerAdapter {
     private final DatagramChannelFactory datagramChannelFactory;
     private final ConcurrentMap<InetAddress, HandlerRef> handlerMap = Maps.newConcurrentMap();
@@ -58,7 +60,7 @@ public class Socks5ServerDatagramDemultiplexer extends ChannelInboundHandlerAdap
                 return new HandlerRef(newHandler(sender));
             }
         });
-        System.out.println(handler);
+        log.debug("join: handler={}", handler);
     }
 
     public void leave(final InetSocketAddress sender) {

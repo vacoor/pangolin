@@ -33,6 +33,7 @@ import java.util.List;
 /**
  *
  */
+@Slf4j
 public class TrojanDatagramProxyHandler extends ChannelDuplexHandler {
     private static final byte CR = 0x0D;
     private static final byte LF = 0x0A;
@@ -96,7 +97,7 @@ public class TrojanDatagramProxyHandler extends ChannelDuplexHandler {
 
                             @Override
                             public void channelRead0(final ChannelHandlerContext ctx, final DatagramPacket msg) throws Exception {
-                                System.out.println(msg);
+                                log.debug("trojan UDP inbound: {}", msg);
                                 // FIXME replace recipt
 //                                udpCtx.writeAndFlush(msg.retain());
                                 udpCtx.fireChannelRead(msg.retain());

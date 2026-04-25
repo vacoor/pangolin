@@ -11,7 +11,9 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.SelfSignedCertificate;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class DnsOverHttpServer {
     private final int port;
     
@@ -34,7 +36,7 @@ public class DnsOverHttpServer {
                     .childOption(ChannelOption.SO_KEEPALIVE, true);
             
             ChannelFuture future = bootstrap.bind(port).sync();
-            System.out.println("DNS over HTTP Server started on port " + port);
+            log.info("DNS over HTTP Server started on port {}", port);
             
             future.channel().closeFuture().sync();
         } finally {

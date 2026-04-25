@@ -58,7 +58,7 @@ public class RuleExporterAcceptor implements Acceptor {
                     final InetSocketAddress localAddress = (InetSocketAddress) future.channel().localAddress();
                     log.info("Web interface started on port: {} ({})", localAddress.getPort(), localAddress);
                 } else {
-                    future.cause().printStackTrace();
+                    log.error("Web interface failed to start on port {}", listenPort, future.cause());
                 }
             }
         });
