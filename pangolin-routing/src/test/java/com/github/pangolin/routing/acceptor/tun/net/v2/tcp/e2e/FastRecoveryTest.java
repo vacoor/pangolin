@@ -59,7 +59,7 @@ class FastRecoveryTest {
     }
 
     @Test
-    @DisplayName("3 个 dup ACK → 进 RECOVERY + cwnd 减半 + 重传队首段")
+    @DisplayName("3 个 dup ACK → 进 RECOVERY + ssthresh 减半 + cwnd 入口不变(PRR) + 重传队首段")
     void threeDupacksEnterRecovery() {
         CapturingInitializer.CapturingHandler h = initializer.handler();
         TcpSock sock = h.sock();
@@ -81,9 +81,7 @@ class FastRecoveryTest {
         assertThat(sender.dupacks()).isZero();
 
         int initialCwnd = sender.cwnd();
-        int initialSsthresh = sender.ssthresh();
         int expectedNewSsthresh = Math.max(initialCwnd / 2, 2);
-        int expectedNewCwnd = expectedNewSsthresh + 3;
 
         // 发 3 个完全相同的 dup ACK(ack_num = origSeq,不推进 SND.UNA)
         for (int i = 0; i < 3; i++) {
@@ -103,10 +101,14 @@ class FastRecoveryTest {
                 .as("ssthresh should halve to max(cwnd/2, 2)")
                 .isEqualTo(expectedNewSsthresh);
 
-        // cwnd 膨胀到 ssthresh + 3
+        // PRR(对齐 Linux tcp_enter_recovery + tcp_init_cwnd_reduction):
+        // 进 Recovery 时 cwnd 不变,由 PRR 在每个 ACK 上把 cwnd 平滑下降到 ssthresh
         assertThat(sender.cwnd())
-                .as("cwnd inflates to ssthresh + 3 on Fast Retransmit entry")
-                .isEqualTo(expectedNewCwnd);
+                .as("PRR: cwnd stays at prior_cwnd on Recovery entry (smooth deflate via PRR)")
+                .isEqualTo(initialCwnd);
+
+        // PRR 计数器入口清零
+        assertThat(sender.prrDelivered()).as("prrDelivered cleared on Recovery entry").isZero();
 
         // highSeq 锁到进入 Recovery 时的 sndNxt
         assertThat(sender.highSeq())
@@ -126,8 +128,8 @@ class FastRecoveryTest {
     }
 
     @Test
-    @DisplayName("RECOVERY 中,新的 dupacks 继续到达:cwnd 递增(inflation),highSeq 不变")
-    void dupacksInRecoveryInflateCwnd() {
+    @DisplayName("RECOVERY 中,继续到达的 dupack 由 PRR 调整 cwnd:不再硬 inflate;highSeq 不变")
+    void dupacksInRecoveryDriveCwndViaPrr() {
         CapturingInitializer.CapturingHandler h = initializer.handler();
         Sender sender = h.sock().sender();
 
@@ -148,9 +150,10 @@ class FastRecoveryTest {
         assertThat(h.sock().inRecovery()).isTrue();
 
         int cwndAtEntry = sender.cwnd();
+        int ssthreshAtEntry = sender.ssthresh();
         int highSeqAtEntry = sender.highSeq();
 
-        // 继续在 Recovery 中再收一个 dupack:走 incrementCwnd 分支(NewReno 的 cwnd inflation)
+        // 继续在 Recovery 中再收一个 dupack(无新 delivered):走 PRR 路径
         harness.sendInbound(PacketFactory.ack(
                 CLIENT_IP, CLIENT_PORT, SERVER_IP, SERVER_PORT,
                 CLIENT_ISN + 1, origSeq));
@@ -160,12 +163,20 @@ class FastRecoveryTest {
         assertThat(h.sock().inRecovery())
                 .as("still in RECOVERY after extra dupack")
                 .isTrue();
+        // PRR 行为:无 delivered 进展 → cwnd 由 PRR 公式重算,
+        //          典型为 pipe + lossSegments,不再走经典 NewReno 的 cwnd++
         assertThat(sender.cwnd())
-                .as("extra dupack during Recovery inflates cwnd (Linux tcp_cwnd_inflate)")
-                .isGreaterThan(cwndAtEntry);
+                .as("PRR keeps cwnd bounded; no longer cwnd++ on dupack")
+                .isLessThanOrEqualTo(cwndAtEntry);
+        // 经过 PRR 后 cwnd ≥ 1(允许重传至少 lossSegments=1 段)
+        assertThat(sender.cwnd()).as("PRR floor: cwnd ≥ 1").isGreaterThanOrEqualTo(1);
         assertThat(sender.highSeq())
                 .as("highSeq is a snapshot at entry; dupacks in Recovery don't change it")
                 .isEqualTo(highSeqAtEntry);
+        // ssthresh 不变
+        assertThat(sender.ssthresh())
+                .as("ssthresh unchanged inside Recovery")
+                .isEqualTo(ssthreshAtEntry);
     }
 
     // ---- helpers ----

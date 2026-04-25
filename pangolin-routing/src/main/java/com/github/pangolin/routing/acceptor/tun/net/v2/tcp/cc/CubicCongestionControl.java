@@ -102,17 +102,17 @@ public final class CubicCongestionControl implements TcpCongestionControl {
         Sender s = sock.sender();
         TcpSock.CongestionState st = s.congestionState();
 
-        // RECOVERY 期间 dupack inflation(与 NewReno 同语义):cwnd++
-        if (st == TcpSock.CongestionState.RECOVERY && rs.ackedPackets == 0) {
-            s.cwnd(s.cwnd() + 1);
+        // RECOVERY 期间(含 dupack 与 partial ACK):PRR 接管 cwnd 调整,
+        // 替代经典 NewReno-style "dupack inflation cwnd++"。
+        if (st == TcpSock.CongestionState.RECOVERY) {
+            Prr.onAck(sock, rs, 1);
+            return;
+        }
+        if (st == TcpSock.CongestionState.LOSS) {
+            // Loss 中持续累计 ACK 但未退出,不动 cwnd
             return;
         }
         if (rs.ackedPackets <= 0) return;
-        if (st == TcpSock.CongestionState.RECOVERY
-                || st == TcpSock.CongestionState.LOSS) {
-            // Recovery / Loss 内不动 cwnd,等状态退出后走自然增长
-            return;
-        }
 
         // Slow start:cwnd += newlyAcked,Hystart++ 监测 RTT 上升提前退出
         if (s.cwnd() < s.ssthresh()) {
@@ -242,8 +242,11 @@ public final class CubicCongestionControl implements TcpCongestionControl {
         if (newS == TcpSock.CongestionState.RECOVERY
                 && (oldS == TcpSock.CongestionState.OPEN
                         || oldS == TcpSock.CongestionState.DISORDER)) {
-            // Fast Retransmit 入口:cwnd = ssthresh + 3(NewReno 风格 dupack inflation)
-            s.cwnd(s.ssthresh() + 3);
+            // 对齐 Linux tcp_enter_recovery + tcp_init_cwnd_reduction:
+            //   cwnd 在入口保持 prior_cwnd,由 PRR 在每个 ACK 平滑下降到 ssthresh。
+            //   priorCwnd / priorSsthresh 已由 Sender.tcpInitUndo 快照,ssthresh 已设。
+            Prr.enterRecovery(sock);
+            // CUBIC 自身 epoch 重置(下次 CA 重新算 K / bicOrigin)
             epochStartUs = 0L;
         } else if (newS == TcpSock.CongestionState.LOSS) {
             // RTO 进 Loss:cwnd = 1

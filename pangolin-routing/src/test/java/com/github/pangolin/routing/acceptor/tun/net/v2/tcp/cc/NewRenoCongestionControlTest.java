@@ -120,29 +120,48 @@ class NewRenoCongestionControlTest {
     }
 
     @Test
-    @DisplayName("onAck RECOVERY + ackedPackets=0:dupack inflation cwnd++")
-    void onAckRecoveryDupackInflation() {
+    @DisplayName("onAck RECOVERY + ackedPackets=0(dupack):PRR 接管,sndcnt 至少 lossSegments=1")
+    void onAckRecoveryDupackTriggersPrr() {
         TcpSock sock = initializer.handler().sock();
         Sender s = sock.sender();
         s.cwnd(10);
+        s.ssthresh(5);
+        s.priorCwnd(10);
+        s.prrDelivered(0);
+        s.prrOut(0);
         s.congestionState(TcpSock.CongestionState.RECOVERY);
 
+        // 没有任何 inflight(packetsOut=0 → pipe=0):走 SSRB 分支
+        //   limit = max(prrDelivered(0) - prrOut(0), lossSegments(1)) = 1
+        //   sndcnt = min(limit, ssthresh - pipe) = min(1, 5) = 1
+        //   sndcnt = max(sndcnt, lossSegments) = 1
+        //   cwnd = pipe + sndcnt = 0 + 1 = 1
         RateSample rs = new RateSample();   // ackedPackets=0 表 dupack
         reno.onAck(sock, rs);
-        assertThat(s.cwnd()).as("Recovery dupack inflation cwnd++").isEqualTo(11);
+        assertThat(s.cwnd())
+                .as("PRR Recovery + dupack(无 delivered,无 inflight)→ cwnd = pipe + lossSegments")
+                .isEqualTo(1);
     }
 
     @Test
-    @DisplayName("onStateChange OPEN→RECOVERY:cwnd = ssthresh + 3")
-    void onStateChangeRecoveryEntryInflatesCwnd() {
+    @DisplayName("onStateChange OPEN→RECOVERY:PRR 重置 prrDelivered/prrOut,不动 cwnd")
+    void onStateChangeRecoveryEntryResetsPrrCountersWithoutTouchingCwnd() {
         TcpSock sock = initializer.handler().sock();
         Sender s = sock.sender();
         s.cwnd(20);
         s.ssthresh(7);          // 已被 Sender 通过 cc.ssthresh() 设好
+        s.priorCwnd(20);
+        s.prrDelivered(99);     // 上一轮残留(应该被清零)
+        s.prrOut(77);
         s.congestionState(TcpSock.CongestionState.RECOVERY);
 
         reno.onStateChange(sock, TcpSock.CongestionState.OPEN, TcpSock.CongestionState.RECOVERY);
-        assertThat(s.cwnd()).as("Recovery 入口 cwnd = ssthresh + 3").isEqualTo(10);
+
+        // 对齐 Linux tcp_enter_recovery + tcp_init_cwnd_reduction:
+        //   cwnd 在入口保持不变(由 PRR 在每个 ACK 平滑下降到 ssthresh)
+        assertThat(s.cwnd()).as("Recovery 入口 cwnd 不变(PRR 接管平滑下降)").isEqualTo(20);
+        assertThat(s.prrDelivered()).as("prrDelivered 清零").isZero();
+        assertThat(s.prrOut()).as("prrOut 清零").isZero();
     }
 
     @Test

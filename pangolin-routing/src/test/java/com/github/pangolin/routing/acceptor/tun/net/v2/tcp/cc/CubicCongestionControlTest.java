@@ -82,7 +82,7 @@ class CubicCongestionControlTest {
     }
 
     @Test
-    @DisplayName("CUBIC ssthresh:进 Recovery 时 ssthresh = cwnd × 0.7")
+    @DisplayName("CUBIC ssthresh:进 Recovery 时 ssthresh = cwnd × 0.7,cwnd 入口不变(PRR)")
     void recoveryHalvesSsthreshByBeta() {
         TcpSock sock = initializer.handler().sock();
         Sender sender = sock.sender();
@@ -108,10 +108,12 @@ class CubicCongestionControlTest {
         assertThat(sender.ssthresh())
                 .as("CUBIC ssthresh = cwnd × 0.7(BETA)")
                 .isEqualTo(expectedSs);
-        // FR 入口:cwnd = ssthresh + 3
+        // PRR(对齐 Linux tcp_init_cwnd_reduction):入口 cwnd 不变,
+        // 由 Prr.onAck 在每个 ACK 平滑下降到 ssthresh
         assertThat(sender.cwnd())
-                .as("CUBIC onStateChange(RECOVERY):cwnd = ssthresh + 3")
-                .isEqualTo(expectedSs + 3);
+                .as("PRR: cwnd stays at prior_cwnd on Recovery entry")
+                .isEqualTo(cwndBefore);
+        assertThat(sender.prrDelivered()).as("prrDelivered cleared at entry").isZero();
     }
 
     @Test

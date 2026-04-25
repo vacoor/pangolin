@@ -372,6 +372,8 @@ public final class TcpOutput {
         }
 
         __tcp_transmit_skb(sock, oldest, sock.receiver().rcvNxt());
+        // PRR 计数:Recovery 期间每发出一段(重传)+1
+        com.github.pangolin.routing.acceptor.tun.net.v2.tcp.cc.Prr.onSegmentSent(sock);
     }
 
     // ── writeXmit and sendFin ───────────────────────────────────
@@ -1174,6 +1176,8 @@ public final class TcpOutput {
         if (startRto || (sock.timers() != null && sock.timers().writeTimerType == TimerType.TLP_PROBE)) {
             sock.sender().scheduleRetransmit();
         }
+        // PRR 计数:Recovery 期间每发出一段(原始数据)+1
+        com.github.pangolin.routing.acceptor.tun.net.v2.tcp.cc.Prr.onSegmentSent(sock);
     }
 
     private void scheduleLossProbe(TcpSock sock) {

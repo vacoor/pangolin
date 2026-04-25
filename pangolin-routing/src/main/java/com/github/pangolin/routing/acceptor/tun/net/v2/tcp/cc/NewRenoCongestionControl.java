@@ -37,20 +37,18 @@ public final class NewRenoCongestionControl implements TcpCongestionControl {
         Sender s = sock.sender();
         TcpSock.CongestionState st = s.congestionState();
 
-        // RECOVERY 期间 dupack inflation:Sender 用 ackedPackets=0 发信号
-        if (st == TcpSock.CongestionState.RECOVERY && rs.ackedPackets == 0) {
-            s.cwnd(s.cwnd() + 1);
+        // RECOVERY 期间(含 dupack 与 partial ACK):PRR 接管 cwnd 调整
+        if (st == TcpSock.CongestionState.RECOVERY) {
+            Prr.onAck(sock, rs, 1);
+            return;
+        }
+        if (st == TcpSock.CongestionState.LOSS) {
+            // Loss 中持续累计 ACK 但未退出,不动 cwnd
             return;
         }
 
-        // 正常 ACK 增长(OPEN / DISORDER / 退出 RECOVERY|LOSS 后):slow start / CA
-        // ackedPackets 由 Sender 在 advanced 路径填,RECOVERY/Loss 内部走自然 cwnd 不增。
+        // 正常 ACK 增长(OPEN / DISORDER):slow start / CA
         if (rs.ackedPackets <= 0) return;
-        if (st == TcpSock.CongestionState.RECOVERY
-                || st == TcpSock.CongestionState.LOSS) {
-            // Recovery / Loss 中持续累计 ACK 但未跨 highSeq,不动 cwnd(对齐 Linux tcp_in_cwnd_reduction)
-            return;
-        }
 
         if (s.cwnd() < s.ssthresh()) {
             // Slow start:cwnd += newlyAcked
@@ -88,9 +86,14 @@ public final class NewRenoCongestionControl implements TcpCongestionControl {
         if (newS == TcpSock.CongestionState.RECOVERY
                 && (oldS == TcpSock.CongestionState.OPEN
                         || oldS == TcpSock.CongestionState.DISORDER)) {
-            // Fast Retransmit cwnd inflation:cwnd = ssthresh + 3
-            // (Sender 在调本方法前已经把 ssthresh 通过 cc.ssthresh() 设好)
-            s.cwnd(s.ssthresh() + 3);
+            // 对齐 Linux tcp_enter_recovery + tcp_init_cwnd_reduction:
+            //   进 Recovery 时 cwnd **不变**(保持 prior_cwnd),由 PRR 在每个
+            //   ACK 平滑下降到 ssthresh。priorCwnd / priorSsthresh 已由 Sender
+            //   tcpInitUndo 快照,cc.ssthresh() 已被 Sender 设到 ssthresh 字段。
+            //   markHeadLost + retransmit 触发的 Fast Retransmit 段直接发出,
+            //   PRR 计数 prr_out 由 TcpOutput.eventNewDataSent / retransmitSkb
+            //   末尾的 Prr.onSegmentSent 维护。
+            Prr.enterRecovery(sock);
         } else if (newS == TcpSock.CongestionState.LOSS) {
             // 进 Loss:cwnd = 1(对齐 Linux tcp_enter_loss)
             s.cwnd(1);

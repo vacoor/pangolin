@@ -824,6 +824,17 @@ public final class Sender {
     /** Per-Sender pacing token bucket。 */
     public PacingTokenBucket pacingBucket() { return pacingBucket; }
 
+    // ── PRR 状态(RFC 6937,Recovery 期 cwnd 平滑下降) ─────────────────────────
+    /** Recovery 期间累计交付的段数。Mirrors Linux {@code tp->prr_delivered}。 */
+    private int prrDelivered;
+    /** Recovery 期间发出的段数。Mirrors Linux {@code tp->prr_out}。 */
+    private int prrOut;
+
+    public int prrDelivered() { return prrDelivered; }
+    public void prrDelivered(int v) { this.prrDelivered = Math.max(v, 0); }
+    public int prrOut() { return prrOut; }
+    public void prrOut(int v) { this.prrOut = Math.max(v, 0); }
+
     // ── Per-ACK scratchpad(BBR rate sample 输入,cleanRtxQueue 内填) ─────────
     /** 本次 ACK 释放最旧段的 sentTimeUs(微秒);0 表示无效样本。 */
     private long ackFirstSentTimeUs;
