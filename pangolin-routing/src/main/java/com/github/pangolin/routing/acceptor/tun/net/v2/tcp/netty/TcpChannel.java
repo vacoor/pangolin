@@ -160,9 +160,12 @@ public class TcpChannel extends AbstractChannel {
         }
         if (pendingInbound.isEmpty()) {
             readRequested = true;
-            // 接收缓冲仍有数据则放开 rcvPaused,由下一次 dataQueue 驱动 consume
+            // 接收缓冲仍有数据则放开 rcvPaused 并触发 tcp_cleanup_rbuf —— 主动 drain
+            // 缓冲里残留段并按需发 window-update ACK,避免对端因停在零/小窗等开窗
+            // 卡死(对齐 Linux tcp_recvmsg → tcp_cleanup_rbuf 在每次应用读后调一次)。
             if (sock.receiver().paused() && sock.receiver().buffer() != null && sock.receiver().buffer().isReadable()) {
                 sock.receiver().paused(false);
+                sock.receiver().tcpCleanupRbuf();
             }
             return;
         }

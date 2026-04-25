@@ -1202,7 +1202,7 @@ public final class TcpOutput {
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L3084">__tcp_select_window</a>
      * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L260">tcp_select_window</a>
      */
-    private static int selectAdvertisedWindow(TcpSock sock) {
+    static int selectAdvertisedWindow(TcpSock sock) {
         final int curWin = sock.receiver().receiveWindow();
         final int wscale = sock.rcvWscale();
         int mss = sock.rcvMss();
@@ -1217,8 +1217,15 @@ public final class TcpOutput {
             mss = fullSpace;
         }
 
-        // 零窗阈值(对齐 Linux:free_space < allowed_space/16 || free_space < mss)
+        // 中间分支(对齐 Linux __tcp_select_window:free_space < full_space/2 时):
+        //   1. icsk->icsk_ack.quick = 0 —— 退出 quick-ACK 模式,降低 ACK 风暴风险;
+        //   2. free_space = round_down(free_space, mss) —— MSS 对齐再判定零窗;
+        //   3. 若 free_space < allowed_space/16 || free_space < mss → 通告零窗。
         if (freeSpace < (fullSpace >> 1)) {
+            sock.receiver().quickAckCount(0);
+            if (mss > 0) {
+                freeSpace = roundDown(freeSpace, mss);
+            }
             if (freeSpace < (allowedSpace >> 4) || freeSpace < mss) {
                 sock.receiver().rcvWnd(0);
                 sock.receiver().rcvWup(sock.receiver().rcvNxt());
@@ -1257,9 +1264,14 @@ public final class TcpOutput {
             }
         }
 
-        // no-shrink 外层保护(对齐 Linux tcp_select_window):wscale != 0 时不得收缩
-        if (window < curWin && wscale != 0) {
-            window = align(curWin, 1 << wscale);
+        // no-shrink 外层保护(对齐 Linux tcp_select_window):无论 wscale 是否为 0,
+        // 新通告窗口都不得小于已通告窗口(右边沿不得回缩,RFC 793 §3.7、9293 §3.8.6)。
+        // wscale=0 时 align 步长为 1,等价于直接 fall back 到 curWin;
+        // wscale!=0 时按 (1<<wscale) 边界 align curWin,保证缩放后位段足够表示。
+        // 注:零窗 advertise 在前面的 "free_space < fullSpace/2 && (< allowed/16 || < mss)"
+        // 早返路径 return 0 已经处理,本 if 不会拦截零窗通告。
+        if (window < curWin) {
+            window = align(curWin, wscale == 0 ? 1 : (1 << wscale));
         }
 
         sock.receiver().rcvWnd(window);

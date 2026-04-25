@@ -315,10 +315,19 @@ public class TcpSock extends SockCommon {
         // 子 sock 由 SYN 中 TSval 初始化 ts_recent,刷新时戳也在此点建立
         sock.tsRecentStamp = timestampEnabled ? SegmentDispatcher.nowSeconds() : 0;
         // 接收侧窗口预算初始化(对齐 Linux tcp_init_buffer_space):
-        // rcvBuf / windowClamp 取当前通告窗口,rcvSsthresh 同步(无缩放时退化为 rcvWnd)
+        //   rcvBuf      = max(rcvWnd, TCP_DEFAULT_RCV_BUF) —— 总预算上限
+        //   windowClamp = 同上 —— 用户配置的通告窗口硬上限
+        //   rcvSsthresh = min(rcvWnd, 4*advmss) —— 通告窗口的 slow-start 起点
+        //                (对齐 Linux tcp_init_buffer_space 的 rcv_ssthresh 初值口径)。
+        //                留出大段 room 让 tcp_grow_window 在每个顺序段到达后把
+        //                rcv_ssthresh 推向 windowClamp;若初始等于 windowClamp,
+        //                grow 永远 room ≤ 0,rcvSsthresh 就失去"slow-start +
+        //                内存压力记忆"的双重作用。SYN-ACK 上的 advertise 仍由
+        //                config.initialRcvWnd() 决定(本初始化只影响 SYN-ACK 后
+        //                的 ACK 段中的窗口算法,且 no-shrink 守卫保证不会回退)。
         sock.receiver().rcvBuf(Math.max(rcvWnd, TcpConstants.TCP_DEFAULT_RCV_BUF));
         sock.receiver().windowClamp(Math.max(rcvWnd, TcpConstants.TCP_DEFAULT_RCV_BUF));
-        sock.receiver().rcvSsthresh(Math.max(rcvWnd, TcpConstants.TCP_DEFAULT_RCV_BUF));
+        sock.receiver().rcvSsthresh(Math.min(rcvWnd, 4 * Math.max(mss, TcpConstants.TCP_MSS_DEFAULT)));
         // PMTU / tcp_header_len 初始化(对齐 Linux tcp_create_openreq_child):
         //   tcp_header_len = 20 + (tstamp_ok ? TCPOLEN_TSTAMP_ALIGNED(12) : 0)
         //   mssCache 延迟到首次 syncMss;pmtuCookie/dstMtu 默认 0(无 PMTU 发现)

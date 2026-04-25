@@ -93,6 +93,7 @@ public final class TcpReceiveBuffer {
         boolean currentFin = false;
         int dsackStart = 0;
         int dsackEnd   = 0;
+        boolean ofoPruned = false;
 
         if (!TcpSequence.after(endSeq, rcvNxt)) {
             // 整段已被累计 ACK 吸收 — 对齐 Linux tcp_dsack_set (Case 1 of RFC 2883)。
@@ -108,6 +109,7 @@ public final class TcpReceiveBuffer {
                 dsackStart = ofo.dsackStart;
                 dsackEnd   = ofo.dsackEnd;
             }
+            ofoPruned = ofo.pruned;
         } else {
             // seq <= rcvNxt < endSeq: deliver (with leading-byte trim for partial overlap).
             int skip = rcvNxt - seq;
@@ -132,7 +134,7 @@ public final class TcpReceiveBuffer {
 
         // Drain any contiguous OFO segments now deliverable.
         DrainOutcome drain = drainOfo(rcvNxt);
-        return new OfferResult(drain.rcvNxt, currentFin || drain.finDelivered, dsackStart, dsackEnd);
+        return new OfferResult(drain.rcvNxt, currentFin || drain.finDelivered, dsackStart, dsackEnd, ofoPruned);
     }
 
     /**
@@ -212,12 +214,14 @@ public final class TcpReceiveBuffer {
         }
 
         // ── OFO 队列自身预算(Linux tcp_prune_ofo_queue / sk_rcvbuf/2 启发式) ──
+        boolean pruned = false;
         if (ofoBytes >= OFO_MAX_BYTES) {
             tcpPruneOfoQueue();
+            pruned = true;
             if (ofoBytes >= OFO_MAX_BYTES) {
                 TcpMibStats.INSTANCE.inc(TcpMib.TCPOFODROP);
                 data.release();
-                return new OfoResult(false, 0, 0);
+                return new OfoResult(false, 0, 0, true);
             }
         }
 
@@ -234,7 +238,7 @@ public final class TcpReceiveBuffer {
                         : prev.endSeq();
                 if (!TcpSequence.after(endSeq, prev.endSeq())) {
                     data.release();
-                    return new OfoResult(false, dsackStart, dsackEnd);
+                    return new OfoResult(false, dsackStart, dsackEnd, pruned);
                 }
                 seq = prev.endSeq();
             }
@@ -271,7 +275,7 @@ public final class TcpReceiveBuffer {
 
         if (!TcpSequence.before(seq, endSeq) && !retainedFin) {
             data.release();
-            return new OfoResult(false, dsackStart, dsackEnd);
+            return new OfoResult(false, dsackStart, dsackEnd, pruned);
         }
 
         final int leadingTrim = seq - origSeq;              // bytes of `data` to skip
@@ -289,7 +293,7 @@ public final class TcpReceiveBuffer {
         byte flags = (byte) (retainedFin ? TcpConstants.TCPHDR_FIN : 0);
         ofoQueue.put(seq, new TcpSegment(slice, seq, payloadLen, flags, 0L));
         addOfoBytes(slice.readableBytes());
-        return new OfoResult(true, dsackStart, dsackEnd);
+        return new OfoResult(true, dsackStart, dsackEnd, pruned);
     }
 
     /**
@@ -535,16 +539,24 @@ public final class TcpReceiveBuffer {
         public final boolean finDelivered;
         public final int     dsackStart;
         public final int     dsackEnd;
+        /** 本次 offer 期间 OFO 队列触发了 prune,调用方应执行 tcp_clamp_window 把
+         *  rcv_ssthresh 写回到 {@code 2*advmss}(对齐 Linux tcp_clamp_window)。 */
+        public final boolean ofoPruned;
 
         public OfferResult(int rcvNxt, boolean finDelivered) {
-            this(rcvNxt, finDelivered, 0, 0);
+            this(rcvNxt, finDelivered, 0, 0, false);
         }
 
         public OfferResult(int rcvNxt, boolean finDelivered, int dsackStart, int dsackEnd) {
+            this(rcvNxt, finDelivered, dsackStart, dsackEnd, false);
+        }
+
+        public OfferResult(int rcvNxt, boolean finDelivered, int dsackStart, int dsackEnd, boolean ofoPruned) {
             this.rcvNxt       = rcvNxt;
             this.finDelivered = finDelivered;
             this.dsackStart   = dsackStart;
             this.dsackEnd     = dsackEnd;
+            this.ofoPruned    = ofoPruned;
         }
 
         public boolean hasDsack() {
@@ -567,11 +579,19 @@ public final class TcpReceiveBuffer {
         public final boolean queued;
         public final int     dsackStart;
         public final int     dsackEnd;
+        /** 本次 offer 期间 OFO 队列触发了 prune(对齐 Linux tcp_prune_ofo_queue,
+         *  受信号方应执行 tcp_clamp_window 把 rcv_ssthresh 写回到 2*advmss)。 */
+        public final boolean pruned;
 
         public OfoResult(boolean queued, int dsackStart, int dsackEnd) {
+            this(queued, dsackStart, dsackEnd, false);
+        }
+
+        public OfoResult(boolean queued, int dsackStart, int dsackEnd, boolean pruned) {
             this.queued     = queued;
             this.dsackStart = dsackStart;
             this.dsackEnd   = dsackEnd;
+            this.pruned     = pruned;
         }
 
         public boolean hasDsack() {
