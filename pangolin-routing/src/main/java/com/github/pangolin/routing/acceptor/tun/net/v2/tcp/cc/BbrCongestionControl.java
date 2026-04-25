@@ -78,8 +78,12 @@ public final class BbrCongestionControl implements TcpCongestionControl {
     private int probeBwCycleIdx;
     /** ProbeBW 当前 cycle 起始时戳(微秒)。 */
     private long probeBwCycleStartUs;
-    /** ProbeRTT 退出时戳。 */
+    /** ProbeRTT 进入时戳(微秒) — cwnd 实际降到 PROBE_RTT_CWND 之后启动 200ms 计时器。 */
+    private long probeRttEnterUs;
+    /** ProbeRTT 退出时戳;0 表示 cwnd 还未 cap 到位。 */
     private long probeRttDoneUs;
+    /** ProbeRTT 期间看到的有效 RTT 样本数 — 退出条件之一。 */
+    private int probeRttRttSamplesSeen;
 
     @Override
     public void init(TcpSock sock) {
@@ -91,7 +95,9 @@ public final class BbrCongestionControl implements TcpCongestionControl {
         rtPropExpiryUs = 0L;
         probeBwCycleIdx = 0;
         probeBwCycleStartUs = 0L;
+        probeRttEnterUs = 0L;
         probeRttDoneUs = 0L;
+        probeRttRttSamplesSeen = 0;
         sock.sender().pacingRateBps(0L);
     }
 
@@ -111,6 +117,10 @@ public final class BbrCongestionControl implements TcpCongestionControl {
             if (rttUs < rtPropUs || nowUs > rtPropExpiryUs) {
                 rtPropUs = rttUs;
                 rtPropExpiryUs = nowUs + RTPROP_FILTER_LEN_US;
+            }
+            // ProbeRTT 退出条件之一:在 ProbeRTT 期间至少看到 1 个新 RTT 样本
+            if (phase == Phase.PROBE_RTT) {
+                probeRttRttSamplesSeen++;
             }
         }
 
@@ -174,11 +184,19 @@ public final class BbrCongestionControl implements TcpCongestionControl {
                 }
                 break;
             case DRAIN:
-                // Drain 完成条件:inflight ≤ BDP — 简化为"经过 1 个 RTprop 后转 ProbeBW"
-                // (严格版需读 tp->packets_out,这里粗略推进)
-                phase = Phase.PROBE_BW;
-                probeBwCycleStartUs = nowUs;
-                probeBwCycleIdx = 0;
+                // Drain 完成条件:inflight ≤ BDP(对齐 Linux bbr_check_drain)。
+                // BDP = BtlBw × RTprop / 1e6;inflight 字节 = packets_out × MSS。
+                long btlBwDrain = btlBwFilter.max();
+                if (btlBwDrain > 0L
+                        && rtPropUs > 0L && rtPropUs != Long.MAX_VALUE) {
+                    long bdpBytes = (btlBwDrain * rtPropUs) / 1_000_000L;
+                    long inflightBytes = (long) sock.packetsOut() * Math.max(sock.mss(), 1);
+                    if (inflightBytes <= bdpBytes) {
+                        phase = Phase.PROBE_BW;
+                        probeBwCycleStartUs = nowUs;
+                        probeBwCycleIdx = 0;
+                    }
+                }
                 break;
             case PROBE_BW:
                 // 每 RTprop 切换一次 cycle gain
@@ -190,13 +208,26 @@ public final class BbrCongestionControl implements TcpCongestionControl {
                 // 检查是否需要进入 ProbeRTT
                 if (nowUs > rtPropExpiryUs && rtPropExpiryUs > 0L) {
                     phase = Phase.PROBE_RTT;
-                    probeRttDoneUs = nowUs + PROBE_RTT_DURATION_US;
+                    probeRttEnterUs = nowUs;
+                    probeRttDoneUs = 0L;        // 待 cwnd 实际降到 PROBE_RTT_CWND 后再设
+                    probeRttRttSamplesSeen = 0;
                 }
                 break;
             case PROBE_RTT:
-                if (nowUs >= probeRttDoneUs) {
+                // ProbeRTT 退出条件(对齐 Linux bbr_check_probe_rtt_done):
+                //   1) cwnd 已降到 PROBE_RTT_CWND(cwnd 调整在 onAck 末尾完成)
+                //   2) 至少持续 PROBE_RTT_DURATION_US (200ms)
+                //   3) 至少看到 1 个新 RTT 样本(即 rs.rttUs > 0)
+                if (probeRttDoneUs == 0L && sock.cwnd() <= PROBE_RTT_CWND) {
+                    // 第一次满足 cwnd cap,启动 200ms 计时器
+                    probeRttDoneUs = nowUs + PROBE_RTT_DURATION_US;
+                }
+                if (probeRttDoneUs != 0L
+                        && nowUs >= probeRttDoneUs
+                        && probeRttRttSamplesSeen >= 1) {
                     phase = Phase.PROBE_BW;
                     probeBwCycleStartUs = nowUs;
+                    probeBwCycleIdx = 0;
                     rtPropExpiryUs = nowUs + RTPROP_FILTER_LEN_US;
                 }
                 break;
