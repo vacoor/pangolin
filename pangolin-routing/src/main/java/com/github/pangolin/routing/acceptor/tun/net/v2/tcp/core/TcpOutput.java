@@ -337,6 +337,11 @@ public final class TcpOutput {
         }
         if (!oldest.isRetransmitted()) {
             sock.incrUndoRetrans();
+            // 对齐 Linux __tcp_retransmit_skb:首次给段打 TCPCB_SACKED_RETRANS 时
+            // tp->retrans_out += pcount。同段后续重传不再重复计数(段已带 RETRANS 标记)。
+            // 由 TcpAck.cleanRtxQueue 在累计 ACK 释放该段时同步 -- 抵消;
+            // RTO 进入 Loss 时由 Sender.onTimeoutByCc 整体清零。
+            sock.incrRetransOut();
         }
 
         oldest.markRetransmitted();

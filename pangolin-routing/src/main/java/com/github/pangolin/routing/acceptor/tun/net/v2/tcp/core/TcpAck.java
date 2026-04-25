@@ -377,12 +377,16 @@ public final class TcpAck {
         TcpSegment skb;
         int sackedDecr = 0;
         int lostDecr = 0;
+        int retransDecr = 0;
         while ((skb = sock.sendBuffer().pollIfAcknowledged(ack)) != null) {
             final boolean retrans = skb.isRetransmitted();
             final long sentUs = skb.sentTimeUs();
 
             if (retrans) {
                 flag |= FLAG_RETRANS_DATA_ACKED;
+                // 对齐 Linux tcp_clean_rtx_queue:被累计 ACK 释放的段若曾经被
+                // __tcp_retransmit_skb 打过 TCPCB_SACKED_RETRANS,从 retrans_out 抵消。
+                retransDecr++;
             } else if (sentUs > 0) {
                 // 仅非重传段参与 RTT 采样 (Karn's algorithm)
                 lastAcktUs = sentUs;
@@ -424,6 +428,9 @@ public final class TcpAck {
         }
         if (lostDecr > 0) {
             sock.decrLostOut(lostDecr);
+        }
+        if (retransDecr > 0) {
+            sock.decrRetransOut(retransDecr);
         }
 
         if (ackedPcount > 0) {

@@ -1072,6 +1072,11 @@ public class TcpSock extends SockCommon {
     public void incrLostOut() { sender.incrementLostOut(); }
     public void decrLostOut(int n) { sender.decrementLostOut(n); }
 
+    /** 对应 Linux {@code tp->retrans_out}。 */
+    public int retransOut() { return sender.retransOut(); }
+    public void incrRetransOut() { sender.incrementRetransOut(); }
+    public void decrRetransOut(int n) { sender.decrementRetransOut(n); }
+
     /**
      * 登记下一次 ACK 要通告的 DSACK 块 {@code [start, end)} — 对齐 Linux
      * {@code tcp_dsack_set}。已存在待发 DSACK 时以最新值覆盖(v2 当前只通告一次,

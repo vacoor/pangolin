@@ -58,6 +58,18 @@ public final class Sender {
     private int sackedOut;
     /** 已被 LOST 标记的段数(RACK / NewReno tag)。Mirrors Linux {@code tp->lost_out}。 */
     private int lostOut;
+    /**
+     * 飞行中"重传段"的计数 — Mirrors Linux {@code tp->retrans_out}。
+     *
+     * <p>段在 {@link TcpOutput#retransmitSkb} 首次打 {@code TCPCB_SACKED_RETRANS}
+     * 时 ++;在 {@code tcp_clean_rtx_queue} 累计 ACK 释放该段时 --;
+     * 进入 {@code tcp_enter_loss} 时整体清零(那一刻所有 in-flight 段都被
+     * 重新视作未重传,后续 RTO 重传重新计数)。
+     *
+     * <p>用于 {@link #packetsInFlight} 的完整公式:
+     * {@code packets_out - sacked_out - lost_out + retrans_out}。
+     */
+    private int retransOut;
     /** cwnd 使用高水位时戳。Mirrors Linux {@code tp->snd_cwnd_stamp}。 */
     private long sndCwndStampMs;
     /** cwnd 使用高水位。Mirrors Linux {@code tp->snd_cwnd_used}。 */
@@ -514,6 +526,23 @@ public final class Sender {
         lostOut = Math.max(0, lostOut - n);
     }
 
+    /** 飞行中重传段计数。Mirrors Linux {@code tp->retrans_out}。 */
+    public int retransOut() {
+        return retransOut;
+    }
+
+    public void retransOut(int v) {
+        this.retransOut = Math.max(v, 0);
+    }
+
+    public void incrementRetransOut() {
+        retransOut++;
+    }
+
+    public void decrementRetransOut(int n) {
+        retransOut = Math.max(0, retransOut - n);
+    }
+
     /** cwnd 使用高水位时戳。Mirrors Linux {@code tp->snd_cwnd_stamp}。 */
     public long sndCwndStampMs() {
         return sndCwndStampMs;
@@ -803,13 +832,21 @@ public final class Sender {
 
     /**
      * 对齐 Linux {@code tcp_packets_in_flight}(include/net/tcp.h):
-     * {@code packets_out - sacked_out - lost_out + retrans_out}。v2 不单独维护
-     * {@code retransOut},SACK 语义由 {@code sackedOut} 覆盖;{@code lostOut}
-     * 由 RACK / NewReno 标记,两者共同从 in_flight 中排除。
+     * {@code packets_out - sacked_out - lost_out + retrans_out}。
+     *
+     * <p>{@code retrans_out} 维护点:
+     * <ul>
+     *   <li>{@link TcpOutput#retransmitSkb} 首次给段打 {@code TCPCB_SACKED_RETRANS} → ++;</li>
+     *   <li>{@code tcp_clean_rtx_queue}({@code TcpAck.cleanRtxQueue})累计 ACK 释放
+     *       带 {@code TCPCB_SACKED_RETRANS} 的段 → --;</li>
+     *   <li>进入 {@code tcp_enter_loss}({@code Sender.onTimeoutByCc}) → 清零,
+     *       后续 RTO 重传从头计数。</li>
+     * </ul>
+     *
      * R7.3a:方法体从 TcpSock 迁入。
      */
     public int packetsInFlight() {
-        return Math.max(0, packetsOut - sackedOut - lostOut);
+        return Math.max(0, packetsOut - sackedOut - lostOut + retransOut);
     }
 
     /**
@@ -940,6 +977,13 @@ public final class Sender {
         dupacks = 0;
         caIncrCounter = 0;
         tlpHighSeq = 0;
+        // 对齐 Linux tcp_enter_loss:retrans_out = 0。Linux 还会扫 rtx 队列把每个段的
+        // TCPCB_SACKED_RETRANS 清掉、重新打 TCPCB_LOST,这一遍走 v2 当前未实现 ——
+        // 因此 RTO 后段上仍带原 Recovery 阶段的 RETRANS 标记,后续 retransmitSkb 的
+        // "首次重传"守卫不会再触发 retrans_out++。这一发散等同于 Linux 在 RTO 重传期
+        // retrans_out 实际是 "本轮已重传段数",而 v2 在 RTO 期暂保持 0;影响范围限于
+        // packetsInFlight 估算精度,不影响检测/CC 触发。后续若做 R2+ 可补上 rtx 扫描。
+        retransOut = 0;
         congestionState = TcpSock.CongestionState.LOSS;
     }
 
