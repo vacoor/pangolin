@@ -18,7 +18,7 @@ public class TcpOutOps {
         }
         if (0 != sock.lastOowAckTimeMs()) {
             final long elapsed = tcp_jiffies32() - sock.lastOowAckTimeMs();
-            if (0 <= elapsed && elapsed < TcpConstants.INVALID_ACK_RATELIMIT_MS) {
+            if (0 <= elapsed && elapsed < SysctlOptions.sysctl_tcp_invalid_ratelimit) {
                 return true;
             }
         }
@@ -45,7 +45,7 @@ public class TcpOutOps {
         }
         if (0 != hs.lastOowAckTimeMs()) {
             final long elapsed = tcp_jiffies32() - hs.lastOowAckTimeMs();
-            if (0 <= elapsed && elapsed < TcpConstants.INVALID_ACK_RATELIMIT_MS) {
+            if (0 <= elapsed && elapsed < SysctlOptions.sysctl_tcp_invalid_ratelimit) {
                 return true;
             }
         }

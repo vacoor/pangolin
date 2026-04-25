@@ -72,6 +72,12 @@ class TcpClampWindowTest {
         // 大量灌 OFO 段:跳过 rcv_nxt(seq=1001)直接发 seq=10001 起的连续段,
         // 强制都进 OFO 队列。每个段 1460 字节,塞够 OFO_MAX_BYTES (256KB) 即可
         // 触发 prune。180 段 × 1460B ≈ 263KB,稳过门槛。
+        //
+        // 注意:prune 一旦触发,tcpClampWindow 把 rcvSsthresh 压到 2*advmss;
+        // 但 prune 释放出空间后,后续 OFO 段又会走 tcp_grow_window 把 ssthresh
+        // 抬回去(对齐 Linux 行为)。本测试关心的是"clamp 那一瞬"被压到位,
+        // 因此追踪过程中的最小值,而不是最终值。
+        int minSsthresh = initial;
         for (int i = 0; i < 200; i++) {
             int seq = CLIENT_ISN + 10001 + i * MSS;  // 永远在 rcv_nxt 之后(OFO)
             ByteBuf p = Unpooled.buffer(MSS).writerIndex(MSS);
@@ -79,18 +85,21 @@ class TcpClampWindowTest {
                     CLIENT_IP, CLIENT_PORT, SERVER_IP, SERVER_PORT,
                     seq, serverIsn + 1, p));
             harness.channel().runPendingTasks();
+            int cur = receiver.rcvSsthresh();
+            if (cur < minSsthresh) {
+                minSsthresh = cur;
+            }
         }
 
         // drain outbound ACK 噪声
         Tcp4PacketBuf out;
         while ((out = harness.readOutboundTcp()) != null) out.release();
 
-        int afterPrune = receiver.rcvSsthresh();
-        assertThat(afterPrune)
-                .as("OFO prune 后 rcvSsthresh 被压到 min(windowClamp, 2*advmss)")
+        assertThat(minSsthresh)
+                .as("OFO prune 触发时 rcvSsthresh 被压到 min(windowClamp, 2*advmss)")
                 .isLessThanOrEqualTo(2 * MSS);
-        assertThat(afterPrune)
-                .as("rcvSsthresh 严格降到 clamp 水位")
+        assertThat(minSsthresh)
+                .as("rcvSsthresh 至少有一次严格降到 clamp 水位")
                 .isLessThan(initial);
     }
 

@@ -73,10 +73,6 @@ public class TcpSock extends SockCommon {
     private long lastOowAckTimeMs;
     /** Mirrors {@code inet_sock.tos}. */
     private int tos;
-    /** RFC 5961 per-socket challenge-ACK accounting window start (ms) — {@code tp->challenge_timestamp}. */
-    private long ipv4TcpChallengeTimestamp;
-    /** RFC 5961 per-socket challenge ACKs emitted in current window — {@code tp->challenge_count}. */
-    private int ipv4TcpChallengeCount;
     /** Delayed-ACK retry count — mirrors {@code icsk_ack.retry}. */
     private int icskAckRetry;
     /** Last data-segment length for {@code rcv_mss} tuning — mirrors {@code icsk_ack.last_seg_size}. */
@@ -356,8 +352,6 @@ public class TcpSock extends SockCommon {
 
     private void initInlineTcpState() {
         tos = 0;
-        ipv4TcpChallengeTimestamp = 0L;
-        ipv4TcpChallengeCount = 0;
         icskAckRetry = 0;
         icskAckLastSegSize = 0;
         icskAckLrcvtimeMs = 0L;
@@ -663,22 +657,6 @@ public class TcpSock extends SockCommon {
 
     public void tos(int v) {
         this.tos = v;
-    }
-
-    public long ipv4TcpChallengeTimestamp() {
-        return ipv4TcpChallengeTimestamp;
-    }
-
-    public void ipv4TcpChallengeTimestamp(long v) {
-        this.ipv4TcpChallengeTimestamp = v;
-    }
-
-    public int ipv4TcpChallengeCount() {
-        return ipv4TcpChallengeCount;
-    }
-
-    public void ipv4TcpChallengeCount(int v) {
-        this.ipv4TcpChallengeCount = v;
     }
 
     public int icskAckRetry() {

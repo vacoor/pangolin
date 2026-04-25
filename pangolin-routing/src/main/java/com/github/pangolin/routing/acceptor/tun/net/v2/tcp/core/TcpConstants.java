@@ -116,8 +116,6 @@ public final class TcpConstants {
     // ---- Delayed ACK ----
     /** Maximum delayed ACK delay: 40 ms (RFC 9293 §3.8.6.2.2) */
     public static final long DELAYED_ACK_MS    = 40L;
-    /** Out-of-window invalid segment ACK rate-limit interval (~Linux HZ/2). */
-    public static final long INVALID_ACK_RATELIMIT_MS = 500L;
 
     // ---- PAWS / Timestamps (RFC 7323 §5) ----
     /**

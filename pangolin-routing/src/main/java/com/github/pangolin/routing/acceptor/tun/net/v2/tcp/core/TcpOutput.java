@@ -47,10 +47,10 @@ public final class TcpOutput {
     public TcpOutput() {}
 
     // ─── Host-wide Challenge ACK limiter (RFC 5961 §7) ─────────────────────
-    // 对齐 Linux sysctl_tcp_challenge_ack_limit(默认 1000/s),与 per-socket 半秒桶
-    // 互补 — per-socket 抑制单连接自 DoS,host 桶抑制跨 4 元组的 Challenge-ACK 放大。
+    // 对齐 Linux net->ipv4.tcp_challenge_timestamp / tcp_challenge_count(per-netns 桶,
+    // 阈值 sysctl_tcp_challenge_ack_limit 默认 1000/s)。Linux 4.x+ 把 challenge ACK
+    // 计数从 per-socket 移到了 netns 层,v2 这两个静态字段就是该桶的对应实现。
     private static final long CHALLENGE_ACK_WINDOW_MS = 1000L;
-    private static final int  CHALLENGE_ACK_LIMIT     = 1000;
     private long challengeAckWindowStartMs = 0L;
     private int  challengeAckCount         = 0;
 
@@ -67,7 +67,7 @@ public final class TcpOutput {
             challengeAckWindowStartMs = now;
             challengeAckCount = 0;
         }
-        if (challengeAckCount >= CHALLENGE_ACK_LIMIT) {
+        if (challengeAckCount >= SysctlOptions.sysctl_tcp_challenge_ack_limit) {
             return false;
         }
         challengeAckCount++;
@@ -171,13 +171,17 @@ public final class TcpOutput {
      *
      * <p>Mirrors Linux {@code tcp_send_challenge_ack} (tcp_input.c):
      * <ol>
-     *   <li><b>Per-socket rate limit</b> — mirrors {@code __tcp_oow_rate_limited}:
-     *       if {@code last_oow_ack_time} is set and fewer than
-     *       {@link TcpConstants#INVALID_ACK_RATELIMIT_MS} ms have elapsed, drop silently.</li>
-     *   <li><b>Host-wide rate limit</b> — {@link #challengeAckHostAllow()} 对齐 Linux
-     *       {@code sysctl_tcp_challenge_ack_limit}(默认 1000/s),跨 4 元组的全局令牌桶。</li>
-     *   <li>Send a pure ACK via {@link #sendAck}.</li>
+     *   <li><b>Netns-level rate limit</b> — {@link #challengeAckHostAllow()} 对齐 Linux
+     *       {@code net->ipv4.tcp_challenge_count} 桶,阈值为
+     *       {@code sysctl_tcp_challenge_ack_limit}(默认 1000/s)。Linux 自 4.x 起把
+     *       该计数从 per-socket({@code tp->challenge_*})移到 netns 层,v2 用静态字段
+     *       {@code challengeAckWindowStartMs}/{@code challengeAckCount} 模拟。</li>
+     *   <li>Send a pure ACK via {@link #sendAck}。</li>
      * </ol>
+     *
+     * <p>注意:不读写 {@code tp->last_oow_ack_time}({@code TcpSock.lastOowAckTimeMs}),
+     * 后者是 {@link TcpOutOps#oowRateLimited} 专用的 per-socket OOW 桶,与 challenge
+     * ACK 是两套独立的限速机制(对齐 Linux 行为)。
      *
      * <p>{@code accecn_reflector}: reserved for AccECN support (RFC 9331); not implemented.
      *
@@ -187,18 +191,9 @@ public final class TcpOutput {
         if (sock == null || !sock.hasConnection()) {
             return;
         }
-        long now = tcp_jiffies32();
-        long lastOow = sock.lastOowAckTimeMs();
-        if (lastOow != 0) {
-            long elapsed = now - lastOow;
-            if (elapsed >= 0 && elapsed < TcpConstants.INVALID_ACK_RATELIMIT_MS) {
-                return;
-            }
-        }
         if (!challengeAckHostAllow()) {
             return;
         }
-        sock.lastOowAckTimeMs(now);
         sock.stack().mib().inc(TcpMib.TCPCHALLENGEACK);
         sendAck(sock);
     }
