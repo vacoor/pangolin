@@ -98,28 +98,12 @@ public final class TcpAck {
         flags |= cleanRtxQueue(sock, priorSndUna);
         tcpProcessTlpAck(sock, ack);
 
-        // 对齐 Linux tcp_fastretrans_alert 调用点:cleanRtxQueue 之后、
-        // 拥塞控制更新之前尝试 tcp_try_undo_recovery(TSECR-based);命中则 CA_Recovery
-        // 已迁至 CA_Open,后续 onAckedByCc 的自然出口分支不再触发 cwnd=ssthresh deflate。
-        final int tsecr = parseTimestampEcho(pkt);
-        if (sock.tcpTryUndoRecovery(tsecr)) {
-            sock.stack().mib().inc(TcpMib.TCPFULLUNDO);
-        } else if (sock.tcpTryUndoLoss(tsecr)) {
-            // 对齐 Linux tcp_fastretrans_alert → tcp_try_undo_loss:CA_Loss 期间若收到对
-            // 原始段(非 RTO 重传副本)的 ACK,TSECR 早于 retrans_stamp,判定为伪 RTO 并回滚。
-            sock.stack().mib().inc(TcpMib.TCPLOSSUNDO);
-        } else if (sock.tcpProcessFrto()) {
-            // 对齐 Linux tcp_process_loss 中 F-RTO 分支(RFC 5682):CA_Loss 首 ACK
-            // 的 sndUna 追平/越过 RTO 瞬间的 sndNxt 快照 — 原始在飞段全部被吸收,
-            // RTO 属伪触发;不依赖 TSECR,与 LOSSUNDO 互补。
-            sock.stack().mib().inc(TcpMib.TCPSPURIOUSRTOS);
-        } else if (sock.tcpTryUndoDsack()) {
-            // 对齐 Linux tcp_try_undo_dsack:当前 epoch 内所有重传副本都被 DSACK 抵消
-            // (tp->undo_retrans 经 tcp_check_dsack 递减至 0),说明是伪触发,回滚 cwnd
-            // 并迁 CA_Open。与 FULLUNDO/LOSSUNDO 互斥 — Linux 在 TSECR 分支命中后直接
-            // 返回,此处走 else 分支保持同样语义。
-            sock.stack().mib().inc(TcpMib.TCPDSACKUNDO);
-        }
+        // 对齐 Linux tcp_fastretrans_alert 调用点:cleanRtxQueue 之后、拥塞控制更新之前。
+        // v2 在该函数体内仅实现 Linux tcp_fastretrans_alert 的 undo 链子集
+        // (FULLUNDO/LOSSUNDO/SPURIOUSRTOS/DSACKUNDO 互斥);剩余的状态机路径
+        // (Disorder/Recovery/Loss 进出、partial ACK 处理、cwnd reduction)v2 仍在
+        // Sender.onAckedByCc 里(见后续 onAckedByCc 调用)。
+        tcpFastretransAlert(sock, pkt);
 
         if (after(sock.sndUna(), priorSndUna)) {
             sock.sender().rearmRto();
@@ -461,6 +445,41 @@ public final class TcpAck {
         }
 
         return flag;
+    }
+
+    /**
+     * 对齐 Linux {@code tcp_fastretrans_alert}(net/ipv4/tcp_input.c)的 undo 子集。
+     *
+     * <p>本方法只承担 Linux 函数体里的"undo 链"职责(FULLUNDO / LOSSUNDO /
+     * SPURIOUSRTOS / DSACKUNDO,四者互斥),完整 Linux 函数还覆盖
+     * Disorder / Recovery / Loss 状态机进出、partial ACK 处理、cwnd reduction —
+     * 那些路径 v2 当前散在 {@link TcpSock#onAckedByCc} 里,后续若要进一步对齐
+     * Linux 状态机,可在本方法内继续聚合。
+     *
+     * <p>调用点:{@link #tcpAck} 的 {@code cleanRtxQueue} + {@code tcpProcessTlpAck} 之后,
+     * {@code onAckedByCc} 之前 — 让 undo 命中后续的 CC 回调能看到 CA_Open。
+     */
+    private static void tcpFastretransAlert(TcpSock sock, TcpPacketBuf pkt) {
+        // FULLUNDO:CA_Recovery 期间收到对原始段的 ACK,TSECR 早于 retransStamp → undo
+        final int tsecr = parseTimestampEcho(pkt);
+        if (sock.tcpTryUndoRecovery(tsecr)) {
+            sock.stack().mib().inc(TcpMib.TCPFULLUNDO);
+            return;
+        }
+        // LOSSUNDO:CA_Loss 期间同上 — 收到对原始段(非 RTO 重传副本)的 ACK 时回滚
+        if (sock.tcpTryUndoLoss(tsecr)) {
+            sock.stack().mib().inc(TcpMib.TCPLOSSUNDO);
+            return;
+        }
+        // F-RTO(RFC 5682):CA_Loss 首 ACK 的 sndUna 越过 RTO 瞬间快照 → 伪 RTO,不依赖 TSECR
+        if (sock.tcpProcessFrto()) {
+            sock.stack().mib().inc(TcpMib.TCPSPURIOUSRTOS);
+            return;
+        }
+        // DSACKUNDO:本 epoch 内所有重传副本都被 DSACK 抵消(undoRetrans → 0)
+        if (sock.tcpTryUndoDsack()) {
+            sock.stack().mib().inc(TcpMib.TCPDSACKUNDO);
+        }
     }
 
     private static void tcpProcessTlpAck(TcpSock sock, int ack) {
