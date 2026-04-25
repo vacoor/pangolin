@@ -254,8 +254,8 @@ public class Tcp4Multiplexer extends TcpMultiplexer {
                     @Override
                     public int init_seq(final TcpPacketBuf p) {
                         return secureSeq(
-                                p.srcAddrBytes(), p.tcpSrcPort(),
-                                p.dstAddrBytes(), p.tcpDstPort()
+                                p.dstAddrBytes(), p.tcpDstPort(),
+                                p.srcAddrBytes(), p.tcpSrcPort()
                         );
                     }
 

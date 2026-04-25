@@ -129,17 +129,17 @@ public abstract class TcpUtils {
         new SecureRandom().nextBytes(key);
     }
 
-    public static int secureSeq(final byte[] srcAddress, final int srcPort,
-                                final byte[] dstAddress, final int dstPort) {
+    public static int secureSeq(final byte[] localAddr, final int localPort,
+                                final byte[] remoteAddr, final int remotePort) {
         final SipHash sipHash = new SipHash();
         sipHash.init(new KeyParameter(key));
-        sipHash.update(dstAddress, 0, dstAddress.length);
-        sipHash.update(srcAddress, 0, srcAddress.length);
+        sipHash.update(localAddr, 0, localAddr.length);
+        sipHash.update(remoteAddr, 0, remoteAddr.length);
 
-        sipHash.update((byte) ((dstPort >> 8) & 0xFF));
-        sipHash.update((byte) ((dstPort >> 0) & 0xFF));
-        sipHash.update((byte) ((srcPort >> 8) & 0xFF));
-        sipHash.update((byte) ((srcPort >> 0) & 0xFF));
+        sipHash.update((byte) ((localPort >> 8) & 0xFF));
+        sipHash.update((byte) ((localPort >> 0) & 0xFF));
+        sipHash.update((byte) ((remotePort >> 8) & 0xFF));
+        sipHash.update((byte) ((remotePort >> 0) & 0xFF));
 
         final long hash64 = sipHash.doFinal();
         final int hash32 = (int) (hash64 & 0xFFFFFFFFL);

@@ -92,7 +92,7 @@ public final class TcpHandshaker {
         this.clientWscale = parsedWscale;
         this.clientTimestamp = parsedTs != null;
         this.clientTsVal = parsedTs != null ? (int) parsedTs[0] : 0;
-        this.sndIsn = TcpUtils.secureSeq(srcAddrBytes, srcPort, dstAddrBytes, dstPort);
+        this.sndIsn = TcpUtils.secureSeq(dstAddrBytes, dstPort, srcAddrBytes, srcPort);
         // 对齐 Linux openreqInit(tcp_input.c:7010):PAWS 基线从首个合法 SYN 的 TSval 继承。
         this.tsRecent = this.clientTsVal;
         this.tsRecentStamp = this.clientTimestamp ? SegmentDispatcher.nowSeconds() : 0;
