@@ -172,6 +172,14 @@ public final class Sender {
      * v2 Phase 1b 仅维护字段,Phase 7 BBR 落地时由 sender 主路径填。
      */
     private boolean appLimited;
+    /**
+     * Pacing rate(字节/秒)— 对齐 Linux {@code sk->sk_pacing_rate}。{@code 0} 表示
+     * 不限速(NewReno / CUBIC 默认),sender 主路径短路跳过 pacing token bucket。
+     * BBR 在 {@code onAck} 内根据 BtlBw × pacing_gain 写入。
+     */
+    private long pacingRateBps;
+    /** 单 Sender pacing 状态(token + lastNs)。Phase 1c 引入,默认空闲不消费。 */
+    private final PacingTokenBucket pacingBucket = new PacingTokenBucket();
 
     // ── R7.1 probe / keepalive / linger2(从 TcpSock 迁入) ──────────────────
 
@@ -808,6 +816,13 @@ public final class Sender {
     /** sender 是否 application-limited(写队列空 / cwnd 未用满)— BBR 过滤 sample 用。 */
     public boolean appLimited() { return appLimited; }
     public void appLimited(boolean v) { this.appLimited = v; }
+
+    /** Pacing rate(字节/秒)— BBR 写入,sender 在 writeXmit 主路径消费。0 表示不限速。 */
+    public long pacingRateBps() { return pacingRateBps; }
+    public void pacingRateBps(long v) { this.pacingRateBps = Math.max(v, 0L); }
+
+    /** Per-Sender pacing token bucket。 */
+    public PacingTokenBucket pacingBucket() { return pacingBucket; }
 
     /** 上次 RACK step 更新时的 delivered 快照。 */
     public int rackLastDelivered() { return rackLastDelivered; }

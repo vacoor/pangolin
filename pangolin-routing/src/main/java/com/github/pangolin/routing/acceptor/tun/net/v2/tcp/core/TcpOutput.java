@@ -876,10 +876,28 @@ public final class TcpOutput {
     }
 
     /**
-     * Pacing gate — pacing not implemented; always {@code false}.
-     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2769">pacingCheck</a>
+     * Pacing gate — 对齐 Linux {@code tcp_pacing_check}(net/ipv4/tcp_output.c)。
+     * 仅当 {@code Sender.pacingRateBps > 0} 时生效;0 时短路返回 false 不影响行为。
+     *
+     * <p>返回 {@code true} 表示需要等待(token 不足),writeXmit 跳出循环;返回
+     * {@code false} 表示通过(token 充足或 pacing 未启用)。
+     *
+     * @see <a href="https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_output.c#L2769">tcp_pacing_check</a>
      */
     private boolean pacingCheck(TcpSock sock) {
+        long rate = sock.sender().pacingRateBps();
+        if (rate <= 0L) {
+            return false;       // pacing 未启用 — 默认 NewReno / CUBIC 路径
+        }
+        TcpSegment head = sock.tcpSendHead();
+        int segBytes = head != null ? Math.max(head.dataLen(), 1) : 1;
+        boolean ok = sock.sender().pacingBucket().tryConsume(rate, segBytes, System.nanoTime());
+        if (!ok) {
+            // Token 不足:schedule writeXmit 唤醒(下个 EventLoop tick 后重试)
+            // 简化:依赖既有 RTO / TLP / dataReady 路径回到 writeXmit;
+            //   未来若需要更激进的 pacing 精度,可基于 nanosUntilNextSend 单独 schedule。
+            return true;
+        }
         return false;
     }
 
