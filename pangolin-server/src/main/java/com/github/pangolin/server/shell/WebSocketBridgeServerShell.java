@@ -46,7 +46,7 @@ public class WebSocketBridgeServerShell {
                 try {
                     WebSocketBridgeServerShell.this.run();
                 } catch (final IOException e) {
-                    log.error("Shell Error: {}", e.getMessage(), e);
+                    log.error("Shell error: {}", e.getMessage(), e);
                 }
             }
         });
@@ -84,10 +84,10 @@ public class WebSocketBridgeServerShell {
     }
 
     private void doExecute(final String line, final ConsoleReader out) throws Exception {
-        // find command and execute
+        // Find the command and execute it.
         final String[] cmdline = tokenize(line);
         if (0 == cmdline.length) {
-            out.println("agent       Agents operations");
+            out.println("agent       Agent operations");
             out.println("forward     Port forwarding operations");
             out.println("connection  Connection operations");
             out.println("exit        ");
@@ -162,7 +162,7 @@ public class WebSocketBridgeServerShell {
             int i = 0;
             table[i++] = new String[]{"SOURCE", "AGENT", "DESTINATION"};
             for (final WebSocketBridgeServerForwarder.Forwarding forwarding : forwardings) {
-                table[i++] = new String[]{forwarding.getLocalAddr().toString(), forwarding.getAgentKey(), forwarding.getRemoteAddr().toString()};
+                table[i++] = new String[]{forwarding.getLocalAddr().toString(), forwarding.getTunnelKey(), forwarding.getRemoteAddr().toString()};
             }
             printTable(table, out);
             return;
@@ -195,11 +195,11 @@ public class WebSocketBridgeServerShell {
         }
 
         out.println("Usage: forward COMMAND [OPTION]");
-        out.println("  list                                  List information about forward rule");
+        out.println("  list                                  List information about forwarding rules");
         out.println("  add    local_port:agent_key:remote_host:remote_port\r\n" +
-                "         Add the forward rule, mapping local L_PORT to remote host R_HOST and port R_PORT by AGENT");
-        out.println("  remove local_port                     Remove the forward rule");
-        out.println("  alias                                 List alias for forward target hostname");
+                "         Add a forwarding rule that maps local L_PORT to remote host R_HOST and port R_PORT through AGENT");
+        out.println("  remove local_port                     Remove the forwarding rule");
+        out.println("  alias                                 List aliases for forwarding target hostnames");
         out.println();
     }
 
@@ -236,7 +236,7 @@ public class WebSocketBridgeServerShell {
             return;
         }
 
-        out.println("Usage: connection COMMAND [args..]");
+        out.println("Usage: connection COMMAND [ARGS..]");
         out.println("  list                 List information about connections");
         out.println("  kill connection_id   Kill the connection");
         out.println();

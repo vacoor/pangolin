@@ -26,6 +26,13 @@ public class WebSocketBridgeServerForwarder {
     private final EventLoopGroup workerGroup;
     private final ConcurrentMap<SocketAddress, Forwarding> registeredForwardingMap = new ConcurrentHashMap<>();
 
+    /**
+     * Create a forwarder.
+     *
+     * @param engine      the server engine
+     * @param bossGroup   the boss event loop group
+     * @param workerGroup the worker event loop group
+     */
     public WebSocketBridgeServerForwarder(final WebSocketBridgeServerEngine engine,
                                           final EventLoopGroup bossGroup, final EventLoopGroup workerGroup) {
         this.engine = engine;
@@ -33,12 +40,30 @@ public class WebSocketBridgeServerForwarder {
         this.workerGroup = workerGroup;
     }
 
+    /**
+     * Add a forwarding rule by local port.
+     *
+     * @param localPort  the local port
+     * @param tunnelKey  the tunnel key
+     * @param remoteAddr the remote address
+     * @return this forwarder
+     * @throws InterruptedException if the current thread is interrupted
+     */
     public WebSocketBridgeServerForwarder addForwarding(final int localPort,
                                                         final String tunnelKey,
                                                         final InetSocketAddress remoteAddr) throws InterruptedException {
         return addForwarding(new InetSocketAddress(localPort), tunnelKey, remoteAddr);
     }
 
+    /**
+     * Add a forwarding rule.
+     *
+     * @param localAddr the local address
+     * @param tunnelKey the tunnel key
+     * @param target    the target address
+     * @return this forwarder
+     * @throws InterruptedException if the current thread is interrupted
+     */
     public WebSocketBridgeServerForwarder addForwarding(final SocketAddress localAddr,
                                                         final String tunnelKey,
                                                         final InetSocketAddress target) throws InterruptedException {
@@ -51,7 +76,7 @@ public class WebSocketBridgeServerForwarder {
                     public void channelActive(final ChannelHandlerContext accessCtx) throws Exception {
                         final String id = accessCtx.channel().id().toString();
                         final SocketAddress source = accessCtx.channel().remoteAddress();
-                        log.info("[{}] Establishing Connection from {} to {} via {}", id, source, target, tunnelKey);
+                        log.info("[{}] Establishing connection from {} to {} via {}", id, source, target, tunnelKey);
 
                         engine.handshake(
                                 accessCtx, tunnelKey, target, accessCtx.executor().newPromise()
@@ -98,7 +123,7 @@ public class WebSocketBridgeServerForwarder {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
                 if (future.isSuccess()) {
-                    log.info("Local connections to {} forwarded to remote address {} via {}", localAddr, target, tunnelKey);
+                    log.info("Forwarding local connections from {} to remote address {} via {}", localAddr, target, tunnelKey);
 
                     final Forwarding forwarding = new Forwarding(localAddr, tunnelKey, target, future.channel());
                     registeredForwardingMap.put(localAddr, forwarding);
@@ -113,30 +138,65 @@ public class WebSocketBridgeServerForwarder {
         return this;
     }
 
+    /**
+     * Remove a forwarding rule by local port.
+     *
+     * @param localPort the local port
+     * @return true if the forwarding rule is removed; otherwise false
+     */
     public boolean removeForwarding(final int localPort) {
         return removeForwarding(new InetSocketAddress(localPort));
     }
 
+    /**
+     * Remove a forwarding rule.
+     *
+     * @param localAddr the local address
+     * @return true if the forwarding rule is removed; otherwise false
+     */
     public boolean removeForwarding(final SocketAddress localAddr) {
         final Forwarding forwarding = registeredForwardingMap.remove(localAddr);
         if (null != forwarding) {
-            log.info("Closed local forwarding: {} to {} via {}", localAddr, forwarding.remoteAddr, forwarding.agentKey);
+            log.info("Closed local forwarding: {} to {} via {}", localAddr, forwarding.remoteAddr, forwarding.tunnelKey);
 
             forwarding.boundChannel.close();
         }
         return null != forwarding;
     }
 
+    /**
+     * Get all registered forwarding rules.
+     *
+     * @return the registered forwarding rules
+     */
     public Collection<Forwarding> getForwardings() {
         return registeredForwardingMap.values();
     }
 
+    /**
+     * A forwarding rule.
+     */
     @Getter
     @AllArgsConstructor
     public class Forwarding {
+        /**
+         * The local address.
+         */
         private final SocketAddress localAddr;
-        private final String agentKey;
+
+        /**
+         * The tunnel key.
+         */
+        private final String tunnelKey;
+
+        /**
+         * The remote address.
+         */
         private final SocketAddress remoteAddr;
+
+        /**
+         * The bound channel.
+         */
         private final Channel boundChannel;
     }
 }

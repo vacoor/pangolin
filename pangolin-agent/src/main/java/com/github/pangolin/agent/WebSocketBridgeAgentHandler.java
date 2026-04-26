@@ -117,8 +117,13 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
                 buf.writeByte(AGENT_VERSION.length());
                 buf.writeBytes(versionBytes);
 
-                final String token = Base64.encode(buf, Base64Dialect.URL_SAFE).toString(CharsetUtil.UTF_8);
-                customHttpHeaders.set("Authorization", "Bearer " + token);
+                final ByteBuf base64 = Base64.encode(buf, Base64Dialect.URL_SAFE);
+                try {
+                    final String token = base64.toString(CharsetUtil.UTF_8);
+                    customHttpHeaders.set("Authorization", "Bearer " + token);
+                } finally {
+                    base64.release();
+                }
             } finally {
                 buf.release();
             }

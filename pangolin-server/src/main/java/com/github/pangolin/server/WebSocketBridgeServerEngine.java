@@ -57,18 +57,24 @@ public class WebSocketBridgeServerEngine {
     private static final byte REPLY_COMMAND_UNSUPPORTED = 0x07;
     private static final byte REPLY_ADDRESS_UNSUPPORTED = 0x08;
 
+    /**
+     * The default handshake timeout in milliseconds.
+     */
     private static final long DEFAULT_HANDSHAKE_TIMEOUT_MILLIS = 10 * 1000;
 
     /**
-     * Registered agents.
+     * The registered agents.
      */
     private final ConcurrentMap<String, Agent> registeredAgents = new ConcurrentHashMap<>();
 
     /**
-     * Requested connections.
+     * The requested connections.
      */
     private final ConcurrentMap<String, Connection> connections = new ConcurrentHashMap<>();
 
+    /**
+     * The handshake timeout in milliseconds.
+     */
     private final long handshakeTimeoutMs;
 
     public WebSocketBridgeServerEngine() {
@@ -80,7 +86,7 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Register an agent service.
+     * Register an agent.
      *
      * @param tunnelKey     the tunnel key
      * @param tunnelVersion the tunnel version
@@ -100,7 +106,7 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Register an agent service.
+     * Register an agent.
      *
      * @param agent    the agent
      * @param agentCtx the agent channel context
@@ -115,7 +121,7 @@ public class WebSocketBridgeServerEngine {
                 public void operationComplete(ChannelFuture future) throws Exception {
                     log.info("[Agent] Agent connection closed: {}", stringify(agent));
 
-                    agentUnregistered(agent);
+                    unregisterAgent(agent);
                 }
             });
             return true;
@@ -124,11 +130,11 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Agent unregistered.
+     * Unregister an agent.
      *
-     * @param agent the agent to unregistered
+     * @param agent the agent
      */
-    private void agentUnregistered(final Agent agent) {
+    private void unregisterAgent(final Agent agent) {
         if (registeredAgents.remove(agent.id, agent)) {
             log.info("[Agent] Agent unregistered: {}", stringify(agent));
             if (agent.bus.channel().isActive()) {
@@ -138,11 +144,11 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Initiating a handshake with the tunnel for the given target address.
+     * Initiate a handshake through the tunnel for the given target address.
      *
      * @param accessCtx        the access channel context
-     * @param tunnelKey        the connection tunnel key
-     * @param target           the connection target address
+     * @param tunnelKey        the tunnel key
+     * @param target           the target address
      * @param handshakePromise the handshake promise
      * @return the handshake promise
      */
@@ -153,11 +159,11 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Initiating a handshake with the tunnel for the given target address.
+     * Initiate a handshake through the tunnel for the given target address.
      *
      * @param accessCtx        the access channel context
-     * @param tunnelKey        the connection tunnel key
-     * @param target           the connection target address
+     * @param tunnelKey        the tunnel key
+     * @param target           the target address
      * @param handshakeTimeout the maximum time to wait
      * @param unit             the time unit of the {@code handshakeTimeout} argument
      * @param handshakePromise the handshake promise
@@ -203,33 +209,33 @@ public class WebSocketBridgeServerEngine {
         }
 
         /*-
-         * Handshake completed.
+         * Complete the handshake.
          */
         final ScheduledFuture<?> handshakeTimeoutFutureToUse = handshakeTimeoutFuture;
         handshakePromise.addListener(new GenericFutureListener<Future<ChannelHandlerContext>>() {
             @Override
             public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {
                 /*-
-                 * clear handshake timeout
+                 * Clear the handshake timeout.
                  */
                 if (null != handshakeTimeoutFutureToUse && !handshakeTimeoutFutureToUse.isDone()) {
                     handshakeTimeoutFutureToUse.cancel(false);
                 }
 
                 if (!future.isSuccess()) {
-                    log.warn("[{}] Handshake failed width {} for {}: {}", id, simplify(agent), target, future.cause().getMessage());
+                    log.warn("[{}] Handshake failed with {} for {}: {}", id, simplify(agent), target, future.cause().getMessage());
                     return;
                 }
 
                 /*-
-                 * After a successful handshake, access should be closed when backhual is closed.
+                 * After a successful handshake, close access when the backhaul is closed.
                  */
                 final ChannelHandlerContext backhaulCtx = future.getNow();
                 backhaulCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(final ChannelFuture future) throws Exception {
                         /*-
-                         * Close the access connection upon backhaul connection closed.
+                         * Close the access connection when the backhaul connection is closed.
                          */
                         if (accessCtx.channel().isActive()) {
                             log.info("[{}] Connection closed by agent: {} -> {}", id, simplify(agent), connection.target);
@@ -244,7 +250,7 @@ public class WebSocketBridgeServerEngine {
         });
 
         /*-
-         * When access is closed, the handshake is aborted or the backhaul connection is closed.
+         * When access is closed, abort the handshake or close the backhaul connection.
          */
         accessCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
             @Override
@@ -256,7 +262,7 @@ public class WebSocketBridgeServerEngine {
                         handshakePromise.tryFailure(new IOException("Connection closed"));
                     } else if (handshakePromise.isSuccess()) {
                         /*-
-                         * Close the backhaul connection upon access connection closed.
+                         * Close the backhaul connection when the access connection is closed.
                          *
                          * @see #finishHandshake
                          */
@@ -281,7 +287,7 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Choose an agent for tunnel key.
+     * Choose an agent for the tunnel key.
      *
      * @param tunnelKey the tunnel key
      * @return the agent instance or null
@@ -294,7 +300,7 @@ public class WebSocketBridgeServerEngine {
 
         final List<Agent> candidates = new ArrayList<>();
         for (final Agent candidate : registeredAgents.values()) {
-            if (candidate.getName().equals(tunnelKey)) {
+            if (candidate.getTunnelKey().equals(tunnelKey)) {
                 candidates.add(candidate);
             }
         }
@@ -302,12 +308,12 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Send the handshake request to the agent.
+     * Send a handshake request to the agent.
      *
      * @param id        the connection id
      * @param accessCtx the access channel context
-     * @param agent     the connection agent
-     * @param target    the connection target address
+     * @param agent     the agent
+     * @param target    the target address
      */
     private void handshake0(final String id,
                             final ChannelHandlerContext accessCtx,
@@ -400,9 +406,9 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Handle the message from the agent.
+     * Handle a response from the agent.
      *
-     * @param payload  the response
+     * @param payload  the response payload
      * @param agentCtx the agent channel context
      */
     void agentResponded(final ByteBuf payload, final ChannelHandlerContext agentCtx) {
@@ -431,12 +437,12 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Validates and finishes the opening handshake initiated by {@link #handshake}.
+     * Validate and finish the opening handshake initiated by {@link #handshake}.
      *
      * @param tunnelKey    the tunnel key
      * @param connectionId the connection id
-     * @param backhaulCtx  the backhaul channel
-     * @return true if handshake completed otherwise false
+     * @param backhaulCtx  the backhaul channel context
+     * @return true if the handshake completes successfully; otherwise false
      */
     public boolean finishHandshake(final String tunnelKey,
                                    final String connectionId,
@@ -445,11 +451,16 @@ public class WebSocketBridgeServerEngine {
 
         final Connection connection = null != connectionId ? connections.get(connectionId) : null;
         if (null == connection) {
-            log.info("[{}] Pending handshake context not found for {}", connectionId, connectionId);
+            log.info("[{}] Pending handshake not found for id {}", connectionId, connectionId);
             return false;
         }
 
         final Agent agent = connection.agent;
+        if (!agent.tunnelKey.equals(tunnelKey)) {
+            log.warn("[{}] Mismatched tunnel key: {}, expected: {}", connectionId, tunnelKey, agent.tunnelKey);
+            return false;
+        }
+
         final ChannelHandlerContext accessCtx = connection.accessCtx;
         final SocketAddress accessAddr = accessCtx.channel().remoteAddress();
         if (!connection.handshakePromise.isDone() && connection.handshakePromise.trySuccess(backhaulCtx)) {

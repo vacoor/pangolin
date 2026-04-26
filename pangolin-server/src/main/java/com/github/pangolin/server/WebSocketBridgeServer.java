@@ -68,7 +68,7 @@ public class WebSocketBridgeServer extends NettyServer {
         this.endpointPath = endpointPath;
         this.useSsl = useSsl;
         this.webSocketBridgeServerEngine = new WebSocketBridgeServerEngine();
-        this.webSocketBridgeServerForwarder = new WebSocketBridgeServerForwarder(webSocketBridgeServerEngine, new NioEventLoopGroup(2), new NioEventLoopGroup());
+        this.webSocketBridgeServerForwarder = new WebSocketBridgeServerForwarder(webSocketBridgeServerEngine, bossGroup, workerGroup);
     }
 
     /**
@@ -103,7 +103,7 @@ public class WebSocketBridgeServer extends NettyServer {
         final WebSocketBridgeServer server = new WebSocketBridgeServer(2345, "/tunnel", false);
 
         final Channel channel = server.start();
-        log.info("WebSocket bridge server start on " + channel.localAddress());
+        log.info("WebSocket bridge server started on {}", channel.localAddress());
 
         channel.closeFuture().sync();
     }
