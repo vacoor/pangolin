@@ -78,9 +78,7 @@ public class WebSocketBridgeServerForwarder {
                         final SocketAddress source = accessCtx.channel().remoteAddress();
                         log.info("[{}] Establishing connection from {} to {} via {}", id, source, target, tunnelKey);
 
-                        engine.handshake(
-                                accessCtx, tunnelKey, target, accessCtx.executor().newPromise()
-                        ).addListener(new FutureListener<ChannelHandlerContext>() {
+                        engine.handshake(accessCtx, tunnelKey, target).addListener(new FutureListener<ChannelHandlerContext>() {
                             @Override
                             public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {
                                 if (future.isSuccess()) {
@@ -103,6 +101,8 @@ public class WebSocketBridgeServerForwarder {
                                      * client <--socket--> server <--ws--> agent
                                      */
                                     accessCtx.pipeline().replace(accessCtx.name(), null, new TcpOverWebSocketEncodeHandler(backhaulCtx));
+
+                                    backhaulCtx.pipeline().addBefore(backhaulCtx.name(), "backhaul-heartbeat", new WebSocketHeartbeatHandler(600, 600, 600));
                                     backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new TcpOverWebSocketDecodeHandler(accessCtx));
 
                                     accessCtx.channel().config().setAutoRead(true);

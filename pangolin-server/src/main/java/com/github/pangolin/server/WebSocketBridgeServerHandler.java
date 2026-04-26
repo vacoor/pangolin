@@ -276,7 +276,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                 tunnelKey, tunnelVersion, agentName, agentVersion, intranet, agentCtx
         );
         if (registered) {
-            agentCtx.pipeline().replace(agentCtx.name(), null, new ChannelInboundHandlerAdapter() {
+            agentCtx.pipeline().replace(agentCtx.name(), null, new WebSocketHeartbeatHandler(60, 60, 60) {
                 /**
                  * {@inheritDoc}
                  */
@@ -358,9 +358,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
         log.info("[{}] Establishing WebSocket connection from {} to {} via {}", id, source, target, tunnelKey);
 
         accessCtx.channel().config().setAutoRead(false);
-        webSocketBridgeServerEngine.handshake(
-                accessCtx, tunnelKey, target, accessCtx.executor().newPromise()
-        ).addListener(new FutureListener<ChannelHandlerContext>() {
+        webSocketBridgeServerEngine.handshake(accessCtx, tunnelKey, target).addListener(new FutureListener<ChannelHandlerContext>() {
             @Override
             public void operationComplete(final Future<ChannelHandlerContext> backhaulFuture) throws Exception {
                 if (backhaulFuture.isSuccess()) {
@@ -378,6 +376,8 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                     });
 
                     log.info("[{}] WebSocket connection established from {} to {} via {}", id, source, target, tunnelKey);
+
+                    backhaulCtx.pipeline().addBefore(backhaulCtx.name(), "backhaul-heartbeat", new WebSocketHeartbeatHandler(600, 600, 600));
 
                     if (!downgrade) {
                         /*-

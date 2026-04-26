@@ -76,7 +76,7 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
         if (log.isDebugEnabled()) {
             log.debug("[tun@ws/tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage(), cause);
         }
-        log.warn("[tun@ws/tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx));
+        log.warn("[tun@ws/tcp {} => {}] Software caused connection abort: {}", stringify(inCtx), stringify(outCtx), cause.getMessage());
 
         if (outCtx.channel().isActive()) {
             outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);

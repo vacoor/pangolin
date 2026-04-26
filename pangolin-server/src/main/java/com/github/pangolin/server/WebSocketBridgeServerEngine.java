@@ -149,13 +149,11 @@ public class WebSocketBridgeServerEngine {
      * @param accessCtx        the access channel context
      * @param tunnelKey        the tunnel key
      * @param target           the target address
-     * @param handshakePromise the handshake promise
      * @return the handshake promise
      */
     public Promise<ChannelHandlerContext> handshake(final ChannelHandlerContext accessCtx,
-                                                    final String tunnelKey, final InetSocketAddress target,
-                                                    final Promise<ChannelHandlerContext> handshakePromise) {
-        return handshake(accessCtx, tunnelKey, target, handshakeTimeoutMs, TimeUnit.MILLISECONDS, handshakePromise);
+                                                    final String tunnelKey, final InetSocketAddress target) {
+        return handshake(accessCtx, tunnelKey, target, handshakeTimeoutMs, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -166,13 +164,12 @@ public class WebSocketBridgeServerEngine {
      * @param target           the target address
      * @param handshakeTimeout the maximum time to wait
      * @param unit             the time unit of the {@code handshakeTimeout} argument
-     * @param handshakePromise the handshake promise
      * @return the handshake promise
      */
     private Promise<ChannelHandlerContext> handshake(final ChannelHandlerContext accessCtx,
                                                      final String tunnelKey, final InetSocketAddress target,
-                                                     final long handshakeTimeout, final TimeUnit unit,
-                                                     final Promise<ChannelHandlerContext> handshakePromise) {
+                                                     final long handshakeTimeout, final TimeUnit unit) {
+        final Promise<ChannelHandlerContext> handshakePromise = accessCtx.executor().newPromise();
         final Agent agent = this.choose(tunnelKey);
         if (null == agent) {
             handshakePromise.tryFailure(new ConnectException(String.format("The agent not found: '%s'", tunnelKey)));
