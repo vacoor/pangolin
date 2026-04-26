@@ -6,12 +6,12 @@ import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
 
-public class WebSocketHeartbeatHandler extends ChannelInboundHandlerAdapter {
+public class WebSocketKeepaliveHandler extends ChannelInboundHandlerAdapter {
     private final int readerIdleTimeSeconds;
     private final int writerIdleTimeSeconds;
     private final int allIdleTimeSeconds;
 
-    public WebSocketHeartbeatHandler(final int readerIdleTimeSeconds,
+    public WebSocketKeepaliveHandler(final int readerIdleTimeSeconds,
                                      final int writerIdleTimeSeconds,
                                      final int allIdleTimeSeconds) {
         this.readerIdleTimeSeconds = readerIdleTimeSeconds;

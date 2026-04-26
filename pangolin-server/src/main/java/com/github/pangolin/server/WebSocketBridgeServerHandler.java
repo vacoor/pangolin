@@ -276,7 +276,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                 tunnelKey, tunnelVersion, agentName, agentVersion, intranet, agentCtx
         );
         if (registered) {
-            agentCtx.pipeline().replace(agentCtx.name(), null, new WebSocketHeartbeatHandler(60, 60, 60) {
+            agentCtx.pipeline().replace(agentCtx.name(), null, new WebSocketKeepaliveHandler(60, 60, 60) {
                 /**
                  * {@inheritDoc}
                  */
@@ -377,7 +377,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
 
                     log.info("[{}] WebSocket connection established from {} to {} via {}", id, source, target, tunnelKey);
 
-                    backhaulCtx.pipeline().addBefore(backhaulCtx.name(), "backhaul-heartbeat", new WebSocketHeartbeatHandler(600, 600, 600));
+                    backhaulCtx.pipeline().addBefore(backhaulCtx.name(), "backhaul-keepalive", new WebSocketKeepaliveHandler(600, 600, 600));
 
                     if (!downgrade) {
                         /*-

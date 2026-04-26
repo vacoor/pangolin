@@ -102,7 +102,7 @@ public class WebSocketBridgeServerForwarder {
                                      */
                                     accessCtx.pipeline().replace(accessCtx.name(), null, new TcpOverWebSocketEncodeHandler(backhaulCtx));
 
-                                    backhaulCtx.pipeline().addBefore(backhaulCtx.name(), "backhaul-heartbeat", new WebSocketHeartbeatHandler(600, 600, 600));
+                                    backhaulCtx.pipeline().addBefore(backhaulCtx.name(), "backhaul-keepalive", new WebSocketKeepaliveHandler(600, 600, 600));
                                     backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new TcpOverWebSocketDecodeHandler(accessCtx));
 
                                     accessCtx.channel().config().setAutoRead(true);
