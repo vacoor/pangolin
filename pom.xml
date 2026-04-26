@@ -19,7 +19,6 @@
         <module>pangolin-agent</module>
         <module>pangolin-client-spring-boot-starter</module>
         <module>pangolin-agent-app</module>
-        <module>pangolin-routing</module>
     </modules>
 
     <licenses>

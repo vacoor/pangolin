@@ -1,3 +1,0 @@
-com.github.pangolin.routing.acceptor.mixin.support.HttpAcceptorHandshakerFactory
-com.github.pangolin.routing.acceptor.mixin.support.Socks4AcceptorHandshakerFactory
-com.github.pangolin.routing.acceptor.mixin.support.Socks5AcceptorHandshakerFactory

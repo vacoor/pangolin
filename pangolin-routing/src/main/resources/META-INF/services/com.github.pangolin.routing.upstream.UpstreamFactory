@@ -1,6 +1,0 @@
-com.github.pangolin.routing.upstream.spi.MockUpstreamFactory
-com.github.pangolin.routing.upstream.spi.HttpUpstreamFactory
-com.github.pangolin.routing.upstream.spi.SshUpstreamFactory
-com.github.pangolin.routing.upstream.spi.WebSocketUpstreamFactory
-com.github.pangolin.routing.upstream.spi.SsUpstreamFactory
-com.github.pangolin.routing.upstream.spi.TrojanUpstreamFactory
