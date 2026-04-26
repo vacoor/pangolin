@@ -1,6 +1,6 @@
 package com.github.pangolin.client.spring.boot.autoconfigure;
 
-import com.github.pangolin.agent.WebSocketBridgeAgentLauncher;
+import com.github.pangolin.agent.WebSocketBridgeAgent;
 import com.github.pangolin.agent.servlet.WebSocketEndpointLoaderListener;
 import org.springframework.boot.web.servlet.ServletComponentScan;
 import org.springframework.context.EnvironmentAware;
@@ -9,67 +9,98 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  *
  */
 @Configuration
 @ServletComponentScan(basePackageClasses = {WebSocketEndpointLoaderListener.class})
-public class WebSocketBridgeAgentAutoConfiguration implements EnvironmentAware {
+public class WebSocketBridgeAgentAutoConfiguration {
     private static final String WS_SERVER_URL_PROPERTY = "spring.management.tunnel";
 
-    private Environment env;
-    private final WebSocketBridgeAgentLauncher launcher = new WebSocketBridgeAgentLauncher();
-
-    @Bean(destroyMethod = "stop")
-    public DebugTunnelInitializer tunnel() {
-        return new DebugTunnelInitializer().start();
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    public WebSocketBridgeAgentWatchdog webSocketBridgeAgentWatchdog() {
+        return new WebSocketBridgeAgentWatchdog();
     }
 
-    public class DebugTunnelInitializer {
+    private static class WebSocketBridgeAgentWatchdog implements EnvironmentAware {
+        private final AtomicBoolean started = new AtomicBoolean(false);
         private final ScheduledExecutorService scheduler;
 
-        public DebugTunnelInitializer() {
+        private Environment env;
+        private volatile WebSocketBridgeAgent agent;
+
+        public WebSocketBridgeAgentWatchdog() {
             this.scheduler = Executors.newSingleThreadScheduledExecutor();
         }
 
-        public DebugTunnelInitializer start() {
-            scheduler.scheduleWithFixedDelay(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        launchTunnelClientIfNecessary();
-                    } catch (final Exception e) {
-                        e.printStackTrace();
-                        // ignore
-                    }
+        private synchronized void launchIfNecessary() throws IOException, InterruptedException {
+            final String name = env.getProperty("spring.application.name", UUID.randomUUID().toString());
+            final String profiles = Arrays.toString(env.getActiveProfiles()).replaceAll("[\\[\\]]+", "");
+            final String tunnelKey = !profiles.isEmpty() ? (name + '@' + profiles).replace(" ", "") : name;
+
+            final String endpoint = env.getProperty(WS_SERVER_URL_PROPERTY);
+            final String wsServerUrlToUse = null != endpoint ? endpoint + "/" + tunnelKey : null;
+            this.launchIfNecessary(tunnelKey, wsServerUrlToUse);
+        }
+
+        private void launchIfNecessary(final String name, final String uri) throws IOException, InterruptedException {
+            if (null == uri || uri.isEmpty()) {
+                if (null != agent) {
+                    agent.shutdownGracefully();
                 }
-            }, 15, 15, TimeUnit.SECONDS);
-            return this;
+                return;
+            }
+
+            final URI endpoint = URI.create(uri);
+            if (null != agent && !endpoint.equals(agent.getWebSocketServerEndpoint())) {
+                agent.shutdownGracefully();
+                agent = new WebSocketBridgeAgent(name, endpoint).start();
+            } else if (null == agent) {
+                agent = new WebSocketBridgeAgent(name, endpoint).start();
+            }
+        }
+
+        public void start() {
+            if (started.compareAndSet(false, true)) {
+                scheduler.scheduleWithFixedDelay(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            launchIfNecessary();
+                        } catch (final Exception e) {
+                            e.printStackTrace();
+                            // ignore
+                        }
+                    }
+                }, 15, 15, TimeUnit.SECONDS);
+            }
         }
 
         public void stop() {
-            scheduler.shutdownNow();
+            if (started.compareAndSet(true, false)) {
+                scheduler.shutdown();
+                if (null != agent) {
+                    agent.shutdownGracefully();
+                }
+            }
         }
-    }
 
-    private void launchTunnelClientIfNecessary() throws IOException, InterruptedException {
-        final String name = env.getProperty("spring.application.name", UUID.randomUUID().toString());
-        final String profiles = Arrays.toString(env.getActiveProfiles()).replaceAll("[\\[\\]]+", "");
-        final String tunnelKey = !profiles.isEmpty() ? (name + '@' + profiles).replace(" ", "") : name;
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        public void setEnvironment(Environment environment) {
+            this.env = environment;
+        }
 
-        final String wsServerUrlToUse = env.getProperty(WS_SERVER_URL_PROPERTY) + "/" + tunnelKey;
-        launcher.launchIfNecessary(tunnelKey, wsServerUrlToUse);
-    }
-
-    @Override
-    public void setEnvironment(Environment environment) {
-        this.env = environment;
     }
 
 }
