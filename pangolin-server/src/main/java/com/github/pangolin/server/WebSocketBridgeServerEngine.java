@@ -7,7 +7,6 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.util.CharsetUtil;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
@@ -34,16 +33,19 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class WebSocketBridgeServerEngine {
 
-    private static final byte IPv4_ADDR_SIZE = 4;
-    private static final byte IPv6_ADDR_SIZE = 16;
+    static final byte IPv4_ADDR_SIZE = 4;
+    static final byte IPv6_ADDR_SIZE = 16;
 
-    private static final byte VER_1_1 = 0x01;
+    static final byte VER_1 = 0x01;
 
-    private static final byte CMD_CONNECT = 0x01;
+    static final byte CMD_CONNECT = 0x01;
+    static final byte CMD_SERVICE = (byte) 0xFF;
 
-    private static final byte ATYPE_IPv4 = 0x01;
-    private static final byte ATYPE_DOMAIN = 0x03;
-    private static final byte ATYPE_IPv6 = 0x04;
+    static final byte RSV = 0;
+
+    static final byte ATYPE_IPv4 = 0x01;
+    static final byte ATYPE_DOMAIN = 0x03;
+    static final byte ATYPE_IPv6 = 0x04;
 
     private static final byte REPLY_SUCCESS = 0x00;
     private static final byte REPLY_FAILURE = 0x01;
@@ -78,26 +80,33 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Agent registered.
+     * Register an agent service.
      *
      * @param tunnelKey     the tunnel key
      * @param tunnelVersion the tunnel version
      * @param agentName     the agent name
      * @param agentVersion  the agent version
      * @param intranet      the agent intranet address
-     * @param agentCtx      the agent channel handler context
+     * @param agentCtx      the agent channel context
      * @return true if registered, otherwise false
      */
-    boolean agentRegistered(final String tunnelKey, final byte tunnelVersion,
-                            final String agentName, final String agentVersion,
-                            final String intranet, final ChannelHandlerContext agentCtx) {
+    boolean registerAgent(final String tunnelKey, final byte tunnelVersion,
+                          final String agentName, final String agentVersion,
+                          final String intranet, final ChannelHandlerContext agentCtx) {
         final Channel ch = agentCtx.channel();
         final String extranet = stringify(ch.remoteAddress());
         final Agent agent = new Agent(ch.id().toString(), agentName, agentVersion, intranet, extranet, tunnelKey, tunnelVersion, agentCtx);
-        return agentRegistered(agent, agentCtx);
+        return registerAgent(agent, agentCtx);
     }
 
-    private boolean agentRegistered(final Agent agent, final ChannelHandlerContext agentCtx) {
+    /**
+     * Register an agent service.
+     *
+     * @param agent    the agent
+     * @param agentCtx the agent channel context
+     * @return true if registered, otherwise false
+     */
+    private boolean registerAgent(final Agent agent, final ChannelHandlerContext agentCtx) {
         if (null == registeredAgents.putIfAbsent(agent.id, agent)) {
             log.info("[Agent] Agent registered: {}", stringify(agent));
 
@@ -186,29 +195,35 @@ public class WebSocketBridgeServerEngine {
                 public void run() {
                     if (!handshakePromise.isDone()) {
                         final long timeoutMs = unit.toMillis(handshakeTimeout);
-                        log.warn(
-                                "[{}] Handshake timeout ({}ms) with {} for {}",
-                                id, timeoutMs, simplify(agent), target
-                        );
+                        log.warn("[{}] Handshake timeout ({}ms) with {} for {}", id, timeoutMs, simplify(agent), target);
                         handshakePromise.tryFailure(new ConnectTimeoutException("Handshake timeout"));
                     }
                 }
             }, handshakeTimeout, unit);
         }
 
+        /*-
+         * Handshake completed.
+         */
         final ScheduledFuture<?> handshakeTimeoutFutureToUse = handshakeTimeoutFuture;
         handshakePromise.addListener(new GenericFutureListener<Future<ChannelHandlerContext>>() {
             @Override
             public void operationComplete(Future<ChannelHandlerContext> future) throws Exception {
-                // clear handshake timeout
+                /*-
+                 * clear handshake timeout
+                 */
                 if (null != handshakeTimeoutFutureToUse && !handshakeTimeoutFutureToUse.isDone()) {
                     handshakeTimeoutFutureToUse.cancel(false);
                 }
+
                 if (!future.isSuccess()) {
                     log.warn("[{}] Handshake failed width {} for {}: {}", id, simplify(agent), target, future.cause().getMessage());
                     return;
                 }
 
+                /*-
+                 * After a successful handshake, access should be closed when backhual is closed.
+                 */
                 final ChannelHandlerContext backhaulCtx = future.getNow();
                 backhaulCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
                     @Override
@@ -228,6 +243,9 @@ public class WebSocketBridgeServerEngine {
             }
         });
 
+        /*-
+         * When access is closed, the handshake is aborted or the backhaul connection is closed.
+         */
         accessCtx.channel().closeFuture().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
@@ -263,7 +281,7 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
-     * Choose a agent for tunnel key.
+     * Choose an agent for tunnel key.
      *
      * @param tunnelKey the tunnel key
      * @return the agent instance or null
@@ -284,6 +302,8 @@ public class WebSocketBridgeServerEngine {
     }
 
     /**
+     * Send the handshake request to the agent.
+     *
      * @param id        the connection id
      * @param accessCtx the access channel context
      * @param agent     the connection agent
@@ -293,22 +313,6 @@ public class WebSocketBridgeServerEngine {
                             final ChannelHandlerContext accessCtx,
                             final Agent agent, final InetSocketAddress target,
                             final Promise<?> handshakePromise) {
-        if ("1.0".equals(agent.version)) {
-            final String command = id + "->" + "tcp://" + target.getHostString() + ":" + target.getPort();
-
-            log.info("[{}] Sending {} handshake to {}", id, command, simplify(agent));
-
-            agent.bus.writeAndFlush(new TextWebSocketFrame(command)).addListener(new ChannelFutureListener() {
-                @Override
-                public void operationComplete(final ChannelFuture future) throws Exception {
-                    if (!future.isSuccess()) {
-                        handshakePromise.tryFailure(future.cause());
-                    }
-                }
-            });
-            return;
-        }
-
         /*-
          * TCP connect request is a SOCKS5-like request:
          *
@@ -327,7 +331,7 @@ public class WebSocketBridgeServerEngine {
          * o  RSV X'00'
          * o  ATYP address type of following address
          *    o  IP V4 address: X'01'
-         *    o  DOMAINNAME: X'03'
+         *    o  DOMAIN NAME: X'03'
          *    o  IP V6 address: X'04'
          * o  DST.ADDR desired destination address
          * o  DST.PORT desired destination port in network octet order
@@ -351,7 +355,7 @@ public class WebSocketBridgeServerEngine {
          */
         final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(id);
         final ByteBuf buffer = accessCtx.alloc().buffer();
-        buffer.writeByte(VER_1_1);
+        buffer.writeByte(VER_1);
         buffer.writeByte(idBytes.remaining());
         buffer.writeBytes(idBytes);
         buffer.writeByte(CMD_CONNECT);
@@ -382,6 +386,9 @@ public class WebSocketBridgeServerEngine {
             log.info("[{}] Sending {} handshake to {}", id, hex, simplify(agent));
         }
 
+        /*-
+         * Send the request to the agent.
+         */
         agent.bus.writeAndFlush(new BinaryWebSocketFrame(buffer)).addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(final ChannelFuture future) throws Exception {
@@ -392,6 +399,12 @@ public class WebSocketBridgeServerEngine {
         });
     }
 
+    /**
+     * Handle the message from the agent.
+     *
+     * @param payload  the response
+     * @param agentCtx the agent channel context
+     */
     void agentResponded(final ByteBuf payload, final ChannelHandlerContext agentCtx) {
         /*-
          * The reply is a SOCKS5-like reply:
@@ -403,7 +416,7 @@ public class WebSocketBridgeServerEngine {
          * +----+----------+-----+-------+------+----------+----------+
          */
         final byte version = payload.readByte();
-        Preconditions.checkState(VER_1_1 == version, "Unsupported version: %s, (expected: %s)", version, VER_1_1);
+        Preconditions.checkState(VER_1 == version, "Unsupported version: %s, (expected: %s)", version, VER_1);
 
         final String id = payload.readCharSequence(payload.readByte(), CharsetUtil.UTF_8).toString();
         final byte status = payload.readByte();
@@ -420,16 +433,19 @@ public class WebSocketBridgeServerEngine {
     /**
      * Validates and finishes the opening handshake initiated by {@link #handshake}.
      *
-     * @param id          the id of handshake request
-     * @param backhaulCtx the backhaul channel
+     * @param tunnelKey    the tunnel key
+     * @param connectionId the connection id
+     * @param backhaulCtx  the backhaul channel
      * @return true if handshake completed otherwise false
      */
-    public boolean finishHandshake(final String id, final ChannelHandlerContext backhaulCtx) {
+    public boolean finishHandshake(final String tunnelKey,
+                                   final String connectionId,
+                                   final ChannelHandlerContext backhaulCtx) {
         backhaulCtx.channel().config().setAutoRead(false);
 
-        final Connection connection = null != id ? connections.get(id) : null;
+        final Connection connection = null != connectionId ? connections.get(connectionId) : null;
         if (null == connection) {
-            log.info("[{}] Pending handshake context not found for {}", id, id);
+            log.info("[{}] Pending handshake context not found for {}", connectionId, connectionId);
             return false;
         }
 
@@ -437,10 +453,10 @@ public class WebSocketBridgeServerEngine {
         final ChannelHandlerContext accessCtx = connection.accessCtx;
         final SocketAddress accessAddr = accessCtx.channel().remoteAddress();
         if (!connection.handshakePromise.isDone() && connection.handshakePromise.trySuccess(backhaulCtx)) {
-            log.info("[{}] Handshake completed: {} -{}-> {}", id, stringify(accessAddr), simplify(agent), connection.target);
+            log.info("[{}] Handshake completed: {} -{}-> {}", connectionId, stringify(accessAddr), simplify(agent), connection.target);
             return true;
         } else {
-            log.warn("[{}] Connection already established: {} -{}-> {}", id, stringify(accessAddr), simplify(agent), connection.target);
+            log.warn("[{}] Connection already established: {} -{}-> {}", connectionId, stringify(accessAddr), simplify(agent), connection.target);
             return false;
         }
     }

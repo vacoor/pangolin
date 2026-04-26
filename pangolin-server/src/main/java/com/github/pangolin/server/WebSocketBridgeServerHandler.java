@@ -26,6 +26,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.*;
 
+import static com.github.pangolin.server.WebSocketBridgeServerEngine.*;
+
 /**
  *
  */
@@ -85,39 +87,47 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                  * SERVICE {endpoint}/{tunnelKey}.
                  */
                 final String tunnelKey = getPathWithinEndpoint(handshake);
-                final ByteBuf handshakePayload = getHandshakePayload(handshake);
                 if (null == tunnelKey || tunnelKey.isEmpty()) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE)).addListener(ChannelFutureListener.CLOSE);
-                } else if (null == handshakePayload) {
-                    ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INVALID_PAYLOAD_DATA)).addListener(ChannelFutureListener.CLOSE);
-                } else if (!service(tunnelKey, handshakePayload, ctx)) {
-                    ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INVALID_PAYLOAD_DATA)).addListener(ChannelFutureListener.CLOSE);
+                } else {
+                    final ByteBuf handshakePayload = getHandshakePayload(handshake);
+                    if (null == handshakePayload) {
+                        ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INVALID_PAYLOAD_DATA)).addListener(ChannelFutureListener.CLOSE);
+                    } else {
+                        if (!registerAgent(tunnelKey, handshakePayload, ctx)) {
+                            ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INVALID_PAYLOAD_DATA)).addListener(ChannelFutureListener.CLOSE);
+                        }
+                    }
                 }
             } else if (PROTO_WS_CONNECT.equals(subprotocol) || PROTO_TCP_CONNECT.equals(subprotocol)) {
                 /*-
                  * CONNECT {endpoint}/{tunnelKey}.
                  */
                 final String tunnelKey = getPathWithinEndpoint(handshake);
-                final ByteBuf handshakePayload = getHandshakePayload(handshake);
-                final boolean downgrade = PROTO_TCP_CONNECT.equals(subprotocol);
                 if (null == tunnelKey || tunnelKey.isEmpty()) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE)).addListener(ChannelFutureListener.CLOSE);
-                } else if (null == handshakePayload) {
-                    ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INVALID_PAYLOAD_DATA)).addListener(ChannelFutureListener.CLOSE);
-                } else if (!handshake(tunnelKey, handshakePayload, downgrade, ctx)) {
-                    ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INVALID_PAYLOAD_DATA)).addListener(ChannelFutureListener.CLOSE);
+                } else {
+                    final ByteBuf handshakePayload = getHandshakePayload(handshake);
+                    if (null == handshakePayload) {
+                        ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INVALID_PAYLOAD_DATA)).addListener(ChannelFutureListener.CLOSE);
+                    } else {
+                        final boolean downgrade = PROTO_TCP_CONNECT.equals(subprotocol);
+                        if (!handshake(tunnelKey, handshakePayload, downgrade, ctx)) {
+                            ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.INVALID_PAYLOAD_DATA)).addListener(ChannelFutureListener.CLOSE);
+                        }
+                    }
                 }
             } else if (PROTO_AGENT_BACKHAUL.equals(subprotocol)) {
                 /*-
-                 * BACKHAUL {endpoint}/{tunnelKey}/{id}.
+                 * BACKHAUL {endpoint}/{tunnelKey}/{connectionId}.
                  */
-                final String tunnelKeyAndId = getPathWithinEndpoint(handshake);
-                final int i = tunnelKeyAndId.indexOf('/');
-                final String tunnelKey = 0 <= i ? tunnelKeyAndId.substring(0, i) : null;
-                final String id = tunnelKeyAndId.substring(i + 1);
-                if (null == tunnelKey || tunnelKey.isEmpty() || id.isEmpty()) {
+                final String tunnelKeyAndConnectionId = getPathWithinEndpoint(handshake);
+                final int i = tunnelKeyAndConnectionId.indexOf('/');
+                final String tunnelKey = 0 <= i ? tunnelKeyAndConnectionId.substring(0, i) : null;
+                final String connectionId = tunnelKeyAndConnectionId.substring(i + 1);
+                if (null == tunnelKey || tunnelKey.isEmpty() || connectionId.isEmpty()) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ENDPOINT_UNAVAILABLE)).addListener(ChannelFutureListener.CLOSE);
-                } else if (!finishHandshake(ctx, tunnelKey, id)) {
+                } else if (!finishHandshake(ctx, tunnelKey, connectionId)) {
                     ctx.writeAndFlush(new CloseWebSocketFrame(WebSocketCloseStatus.ABNORMAL_CLOSURE)).addListener(ChannelFutureListener.CLOSE);
                 }
             } else if (PROTO_MGR_CONSOLE.equals(subprotocol)) {
@@ -148,7 +158,16 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
         } else {
             payload = Util.last(new QueryStringDecoder(handshake.requestUri()).parameters(), "access_token");
         }
-        return null != payload && !payload.isEmpty() ? Base64.decode(Unpooled.wrappedBuffer(CharsetUtil.UTF_8.encode(payload)), Base64Dialect.URL_SAFE) : null;
+        if (null == payload || payload.isEmpty()) {
+            return null;
+        }
+
+        final ByteBuf encoded = Unpooled.wrappedBuffer(CharsetUtil.UTF_8.encode(payload));
+        try {
+            return Base64.decode(encoded, Base64Dialect.URL_SAFE);
+        } finally {
+            encoded.release();
+        }
     }
 
     /**
@@ -162,21 +181,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
         )).addListener(ChannelFutureListener.CLOSE);
     }
 
-
-    private static final byte IPv4_ADDR_SIZE = 4;
-    private static final byte IPv6_ADDR_SIZE = 16;
-
-    private static final byte VER_1 = 0x01;
-
-    private static final byte CMD_CONNECT = 0x01;
-
-    private static final byte CMD_SERVICE = (byte) 0xFF;
-
-    private static final byte RSV = 0;
-
-    private static final byte ATYPE_IPv4 = 0x01;
-    private static final byte ATYPE_DOMAIN = 0x03;
-    private static final byte ATYPE_IPv6 = 0x04;
+    /* **** */
 
     private static InetSocketAddress parseSocketAddress(final ByteBuf in) throws UnknownHostException {
         final byte addressType = in.readByte();
@@ -193,8 +198,17 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
         throw new UnknownHostException("address type: " + addressType);
     }
 
-    private boolean service(final String tunnelKey, final ByteBuf payload,
-                            final ChannelHandlerContext agentCtx) throws UnknownHostException {
+    /**
+     * Register an agent service.
+     *
+     * @param tunnelKey the tunnel key
+     * @param payload   the payload of the handshake request
+     * @param agentCtx  the context of the agent
+     * @return <code>true</code> if the agent is registered, <code>false</code> otherwise
+     * @throws UnknownHostException if the address type is not supported
+     */
+    private boolean registerAgent(final String tunnelKey, final ByteBuf payload,
+                                  final ChannelHandlerContext agentCtx) throws UnknownHostException {
         /*-
          * agent service request is a SOCKS5-like request:
          *
@@ -204,25 +218,40 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
          * |  1  | x'FF' | X'00' |  1   | Variable |    2     | Variable | Variable |
          * +-----+-------+-------+------+----------+----------+----------+----------+
          */
-        final byte version = payload.readByte();
-        Preconditions.checkState(VER_1 == version, "unsupported version: %s, (expected: %s)", version, VER_1);
+        try {
+            final byte version = payload.readByte();
+            Preconditions.checkState(VER_1 == version, "unsupported version: %s, (expected: %s)", version, VER_1);
 
-        final byte cmd = payload.readByte();
-        Preconditions.checkState(CMD_SERVICE == cmd, "unsupported command type: %s, (expected: %s)", cmd, CMD_SERVICE);
+            final byte cmd = payload.readByte();
+            Preconditions.checkState(CMD_SERVICE == cmd, "unsupported command type: %s, (expected: %s)", cmd, CMD_SERVICE);
 
-        final byte rsv = payload.readByte();
-        Preconditions.checkState(RSV == rsv, "unsupported rsv: %s, (expected: %s)", rsv, RSV);
+            final byte rsv = payload.readByte();
+            Preconditions.checkState(RSV == rsv, "unsupported rsv: %s, (expected: %s)", rsv, RSV);
 
-        final InetSocketAddress target = parseSocketAddress(payload);
-        final String agentName = payload.readCharSequence(payload.readUnsignedByte(), CharsetUtil.UTF_8).toString();
-        final String agentVersion = payload.readCharSequence(payload.readUnsignedByte(), CharsetUtil.UTF_8).toString();
-        return service0(tunnelKey, version, agentName, agentVersion, target.getHostString(), agentCtx);
+            final InetSocketAddress target = parseSocketAddress(payload);
+            final String agentName = payload.readCharSequence(payload.readUnsignedByte(), CharsetUtil.UTF_8).toString();
+            final String agentVersion = payload.readCharSequence(payload.readUnsignedByte(), CharsetUtil.UTF_8).toString();
+            return registerAgent0(tunnelKey, version, agentName, agentVersion, target.getHostString(), agentCtx);
+        } finally {
+            payload.release();
+        }
     }
 
-    private boolean service0(final String tunnelKey, final byte tunnelVersion,
-                             final String agentName, final String agentVersion,
-                             final String intranet, final ChannelHandlerContext agentCtx) {
-        final boolean registered = webSocketBridgeServerEngine.agentRegistered(
+    /**
+     * Register an agent service.
+     *
+     * @param tunnelKey     the tunnel key
+     * @param tunnelVersion the tunnel version
+     * @param agentName     the agent name
+     * @param agentVersion  the agent version
+     * @param intranet      the intranet address of the agent
+     * @param agentCtx      the context of the agent
+     * @return <code>true</code> if the agent is registered, <code>false</code> otherwise
+     */
+    private boolean registerAgent0(final String tunnelKey, final byte tunnelVersion,
+                                   final String agentName, final String agentVersion,
+                                   final String intranet, final ChannelHandlerContext agentCtx) {
+        final boolean registered = webSocketBridgeServerEngine.registerAgent(
                 tunnelKey, tunnelVersion, agentName, agentVersion, intranet, agentCtx
         );
         if (registered) {
@@ -231,7 +260,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                  * {@inheritDoc}
                  */
                 @Override
-                public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
+                public void channelRead(final ChannelHandlerContext ctx, final Object msg) {
                     /*-
                      * agent service CMD response.
                      */
@@ -250,6 +279,17 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
         return registered;
     }
 
+    /**
+     * Initiate a handshake with the agent for target address to establish
+     * a WebSocket connection or downgrade the WebSocket to a TCP socket.
+     *
+     * @param tunnelKey the tunnel key
+     * @param payload   the payload of the handshake request
+     * @param downgrade
+     * @param accessCtx the access channel context
+     * @return <code>true</code> if the handshake is initiated, <code>false</code> otherwise
+     * @throws UnknownHostException
+     */
     private boolean handshake(final String tunnelKey, final ByteBuf payload,
                               final boolean downgrade, final ChannelHandlerContext accessCtx) throws UnknownHostException {
         /*-
@@ -261,17 +301,21 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
          * |  1  |  1  | X'00' |  1   | Variable |    2     |
          * +-----+-----+-------+------+----------+----------+
          */
-        final byte version = payload.readByte();
-        Preconditions.checkState(VER_1 == version, "unsupported version: %s, (expected: %s)", version, VER_1);
+        try {
+            final byte version = payload.readByte();
+            Preconditions.checkState(VER_1 == version, "unsupported version: %s, (expected: %s)", version, VER_1);
 
-        final byte cmd = payload.readByte();
-        Preconditions.checkState(CMD_CONNECT == cmd, "unsupported command type: %s, (expected: %s)", cmd, CMD_CONNECT);
+            final byte cmd = payload.readByte();
+            Preconditions.checkState(CMD_CONNECT == cmd, "unsupported command type: %s, (expected: %s)", cmd, CMD_CONNECT);
 
-        final byte rsv = payload.readByte();
-        Preconditions.checkState(0 == rsv, "unsupported rsv: %s, (expected: %s)", rsv, 0);
+            final byte rsv = payload.readByte();
+            Preconditions.checkState(0 == rsv, "unsupported rsv: %s, (expected: %s)", rsv, 0);
 
-        final InetSocketAddress target = parseSocketAddress(payload);
-        return handshake0(tunnelKey, target, downgrade, accessCtx);
+            final InetSocketAddress target = parseSocketAddress(payload);
+            return handshake0(tunnelKey, target, downgrade, accessCtx);
+        } finally {
+            payload.release();
+        }
     }
 
     /**
@@ -354,8 +398,8 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
     }
 
     private boolean finishHandshake(final ChannelHandlerContext backhaulCtx,
-                                    final String tunnelKey, final String id) {
-        return webSocketBridgeServerEngine.finishHandshake(id, backhaulCtx);
+                                    final String tunnelKey, final String connectionId) {
+        return webSocketBridgeServerEngine.finishHandshake(tunnelKey, connectionId, backhaulCtx);
     }
 
 }
