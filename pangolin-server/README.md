@@ -72,7 +72,19 @@ com/github/pangolin/server/
 +-----+-------+-------+------+----------+----------+----------+----------+
 ```
 
-**Client 建立连接(CONNECT,握手阶段由服务端发给 Agent):**
+**Client → Server 的 CONNECT 请求**(WS 握手时通过 `Authorization: Bearer <base64>` 或 `?access_token=<base64>` 携带,**不含 ID**):
+
+```
++-----+-----+-------+------+----------+----------+
+| VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
++-----+-----+-------+------+----------+----------+
+|  1  |  1  | x'00' |  1   | Variable |    2     |
++-----+-----+-------+------+----------+----------+
+```
+
+由 `WebSocketBridgeServerHandler#handshake` 解析。ID 字段由 server 用 access channel 的 Netty channel id 字符串自行补齐。
+
+**Server → Agent 的 CONNECT 转发**(通过 Agent 的 SERVICE bus 下发,**带上 ID**):
 
 ```
 +-----+----------+-----+-------+------+----------+----------+
@@ -82,7 +94,9 @@ com/github/pangolin/server/
 +-----+----------+-----+-------+------+----------+----------+
 ```
 
-**Agent 响应:**
+由 `WebSocketBridgeServerEngine#handshake0` 编码。`ID` 是 1 字节长度前缀 + UTF-8 字节(用 access channel 的 Netty channel id 字符串)。
+
+**Agent → Server 的 Reply:**
 
 ```
 +-----+----------+-----+-------+------+----------+----------+
@@ -91,6 +105,8 @@ com/github/pangolin/server/
 |  1  | Variable |  1  | x'00' |  1   | Variable |    2     |
 +-----+----------+-----+-------+------+----------+----------+
 ```
+
+由 `WebSocketBridgeServerEngine#agentResponded` 解析,但只读到 `RSV` 为止 —— `ATYP / BND.ADDR / BND.PORT` 当前未被服务端使用(agent 端 `newReply` 仍会写,占位 `0x01 / 0.0.0.0 / 0`)。
 
 `ATYP`:`0x01` IPv4 / `0x03` 域名 / `0x04` IPv6。
 
