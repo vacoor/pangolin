@@ -18,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.IOException;
 import java.net.*;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -87,20 +88,17 @@ public class WebSocketBridgeServerEngine {
     /**
      * Register an agent.
      *
-     * @param tunnelKey     the tunnel key
-     * @param tunnelVersion the tunnel version
-     * @param agentName     the agent name
-     * @param agentVersion  the agent version
-     * @param intranet      the agent intranet address
-     * @param agentCtx      the agent channel context
+     * @param tunnelKey the tunnel key
+     * @param agentName the agent name
+     * @param intranet  the agent intranet address
+     * @param agentCtx  the agent channel context
      * @return true if registered, otherwise false
      */
-    boolean registerAgent(final String tunnelKey, final byte tunnelVersion,
-                          final String agentName, final String agentVersion,
+    boolean registerAgent(final String tunnelKey, final String agentName,
                           final String intranet, final ChannelHandlerContext agentCtx) {
         final Channel ch = agentCtx.channel();
         final String extranet = stringify(ch.remoteAddress());
-        final Agent agent = new Agent(ch.id().toString(), agentName, agentVersion, intranet, extranet, tunnelKey, tunnelVersion, agentCtx);
+        final Agent agent = new Agent(ch.id().toString(), agentName, intranet, extranet, tunnelKey, agentCtx);
         return registerAgent(agent, agentCtx);
     }
 
@@ -289,11 +287,6 @@ public class WebSocketBridgeServerEngine {
      * @return the agent instance or null
      */
     private Agent choose(final String tunnelKey) {
-        Agent agent = registeredAgents.get(tunnelKey);
-        if (null != agent) {
-            return agent;
-        }
-
         final List<Agent> candidates = new ArrayList<>();
         for (final Agent candidate : registeredAgents.values()) {
             if (candidate.getTunnelKey().equals(tunnelKey)) {
@@ -316,17 +309,17 @@ public class WebSocketBridgeServerEngine {
                             final Agent agent, final InetSocketAddress target,
                             final Promise<?> handshakePromise) {
         /*-
-         * TCP connect request is a SOCKS5-like request:
+         * TCP connect request is a SOCKS5-like request
+         * (sent over already-authenticated SERVICE bus, NO auth tail):
          *
-         * +-----+----------+-----+-------+------+----------+----------+
-         * | VER | ID       | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
-         * +-----+----------+-----+-------+------+----------+----------+
-         * |  1  | Variable |  1  | X'00' |  1   | Variable |    2     |
-         * +-----+----------+-----+-------+------+----------+----------+
+         * +-----+-----+-------+------+----------+----------+----------+
+         * | VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT | ID       |
+         * +-----+-----+-------+------+----------+----------+----------+
+         * |  1  |  1  | X'00' |  1   | Variable |    2     | Variable |
+         * +-----+-----+-------+------+----------+----------+----------+
          *
          * Where:
          * o  VER protocol version: X'01'
-         * o  ID request id
          * o  CMD
          *    o  CONNECT X'01'
          *    o  UDP ASSOCIATE X'03'
@@ -337,6 +330,7 @@ public class WebSocketBridgeServerEngine {
          *    o  IP V6 address: X'04'
          * o  DST.ADDR desired destination address
          * o  DST.PORT desired destination port in network octet order
+         * o  ID request id, 1B length prefix + UTF-8 bytes
          *
          * In an address field (DST.ADDR, BND.ADDR), the ATYP field specifies
          * the type of address contained within the field:
@@ -358,8 +352,6 @@ public class WebSocketBridgeServerEngine {
         final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(id);
         final ByteBuf buffer = accessCtx.alloc().buffer();
         buffer.writeByte(VER_1);
-        buffer.writeByte(idBytes.remaining());
-        buffer.writeBytes(idBytes);
         buffer.writeByte(CMD_CONNECT);
         buffer.writeByte(0);
 
@@ -382,6 +374,9 @@ public class WebSocketBridgeServerEngine {
         }
 
         buffer.writeShort(target.getPort());
+        buffer.writeByte(idBytes.remaining());
+        buffer.writeBytes(idBytes);
+        // SERVICE bus 在 REGISTER 阶段已验签,FORWARD 走 channel-level trust,不带 auth tail
 
         if (log.isInfoEnabled()) {
             final String hex = ByteBufUtil.hexDump(buffer);
@@ -407,15 +402,17 @@ public class WebSocketBridgeServerEngine {
      * @param payload  the response payload
      * @param agentCtx the agent channel context
      */
-    void agentResponded(final ByteBuf payload, final ChannelHandlerContext agentCtx) {
+    void agentResponded(final String tunnelKey, final ByteBuf payload, final ChannelHandlerContext agentCtx) throws UnknownHostException {
         /*-
-         * The reply is a SOCKS5-like reply:
+         * The reply is a SOCKS5-like reply (sent over already-authenticated SERVICE bus,
+         * NO auth tail; only used for failure replies — successful replies travel as the
+         * BACKHAUL handshake token where auth tail IS required):
          *
-         * +----+----------+-----+-------+------+----------+----------+
-         * |VER | ID       | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
-         * +----+----------+-----+-------+------+----------+----------+
-         * | 1  | Variable |  1  | X'00' |  1   | Variable |    2     |
-         * +----+----------+-----+-------+------+----------+----------+
+         * +-----+-----+-------+------+----------+----------+----------+
+         * | VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT | ID       |
+         * +-----+-----+-------+------+----------+----------+----------+
+         * |  1  |  1  | X'00' |  1   | Variable |    2     | Variable |
+         * +-----+-----+-------+------+----------+----------+----------+
          */
         final byte version = payload.readByte();
         if (VER_1 != version) {
@@ -423,9 +420,11 @@ public class WebSocketBridgeServerEngine {
             return;
         }
 
-        final String id = payload.readCharSequence(payload.readByte(), CharsetUtil.UTF_8).toString();
         final byte status = payload.readByte();
         payload.skipBytes(1);
+        WebSocketBridgeUtil.skipSocketAddress(payload);
+
+        final String id = payload.readString(payload.readByte(), CharsetUtil.UTF_8);
 
         if (REPLY_SUCCESS != status) {
             final Connection connection = connections.get(id);
@@ -471,6 +470,19 @@ public class WebSocketBridgeServerEngine {
         }
     }
 
+    ByteBuf verifySignature(final String tunnelKey, final ByteBuf payload) {
+        try {
+            final byte[] secretKey = determineTunnelSecretKey(tunnelKey);
+            return WebSocketBridgeUtil.verifySignature(payload, secretKey);
+        } catch (final Exception ex) {
+            return null;
+        }
+    }
+
+    private byte[] determineTunnelSecretKey(final String tunnelKey) {
+        return "Local-v1.2".getBytes(StandardCharsets.UTF_8);
+    }
+
     public Collection<Agent> getAgents() {
         return registeredAgents.values();
     }
@@ -492,12 +504,10 @@ public class WebSocketBridgeServerEngine {
     public static class Agent {
         private final String id;
         private final String name;
-        private final String version;
         private final String intranet;
         private final String extranet;
 
         private final String tunnelKey;
-        private final byte tunnelVersion;
         private final ChannelHandlerContext bus;
     }
 
@@ -525,7 +535,7 @@ public class WebSocketBridgeServerEngine {
 
     private String stringify(final Agent agent) {
         if (null != agent) {
-            return agent.tunnelKey + ' ' + agent.id + ' ' + agent.name + " v" + agent.version + "(" + agent.tunnelVersion + ") " + agent.extranet + '/' + agent.intranet;
+            return agent.tunnelKey + ' ' + agent.id + ' ' + agent.name + ' ' + agent.extranet + '/' + agent.intranet;
         }
         return null;
     }

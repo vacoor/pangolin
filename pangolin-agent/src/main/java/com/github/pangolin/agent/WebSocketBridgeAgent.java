@@ -11,6 +11,7 @@ import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.timeout.IdleStateHandler;
+import io.netty.util.CharsetUtil;
 import io.netty.util.concurrent.Future;
 
 import java.io.IOException;
@@ -25,6 +26,7 @@ public class WebSocketBridgeAgent {
     private static final String PROTO_AGENT_SERVICE = "SERVICE";
 
     private final String name;
+    private final byte[] secretKey;
     private final URI webSocketServerEndpoint;
     private final int reconnectIntervalSeconds;
 
@@ -34,12 +36,14 @@ public class WebSocketBridgeAgent {
     private volatile ChannelFuture channelFuture;
     private volatile ScheduledFuture<?> reconnectFuture;
 
-    public WebSocketBridgeAgent(final String name, final URI endpoint) {
-        this(name, endpoint, 10);
+    public WebSocketBridgeAgent(final String name, final byte[] secretKey, final URI endpoint) {
+        this(name, secretKey, endpoint, 10);
     }
 
-    public WebSocketBridgeAgent(final String name, final URI endpoint, final int reconnectIntervalSeconds) {
+    public WebSocketBridgeAgent(final String name, final byte[] secretKey,
+                                final URI endpoint, final int reconnectIntervalSeconds) {
         this.name = name;
+        this.secretKey = secretKey;
         this.webSocketServerEndpoint = endpoint;
         this.reconnectIntervalSeconds = reconnectIntervalSeconds;
     }
@@ -82,7 +86,7 @@ public class WebSocketBridgeAgent {
         return Channels2.openWs(
                 handshaker, workerGroup,
                 new IdleStateHandler(60, 60, 60),
-                new WebSocketBridgeAgentHandler(name, handshaker, httpHeaders)
+                new WebSocketBridgeAgentHandler(name, secretKey, handshaker, httpHeaders)
         );
     }
 
@@ -115,7 +119,8 @@ public class WebSocketBridgeAgent {
     }
 
     public static void main(String[] args) throws IOException, InterruptedException {
-        final WebSocketBridgeAgent agent = new WebSocketBridgeAgent("Local", URI.create("ws://localhost:2345/tunnel/123"));
+        final byte[] secretKey = ("Local" + "-v" + WebSocketBridgeAgentHandler.AGENT_VERSION).getBytes(CharsetUtil.UTF_8);
+        final WebSocketBridgeAgent agent = new WebSocketBridgeAgent("Local", secretKey, URI.create("ws://localhost:2346/tunnel/123"));
         agent.start();
         LockSupport.park();
     }

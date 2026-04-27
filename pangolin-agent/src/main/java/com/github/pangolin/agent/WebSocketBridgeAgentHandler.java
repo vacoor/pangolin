@@ -20,15 +20,20 @@ import io.netty.util.CharsetUtil;
 import io.netty.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.net.*;
 import java.nio.ByteBuffer;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 
 /**
  * WebSocket 回传通道代理.
  */
 @Slf4j
 public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
-    private static final String AGENT_VERSION = "1.2";
+    public static final String AGENT_VERSION = "1.2";
     private static final String PROTO_AGENT_BACKHAUL = "BACKHAUL";
 
     private static final byte IPv4_ADDR_SIZE = 4;
@@ -52,13 +57,13 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
     private static final byte REPLY_COMMAND_UNSUPPORTED = 0x07;
     private static final byte REPLY_ADDRESS_UNSUPPORTED = 0x08;
 
-
-    private enum State {SUSPENDED, INITIALIZING, INITIALIZED}
+    private static final SecureRandom RNG = new SecureRandom();
 
     /**
      * Agent name.
      */
     private final String name;
+    private byte[] secretKey;
 
     /**
      * WebSocket agent handshaker.
@@ -71,9 +76,11 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
     private final HttpHeaders customHttpHeaders;
 
     public WebSocketBridgeAgentHandler(final String name,
+                                       final byte[] secretKey,
                                        final WebSocketClientHandshaker handshaker,
                                        final HttpHeaders customHttpHeaders) {
         this.name = name;
+        this.secretKey = secretKey;
         this.handshaker = handshaker;
         this.customHttpHeaders = customHttpHeaders;
     }
@@ -85,10 +92,9 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
 
             final int port = addr.getPort();
             final ByteBuffer addrBytes = CharsetUtil.UTF_8.encode(addr.getHostString());
-            final ByteBuffer nameBytes = CharsetUtil.UTF_8.encode(name);
-            final ByteBuffer versionBytes = CharsetUtil.UTF_8.encode(AGENT_VERSION);
+            final ByteBuffer nameBytes = CharsetUtil.UTF_8.encode(name + "-v" + AGENT_VERSION);
 
-            final ByteBuf buf = ctx.alloc().buffer(4 + addrBytes.remaining() + 2 + 1 + nameBytes.remaining());
+            final ByteBuf buf = ctx.alloc().buffer(4 + addrBytes.remaining() + 2 + 1 + nameBytes.remaining() + 8 + 8 + 32);
             try {
                 buf.writeByte(VER_1);
 
@@ -102,8 +108,8 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
                 buf.writeShort(port);
                 buf.writeByte(nameBytes.remaining());
                 buf.writeBytes(nameBytes);
-                buf.writeByte(AGENT_VERSION.length());
-                buf.writeBytes(versionBytes);
+
+                writeSignature(buf);
 
                 final ByteBuf base64 = Base64.encode(buf, Base64Dialect.URL_SAFE);
                 try {
@@ -137,13 +143,13 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
 
         final ByteBuf in = frame.content();
         final byte version = in.readByte();
-        final String id = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
         final byte command = in.readByte();
         final byte rsv = in.readByte();
 
         if (CMD_CONNECT == command) {
-            final InetAddress address = parseAddress(in);
+            final InetAddress address = readAddress(in);
             final int port = in.readUnsignedShort();
+            final String id = in.readString(in.readUnsignedByte(), CharsetUtil.UTF_8);
             final InetSocketAddress destination = new InetSocketAddress(address, port);
 
             final WebSocketClientHandshaker backhaulHandshaker = newBackhaulHandshaker(id, ctx);
@@ -151,9 +157,7 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
                 @Override
                 public void operationComplete(final ChannelFuture future) throws Exception {
                     if (!future.isSuccess()) {
-                        ctx.writeAndFlush(new BinaryWebSocketFrame(
-                                newReply(ctx, id, rsv, REPLY_HOST_UNREACHABLE)
-                        ));
+                        ctx.writeAndFlush(new BinaryWebSocketFrame(newReply(ctx, id, rsv, REPLY_HOST_UNREACHABLE)));
                     }
                 }
             });
@@ -162,7 +166,7 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
         }
     }
 
-    private InetAddress parseAddress(final ByteBuf in) throws UnknownHostException {
+    private InetAddress readAddress(final ByteBuf in) throws UnknownHostException {
         final byte addressType = in.readByte();
         if (ATYPE_IPv4 == addressType) {
             final byte[] addr = ByteBufUtil.getBytes(in.readBytes(IPv4_ADDR_SIZE));
@@ -181,19 +185,41 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
     private ByteBuf newReply(final ChannelHandlerContext ctx,
                              final String id, final byte rsv, final byte status) {
         final ByteBuffer idBytes = CharsetUtil.UTF_8.encode(id);
-        final ByteBuf reply = ctx.alloc().buffer(1 + idBytes.remaining() + 4 + IPv4_ADDR_SIZE + 2);
+        final ByteBuf reply = ctx.alloc().buffer(4 + IPv4_ADDR_SIZE + 2 + 1 + idBytes.remaining() + 8 + 8 + 32);
         reply.writeByte(VER_1);
-        reply.writeByte(idBytes.remaining());
-        reply.writeBytes(idBytes);
         reply.writeByte(status);
         reply.writeByte(rsv);
         reply.writeByte(ATYPE_IPv4);
         reply.writeInt(0);
         reply.writeShort(0);
+        reply.writeByte(idBytes.remaining());
+        reply.writeBytes(idBytes);
         return reply;
     }
 
-    private WebSocketClientHandshaker newBackhaulHandshaker(final String id, final ChannelHandlerContext ctx) {
+    private ByteBuf writeSignature(final ByteBuf buf) throws NoSuchAlgorithmException, InvalidKeyException {
+        return writeSignature(buf, secretKey);
+    }
+
+    private ByteBuf writeSignature(final ByteBuf buf, final byte[] secretKey) throws NoSuchAlgorithmException, InvalidKeyException {
+        buf.writeLong(System.currentTimeMillis() / 1000L);  // TS: unix seconds
+        final byte[] nonce = new byte[8];
+        RNG.nextBytes(nonce);
+        buf.writeBytes(nonce);                              // NONCE: 8B random
+
+        final Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(secretKey, "HmacSHA256"));
+        if (buf.readableBytes() > 0) {
+            final ByteBuffer[] views = buf.nioBuffers(buf.readerIndex(), buf.readableBytes());
+            for (ByteBuffer view : views) {
+                mac.update(view);
+            }
+        }
+        buf.writeBytes(mac.doFinal());
+        return buf;
+    }
+
+    private WebSocketClientHandshaker newBackhaulHandshaker(final String id, final ChannelHandlerContext ctx) throws NoSuchAlgorithmException, InvalidKeyException {
         final URI uri = handshaker.uri();
         final String basePath = uri.getPath();
         final String backhaulPath = basePath.endsWith("/") ? basePath + id : basePath + "/" + id;
@@ -201,15 +227,26 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
         final URI backhaulWebSocketUri = URI.create(endpoint + "?id=" + id);
 
         ByteBuf buf = newReply(ctx, id, (byte) 0, REPLY_SUCCESS);
+        try {
+            // BACKHAUL handshake token: append auth tail (TS / NONCE / HMAC)
+            // —— bus 还没建立,需要 handshake-time auth
+            writeSignature(buf);
+            final ByteBuf encoded = Base64.encode(buf, Base64Dialect.URL_SAFE);
+            try {
+                final String token = encoded.toString(CharsetUtil.UTF_8);
+                final DefaultHttpHeaders backhaulHeaders = new DefaultHttpHeaders();
+                backhaulHeaders.set("Authorization", "Bearer " + token);
 
-        final String token = Base64.encode(buf, Base64Dialect.URL_SAFE).toString(CharsetUtil.UTF_8);
-        final DefaultHttpHeaders backhaulHeaders = new DefaultHttpHeaders();
-        backhaulHeaders.set("Authorization", "Bearer " + token);
-
-        return WebSocketClientHandshakerFactory.newHandshaker(
-                backhaulWebSocketUri, handshaker.version(), PROTO_AGENT_BACKHAUL,
-                false, backhaulHeaders, handshaker.maxFramePayloadLength()
-        );
+                return WebSocketClientHandshakerFactory.newHandshaker(
+                        backhaulWebSocketUri, handshaker.version(), PROTO_AGENT_BACKHAUL,
+                        false, backhaulHeaders, handshaker.maxFramePayloadLength()
+                );
+            } finally {
+                encoded.release();
+            }
+        } finally {
+            buf.release();
+        }
     }
 
 

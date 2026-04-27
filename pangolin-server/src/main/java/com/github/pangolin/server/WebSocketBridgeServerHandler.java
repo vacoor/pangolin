@@ -6,7 +6,6 @@ import com.github.pangolin.handler.WebSocketInboundRedirectHandler;
 import com.github.pangolin.server.shell.WebSocketBridgeServerConsoleHandler;
 import com.github.pangolin.util.Util;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -23,7 +22,10 @@ import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
 import lombok.extern.slf4j.Slf4j;
 
-import java.net.*;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.net.URI;
+import java.net.UnknownHostException;
 
 import static com.github.pangolin.server.WebSocketBridgeServerEngine.*;
 
@@ -199,21 +201,6 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
 
     /* **** */
 
-    private static InetSocketAddress parseSocketAddress(final ByteBuf in) throws UnknownHostException {
-        final byte addressType = in.readByte();
-        if (ATYPE_IPv4 == addressType) {
-            final byte[] addr = ByteBufUtil.getBytes(in.readBytes(IPv4_ADDR_SIZE));
-            return new InetSocketAddress(InetAddress.getByAddress(addr), in.readUnsignedShort());
-        } else if (ATYPE_DOMAIN == addressType) {
-            final String domain = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
-            return InetSocketAddress.createUnresolved(domain, in.readUnsignedShort());
-        } else if (ATYPE_IPv6 == addressType) {
-            final byte[] addr = ByteBufUtil.getBytes(in.readBytes(IPv6_ADDR_SIZE));
-            return new InetSocketAddress(InetAddress.getByAddress(addr), in.readUnsignedShort());
-        }
-        throw new UnknownHostException("address type: " + addressType);
-    }
-
     /**
      * Register an agent.
      *
@@ -223,17 +210,23 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
      * @return <code>true</code> if the agent is registered; otherwise <code>false</code>
      * @throws UnknownHostException if the address type is not supported
      */
-    private boolean registerAgent(final String tunnelKey, final ByteBuf payload,
+    private boolean registerAgent(final String tunnelKey, ByteBuf payload,
                                   final ChannelHandlerContext agentCtx) throws UnknownHostException {
         /*-
          * The agent registration request is a SOCKS5-like request:
          *
-         * +-----+-------+-------+------+----------+----------+----------+----------+
-         * | VER |  CMD  |  RSV  | ATYP | BND.ADDR | BND.PORT | AGN.NAME |  AGN.VER |
-         * +-----+-------+-------+------+----------+----------+----------+----------+
-         * |  1  | x'FF' | X'00' |  1   | Variable |    2     | Variable | Variable |
-         * +-----+-------+-------+------+----------+----------+----------+----------+
+         * +-----+-----+-------+------+----------+----------+----------+----+-------+------+
+         * | VER | CMD |  RSV  | ATYP | BND.ADDR | BND.PORT | AGN.INFO | TS | NONCE | HMAC |
+         * +-----+-----+-------+------+----------+----------+----------+----+-------+------+
+         * |  1  |  1  | X'00' |  1   | Variable |    2     | Variable |  8 |   8   |  32  |
+         * +-----+-----+-------+------+----------+----------+----------+----+------ +------+
          */
+        payload = webSocketBridgeServerEngine.verifySignature(tunnelKey, payload);
+        if (null == payload) {
+            log.debug("Invalid signature: {}", payload);
+            return false;
+        }
+
         final byte version = payload.readByte();
         if (VER_1 != version) {
             log.debug("unsupported version: {}, (expected: {})", version, VER_1);
@@ -252,28 +245,24 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
             return false;
         }
 
-        final InetSocketAddress intranet = parseSocketAddress(payload);
-        final String agentName = payload.readCharSequence(payload.readUnsignedByte(), CharsetUtil.UTF_8).toString();
-        final String agentVersion = payload.readCharSequence(payload.readUnsignedByte(), CharsetUtil.UTF_8).toString();
-        return registerAgent0(tunnelKey, version, agentName, agentVersion, intranet.getHostString(), agentCtx);
+        final InetSocketAddress intranet = WebSocketBridgeUtil.readSocketAddress(payload);
+        final String agentName = payload.readString(payload.readUnsignedByte(), CharsetUtil.UTF_8);
+        return registerAgent0(tunnelKey, agentName, intranet.getHostString(), agentCtx);
     }
 
     /**
      * Register an agent.
      *
-     * @param tunnelKey     the tunnel key
-     * @param tunnelVersion the tunnel version
-     * @param agentName     the agent name
-     * @param agentVersion  the agent version
-     * @param intranet      the agent intranet address
-     * @param agentCtx      the agent channel context
+     * @param tunnelKey the tunnel key
+     * @param agentName the agent name
+     * @param intranet  the agent intranet address
+     * @param agentCtx  the agent channel context
      * @return <code>true</code> if the agent is registered; otherwise <code>false</code>
      */
-    private boolean registerAgent0(final String tunnelKey, final byte tunnelVersion,
-                                   final String agentName, final String agentVersion,
+    private boolean registerAgent0(final String tunnelKey, final String agentName,
                                    final String intranet, final ChannelHandlerContext agentCtx) {
         final boolean registered = webSocketBridgeServerEngine.registerAgent(
-                tunnelKey, tunnelVersion, agentName, agentVersion, intranet, agentCtx
+                tunnelKey, agentName, intranet, agentCtx
         );
         if (registered) {
             agentCtx.pipeline().replace(agentCtx.name(), null, new WebSocketKeepaliveHandler(60, 60, 60) {
@@ -281,13 +270,13 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                  * {@inheritDoc}
                  */
                 @Override
-                public void channelRead(final ChannelHandlerContext ctx, final Object msg) {
+                public void channelRead(final ChannelHandlerContext ctx, final Object msg) throws Exception {
                     /*-
                      * Handle an agent registration response.
                      */
                     if (msg instanceof BinaryWebSocketFrame) {
                         try {
-                            webSocketBridgeServerEngine.agentResponded(((BinaryWebSocketFrame) msg).content(), ctx);
+                            webSocketBridgeServerEngine.agentResponded(tunnelKey, ((BinaryWebSocketFrame) msg).content(), ctx);
                         } finally {
                             ReferenceCountUtil.release(msg);
                         }
@@ -310,17 +299,22 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
      * @return <code>true</code> if the handshake is initiated; otherwise <code>false</code>
      * @throws UnknownHostException if the address type is not supported
      */
-    private boolean handshake(final String tunnelKey, final ByteBuf payload,
+    private boolean handshake(final String tunnelKey, ByteBuf payload,
                               final boolean downgrade, final ChannelHandlerContext accessCtx) throws UnknownHostException {
         /*-
          * The TCP connect request is a SOCKS5-like request:
          *
-         * +-----+-----+-------+------+----------+----------+
-         * | VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
-         * +-----+-----+-------+------+----------+----------+
-         * |  1  |  1  | X'00' |  1   | Variable |    2     |
-         * +-----+-----+-------+------+----------+----------+
+         * +-----+-----+-------+------+----------+----------+-----------+----+-------+------+
+         * | VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |  EXT.INFO | TS | NONCE | HMAC |
+         * +-----+-----+-------+------+----------+----------+-----------+----+-------+------+
+         * |  1  |  1  | X'00' |  1   | Variable |    2     |  Variable | 8  |   8   |  32  |
+         * +-----+-----+-------+------+----------+----------+-----------+----+------ +------+
          */
+        payload = webSocketBridgeServerEngine.verifySignature(tunnelKey, payload);
+        if (null == payload) {
+            log.debug("Invalid signature: {}", payload);
+            return false;
+        }
         final byte version = payload.readByte();
         if (VER_1 != version) {
             log.debug("unsupported version: {}, (expected: {})", version, VER_1);
@@ -339,8 +333,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
             return false;
         }
 
-
-        final InetSocketAddress target = parseSocketAddress(payload);
+        final InetSocketAddress target = WebSocketBridgeUtil.readSocketAddress(payload);
         return handshake0(tunnelKey, target, downgrade, accessCtx);
     }
 
