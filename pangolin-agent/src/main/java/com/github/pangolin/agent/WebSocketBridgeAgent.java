@@ -13,6 +13,7 @@ import io.netty.handler.codec.http.websocketx.WebSocketVersion;
 import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.CharsetUtil;
 import io.netty.util.concurrent.Future;
+import lombok.Getter;
 
 import java.io.IOException;
 import java.net.URI;
@@ -23,10 +24,12 @@ import java.util.concurrent.locks.LockSupport;
 
 public class WebSocketBridgeAgent {
 
+    public static final String AGENT_VERSION = "1.3";
     private static final String PROTO_AGENT_SERVICE = "SERVICE";
 
     private final String name;
     private final byte[] secretKey;
+    @Getter
     private final URI webSocketServerEndpoint;
     private final int reconnectIntervalSeconds;
 
@@ -36,25 +39,25 @@ public class WebSocketBridgeAgent {
     private volatile ChannelFuture channelFuture;
     private volatile ScheduledFuture<?> reconnectFuture;
 
-    public WebSocketBridgeAgent(final String name, final byte[] secretKey, final URI endpoint) {
-        this(name, secretKey, endpoint, 10);
+    public WebSocketBridgeAgent(final String name,
+                                final String password,
+                                final URI webSocketServerEndpoint) {
+        this(name, password, webSocketServerEndpoint, 10);
     }
 
-    public WebSocketBridgeAgent(final String name, final byte[] secretKey,
-                                final URI endpoint, final int reconnectIntervalSeconds) {
+    public WebSocketBridgeAgent(final String name,
+                                final String password,
+                                final URI webSocketServerEndpoint,
+                                final int reconnectIntervalSeconds) {
         this.name = name;
-        this.secretKey = secretKey;
-        this.webSocketServerEndpoint = endpoint;
+        this.secretKey = null != password ? password.getBytes(CharsetUtil.UTF_8) : new byte[0];
+        this.webSocketServerEndpoint = webSocketServerEndpoint;
         this.reconnectIntervalSeconds = reconnectIntervalSeconds;
-    }
-
-    public URI getWebSocketServerEndpoint() {
-        return webSocketServerEndpoint;
     }
 
     public synchronized WebSocketBridgeAgent start() throws IOException, InterruptedException {
         if (!started.compareAndSet(false, true)) {
-            throw new IllegalStateException("already started");
+            throw new IllegalStateException("Already started");
         }
         connect();
         return this;
@@ -79,6 +82,7 @@ public class WebSocketBridgeAgent {
     }
 
     private ChannelFuture connect0() throws IOException, InterruptedException {
+        final String nameToUse = name + "-v" + AGENT_VERSION;
         final HttpHeaders httpHeaders = new DefaultHttpHeaders();
         final WebSocketClientHandshaker handshaker = WebSocketClientHandshakerFactory.newHandshaker(
                 webSocketServerEndpoint, WebSocketVersion.V13, PROTO_AGENT_SERVICE, true, httpHeaders
@@ -86,7 +90,7 @@ public class WebSocketBridgeAgent {
         return Channels2.openWs(
                 handshaker, workerGroup,
                 new IdleStateHandler(60, 60, 60),
-                new WebSocketBridgeAgentHandler(name, secretKey, handshaker, httpHeaders)
+                new WebSocketBridgeAgentHandler(nameToUse, secretKey, handshaker, httpHeaders)
         );
     }
 
@@ -119,8 +123,7 @@ public class WebSocketBridgeAgent {
     }
 
     public static void main(String[] args) throws IOException, InterruptedException {
-        final byte[] secretKey = ("Local" + "-v" + WebSocketBridgeAgentHandler.AGENT_VERSION).getBytes(CharsetUtil.UTF_8);
-        final WebSocketBridgeAgent agent = new WebSocketBridgeAgent("Local", secretKey, URI.create("ws://localhost:2346/tunnel/123"));
+        final WebSocketBridgeAgent agent = new WebSocketBridgeAgent("Local", "321^_^123", URI.create("wss://localhost:2345/tunnel/123"));
         agent.start();
         LockSupport.park();
     }

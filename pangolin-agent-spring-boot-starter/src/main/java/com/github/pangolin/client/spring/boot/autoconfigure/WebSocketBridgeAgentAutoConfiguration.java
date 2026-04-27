@@ -1,8 +1,6 @@
 package com.github.pangolin.client.spring.boot.autoconfigure;
 
 import com.github.pangolin.agent.WebSocketBridgeAgent;
-import com.github.pangolin.agent.servlet.WebSocketEndpointLoaderListener;
-import org.springframework.boot.web.servlet.ServletComponentScan;
 import org.springframework.context.EnvironmentAware;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,13 +15,11 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- *
- */
 @Configuration
-@ServletComponentScan(basePackageClasses = {WebSocketEndpointLoaderListener.class})
+// @ServletComponentScan(basePackageClasses = {WebSocketEndpointLoaderListener.class})
 public class WebSocketBridgeAgentAutoConfiguration {
     private static final String WS_SERVER_URL_PROPERTY = "spring.management.tunnel";
+    private static final String SECRET_KEY_PROPERTY = "spring.management.tunnelSecretKey";
 
     @Bean(initMethod = "start", destroyMethod = "stop")
     public WebSocketBridgeAgentWatchdog webSocketBridgeAgentWatchdog() {
@@ -46,12 +42,17 @@ public class WebSocketBridgeAgentAutoConfiguration {
             final String profiles = Arrays.toString(env.getActiveProfiles()).replaceAll("[\\[\\]]+", "");
             final String tunnelKey = !profiles.isEmpty() ? (name + '@' + profiles).replace(" ", "") : name;
 
+            String secretKey = env.getProperty(SECRET_KEY_PROPERTY);
+            if (null == secretKey) {
+                secretKey = new StringBuilder(tunnelKey).reverse().append("^_^").append(tunnelKey).toString();
+            }
+
             final String endpoint = env.getProperty(WS_SERVER_URL_PROPERTY);
             final String wsServerUrlToUse = null != endpoint ? endpoint + "/" + tunnelKey : null;
-            this.launchIfNecessary(tunnelKey, wsServerUrlToUse);
+            this.launchIfNecessary(tunnelKey, secretKey, wsServerUrlToUse);
         }
 
-        private void launchIfNecessary(final String name, final String uri) throws IOException, InterruptedException {
+        private void launchIfNecessary(final String name, final String secretKey, final String uri) throws IOException, InterruptedException {
             if (null == uri || uri.isEmpty()) {
                 if (null != agent) {
                     agent.shutdownGracefully();
@@ -62,9 +63,9 @@ public class WebSocketBridgeAgentAutoConfiguration {
             final URI endpoint = URI.create(uri);
             if (null != agent && !endpoint.equals(agent.getWebSocketServerEndpoint())) {
                 agent.shutdownGracefully();
-                agent = new WebSocketBridgeAgent(name, endpoint).start();
+                agent = new WebSocketBridgeAgent(name, secretKey, endpoint).start();
             } else if (null == agent) {
-                agent = new WebSocketBridgeAgent(name, endpoint).start();
+                agent = new WebSocketBridgeAgent(name, secretKey, endpoint).start();
             }
         }
 

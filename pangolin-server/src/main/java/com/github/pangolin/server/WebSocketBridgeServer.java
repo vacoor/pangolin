@@ -100,7 +100,8 @@ public class WebSocketBridgeServer extends NettyServer {
     }
 
     public static void main(String[] args) throws Exception {
-        final WebSocketBridgeServer server = new WebSocketBridgeServer(2346, "/tunnel", false);
+        final boolean useSsl = !Boolean.getBoolean("websocket.bridge.no-ssl");
+        final WebSocketBridgeServer server = new WebSocketBridgeServer(2345, "/tunnel", useSsl);
 
         final Channel channel = server.start();
         log.info("WebSocket bridge server started on {}", channel.localAddress());

@@ -13,11 +13,6 @@ import javax.websocket.server.ServerEndpoint;
 import javax.websocket.server.ServerEndpointConfig;
 import java.util.Arrays;
 
-/**
- * WebSocket Endpoint 注册监听.
- *
- * @author vacoor
- */
 @WebListener
 public class WebSocketEndpointLoaderListener implements ServletContextListener {
     private static final String WEB_SOCKET_ENDPOINT_NAME = "javax.websocket.Endpoint";

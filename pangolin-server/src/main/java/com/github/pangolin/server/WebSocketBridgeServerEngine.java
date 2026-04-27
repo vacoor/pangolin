@@ -1,5 +1,6 @@
 package com.github.pangolin.server;
 
+import com.github.pangolin.util.Util;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
@@ -18,7 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.IOException;
 import java.net.*;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -27,35 +27,13 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
+import static com.github.pangolin.util.Constants.*;
+
 /**
  *
  */
 @Slf4j
 public class WebSocketBridgeServerEngine {
-
-    static final byte IPv4_ADDR_SIZE = 4;
-    static final byte IPv6_ADDR_SIZE = 16;
-
-    static final byte VER_1 = 0x01;
-
-    static final byte CMD_CONNECT = 0x01;
-    static final byte CMD_SERVICE = (byte) 0xFF;
-
-    static final byte RSV = 0;
-
-    static final byte ATYPE_IPv4 = 0x01;
-    static final byte ATYPE_DOMAIN = 0x03;
-    static final byte ATYPE_IPv6 = 0x04;
-
-    private static final byte REPLY_SUCCESS = 0x00;
-    private static final byte REPLY_FAILURE = 0x01;
-    private static final byte REPLY_FORBIDDEN = 0x02;
-    private static final byte REPLY_NETWORK_UNREACHABLE = 0x03;
-    private static final byte REPLY_HOST_UNREACHABLE = 0x04;
-    private static final byte REPLY_CONNECTION_REFUSED = 0x05;
-    private static final byte REPLY_TTL_EXPIRED = 0x06;
-    private static final byte REPLY_COMMAND_UNSUPPORTED = 0x07;
-    private static final byte REPLY_ADDRESS_UNSUPPORTED = 0x08;
 
     /**
      * The default handshake timeout in milliseconds.
@@ -76,29 +54,35 @@ public class WebSocketBridgeServerEngine {
      * The handshake timeout in milliseconds.
      */
     private final long handshakeTimeoutMs;
+    private final WebSocketBridgeSecretKeyProvider secretKeyProvider;
 
     public WebSocketBridgeServerEngine() {
-        this(DEFAULT_HANDSHAKE_TIMEOUT_MILLIS);
+        this(DEFAULT_HANDSHAKE_TIMEOUT_MILLIS, WebSocketBridgeEnvSecretKeyProvider.INSTANCE);
     }
 
-    public WebSocketBridgeServerEngine(final long handshakeTimeoutMs) {
+    public WebSocketBridgeServerEngine(final WebSocketBridgeSecretKeyProvider secretKeyProvider) {
+        this(DEFAULT_HANDSHAKE_TIMEOUT_MILLIS, secretKeyProvider);
+    }
+
+    public WebSocketBridgeServerEngine(final long handshakeTimeoutMs, final WebSocketBridgeSecretKeyProvider secretKeyProvider) {
         this.handshakeTimeoutMs = handshakeTimeoutMs;
+        this.secretKeyProvider = secretKeyProvider;
     }
 
     /**
      * Register an agent.
      *
      * @param tunnelKey the tunnel key
-     * @param agentName the agent name
+     * @param name      the agent name
      * @param intranet  the agent intranet address
      * @param agentCtx  the agent channel context
      * @return true if registered, otherwise false
      */
-    boolean registerAgent(final String tunnelKey, final String agentName,
+    boolean registerAgent(final String tunnelKey, final String name,
                           final String intranet, final ChannelHandlerContext agentCtx) {
         final Channel ch = agentCtx.channel();
         final String extranet = stringify(ch.remoteAddress());
-        final Agent agent = new Agent(ch.id().toString(), agentName, intranet, extranet, tunnelKey, agentCtx);
+        final Agent agent = new Agent(ch.id().toString(), name, intranet, extranet, tunnelKey, agentCtx);
         return registerAgent(agent, agentCtx);
     }
 
@@ -353,7 +337,7 @@ public class WebSocketBridgeServerEngine {
         final ByteBuf buffer = accessCtx.alloc().buffer();
         buffer.writeByte(VER_1);
         buffer.writeByte(CMD_CONNECT);
-        buffer.writeByte(0);
+        buffer.writeByte(RSV);
 
         if (target.isUnresolved()) {
             final String hostname = target.getHostString();
@@ -376,7 +360,6 @@ public class WebSocketBridgeServerEngine {
         buffer.writeShort(target.getPort());
         buffer.writeByte(idBytes.remaining());
         buffer.writeBytes(idBytes);
-        // SERVICE bus 在 REGISTER 阶段已验签,FORWARD 走 channel-level trust,不带 auth tail
 
         if (log.isInfoEnabled()) {
             final String hex = ByteBufUtil.hexDump(buffer);
@@ -416,16 +399,15 @@ public class WebSocketBridgeServerEngine {
          */
         final byte version = payload.readByte();
         if (VER_1 != version) {
-            log.warn("Unsupported version: {}, (expected: {})", version, VER_1);
+            log.warn("[AGENT] Unsupported version: {}, (expected: {})", version, VER_1);
             return;
         }
 
         final byte status = payload.readByte();
         payload.skipBytes(1);
-        WebSocketBridgeUtil.skipSocketAddress(payload);
+        Util.skipSocketAddress(payload);
 
-        final String id = payload.readString(payload.readByte(), CharsetUtil.UTF_8);
-
+        final String id = payload.readString(payload.readUnsignedByte(), CharsetUtil.UTF_8);
         if (REPLY_SUCCESS != status) {
             final Connection connection = connections.get(id);
             if (null != connection) {
@@ -437,51 +419,44 @@ public class WebSocketBridgeServerEngine {
     /**
      * Validate and finish the opening handshake initiated by {@link #handshake}.
      *
-     * @param tunnelKey    the tunnel key
-     * @param connectionId the connection id
-     * @param backhaulCtx  the backhaul channel context
+     * @param tunnelKey   the tunnel key
+     * @param id          the connection id
+     * @param backhaulCtx the backhaul channel context
      * @return true if the handshake completes successfully; otherwise false
      */
     public boolean finishHandshake(final String tunnelKey,
-                                   final String connectionId,
-                                   final ChannelHandlerContext backhaulCtx) {
+                                   final String id, final ChannelHandlerContext backhaulCtx) {
         backhaulCtx.channel().config().setAutoRead(false);
 
-        final Connection connection = null != connectionId ? connections.get(connectionId) : null;
+        final Connection connection = null != id ? connections.get(id) : null;
         if (null == connection) {
-            log.info("[{}] Pending handshake not found for id {}", connectionId, connectionId);
+            log.info("[{}] Pending handshake not found for id {}", id, id);
             return false;
         }
 
         final Agent agent = connection.agent;
         if (!agent.tunnelKey.equals(tunnelKey)) {
-            log.warn("[{}] Mismatched tunnel key: {}, expected: {}", connectionId, tunnelKey, agent.tunnelKey);
+            log.warn("[{}] Mismatched tunnel key: {}, expected: {}", id, tunnelKey, agent.tunnelKey);
             return false;
         }
 
         final ChannelHandlerContext accessCtx = connection.accessCtx;
         final SocketAddress accessAddr = accessCtx.channel().remoteAddress();
         if (!connection.handshakePromise.isDone() && connection.handshakePromise.trySuccess(backhaulCtx)) {
-            log.info("[{}] Handshake completed: {} -{}-> {}", connectionId, stringify(accessAddr), simplify(agent), connection.target);
+            log.info("[{}] Handshake completed: {} -{}-> {}", id, stringify(accessAddr), simplify(agent), connection.target);
             return true;
         } else {
-            log.warn("[{}] Connection already established: {} -{}-> {}", connectionId, stringify(accessAddr), simplify(agent), connection.target);
+            log.warn("[{}] Connection already established: {} -{}-> {}", id, stringify(accessAddr), simplify(agent), connection.target);
             return false;
         }
     }
 
-    ByteBuf verifySignature(final String tunnelKey, final ByteBuf payload) {
-        try {
-            final byte[] secretKey = determineTunnelSecretKey(tunnelKey);
-            return WebSocketBridgeUtil.verifySignature(payload, secretKey);
-        } catch (final Exception ex) {
-            return null;
-        }
+    byte[] hmac(final String tunnelKey, final ByteBuf payload, final int offset, final int len) {
+        final byte[] secretKey = secretKeyProvider.getSecretKey(tunnelKey);
+        return null != secretKey ? Util.hmacSha256(payload, offset, len, secretKey) : null;
     }
 
-    private byte[] determineTunnelSecretKey(final String tunnelKey) {
-        return "Local-v1.2".getBytes(StandardCharsets.UTF_8);
-    }
+    /* ****************** */
 
     public Collection<Agent> getAgents() {
         return registeredAgents.values();
