@@ -383,6 +383,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
                         /*-
                          * client <--ws--> server <--ws--> agent
                          */
+                        accessCtx.pipeline().addBefore(accessCtx.name(), "access-keepalive", new WebSocketKeepaliveHandler(60, 60, 60));
                         accessCtx.pipeline().replace(accessCtx.name(), null, new WebSocketInboundRedirectHandler(backhaulCtx));
                         backhaulCtx.pipeline().replace(backhaulCtx.name(), null, new WebSocketInboundRedirectHandler(accessCtx));
                     } else {

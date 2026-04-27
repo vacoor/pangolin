@@ -79,22 +79,18 @@ Token:`Authorization: Bearer <urlsafe-base64>` 或 `?access_token=<urlsafe-base6
 
 ### 心跳保活
 
-中间链路长时间空闲会被静默丢掉,所以 server↔agent 整条 WS 链路都挂了 `WebSocketKeepaliveHandler(60,60,60)`(`IdleStateHandler` + `IdleStateEvent → PingWebSocketFrame`),三处统一 60s:
+中间链路长时间空闲会被静默丢掉,WS 链路都挂了 `WebSocketKeepaliveHandler(60,60,60)`(`IdleStateHandler` + `IdleStateEvent → PingWebSocketFrame`),四处统一 60s:
 
 - **SERVICE bus**(`registerAgent0`):匿名子类**替换**终端 handler,顺带 override `channelRead` 处理 `agentResponded`
-- **Backhaul**(`Handler#handshake0`):`addBefore` 终端 redirect handler
+- **Backhaul**(`Handler#handshake0`):`addBefore` 终端 redirect/encode handler
+- **Access(WS 透传)**(`Handler#handshake0` 的 `!downgrade` 分支):`addBefore` 终端 `WebSocketInboundRedirectHandler`
 - **Forwarder backhaul**(`Forwarder#addForwarding`):`addBefore` 终端 `TcpOverWebSocketDecodeHandler`
 
 `WebSocketKeepaliveHandler#handlerAdded` 自动把 `IdleStateHandler` 插在自身前面;但 keepalive 整体**必须挂在终端 redirect handler 之前**,否则 PING 帧会被 `WebSocketInboundRedirectHandler` 直接转发到对端,而非由本地 `WebSocketServerProtocolHandler` 回 PONG。Agent 端 `WebSocketBridgeAgentHandler#userEventTriggered` 也实现了 `IdleStateEvent → PING`,所以 server↔agent 双向都会主动发 PING。
 
-**access 段的 SO_KEEPALIVE 已默认开**:`pangolin-common/Channels.java#listen` 写死了 `childOption(SO_KEEPALIVE, true)`,主 server 与 Forwarder 都走它,所以裸 TCP 段在 OS 层有 keepalive 兜底 —— 但 Linux 默认 `tcp_keepalive_time=7200s`,需要运维侧调小内核参数才有意义。
+**access 裸 TCP 段(TCP 降级 + Forwarder 转发)只有 SO_KEEPALIVE 兜底**:`pangolin-common/Channels.java#listen` 写死了 `childOption(SO_KEEPALIVE, true)`,所以裸 TCP 段在 OS 层有 keepalive —— 但 Linux 默认 `tcp_keepalive_time=7200s`,需要运维侧调小内核参数才有意义。
 
-**仍未覆盖的应用层 PING:**
-
-- Client↔Server 的 WS 透传 access:可以挂 `WebSocketKeepaliveHandler`,目前没装(`Handler#handshake0` 的 `!downgrade` 分支没 `addBefore`)
-- TCP 降级 access 是裸 TCP,只能靠上述 `SO_KEEPALIVE` + 内核参数
-
-**改心跳参数前先看 `pangolin-server/README.md` "保活策略"那节**,里面有分段的修复方案。
+**改心跳参数前先看 `pangolin-server/README.md` "保活策略"那节**。
 
 ### 端口转发与管理 Shell
 
