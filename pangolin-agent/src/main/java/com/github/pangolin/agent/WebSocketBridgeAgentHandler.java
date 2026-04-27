@@ -81,13 +81,7 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
     @Override
     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
         if (null != customHttpHeaders) {
-            final InetSocketAddress localAddress = (InetSocketAddress) ctx.channel().localAddress();
-            customHttpHeaders.set("X-Node-Name", name);
-            customHttpHeaders.set("X-Node-Version", AGENT_VERSION);
-            customHttpHeaders.set("X-Node-Intranet", localAddress.getHostString());
-
-            final Channel ch = ctx.channel();
-            final InetSocketAddress addr = ((InetSocketAddress) ch.localAddress());
+            final InetSocketAddress addr = ((InetSocketAddress) ctx.channel().localAddress());
 
             final int port = addr.getPort();
             final ByteBuffer addrBytes = CharsetUtil.UTF_8.encode(addr.getHostString());

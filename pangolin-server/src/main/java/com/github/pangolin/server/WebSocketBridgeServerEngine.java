@@ -1,6 +1,5 @@
 package com.github.pangolin.server;
 
-import com.google.common.base.Preconditions;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
@@ -146,9 +145,9 @@ public class WebSocketBridgeServerEngine {
     /**
      * Initiate a handshake through the tunnel for the given target address.
      *
-     * @param accessCtx        the access channel context
-     * @param tunnelKey        the tunnel key
-     * @param target           the target address
+     * @param accessCtx the access channel context
+     * @param tunnelKey the tunnel key
+     * @param target    the target address
      * @return the handshake promise
      */
     public Promise<ChannelHandlerContext> handshake(final ChannelHandlerContext accessCtx,
@@ -419,7 +418,10 @@ public class WebSocketBridgeServerEngine {
          * +----+----------+-----+-------+------+----------+----------+
          */
         final byte version = payload.readByte();
-        Preconditions.checkState(VER_1 == version, "Unsupported version: %s, (expected: %s)", version, VER_1);
+        if (VER_1 != version) {
+            log.warn("Unsupported version: {}, (expected: {})", version, VER_1);
+            return;
+        }
 
         final String id = payload.readCharSequence(payload.readByte(), CharsetUtil.UTF_8).toString();
         final byte status = payload.readByte();

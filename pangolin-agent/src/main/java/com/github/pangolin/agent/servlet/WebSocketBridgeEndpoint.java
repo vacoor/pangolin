@@ -39,17 +39,17 @@ public class WebSocketBridgeEndpoint {
 
         final ByteBuf payload = decode(encodedPayloadToUse);
         final byte version = payload.readByte();
-        if (VER_1_1 != version) {
+        if (VER_1 != version) {
             session.close(new CloseReason(
                     CloseReason.CloseCodes.NOT_CONSISTENT,
-                    String.format("unsupported version: %s, (expected: %s)", version, VER_1_1)
+                    String.format("unsupported version: %s, (expected: %s)", version, VER_1)
             ));
         }
         final byte cmd = payload.readByte();
         if (CMD_CONNECT != cmd) {
             session.close(new CloseReason(
                     CloseReason.CloseCodes.NOT_CONSISTENT,
-                    String.format("unsupported command type: %s, (expected: %s)", version, VER_1_1)
+                    String.format("unsupported command type: %s, (expected: %s)", version, VER_1)
             ));
         }
 
@@ -149,7 +149,7 @@ public class WebSocketBridgeEndpoint {
     private static final byte IPv4_ADDR_SIZE = 4;
     private static final byte IPv6_ADDR_SIZE = 16;
 
-    private static final byte VER_1_1 = 0x01;
+    private static final byte VER_1 = 0x01;
 
     private static final byte CMD_CONNECT = 0x01;
 

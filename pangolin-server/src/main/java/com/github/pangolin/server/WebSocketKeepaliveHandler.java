@@ -32,6 +32,7 @@ public class WebSocketKeepaliveHandler extends ChannelInboundHandlerAdapter {
         if (evt instanceof IdleStateEvent) {
             ctx.writeAndFlush(new PingWebSocketFrame());
         }
+        ctx.fireUserEventTriggered(evt);
     }
 
 }
