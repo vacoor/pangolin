@@ -37,7 +37,7 @@ public class WebSocketBridgeEndpoint {
             return;
         }
 
-        final ByteBuf payload = Base64.decode(Unpooled.wrappedBuffer(encodedPayloadToUse.getBytes()), Base64Dialect.URL_SAFE);
+        final ByteBuf payload = decode(encodedPayloadToUse);
         final byte version = payload.readByte();
         if (VER_1_1 != version) {
             session.close(new CloseReason(
@@ -119,6 +119,15 @@ public class WebSocketBridgeEndpoint {
     public void onMessage(final byte[] bytes) {
         if (null != channel && channel.isOpen()) {
             channel.writeAndFlush(Unpooled.wrappedBuffer(bytes));
+        }
+    }
+
+    private ByteBuf decode(final String encodedPayloadToUse) {
+        final ByteBuf encoded = Unpooled.wrappedBuffer(encodedPayloadToUse.getBytes());
+        try {
+            return Base64.decode(encoded, Base64Dialect.URL_SAFE);
+        } finally {
+            encoded.release();
         }
     }
 

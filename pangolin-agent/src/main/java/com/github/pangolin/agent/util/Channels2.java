@@ -23,52 +23,6 @@ import java.net.URI;
 public class Channels2 {
 
 
-    /**
-     * client -> websocket server(downstream) <-- backhaul connection -- br --> destination socket(upstream)
-     *
-     * @deprecated 1.2.2
-     */
-    @Deprecated
-    public static ChannelFuture pipe(final SocketAddress upstream, final WebSocketClientHandshaker downstream, final EventLoopGroup brGroup) throws InterruptedException {
-        return Channels.open(upstream, false, brGroup, new ChannelInboundHandlerAdapter() {
-            @Override
-            public void channelActive(final ChannelHandlerContext upstreamCtx) throws Exception {
-                openWs(downstream, brGroup, new ChannelInboundHandlerAdapter() {
-                    @Override
-                    public void handlerAdded(final ChannelHandlerContext downstreamCtx) throws Exception {
-                        final ChannelPipeline cp = downstreamCtx.pipeline();
-                        if (null == cp.get(FlowControlHandler.class)) {
-                            final ChannelHandlerContext wsCtx = cp.context(WebSocketClientProtocolHandler.class);
-                            cp.addBefore(wsCtx.name(), FlowControlHandler.class.getName(), new FlowControlHandler());
-                        }
-                    }
-
-                    @Override
-                    public void userEventTriggered(final ChannelHandlerContext downstreamCtx, final Object evt) throws Exception {
-                        if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
-                            downstreamCtx.channel().config().setAutoRead(false);
-
-                            upstreamCtx.pipeline().replace(upstreamCtx.name(), "upstream-br", new TcpOverWebSocketEncodeHandler(downstreamCtx));
-                            downstreamCtx.pipeline().replace(downstreamCtx.name(), "downstream-br", new TcpOverWebSocketDecodeHandler(upstreamCtx));
-
-                            upstreamCtx.channel().config().setAutoRead(true);
-                            downstreamCtx.channel().config().setAutoRead(true);
-                        }
-                    }
-                }).addListener(new ChannelFutureListener() {
-                    @Override
-                    public void operationComplete(final ChannelFuture future) throws Exception {
-                        if (!future.isSuccess()) {
-                            // can't open backhaul connection.
-                            future.channel().close();
-                            upstreamCtx.channel().close();
-                        }
-                    }
-                });
-            }
-        }).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
-    }
-
     public static ChannelFuture openWs(final WebSocketClientHandshaker handshaker,
                                        final EventLoopGroup group, final ChannelHandler... wsHandlers) throws InterruptedException, SSLException {
         final URI webSocketEndpoint = handshaker.uri();

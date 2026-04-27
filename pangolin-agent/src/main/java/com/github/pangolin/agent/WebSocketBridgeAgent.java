@@ -45,7 +45,6 @@ public class WebSocketBridgeAgent {
     }
 
     public URI getWebSocketServerEndpoint() {
-
         return webSocketServerEndpoint;
     }
 
@@ -75,23 +74,6 @@ public class WebSocketBridgeAgent {
         });
     }
 
-    private void reconnectIfNecessary() {
-        if (!started.get() || (null != reconnectFuture && !reconnectFuture.isDone())) {
-            return;
-        }
-
-        reconnectFuture = workerGroup.next().schedule(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    connect();
-                } catch (final Exception e) {
-                    reconnectIfNecessary();
-                }
-            }
-        }, reconnectIntervalSeconds, java.util.concurrent.TimeUnit.SECONDS);
-    }
-
     private ChannelFuture connect0() throws IOException, InterruptedException {
         final HttpHeaders httpHeaders = new DefaultHttpHeaders();
         final WebSocketClientHandshaker handshaker = WebSocketClientHandshakerFactory.newHandshaker(
@@ -102,6 +84,22 @@ public class WebSocketBridgeAgent {
                 new IdleStateHandler(600, 600, 600),
                 new WebSocketBridgeAgentHandler(name, handshaker, httpHeaders)
         );
+    }
+
+    private void reconnectIfNecessary() {
+        if (!started.get() || (null != reconnectFuture && !reconnectFuture.isDone())) {
+            return;
+        }
+        reconnectFuture = workerGroup.next().schedule(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    connect();
+                } catch (final Exception e) {
+                    reconnectIfNecessary();
+                }
+            }
+        }, reconnectIntervalSeconds, java.util.concurrent.TimeUnit.SECONDS);
     }
 
     public Future<?> shutdownGracefully() {

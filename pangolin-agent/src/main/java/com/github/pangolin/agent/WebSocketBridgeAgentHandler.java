@@ -22,7 +22,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.*;
 import java.nio.ByteBuffer;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * WebSocket 回传通道代理.
@@ -70,11 +69,6 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
      * WebSocket agent handshake http headers.
      */
     private final HttpHeaders customHttpHeaders;
-
-    /**
-     * WebSocket agent state.
-     */
-    private final AtomicReference<State> state = new AtomicReference<>(State.SUSPENDED);
 
     public WebSocketBridgeAgentHandler(final String name,
                                        final WebSocketClientHandshaker handshaker,
@@ -132,21 +126,9 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
     }
 
     @Override
-    public void channelInactive(final ChannelHandlerContext ctx) throws Exception {
-        state.set(State.SUSPENDED);
-        super.channelInactive(ctx);
-    }
-
-    @Override
     public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
-        if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_ISSUED.equals(evt)) {
-            state.compareAndSet(State.SUSPENDED, State.INITIALIZING);
-        } else if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
-            state.compareAndSet(State.INITIALIZING, State.INITIALIZED);
-        } else if (evt instanceof IdleStateEvent) {
-            if (ctx.channel().isActive() && State.INITIALIZED.equals(state.get())) {
-                ctx.writeAndFlush(new PingWebSocketFrame());
-            }
+        if (evt instanceof IdleStateEvent) {
+            ctx.writeAndFlush(new PingWebSocketFrame());
         } else {
             super.userEventTriggered(ctx, evt);
         }
@@ -230,13 +212,11 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
         final DefaultHttpHeaders backhaulHeaders = new DefaultHttpHeaders();
         backhaulHeaders.set("Authorization", "Bearer " + token);
 
-        // backhaulHeaders.set("")
         return WebSocketClientHandshakerFactory.newHandshaker(
                 backhaulWebSocketUri, handshaker.version(), PROTO_AGENT_BACKHAUL,
                 false, backhaulHeaders, handshaker.maxFramePayloadLength()
         );
     }
-
 
 
     /*
