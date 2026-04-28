@@ -28,7 +28,7 @@ public class WebSocketInboundRedirectHandler extends ChannelInboundHandlerAdapte
             cp.addBefore(contextToUse.name(), "WsCloser", new MessageToMessageDecoder<CloseWebSocketFrame>() {
                 @Override
                 protected void decode(final ChannelHandlerContext ctx, final CloseWebSocketFrame c, final List<Object> out) throws Exception {
-                    closeGracefully(c, ctx, outCtx);
+                    closeGracefully(c, ctx, outCtx, false);
                 }
             });
         }
@@ -72,7 +72,7 @@ public class WebSocketInboundRedirectHandler extends ChannelInboundHandlerAdapte
             if (!(msg instanceof CloseWebSocketFrame)) {
                 outCtx.writeAndFlush(msg);
             } else {
-                closeGracefully((CloseWebSocketFrame) msg, inCtx, outCtx);
+                closeGracefully((CloseWebSocketFrame) msg, inCtx, outCtx, true);
             }
         } else {
             ReferenceCountUtil.release(msg);
@@ -82,12 +82,17 @@ public class WebSocketInboundRedirectHandler extends ChannelInboundHandlerAdapte
         }
     }
 
-    private void closeGracefully(final CloseWebSocketFrame c, final ChannelHandlerContext inCtx, final ChannelHandlerContext outCtx) {
+    private void closeGracefully(final CloseWebSocketFrame c, final ChannelHandlerContext inCtx,
+                                 final ChannelHandlerContext outCtx, final boolean releaseOriginal) {
         log.info("[tun@ws {}(!) => {}] Connection closed by peer: {}({})", stringify(inCtx), stringify(outCtx), c.reasonText(), c.statusCode());
-        if (outCtx.channel().isActive()) {
-            outCtx.writeAndFlush(c.retain()).addListener(ChannelFutureListener.CLOSE);
-        } else {
-            c.release();
+        try {
+            if (outCtx.channel().isActive()) {
+                outCtx.writeAndFlush(c.retain()).addListener(ChannelFutureListener.CLOSE);
+            }
+        } finally {
+            if (releaseOriginal) {
+                c.release();
+            }
         }
         if (inCtx.channel().isActive()) {
             inCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);

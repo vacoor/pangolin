@@ -13,7 +13,7 @@ import javax.websocket.server.ServerEndpoint;
 import javax.websocket.server.ServerEndpointConfig;
 import java.util.Arrays;
 
-@WebListener
+// @WebListener
 public class WebSocketEndpointLoaderListener implements ServletContextListener {
     private static final String WEB_SOCKET_ENDPOINT_NAME = "javax.websocket.Endpoint";
     private static final boolean WEB_SOCKET_SUPPORTED = isPresent(WEB_SOCKET_ENDPOINT_NAME);

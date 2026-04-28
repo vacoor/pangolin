@@ -23,7 +23,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.net.URI;
 import java.net.UnknownHostException;
 import java.security.MessageDigest;
 
@@ -174,9 +173,16 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
     }
 
     private String getPathWithinEndpoint(final HandshakeComplete handshake) {
-        final URI endpointPathUri = URI.create(new QueryStringDecoder(endpointPath).path());
-        final URI handshakePathUri = URI.create(new QueryStringDecoder(handshake.requestUri()).path());
-        return endpointPathUri.relativize(handshakePathUri).getPath();
+        final String basePath = new QueryStringDecoder(endpointPath).path();
+        final String requestPath = new QueryStringDecoder(handshake.requestUri()).path();
+        final String prefix = basePath.endsWith("/") ? basePath : basePath + "/";
+
+        if (!requestPath.startsWith(prefix)) {
+            return null;
+        }
+
+        final String tunnelKey = requestPath.substring(prefix.length());
+        return !tunnelKey.isEmpty() && tunnelKey.indexOf('/') < 0 ? tunnelKey : null;
     }
 
     private ByteBuf getHandshakePayload(final HandshakeComplete handshake) {

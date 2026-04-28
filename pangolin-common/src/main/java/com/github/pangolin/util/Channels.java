@@ -81,7 +81,10 @@ public class Channels {
         b.option(ChannelOption.SO_KEEPALIVE, true);
         b.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectTimeoutMillis);
         b.option(ChannelOption.SO_RCVBUF, 32 * 1024);// 读缓冲区为32k
-        b.resolver(resolver).group(group).channel(NioSocketChannel.class).handler(initializer);
+        if (null != resolver) {
+            b.resolver(resolver);
+        }
+        b.group(group).channel(NioSocketChannel.class).handler(initializer);
         return b.connect(remoteAddress);
     }
 

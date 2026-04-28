@@ -17,6 +17,7 @@ import io.netty.util.CharsetUtil;
 import io.netty.util.concurrent.Promise;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
@@ -175,6 +176,8 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
             @Override
             public void channelActive(final ChannelHandlerContext destinationCtx) throws Exception {
                 Channels2.openWs(backhaulHandhaker, brGroup, new ChannelInboundHandlerAdapter() {
+                    private boolean handshakeComplete;
+
                     @Override
                     public void handlerAdded(final ChannelHandlerContext backhaulCtx) throws Exception {
                         final ChannelPipeline cp = backhaulCtx.pipeline();
@@ -187,6 +190,7 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
                     @Override
                     public void userEventTriggered(final ChannelHandlerContext backhaulCtx, final Object evt) throws Exception {
                         if (WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE.equals(evt)) {
+                            handshakeComplete = true;
                             backhaulCtx.channel().config().setAutoRead(false);
 
                             /*-
@@ -210,6 +214,28 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
                                     backhaulCtx.channel().close();
                                 }
                             });
+                        }
+                    }
+
+                    @Override
+                    public void channelInactive(final ChannelHandlerContext backhaulCtx) throws Exception {
+                        if (!handshakeComplete) {
+                            promise.tryFailure(new IOException("Backhaul connection closed before handshake completed"));
+                        }
+                        closeDestinationIfHandshakeIncomplete();
+                        super.channelInactive(backhaulCtx);
+                    }
+
+                    @Override
+                    public void exceptionCaught(final ChannelHandlerContext backhaulCtx, final Throwable cause) throws Exception {
+                        promise.tryFailure(cause);
+                        closeDestinationIfHandshakeIncomplete();
+                        backhaulCtx.close();
+                    }
+
+                    private void closeDestinationIfHandshakeIncomplete() {
+                        if (!handshakeComplete && destinationCtx.channel().isActive()) {
+                            destinationCtx.channel().close();
                         }
                     }
                 }).addListener(propagationOnFailure).addListener(new ChannelFutureListener() {

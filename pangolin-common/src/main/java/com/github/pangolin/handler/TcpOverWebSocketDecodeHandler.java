@@ -45,9 +45,8 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
             } else if (msg instanceof PingWebSocketFrame) {
                 log.debug("[tun@ws/tcp {} => {}] Ping <==", stringify(inCtx), stringify(outCtx));
 
-                // ReferenceCountUtil.release(msg);
-                outCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER);
-                inCtx.channel().writeAndFlush(new PongWebSocketFrame(((WebSocketFrame) msg).content()));
+                inCtx.channel().writeAndFlush(new PongWebSocketFrame(((WebSocketFrame) msg).content().retain()));
+                ReferenceCountUtil.release(msg);
             } else if (msg instanceof PongWebSocketFrame) {
                 ReferenceCountUtil.release(msg);
             } else if (msg instanceof WebSocketFrame) {
@@ -55,7 +54,8 @@ public class TcpOverWebSocketDecodeHandler extends ChannelInboundHandlerAdapter 
                     final String msgToLog = ((WebSocketFrame) msg).content().toString(StandardCharsets.UTF_8);
                     log.debug("[tun@ws/tcp {} => {}] {}", stringify(inCtx), stringify(outCtx), msgToLog);
                 }
-                outCtx.writeAndFlush(((WebSocketFrame) msg).content());
+                outCtx.writeAndFlush(((WebSocketFrame) msg).content().retain());
+                ReferenceCountUtil.release(msg);
             } else {
                 ReferenceCountUtil.release(msg);
 

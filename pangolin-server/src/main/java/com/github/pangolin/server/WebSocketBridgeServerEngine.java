@@ -202,6 +202,10 @@ public class WebSocketBridgeServerEngine {
 
                 if (!future.isSuccess()) {
                     log.warn("[{}] Handshake failed with {} for {}: {}", id, simplify(agent), target, future.cause().getMessage());
+                    connections.remove(id, connection);
+                    if (accessCtx.channel().isActive()) {
+                        accessCtx.channel().writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+                    }
                     return;
                 }
 

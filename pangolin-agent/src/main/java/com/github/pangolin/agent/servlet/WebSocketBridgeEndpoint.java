@@ -23,7 +23,7 @@ import java.util.Map;
 import static com.github.pangolin.util.Constants.*;
 
 @Deprecated
-@ServerEndpoint(value = "/ws/bridge", configurator = WebSocketBridgeEndpoint.AuthenticationConfigurator.class)
+// @ServerEndpoint(value = "/ws/bridge", configurator = WebSocketBridgeEndpoint.AuthenticationConfigurator.class)
 public class WebSocketBridgeEndpoint {
     private static final int MIN_TRUST_PAYLOAD_LENGTH = 1 + 1 + 1 + 1 + IPv4_ADDR_SIZE + 2;
 

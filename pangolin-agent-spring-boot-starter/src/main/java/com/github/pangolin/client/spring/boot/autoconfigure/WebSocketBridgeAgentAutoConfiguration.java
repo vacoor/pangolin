@@ -14,10 +14,14 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 @Configuration
 // @ServletComponentScan(basePackageClasses = {WebSocketEndpointLoaderListener.class})
 public class WebSocketBridgeAgentAutoConfiguration {
+    private static final Logger log = Logger.getLogger(WebSocketBridgeAgentAutoConfiguration.class.getName());
+
     private static final String WS_SERVER_URL_PROPERTY = "spring.management.tunnel";
     private static final String SECRET_KEY_PROPERTY = "spring.management.tunnelSecretKey";
 
@@ -48,7 +52,8 @@ public class WebSocketBridgeAgentAutoConfiguration {
             }
 
             final String endpoint = env.getProperty(WS_SERVER_URL_PROPERTY);
-            final String wsServerUrlToUse = null != endpoint ? endpoint + "/" + tunnelKey : null;
+            final String wsServerUrlToUse = null != endpoint && !endpoint.isEmpty()
+                    ? trimTrailingSlashes(endpoint) + "/" + tunnelKey : null;
             this.launchIfNecessary(tunnelKey, secretKey, wsServerUrlToUse);
         }
 
@@ -56,6 +61,7 @@ public class WebSocketBridgeAgentAutoConfiguration {
             if (null == uri || uri.isEmpty()) {
                 if (null != agent) {
                     agent.shutdownGracefully();
+                    agent = null;
                 }
                 return;
             }
@@ -63,10 +69,19 @@ public class WebSocketBridgeAgentAutoConfiguration {
             final URI endpoint = URI.create(uri);
             if (null != agent && !endpoint.equals(agent.getWebSocketServerEndpoint())) {
                 agent.shutdownGracefully();
+                agent = null;
                 agent = new WebSocketBridgeAgent(name, secretKey, endpoint).start();
             } else if (null == agent) {
                 agent = new WebSocketBridgeAgent(name, secretKey, endpoint).start();
             }
+        }
+
+        private String trimTrailingSlashes(final String endpoint) {
+            int end = endpoint.length();
+            while (end > 0 && '/' == endpoint.charAt(end - 1)) {
+                end--;
+            }
+            return endpoint.substring(0, end);
         }
 
         public void start() {
@@ -77,8 +92,7 @@ public class WebSocketBridgeAgentAutoConfiguration {
                         try {
                             launchIfNecessary();
                         } catch (final Exception e) {
-                            e.printStackTrace();
-                            // ignore
+                            log.log(Level.WARNING, "Failed to launch WebSocket bridge agent", e);
                         }
                     }
                 }, 15, 15, TimeUnit.SECONDS);

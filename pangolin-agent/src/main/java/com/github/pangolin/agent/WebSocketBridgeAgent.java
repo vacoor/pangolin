@@ -67,7 +67,7 @@ public class WebSocketBridgeAgent {
         channelFuture = connect0().addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
-                if (!channelFuture.isSuccess()) {
+                if (!future.isSuccess()) {
                     reconnectIfNecessary();
                 } else {
                     future.channel().closeFuture().addListener(new ChannelFutureListener() {
