@@ -411,7 +411,7 @@ public class WebSocketBridgeServerEngine {
         payload.skipBytes(1);
         Util.skipSocketAddress(payload);
 
-        final String id = payload.readString(payload.readUnsignedByte(), CharsetUtil.UTF_8);
+        final String id = payload.readCharSequence(payload.readUnsignedByte(), CharsetUtil.UTF_8).toString();
         if (REPLY_SUCCESS != status) {
             final Connection connection = connections.get(id);
             if (null != connection) {

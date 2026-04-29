@@ -126,7 +126,7 @@ public class WebSocketBridgeAgentHandler extends SimpleChannelInboundHandler<Web
 
         if (VER_1 == version && CMD_CONNECT == command) {
             final InetSocketAddress destination = Util.readSocketAddress(in, false);
-            final String id = in.readString(in.readUnsignedByte(), CharsetUtil.UTF_8);
+            final String id = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
 
             final WebSocketClientHandshaker backhaulHandshaker = newBackhaulHandshaker(id, ctx);
             final ChannelPromise backhaulPromise = ctx.newPromise().addListener(new ChannelFutureListener() {

@@ -55,7 +55,7 @@ public class Util {
             in.readBytes(addr);
             return new InetSocketAddress(InetAddress.getByAddress(addr), in.readUnsignedShort());
         } else if (ATYPE_DOMAIN == addressType) {
-            final String domain = in.readString(in.readUnsignedByte(), CharsetUtil.UTF_8);
+            final String domain = in.readCharSequence(in.readUnsignedByte(), CharsetUtil.UTF_8).toString();
             final int port = in.readUnsignedShort();
             return resolve ? new InetSocketAddress(domain, port) : InetSocketAddress.createUnresolved(domain, port);
         } else if (ATYPE_IPv6 == addressType) {

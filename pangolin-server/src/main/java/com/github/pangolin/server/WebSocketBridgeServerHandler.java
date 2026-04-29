@@ -252,7 +252,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
             }
 
             final InetSocketAddress intranet = Util.readSocketAddress(payload, false);
-            final String agentName = payload.readString(payload.readUnsignedByte(), CharsetUtil.UTF_8);
+            final String agentName = payload.readCharSequence(payload.readUnsignedByte(), CharsetUtil.UTF_8).toString();
             if (!registerAgent0(tunnelKey, agentName, intranet.getHostString(), agentCtx)) {
                 return WebSocketCloseStatus.POLICY_VIOLATION;
             }
@@ -468,7 +468,7 @@ public class WebSocketBridgeServerHandler extends ChannelInboundHandlerAdapter {
 
             Util.skipSocketAddress(payload);
 
-            final String connectionId = payload.readString(payload.readUnsignedByte(), CharsetUtil.UTF_8);
+            final String connectionId = payload.readCharSequence(payload.readUnsignedByte(), CharsetUtil.UTF_8).toString();
             if (!webSocketBridgeServerEngine.finishHandshake(tunnelKey, connectionId, backhaulCtx)) {
                 return WebSocketCloseStatus.POLICY_VIOLATION;
             }
