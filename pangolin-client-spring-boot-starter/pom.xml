@@ -7,10 +7,11 @@
 
     <groupId>com.github.nomou.pangolin</groupId>
     <artifactId>pangolin-client-spring-boot-starter</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
     <!--
     <version>0.0.3-SNAPSHOT</version>
-    -->
     <version>0.0.5-SNAPSHOT</version>
+    -->
 
     <properties>
         <!-- distributionManagement [[ -->
